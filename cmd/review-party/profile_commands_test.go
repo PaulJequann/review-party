@@ -72,6 +72,45 @@ func TestReadOnlyProfileCommandsDoNotInitializeRecordStorage(t *testing.T) {
 	}
 }
 
+func TestReviewWithoutProfileUsesRepositoryDefault(t *testing.T) {
+	isolateProfileCommandEnvironment(t)
+	repository := t.TempDir()
+	runProfileTestCommand(t, exec.Command("git", "-C", repository, "init", "--quiet"))
+	runProfileTestCommand(t, exec.Command("git", "-C", repository, "config", "user.email", "review-party@example.invalid"))
+	runProfileTestCommand(t, exec.Command("git", "-C", repository, "config", "user.name", "Review Party Test"))
+	profileDirectory := filepath.Join(repository, ".reviewparty", "profiles")
+	if err := os.MkdirAll(profileDirectory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repository, ".reviewparty", "config.json"), []byte(`{"schema":1,"defaultProfile":"security"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(profileDirectory, "security.md"), []byte("   \n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runProfileTestCommand(t, exec.Command("git", "-C", repository, "add", ".reviewparty"))
+	runProfileTestCommand(t, exec.Command("git", "-C", repository, "commit", "--quiet", "-m", "test fixture"))
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exit := run(context.Background(), []string{"review", "--repo", repository}, &stdout, &stderr)
+	if exit != 1 {
+		t.Fatalf("exit = %d, stdout = %q, stderr = %q", exit, stdout.String(), stderr.String())
+	}
+	for _, expected := range []string{"repository:.reviewparty/profiles/security.md", "is empty"} {
+		if !strings.Contains(stderr.String(), expected) {
+			t.Fatalf("stderr %q does not contain %q", stderr.String(), expected)
+		}
+	}
+}
+
+func runProfileTestCommand(t *testing.T, command *exec.Cmd) {
+	t.Helper()
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("%v: %v\n%s", command.Args, err, output)
+	}
+}
+
 func isolateProfileCommandEnvironment(t *testing.T) {
 	t.Helper()
 	t.Setenv("REVIEW_PARTY_HOME", t.TempDir())

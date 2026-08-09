@@ -31,12 +31,23 @@ type ReviewSelection struct {
 	Profile    string
 	Reviewer   string
 	Model      string
+	Effort     string
 }
 
 type ProfileSelection struct {
 	Profile  string
 	Reviewer string
 	Model    string
+	Effort   string
+}
+
+func (selection ReviewSelection) profileSelection() ProfileSelection {
+	return ProfileSelection{
+		Profile:  selection.Profile,
+		Reviewer: selection.Reviewer,
+		Model:    selection.Model,
+		Effort:   selection.Effort,
+	}
 }
 
 type ReviewSubject struct {

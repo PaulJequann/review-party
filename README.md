@@ -29,7 +29,8 @@ Run a bug or Documentation Review with an explicitly selected direct adapter:
 ```sh
 review-party review bugs --reviewer grok
 review-party review documentation --reviewer opencode \
-  --model opencode-go/deepseek-v4-flash
+  --model opencode-go/deepseek-v4-flash \
+  --effort high
 ```
 
 `bugs` remains the default Profile, and Grok is the default Reviewer. Both
@@ -42,6 +43,12 @@ Incomplete Review. Grok's built-in model is `grok-4.5`. OpenCode requires a
 model supplied by user configuration or explicit `--model`; the product does
 not compile a personal OpenCode model preference into its catalog. Copilot's
 built-in `auto` selection records the model it resolves.
+
+Callers may override the selected Reviewer's reasoning effort with
+`--effort`. For OpenCode, Review Party passes an explicit value such as `high`
+as the model variant and records it in the effective Profile Revision and
+Review Record. Copilot's `auto` model cannot be combined with an explicit
+effort; Review Party reports that unsupported choice instead of dropping it.
 
 ## User configuration
 

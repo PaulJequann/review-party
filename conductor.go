@@ -96,7 +96,7 @@ func (conductor *Conductor) Review(ctx context.Context, selection ReviewSelectio
 }
 
 func (conductor *Conductor) prepareReview(selection ReviewSelection) (ReviewSubject, compiledProfile, error) {
-	profileSelection := ProfileSelection{Profile: selection.Profile, Reviewer: selection.Reviewer, Model: selection.Model}
+	profileSelection := selection.profileSelection()
 	if err := conductor.validateExplicitReviewer(profileSelection); err != nil {
 		return ReviewSubject{}, compiledProfile{}, err
 	}

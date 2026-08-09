@@ -107,6 +107,34 @@ func TestOpenCodeModelOverrideMustBeAllowed(t *testing.T) {
 	}
 }
 
+func TestExplainRejectsUnsupportedExplicitEffort(t *testing.T) {
+	conductor, err := New(Config{RecordDirectory: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := map[string]ProfileSelection{
+		"copilot auto model": {Profile: "bugs", Reviewer: "copilot", Effort: "high"},
+		"opencode auto effort": {
+			Profile:  "bugs",
+			Reviewer: "opencode",
+			Model:    "meta/muse-spark-1.2-contributor",
+			Effort:   "auto",
+		},
+	}
+	for name, selection := range tests {
+		t.Run(name, func(t *testing.T) {
+			_, err := conductor.Explain(context.Background(), selection)
+			var unsupported ReviewerEffortNotSupportedError
+			if !errors.As(err, &unsupported) {
+				t.Fatalf("error = %v, want ReviewerEffortNotSupportedError", err)
+			}
+			if unsupported.Reviewer != selection.Reviewer || unsupported.Effort != selection.Effort {
+				t.Fatalf("error = %#v, want reviewer %q and effort %q", unsupported, selection.Reviewer, selection.Effort)
+			}
+		})
+	}
+}
+
 func TestOmittedModelAllowlistAllowsExplicitModel(t *testing.T) {
 	configuration := `{
   "version": 1,

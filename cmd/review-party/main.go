@@ -65,6 +65,7 @@ func runReview(ctx context.Context, arguments []string, stdout, stderr io.Writer
 	configuration := flags.String("config", defaultUserConfigurationPath(), "User configuration path")
 	reviewer := flags.String("reviewer", "", "Reviewer adapter: "+strings.Join(reviewparty.SupportedReviewers(), ", ")+"; empty uses configured/Profile default")
 	model := flags.String("model", "", "Explicit model for the selected Reviewer")
+	effort := flags.String("effort", "", "Explicit reasoning effort for the selected Reviewer")
 	if err := flags.Parse(arguments); err != nil {
 		return 2
 	}
@@ -88,6 +89,7 @@ func runReview(ctx context.Context, arguments []string, stdout, stderr io.Writer
 		Profile:    profile,
 		Reviewer:   *reviewer,
 		Model:      *model,
+		Effort:     *effort,
 	})
 	if err != nil {
 		fmt.Fprintf(stderr, "review-party: %v\n", err)
@@ -187,7 +189,13 @@ func latestProvenance(record reviewparty.ReviewRecord) reviewparty.ReviewerProve
 }
 
 func takeLeadingValue(arguments []string) (string, []string) {
-	if len(arguments) == 0 || arguments[0] == "" || strings.HasPrefix(arguments[0], "-") {
+	if len(arguments) == 0 {
+		return "", arguments
+	}
+	if arguments[0] == "" {
+		return "", arguments
+	}
+	if strings.HasPrefix(arguments[0], "-") {
 		return "", arguments
 	}
 	return arguments[0], arguments[1:]
@@ -197,8 +205,8 @@ func printUsage(output io.Writer) {
 	fmt.Fprintln(output, "usage:")
 	fmt.Fprintln(output, "  review-party profiles [--repo PATH] [--format human|json]")
 	fmt.Fprintln(output, "  review-party config path|show [--config PATH]")
-	fmt.Fprintf(output, "  review-party explain PROFILE [--repo PATH] [--reviewer %s] [--model MODEL] [--format human|json]\n", strings.Join(reviewparty.SupportedReviewers(), "|"))
-	fmt.Fprintf(output, "  review-party review [PROFILE] [--reviewer %s] [--model MODEL] [--config PATH] [--repo PATH] [--format human|json]\n", strings.Join(reviewparty.SupportedReviewers(), "|"))
+	fmt.Fprintf(output, "  review-party explain PROFILE [--repo PATH] [--reviewer %s] [--model MODEL] [--effort EFFORT] [--format human|json]\n", strings.Join(reviewparty.SupportedReviewers(), "|"))
+	fmt.Fprintf(output, "  review-party review [PROFILE] [--reviewer %s] [--model MODEL] [--effort EFFORT] [--config PATH] [--repo PATH] [--format human|json]\n", strings.Join(reviewparty.SupportedReviewers(), "|"))
 	fmt.Fprintln(output, "  review-party inspect REVIEW_ID [--format human|json]")
 	fmt.Fprintln(output, "  review-party init [--repo PATH] [--global]")
 }

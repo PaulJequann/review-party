@@ -17,7 +17,10 @@ type openCodeAdapter struct{}
 
 func (openCodeAdapter) Name() string { return "opencode" }
 
-func (openCodeAdapter) Check(_ context.Context, _ reviewerCandidate) availability {
+func (openCodeAdapter) Check(_ context.Context, candidate reviewerCandidate) availability {
+	if err := validateOpenCodeCandidate(candidate); err != nil {
+		return availability{Diagnostic: err.Error()}
+	}
 	if _, err := exec.LookPath("opencode"); err != nil {
 		return availability{Diagnostic: "opencode is not installed"}
 	}
@@ -43,10 +46,27 @@ func (openCodeAdapter) Decode(output []byte) (decodedHarnessOutput, error) {
 
 func openCodeCommand(candidate reviewerCandidate) []string {
 	command := []string{"opencode", "run", "--pure", "--agent", "build", "--format", "json", "--model", candidate.Model}
-	if candidate.Effort != "" && candidate.Effort != "default" && candidate.Effort != "auto" {
+	if usesOpenCodeVariant(candidate) {
 		command = append(command, "--variant", candidate.Effort)
 	}
 	return command
+}
+
+func validateOpenCodeCandidate(candidate reviewerCandidate) error {
+	if candidate.Effort == "auto" {
+		return ReviewerEffortNotSupportedError{Reviewer: candidate.ID, Model: candidate.Model, Effort: candidate.Effort}
+	}
+	return nil
+}
+
+func usesOpenCodeVariant(candidate reviewerCandidate) bool {
+	if candidate.Effort == "" {
+		return false
+	}
+	if candidate.Effort == "default" {
+		return false
+	}
+	return candidate.Effort != "auto"
 }
 
 type decodedOpenCodeOutput struct {

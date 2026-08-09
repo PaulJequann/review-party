@@ -72,7 +72,7 @@ func compileProfileDefinition(catalog reviewerCatalog, selection ProfileSelectio
 	if len(missing) > 0 {
 		return compiledProfile{}, UnsupportedCapabilitiesError{Profile: selection.Profile, Reviewer: registration.candidate.ID, Missing: missing}
 	}
-	registration, err = resolveReviewerModel(registration, selection.Model)
+	registration, err = resolveReviewerSelection(registration, selection)
 	if err != nil {
 		return compiledProfile{}, err
 	}
@@ -101,6 +101,22 @@ func compileProfileDefinition(catalog reviewerCatalog, selection ProfileSelectio
 		reviewerWasDefault: reviewerWasDefault,
 		buildPrompt:        definition.buildPrompt,
 	}, nil
+}
+
+func resolveReviewerSelection(registration reviewerRegistration, selection ProfileSelection) (reviewerRegistration, error) {
+	registration, err := resolveReviewerModel(registration, selection.Model)
+	if err != nil {
+		return reviewerRegistration{}, err
+	}
+	if selection.Effort != "" {
+		registration.candidate.Effort = selection.Effort
+	}
+	if registration.validateCandidate != nil {
+		if err := registration.validateCandidate(registration.candidate); err != nil {
+			return reviewerRegistration{}, err
+		}
+	}
+	return registration, nil
 }
 
 func resolveProfileReviewer(catalog reviewerCatalog, definition profileDefinition, selection ProfileSelection) (reviewerRegistration, bool, error) {

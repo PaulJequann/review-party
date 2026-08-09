@@ -14,11 +14,24 @@ type copilotAdapter struct{}
 
 func (copilotAdapter) Name() string { return "copilot" }
 
-func (copilotAdapter) Check(_ context.Context, _ reviewerCandidate) availability {
+func (copilotAdapter) Check(_ context.Context, candidate reviewerCandidate) availability {
+	if err := validateCopilotCandidate(candidate); err != nil {
+		return availability{Diagnostic: err.Error()}
+	}
 	if _, err := exec.LookPath("copilot"); err != nil {
 		return availability{Diagnostic: "copilot is not installed"}
 	}
 	return availability{Available: true}
+}
+
+func validateCopilotCandidate(candidate reviewerCandidate) error {
+	if candidate.Model != "auto" {
+		return nil
+	}
+	if !hasExplicitEffort(candidate) {
+		return nil
+	}
+	return ReviewerEffortNotSupportedError{Reviewer: candidate.ID, Model: candidate.Model, Effort: candidate.Effort}
 }
 
 func (copilotAdapter) Prepare(spec attemptSpec) (preparedAttempt, error) {
@@ -52,10 +65,21 @@ func copilotCommand(candidate reviewerCandidate) []string {
 		"--output-format=json",
 		"--model=" + candidate.Model,
 	}
-	if candidate.Model != "auto" && candidate.Effort != "" && candidate.Effort != "auto" {
+	if usesExplicitCopilotEffort(candidate) {
 		command = append(command, "--effort="+candidate.Effort)
 	}
 	return command
+}
+
+func usesExplicitCopilotEffort(candidate reviewerCandidate) bool {
+	if candidate.Model == "auto" {
+		return false
+	}
+	return hasExplicitEffort(candidate)
+}
+
+func hasExplicitEffort(candidate reviewerCandidate) bool {
+	return candidate.Effort != "" && candidate.Effort != "auto"
 }
 
 type decodedCopilotOutput struct {
