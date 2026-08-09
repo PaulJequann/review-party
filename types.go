@@ -73,6 +73,16 @@ type ProfileRevision struct {
 	AttemptLimit         int                  `json:"attempt_limit"`
 	ExecutionDeadline    string               `json:"execution_deadline"`
 	ResultContract       string               `json:"result_contract_revision"`
+	Source               string               `json:"source"`
+	SourceDigest         string               `json:"source_digest"`
+	CompilerRevision     string               `json:"compiler_revision"`
+}
+
+type ProfileSnapshot struct {
+	Name         string `json:"name"`
+	Source       string `json:"source"`
+	SourceDigest string `json:"source_digest"`
+	Instructions string `json:"instructions"`
 }
 
 type Capability string
@@ -98,11 +108,15 @@ type ProfileSummary struct {
 	DefaultReviewer      ReviewerProvenance   `json:"default_reviewer"`
 	Passes               []ReviewPassRevision `json:"passes"`
 	RequiredCapabilities []Capability         `json:"required_capabilities"`
+	Source               string               `json:"source"`
+	Path                 string               `json:"path"`
+	Error                string               `json:"error,omitempty"`
 }
 
 type ProfileExplanation struct {
 	ProfileRevision    ProfileRevision `json:"profile_revision"`
 	ReviewerWasDefault bool            `json:"reviewer_was_default"`
+	Instructions       string          `json:"instructions"`
 }
 
 type AttemptOutcome string
@@ -159,6 +173,7 @@ type ReviewRecord struct {
 	Lifecycle       Lifecycle       `json:"lifecycle"`
 	Subject         ReviewSubject   `json:"subject"`
 	ProfileRevision ProfileRevision `json:"profile_revision"`
+	ProfileSnapshot ProfileSnapshot `json:"profile_snapshot"`
 	Passes          []PassRecord    `json:"passes"`
 	Result          *ReviewResult   `json:"result,omitempty"`
 	IncompleteCause string          `json:"incomplete_cause,omitempty"`

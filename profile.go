@@ -12,6 +12,7 @@ import (
 
 type compiledProfile struct {
 	revision           ProfileRevision
+	snapshot           ProfileSnapshot
 	reviewer           reviewerRegistration
 	reviewerWasDefault bool
 	buildPrompt        func(ReviewSubject) string
@@ -59,6 +60,10 @@ func compileProfile(catalog reviewerCatalog, selection ProfileSelection, deadlin
 	if err != nil {
 		return compiledProfile{}, err
 	}
+	return compileProfileDefinition(catalog, selection, deadline, definition)
+}
+
+func compileProfileDefinition(catalog reviewerCatalog, selection ProfileSelection, deadline time.Duration, definition profileDefinition) (compiledProfile, error) {
 	registration, reviewerWasDefault, err := resolveProfileReviewer(catalog, definition, selection)
 	if err != nil {
 		return compiledProfile{}, err
@@ -105,6 +110,11 @@ func resolveReviewerSelection(registration reviewerRegistration, selection Profi
 	}
 	if selection.Effort != "" {
 		registration.candidate.Effort = selection.Effort
+	}
+	if registration.validateCandidate != nil {
+		if err := registration.validateCandidate(registration.candidate); err != nil {
+			return reviewerRegistration{}, err
+		}
 	}
 	return registration, nil
 }

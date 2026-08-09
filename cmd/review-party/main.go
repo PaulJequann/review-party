@@ -26,24 +26,31 @@ func run(ctx context.Context, arguments []string, stdout, stderr io.Writer) int 
 		printUsage(stderr)
 		return 2
 	}
-	switch arguments[0] {
-	case "review":
-		return runReview(ctx, arguments[1:], stdout, stderr)
-	case "profiles":
-		return runProfiles(ctx, arguments[1:], stdout, stderr)
-	case "explain":
-		return runExplain(ctx, arguments[1:], stdout, stderr)
-	case "config":
-		return runConfig(arguments[1:], stdout, stderr)
-	case "inspect":
-		return runInspect(ctx, arguments[1:], stdout, stderr)
-	case "help", "-h", "--help":
-		printUsage(stdout)
-		return 0
-	default:
+	handler, exists := commandHandlers(ctx, stdout, stderr)[arguments[0]]
+	if !exists {
 		fmt.Fprintf(stderr, "review-party: unknown command %q\n", arguments[0])
 		printUsage(stderr)
 		return 2
+	}
+	return handler(arguments[1:])
+}
+
+func commandHandlers(ctx context.Context, stdout, stderr io.Writer) map[string]func([]string) int {
+	help := func([]string) int {
+		printUsage(stdout)
+		return 0
+	}
+	return map[string]func([]string) int{
+		"review":   func(arguments []string) int { return runReview(ctx, arguments, stdout, stderr) },
+		"profiles": func(arguments []string) int { return runProfiles(ctx, arguments, stdout, stderr) },
+		"explain":  func(arguments []string) int { return runExplain(ctx, arguments, stdout, stderr) },
+		"config":   func(arguments []string) int { return runConfig(arguments, stdout, stderr) },
+		"inspect":  func(arguments []string) int { return runInspect(ctx, arguments, stdout, stderr) },
+		"init":     func(arguments []string) int { return runInit(arguments, stdout, stderr) },
+		"profile":  func(arguments []string) int { return runProfile(ctx, arguments, stdout, stderr) },
+		"help":     help,
+		"-h":       help,
+		"--help":   help,
 	}
 }
 
@@ -99,20 +106,20 @@ func runReview(ctx context.Context, arguments []string, stdout, stderr io.Writer
 }
 
 func optionalLeadingArgument(arguments []string, fallback string) (string, []string) {
-	value, remaining, ok := requiredLeadingArgument(arguments)
-	if !ok {
+	value, remaining := takeLeadingValue(arguments)
+	if value == "" {
 		return fallback, arguments
 	}
 	return value, remaining
 }
 
 func runInspect(ctx context.Context, arguments []string, stdout, stderr io.Writer) int {
-	value, remaining, ok := requiredLeadingArgument(arguments)
-	if !ok {
+	idValue, remaining := takeLeadingValue(arguments)
+	if idValue == "" {
 		fmt.Fprintln(stderr, "review-party: inspect requires a review id")
 		return 2
 	}
-	id := reviewparty.ReviewID(value)
+	id := reviewparty.ReviewID(idValue)
 	flags := flag.NewFlagSet("inspect", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	format := flags.String("format", "human", "Output format: human or json")
@@ -151,11 +158,31 @@ func printRecord(output io.Writer, record reviewparty.ReviewRecord, format strin
 	if format != "human" {
 		return fmt.Errorf("unknown output format %q", format)
 	}
+	printHumanRecord(output, record)
+	return nil
+}
+
+func printHumanRecord(output io.Writer, record reviewparty.ReviewRecord) {
 	findings := 0
 	if record.Result != nil {
 		findings = record.Result.FindingCount
 	}
 	fmt.Fprintf(output, "review %s\n", record.ID)
+	provenance := latestProvenance(record)
+	fmt.Fprintf(output, "%s · %d finding(s) · %s/%s (%s)\n", record.Lifecycle, findings, provenance.ReviewerID, provenance.Model, provenance.Effort)
+	if record.ProfileRevision.Source != "" {
+		fmt.Fprintf(output, "profile: %s · %s\n", record.ProfileRevision.Name, record.ProfileRevision.Source)
+	}
+	if record.Result != nil {
+		fmt.Fprintln(output, record.Result.Raw)
+	}
+	if record.IncompleteCause != "" {
+		fmt.Fprintf(output, "incomplete: %s\n", record.IncompleteCause)
+	}
+	fmt.Fprintf(output, "inspect: review-party inspect %s\n", record.ID)
+}
+
+func latestProvenance(record reviewparty.ReviewRecord) reviewparty.ReviewerProvenance {
 	provenance := reviewparty.ReviewerProvenance{
 		ReviewerID: record.ProfileRevision.ReviewerID,
 		Model:      record.ProfileRevision.Model,
@@ -166,22 +193,28 @@ func printRecord(output io.Writer, record reviewparty.ReviewRecord, format strin
 			provenance = pass.Attempts[len(pass.Attempts)-1].Provenance
 		}
 	}
-	fmt.Fprintf(output, "%s · %d finding(s) · %s/%s (%s)\n", record.Lifecycle, findings, provenance.ReviewerID, provenance.Model, provenance.Effort)
-	if record.Result != nil {
-		fmt.Fprintln(output, record.Result.Raw)
+	return provenance
+}
+
+func takeLeadingValue(arguments []string) (string, []string) {
+	if len(arguments) == 0 {
+		return "", arguments
 	}
-	if record.IncompleteCause != "" {
-		fmt.Fprintf(output, "incomplete: %s\n", record.IncompleteCause)
+	if arguments[0] == "" {
+		return "", arguments
 	}
-	fmt.Fprintf(output, "inspect: review-party inspect %s\n", record.ID)
-	return nil
+	if strings.HasPrefix(arguments[0], "-") {
+		return "", arguments
+	}
+	return arguments[0], arguments[1:]
 }
 
 func printUsage(output io.Writer) {
 	fmt.Fprintln(output, "usage:")
-	fmt.Fprintln(output, "  review-party profiles [--format human|json]")
+	fmt.Fprintln(output, "  review-party profiles [--repo PATH] [--format human|json]")
 	fmt.Fprintln(output, "  review-party config path|show [--config PATH]")
-	fmt.Fprintf(output, "  review-party explain PROFILE [--reviewer %s] [--model MODEL] [--effort EFFORT] [--format human|json]\n", strings.Join(reviewparty.SupportedReviewers(), "|"))
-	fmt.Fprintf(output, "  review-party review [%s] [--reviewer %s] [--model MODEL] [--effort EFFORT] [--config PATH] [--repo PATH] [--format human|json]\n", strings.Join(reviewparty.SupportedProfiles(), "|"), strings.Join(reviewparty.SupportedReviewers(), "|"))
+	fmt.Fprintf(output, "  review-party explain PROFILE [--repo PATH] [--reviewer %s] [--model MODEL] [--effort EFFORT] [--format human|json]\n", strings.Join(reviewparty.SupportedReviewers(), "|"))
+	fmt.Fprintf(output, "  review-party review [PROFILE] [--reviewer %s] [--model MODEL] [--effort EFFORT] [--config PATH] [--repo PATH] [--format human|json]\n", strings.Join(reviewparty.SupportedReviewers(), "|"))
 	fmt.Fprintln(output, "  review-party inspect REVIEW_ID [--format human|json]")
+	fmt.Fprintln(output, "  review-party init [--repo PATH] [--global]")
 }

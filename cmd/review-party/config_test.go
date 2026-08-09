@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -124,6 +125,11 @@ func TestReviewAppliesConfiguredModelPolicyBeforeSubjectResolution(t *testing.T)
 
 func TestExplainDoesNotLoadConfigurationFromWorkingDirectory(t *testing.T) {
 	repository := t.TempDir()
+	command := exec.Command("git", "init", "--quiet")
+	command.Dir = repository
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, output)
+	}
 	payload := `{"version":1,"reviewers":{"grok":{"enabled":false}}}`
 	if err := os.WriteFile(filepath.Join(repository, "review-party-config.json"), []byte(payload), 0o600); err != nil {
 		t.Fatal(err)

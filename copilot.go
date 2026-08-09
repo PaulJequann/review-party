@@ -15,15 +15,23 @@ type copilotAdapter struct{}
 func (copilotAdapter) Name() string { return "copilot" }
 
 func (copilotAdapter) Check(_ context.Context, candidate reviewerCandidate) availability {
-	if candidate.Model == "auto" {
-		if hasExplicitEffort(candidate) {
-			return availability{Diagnostic: "copilot auto model does not support explicit effort; select a model or omit the effort override"}
-		}
+	if err := validateCopilotCandidate(candidate); err != nil {
+		return availability{Diagnostic: err.Error()}
 	}
 	if _, err := exec.LookPath("copilot"); err != nil {
 		return availability{Diagnostic: "copilot is not installed"}
 	}
 	return availability{Available: true}
+}
+
+func validateCopilotCandidate(candidate reviewerCandidate) error {
+	if candidate.Model != "auto" {
+		return nil
+	}
+	if !hasExplicitEffort(candidate) {
+		return nil
+	}
+	return ReviewerEffortNotSupportedError{Reviewer: candidate.ID, Model: candidate.Model, Effort: candidate.Effort}
 }
 
 func (copilotAdapter) Prepare(spec attemptSpec) (preparedAttempt, error) {

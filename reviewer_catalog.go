@@ -11,6 +11,7 @@ const defaultReviewer = "grok"
 type reviewerRegistration struct {
 	candidate                reviewerCandidate
 	capabilities             []Capability
+	validateCandidate        func(reviewerCandidate) error
 	disabled                 bool
 	allowedModels            []string
 	modelAllowlistConfigured bool
@@ -26,8 +27,8 @@ func defaultReviewerCatalog() reviewerCatalog {
 	capabilities := restrictedReviewCapabilities()
 	return newReviewerCatalog([]reviewerRegistration{
 		{candidate: reviewerCandidate{ID: "grok", Model: "grok-4.5", Effort: "high", Harness: "grok-build-cli", Transport: "direct-cli"}, capabilities: capabilities, executor: newDirectExecutor(grokAdapter{})},
-		{candidate: reviewerCandidate{ID: "opencode", Effort: "default", Harness: "opencode-cli", Transport: "direct-cli"}, capabilities: capabilities, executor: newDirectExecutor(openCodeAdapter{})},
-		{candidate: reviewerCandidate{ID: "copilot", Model: "auto", Effort: "auto", Harness: "github-copilot-cli", Transport: "direct-cli"}, capabilities: capabilities, executor: newDirectExecutor(copilotAdapter{})},
+		{candidate: reviewerCandidate{ID: "opencode", Effort: "default", Harness: "opencode-cli", Transport: "direct-cli"}, capabilities: capabilities, validateCandidate: validateOpenCodeCandidate, executor: newDirectExecutor(openCodeAdapter{})},
+		{candidate: reviewerCandidate{ID: "copilot", Model: "auto", Effort: "auto", Harness: "github-copilot-cli", Transport: "direct-cli"}, capabilities: capabilities, validateCandidate: validateCopilotCandidate, executor: newDirectExecutor(copilotAdapter{})},
 	})
 }
 
@@ -88,6 +89,16 @@ type UnknownReviewerError struct {
 
 type DisabledReviewerError struct {
 	Name string
+}
+
+type ReviewerEffortNotSupportedError struct {
+	Reviewer string
+	Model    string
+	Effort   string
+}
+
+func (failure ReviewerEffortNotSupportedError) Error() string {
+	return fmt.Sprintf("reviewer %q does not support explicit effort %q with model %q", failure.Reviewer, failure.Effort, failure.Model)
 }
 
 func (failure DisabledReviewerError) Error() string {

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -18,8 +19,9 @@ func TestProfilesCommandEmitsJSONCatalog(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
+	repository := isolatedProfilesRepository(t)
 
-	exitCode := run(context.Background(), []string{"profiles", "--format", "json"}, &stdout, &stderr)
+	exitCode := run(context.Background(), []string{"profiles", "--repo", repository, "--format", "json"}, &stdout, &stderr)
 	if exitCode != 0 {
 		t.Fatalf("exit = %d, stderr = %q", exitCode, stderr.String())
 	}
@@ -37,8 +39,9 @@ func TestExplainCommandReportsRecipeWithoutAvailability(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
+	repository := isolatedProfilesRepository(t)
 
-	exitCode := run(context.Background(), []string{"explain", "documentation", "--reviewer", "copilot"}, &stdout, &stderr)
+	exitCode := run(context.Background(), []string{"explain", "documentation", "--repo", repository, "--reviewer", "copilot"}, &stdout, &stderr)
 	if exitCode != 0 {
 		t.Fatalf("exit = %d, stderr = %q", exitCode, stderr.String())
 	}
@@ -63,8 +66,9 @@ func TestProfilesCommandUsesConfiguredDefault(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
+	repository := isolatedProfilesRepository(t)
 
-	exitCode := run(context.Background(), []string{"profiles", "--format", "json"}, &stdout, &stderr)
+	exitCode := run(context.Background(), []string{"profiles", "--repo", repository, "--format", "json"}, &stdout, &stderr)
 	if exitCode != 0 {
 		t.Fatalf("exit = %d, stderr = %q", exitCode, stderr.String())
 	}
@@ -90,8 +94,9 @@ func TestProfilesDoesNotRequireUsableRecordStorage(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
+	repository := isolatedProfilesRepository(t)
 
-	exitCode := run(context.Background(), []string{"profiles", "--format", "json"}, &stdout, &stderr)
+	exitCode := run(context.Background(), []string{"profiles", "--repo", repository, "--format", "json"}, &stdout, &stderr)
 	if exitCode != 0 {
 		t.Fatalf("exit = %d, stderr = %q", exitCode, stderr.String())
 	}
@@ -102,6 +107,17 @@ func TestProfilesDoesNotRequireUsableRecordStorage(t *testing.T) {
 	if len(profiles) != 2 {
 		t.Fatalf("profiles = %#v", profiles)
 	}
+}
+
+func isolatedProfilesRepository(t *testing.T) string {
+	t.Helper()
+	repository := t.TempDir()
+	command := exec.Command("git", "init", "--quiet")
+	command.Dir = repository
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, output)
+	}
+	return repository
 }
 
 func assertProfileNames(t *testing.T, profiles []reviewparty.ProfileSummary) {

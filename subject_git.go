@@ -23,59 +23,77 @@ func resolveSubject(repository string, reference SubjectReference) (ReviewSubjec
 }
 
 func resolveWorkingChanges(repository string) (ReviewSubject, error) {
-	root, err := gitOutput(repository, "rev-parse", "--show-toplevel")
+	repositoryRoot, err := resolveRepositoryRoot(repository)
 	if err != nil {
-		return ReviewSubject{}, fmt.Errorf("resolve repository root: %w", err)
+		return ReviewSubject{}, err
 	}
-	repositoryRoot, err := filepath.Abs(strings.TrimSpace(string(root)))
+	paths, patch, err := captureWorkingChanges(repositoryRoot)
 	if err != nil {
-		return ReviewSubject{}, fmt.Errorf("make repository root absolute: %w", err)
+		return ReviewSubject{}, err
 	}
+	return newWorkingChangesSubject(repositoryRoot, paths, patch), nil
+}
 
+func captureWorkingChanges(repositoryRoot string) ([]string, []byte, error) {
 	base := "HEAD"
 	if _, err := gitOutput(repositoryRoot, "rev-parse", "--verify", "HEAD"); err != nil {
 		base = emptyGitTree
 	}
 	trackedPatch, err := gitOutput(repositoryRoot, "diff", "--binary", "--no-ext-diff", base, "--")
 	if err != nil {
-		return ReviewSubject{}, fmt.Errorf("capture tracked working changes: %w", err)
+		return nil, nil, fmt.Errorf("capture tracked working changes: %w", err)
 	}
 
 	untracked, err := gitOutput(repositoryRoot, "ls-files", "--others", "--exclude-standard", "-z")
 	if err != nil {
-		return ReviewSubject{}, fmt.Errorf("list untracked files: %w", err)
+		return nil, nil, fmt.Errorf("list untracked files: %w", err)
 	}
 	paths, err := changedPaths(repositoryRoot, base, untracked)
 	if err != nil {
-		return ReviewSubject{}, err
+		return nil, nil, err
 	}
 
 	patch := bytes.NewBuffer(trackedPatch)
 	for _, path := range splitNUL(untracked) {
 		untrackedPatch, diffErr := gitDiffUntracked(repositoryRoot, path)
 		if diffErr != nil {
-			return ReviewSubject{}, fmt.Errorf("capture untracked file %q: %w", path, diffErr)
+			return nil, nil, fmt.Errorf("capture untracked file %q: %w", path, diffErr)
 		}
 		patch.Write(untrackedPatch)
 	}
 	if patch.Len() == 0 {
-		return ReviewSubject{}, errors.New("working changes are empty")
+		return nil, nil, errors.New("working changes are empty")
 	}
+	return paths, patch.Bytes(), nil
+}
 
+func newWorkingChangesSubject(repositoryRoot string, paths []string, patch []byte) ReviewSubject {
 	hash := sha256.New()
 	hash.Write([]byte(SubjectWorkingChanges))
 	hash.Write([]byte{0})
 	hash.Write([]byte(strings.Join(paths, "\x00")))
 	hash.Write([]byte{0})
-	hash.Write(patch.Bytes())
+	hash.Write(patch)
 
 	return ReviewSubject{
 		Kind:         SubjectWorkingChanges,
 		Repository:   repositoryRoot,
 		Identity:     hex.EncodeToString(hash.Sum(nil)),
 		ChangedPaths: paths,
-		Patch:        patch.String(),
-	}, nil
+		Patch:        string(patch),
+	}
+}
+
+func resolveRepositoryRoot(repository string) (string, error) {
+	root, err := gitOutput(repository, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return "", fmt.Errorf("resolve repository root: %w", err)
+	}
+	repositoryRoot, err := filepath.Abs(strings.TrimSpace(string(root)))
+	if err != nil {
+		return "", fmt.Errorf("make repository root absolute: %w", err)
+	}
+	return repositoryRoot, nil
 }
 
 func changedPaths(repositoryRoot, base string, untracked []byte) ([]string, error) {

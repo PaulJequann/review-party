@@ -11,14 +11,16 @@ import (
 )
 
 type Config struct {
-	RecordDirectory       string
-	AttemptDeadline       time.Duration
-	UserConfigurationPath string
+	RecordDirectory        string
+	GlobalProfileDirectory string
+	AttemptDeadline        time.Duration
+	UserConfigurationPath  string
 }
 
 type Conductor struct {
 	store           recordStore
 	reviewers       reviewerCatalog
+	profiles        profileLibrary
 	attemptDeadline time.Duration
 	now             func() time.Time
 }
@@ -42,7 +44,7 @@ func New(config Config) (*Conductor, error) {
 	if err != nil {
 		return nil, err
 	}
-	return newConductorWithCatalog(store, reviewers, config.AttemptDeadline), nil
+	return newConductorWithProfiles(store, reviewers, newProfileLibrary(config.GlobalProfileDirectory), config.AttemptDeadline), nil
 }
 
 func newConductor(store recordStore, executors map[string]attemptExecutor, deadline time.Duration) *Conductor {
@@ -50,9 +52,14 @@ func newConductor(store recordStore, executors map[string]attemptExecutor, deadl
 }
 
 func newConductorWithCatalog(store recordStore, reviewers reviewerCatalog, deadline time.Duration) *Conductor {
+	return newConductorWithProfiles(store, reviewers, profileLibrary{}, deadline)
+}
+
+func newConductorWithProfiles(store recordStore, reviewers reviewerCatalog, profiles profileLibrary, deadline time.Duration) *Conductor {
 	return &Conductor{
 		store:           store,
 		reviewers:       reviewers,
+		profiles:        profiles,
 		attemptDeadline: deadline,
 		now:             time.Now,
 	}
@@ -62,11 +69,7 @@ func (conductor *Conductor) Review(ctx context.Context, selection ReviewSelectio
 	if err := ctx.Err(); err != nil {
 		return ReviewRecord{}, err
 	}
-	profile, err := compileProfile(conductor.reviewers, selection.profileSelection(), conductor.attemptDeadline)
-	if err != nil {
-		return ReviewRecord{}, err
-	}
-	subject, err := resolveSubject(selection.Repository, selection.Subject)
+	subject, profile, err := conductor.prepareReview(selection)
 	if err != nil {
 		return ReviewRecord{}, err
 	}
@@ -92,25 +95,83 @@ func (conductor *Conductor) Review(ctx context.Context, selection ReviewSelectio
 	return conductor.executePass(ctx, record, profile, executor)
 }
 
+func (conductor *Conductor) prepareReview(selection ReviewSelection) (ReviewSubject, compiledProfile, error) {
+	profileSelection := selection.profileSelection()
+	if err := conductor.validateExplicitReviewer(profileSelection); err != nil {
+		return ReviewSubject{}, compiledProfile{}, err
+	}
+	repository, err := resolveRepositoryRoot(selection.Repository)
+	if err != nil {
+		return ReviewSubject{}, compiledProfile{}, err
+	}
+	profile, err := conductor.compileFilesystemProfile(profileSelection, repository)
+	if err != nil {
+		return ReviewSubject{}, compiledProfile{}, err
+	}
+	subject, err := resolveSubject(repository, selection.Subject)
+	return subject, profile, err
+}
+
 func (conductor *Conductor) Profiles(ctx context.Context) ([]ProfileSummary, error) {
+	return conductor.profilesAt(ctx, "")
+}
+
+func (conductor *Conductor) ProfilesForRepository(ctx context.Context, repository string) ([]ProfileSummary, error) {
+	root, err := resolveRepositoryRoot(repository)
+	if err != nil {
+		return nil, err
+	}
+	return conductor.profilesAt(ctx, root)
+}
+
+func (conductor *Conductor) profilesAt(ctx context.Context, repository string) ([]ProfileSummary, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	return profileSummaries(conductor.reviewers)
+	return conductor.profileSummaries(repository)
 }
 
 func (conductor *Conductor) Explain(ctx context.Context, selection ProfileSelection) (ProfileExplanation, error) {
+	return conductor.explainAt(ctx, selection, "")
+}
+
+func (conductor *Conductor) ExplainForRepository(ctx context.Context, selection ProfileSelection, repository string) (ProfileExplanation, error) {
+	root, err := resolveRepositoryRoot(repository)
+	if err != nil {
+		return ProfileExplanation{}, err
+	}
+	return conductor.explainAt(ctx, selection, root)
+}
+
+func (conductor *Conductor) explainAt(ctx context.Context, selection ProfileSelection, repository string) (ProfileExplanation, error) {
 	if err := ctx.Err(); err != nil {
 		return ProfileExplanation{}, err
 	}
-	profile, err := compileProfile(conductor.reviewers, selection, conductor.attemptDeadline)
+	profile, err := conductor.compileFilesystemProfile(selection, repository)
 	if err != nil {
 		return ProfileExplanation{}, err
 	}
 	return ProfileExplanation{
 		ProfileRevision:    profile.revision,
 		ReviewerWasDefault: profile.reviewerWasDefault,
+		Instructions:       profile.snapshot.Instructions,
 	}, nil
+}
+
+func (conductor *Conductor) validateExplicitReviewer(selection ProfileSelection) error {
+	if selection.Reviewer == "" {
+		return nil
+	}
+	registration, err := conductor.reviewers.resolve(selection.Reviewer)
+	if err != nil {
+		return err
+	}
+	missing := missingCapabilities(restrictedReviewCapabilities(), registration.capabilities)
+	if len(missing) > 0 {
+		return UnsupportedCapabilitiesError{Profile: firstNonempty(selection.Profile, "bugs"), Reviewer: registration.candidate.ID, Missing: missing}
+	}
+	_, err = resolveReviewerModel(registration, selection.Model)
+	return err
 }
 
 func (conductor *Conductor) Inspect(_ context.Context, id ReviewID) (ReviewRecord, error) {
@@ -135,6 +196,7 @@ func (conductor *Conductor) pendingRecord(subject ReviewSubject, profile compile
 		Lifecycle:       LifecyclePending,
 		Subject:         subject,
 		ProfileRevision: profile.revision,
+		ProfileSnapshot: profile.snapshot,
 		Passes:          passes,
 		CreatedAt:       now,
 		UpdatedAt:       now,
@@ -238,11 +300,21 @@ func validReviewID(id ReviewID) bool {
 		return false
 	}
 	for _, character := range id {
-		if character != '_' && (character < 'a' || character > 'z') && (character < '0' || character > '9') {
+		if !validReviewIDCharacter(character) {
 			return false
 		}
 	}
 	return true
+}
+
+func validReviewIDCharacter(character rune) bool {
+	if character == '_' {
+		return true
+	}
+	if character >= 'a' && character <= 'z' {
+		return true
+	}
+	return character >= '0' && character <= '9'
 }
 
 func defaultRecordDirectory() string {
