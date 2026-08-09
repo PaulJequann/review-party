@@ -62,7 +62,7 @@ func (conductor *Conductor) Review(ctx context.Context, selection ReviewSelectio
 	if err := ctx.Err(); err != nil {
 		return ReviewRecord{}, err
 	}
-	profile, err := compileProfile(conductor.reviewers, ProfileSelection{Profile: selection.Profile, Reviewer: selection.Reviewer, Model: selection.Model}, conductor.attemptDeadline)
+	profile, err := compileProfile(conductor.reviewers, selection.profileSelection(), conductor.attemptDeadline)
 	if err != nil {
 		return ReviewRecord{}, err
 	}

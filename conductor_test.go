@@ -234,6 +234,27 @@ func TestExplicitReviewerRoutesToMatchingAdapter(t *testing.T) {
 	}
 }
 
+func TestReviewCarriesExplicitEffortToReviewer(t *testing.T) {
+	repository := changedTestRepository(t)
+	opencode := successfulExecutor(cleanReview)
+	conductor := testConductorWithExecutors(t, map[string]attemptExecutor{"opencode": opencode}, time.Second)
+	selection := testSelection(repository)
+	selection.Reviewer = "opencode"
+	selection.Model = "meta/muse-spark-1.2-contributor"
+	selection.Effort = "high"
+
+	record, err := conductor.Review(context.Background(), selection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := opencode.lastAttempt().Candidate.Effort; got != "high" {
+		t.Fatalf("executed effort = %q, want high", got)
+	}
+	if got := record.ProfileRevision.Reviewer.Effort; got != "high" {
+		t.Fatalf("recorded effort = %q, want high", got)
+	}
+}
+
 func TestUnavailableReviewerDoesNotFallBack(t *testing.T) {
 	repository := changedTestRepository(t)
 	grok := &scriptedExecutor{

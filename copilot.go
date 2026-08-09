@@ -14,7 +14,12 @@ type copilotAdapter struct{}
 
 func (copilotAdapter) Name() string { return "copilot" }
 
-func (copilotAdapter) Check(_ context.Context, _ reviewerCandidate) availability {
+func (copilotAdapter) Check(_ context.Context, candidate reviewerCandidate) availability {
+	if candidate.Model == "auto" {
+		if hasExplicitEffort(candidate) {
+			return availability{Diagnostic: "copilot auto model does not support explicit effort; select a model or omit the effort override"}
+		}
+	}
 	if _, err := exec.LookPath("copilot"); err != nil {
 		return availability{Diagnostic: "copilot is not installed"}
 	}
@@ -52,10 +57,21 @@ func copilotCommand(candidate reviewerCandidate) []string {
 		"--output-format=json",
 		"--model=" + candidate.Model,
 	}
-	if candidate.Model != "auto" && candidate.Effort != "" && candidate.Effort != "auto" {
+	if usesExplicitCopilotEffort(candidate) {
 		command = append(command, "--effort="+candidate.Effort)
 	}
 	return command
+}
+
+func usesExplicitCopilotEffort(candidate reviewerCandidate) bool {
+	if candidate.Model == "auto" {
+		return false
+	}
+	return hasExplicitEffort(candidate)
+}
+
+func hasExplicitEffort(candidate reviewerCandidate) bool {
+	return candidate.Effort != "" && candidate.Effort != "auto"
 }
 
 type decodedCopilotOutput struct {

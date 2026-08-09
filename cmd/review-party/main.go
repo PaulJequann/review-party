@@ -48,11 +48,7 @@ func run(ctx context.Context, arguments []string, stdout, stderr io.Writer) int 
 }
 
 func runReview(ctx context.Context, arguments []string, stdout, stderr io.Writer) int {
-	profile := "bugs"
-	if len(arguments) > 0 && arguments[0] != "" && arguments[0][0] != '-' {
-		profile = arguments[0]
-		arguments = arguments[1:]
-	}
+	profile, arguments := optionalLeadingArgument(arguments, "bugs")
 	flags := flag.NewFlagSet("review", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	repository := flags.String("repo", ".", "Git repository to review")
@@ -62,6 +58,7 @@ func runReview(ctx context.Context, arguments []string, stdout, stderr io.Writer
 	configuration := flags.String("config", defaultUserConfigurationPath(), "User configuration path")
 	reviewer := flags.String("reviewer", "", "Reviewer adapter: "+strings.Join(reviewparty.SupportedReviewers(), ", ")+"; empty uses configured/Profile default")
 	model := flags.String("model", "", "Explicit model for the selected Reviewer")
+	effort := flags.String("effort", "", "Explicit reasoning effort for the selected Reviewer")
 	if err := flags.Parse(arguments); err != nil {
 		return 2
 	}
@@ -85,6 +82,7 @@ func runReview(ctx context.Context, arguments []string, stdout, stderr io.Writer
 		Profile:    profile,
 		Reviewer:   *reviewer,
 		Model:      *model,
+		Effort:     *effort,
 	})
 	if err != nil {
 		fmt.Fprintf(stderr, "review-party: %v\n", err)
@@ -100,17 +98,26 @@ func runReview(ctx context.Context, arguments []string, stdout, stderr io.Writer
 	return 0
 }
 
+func optionalLeadingArgument(arguments []string, fallback string) (string, []string) {
+	value, remaining, ok := requiredLeadingArgument(arguments)
+	if !ok {
+		return fallback, arguments
+	}
+	return value, remaining
+}
+
 func runInspect(ctx context.Context, arguments []string, stdout, stderr io.Writer) int {
-	if len(arguments) == 0 || arguments[0] == "" || arguments[0][0] == '-' {
+	value, remaining, ok := requiredLeadingArgument(arguments)
+	if !ok {
 		fmt.Fprintln(stderr, "review-party: inspect requires a review id")
 		return 2
 	}
-	id := reviewparty.ReviewID(arguments[0])
+	id := reviewparty.ReviewID(value)
 	flags := flag.NewFlagSet("inspect", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	format := flags.String("format", "human", "Output format: human or json")
 	records := flags.String("records", "", "Review Record directory")
-	if err := flags.Parse(arguments[1:]); err != nil {
+	if err := flags.Parse(remaining); err != nil {
 		return 2
 	}
 	if flags.NArg() != 0 {
@@ -174,7 +181,7 @@ func printUsage(output io.Writer) {
 	fmt.Fprintln(output, "usage:")
 	fmt.Fprintln(output, "  review-party profiles [--format human|json]")
 	fmt.Fprintln(output, "  review-party config path|show [--config PATH]")
-	fmt.Fprintf(output, "  review-party explain PROFILE [--reviewer %s] [--model MODEL] [--format human|json]\n", strings.Join(reviewparty.SupportedReviewers(), "|"))
-	fmt.Fprintf(output, "  review-party review [%s] [--reviewer %s] [--model MODEL] [--config PATH] [--repo PATH] [--format human|json]\n", strings.Join(reviewparty.SupportedProfiles(), "|"), strings.Join(reviewparty.SupportedReviewers(), "|"))
+	fmt.Fprintf(output, "  review-party explain PROFILE [--reviewer %s] [--model MODEL] [--effort EFFORT] [--format human|json]\n", strings.Join(reviewparty.SupportedReviewers(), "|"))
+	fmt.Fprintf(output, "  review-party review [%s] [--reviewer %s] [--model MODEL] [--effort EFFORT] [--config PATH] [--repo PATH] [--format human|json]\n", strings.Join(reviewparty.SupportedProfiles(), "|"), strings.Join(reviewparty.SupportedReviewers(), "|"))
 	fmt.Fprintln(output, "  review-party inspect REVIEW_ID [--format human|json]")
 }

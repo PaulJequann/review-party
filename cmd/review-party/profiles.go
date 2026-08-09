@@ -49,7 +49,7 @@ func runExplain(ctx context.Context, arguments []string, stdout, stderr io.Write
 	if err != nil {
 		return printFailure(stderr, err)
 	}
-	explanation, err := conductor.Explain(ctx, reviewparty.ProfileSelection{Profile: options.profile, Reviewer: options.reviewer, Model: options.model})
+	explanation, err := conductor.Explain(ctx, reviewparty.ProfileSelection{Profile: options.profile, Reviewer: options.reviewer, Model: options.model, Effort: options.effort})
 	if err != nil {
 		return printFailure(stderr, err)
 	}
@@ -66,6 +66,7 @@ type explainOptions struct {
 	configuration string
 	reviewer      string
 	model         string
+	effort        string
 }
 
 func parseExplainOptions(arguments []string, stderr io.Writer) (explainOptions, int) {
@@ -81,6 +82,7 @@ func parseExplainOptions(arguments []string, stderr io.Writer) (explainOptions, 
 	configuration := flags.String("config", defaultUserConfigurationPath(), "User configuration path")
 	reviewer := flags.String("reviewer", "", "Reviewer: "+strings.Join(reviewparty.SupportedReviewers(), ", ")+"; empty uses configured/Profile default")
 	model := flags.String("model", "", "Explicit model for the selected Reviewer")
+	effort := flags.String("effort", "", "Explicit reasoning effort for the selected Reviewer")
 	if err := flags.Parse(remaining); err != nil {
 		return explainOptions{}, 2
 	}
@@ -88,7 +90,7 @@ func parseExplainOptions(arguments []string, stderr io.Writer) (explainOptions, 
 		fmt.Fprintln(stderr, "review-party: explain accepts one profile name")
 		return explainOptions{}, 2
 	}
-	return explainOptions{profile: profile, format: *format, deadline: *deadline, configuration: *configuration, reviewer: *reviewer, model: *model}, 0
+	return explainOptions{profile: profile, format: *format, deadline: *deadline, configuration: *configuration, reviewer: *reviewer, model: *model, effort: *effort}, 0
 }
 
 func requiredLeadingArgument(arguments []string) (string, []string, bool) {

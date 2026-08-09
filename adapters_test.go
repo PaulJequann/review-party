@@ -41,6 +41,13 @@ func TestCopilotAutoModelOmitsEffortAndCapturesResolution(t *testing.T) {
 	}
 }
 
+func TestCopilotAutoModelRejectsExplicitEffort(t *testing.T) {
+	check := (copilotAdapter{}).Check(context.Background(), reviewerCandidate{Model: "auto", Effort: "high"})
+	if check.Available || !strings.Contains(check.Diagnostic, "does not support explicit effort") {
+		t.Fatalf("availability = %#v, want explicit unsupported-effort diagnostic", check)
+	}
+}
+
 func TestCopilotDecoderPreservesAssistantMessageBoundaries(t *testing.T) {
 	output := []byte("{\"type\":\"assistant.message\",\"data\":{\"content\":\"Inspecting files.\"}}\n" +
 		"{\"type\":\"assistant.message\",\"data\":{\"content\":\"" + strings.ReplaceAll(cleanReview, "\n", "\\n") + "\"}}\n")
@@ -162,6 +169,14 @@ func TestOpenCodeCommandAndConfigDenyUnreviewedCapabilities(t *testing.T) {
 	}
 	if config.Share != "disabled" {
 		t.Fatalf("share = %q", config.Share)
+	}
+}
+
+func TestOpenCodeCommandRequestsExplicitEffortVariant(t *testing.T) {
+	command := openCodeCommand(reviewerCandidate{Model: "meta/muse-spark-1.2-contributor", Effort: "high"})
+	want := []string{"opencode", "run", "--pure", "--agent", "build", "--format", "json", "--model", "meta/muse-spark-1.2-contributor", "--variant", "high"}
+	if !reflect.DeepEqual(command, want) {
+		t.Fatalf("command = %#v, want %#v", command, want)
 	}
 }
 

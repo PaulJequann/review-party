@@ -40,6 +40,29 @@ func TestExplainUsesDefaultUserConfiguration(t *testing.T) {
 	}
 }
 
+func TestExplainAppliesExplicitEffort(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	payload := `{"version":1,"default_reviewer":"opencode","reviewers":{"opencode":{"enabled":true,"model":"meta/muse-spark-1.2-contributor"}}}`
+	if err := os.WriteFile(path, []byte(payload), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := run(context.Background(), []string{"explain", "bugs", "--config", path, "--effort", "high", "--format", "json"}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("exit = %d, stderr = %q", exitCode, stderr.String())
+	}
+	var explanation reviewparty.ProfileExplanation
+	if err := json.Unmarshal(stdout.Bytes(), &explanation); err != nil {
+		t.Fatal(err)
+	}
+	if got := explanation.ProfileRevision.Reviewer.Effort; got != "high" {
+		t.Fatalf("effort = %q, want high", got)
+	}
+}
+
 func TestConfigPathUsesXDGConfigurationDirectory(t *testing.T) {
 	configurationRoot := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", configurationRoot)
