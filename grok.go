@@ -13,6 +13,8 @@ import (
 
 type grokAdapter struct{}
 
+const grokReviewMaxTurns = "30"
+
 func (grokAdapter) Name() string { return "grok" }
 
 func (grokAdapter) Check(_ context.Context, _ reviewerCandidate) availability {
@@ -51,7 +53,7 @@ func grokCommand(candidate reviewerCandidate, repository, promptPath string) []s
 		"--no-memory",
 		"--no-plan",
 		"--permission-mode", "dontAsk",
-		"--max-turns", "10",
+		"--max-turns", grokReviewMaxTurns,
 		"--output-format", "streaming-json",
 		"--verbatim",
 	}

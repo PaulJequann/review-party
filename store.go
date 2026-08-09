@@ -21,9 +21,6 @@ func newFileRecordStore(directory string) (*fileRecordStore, error) {
 	if directory == "" {
 		return nil, errors.New("record directory is required")
 	}
-	if err := os.MkdirAll(directory, 0o700); err != nil {
-		return nil, fmt.Errorf("create record directory: %w", err)
-	}
 	return &fileRecordStore{directory: directory}, nil
 }
 
@@ -32,9 +29,9 @@ func (store *fileRecordStore) Save(record ReviewRecord) error {
 	if err != nil {
 		return fmt.Errorf("encode review record: %w", err)
 	}
-	temporary, err := os.CreateTemp(store.directory, ".record-*.tmp")
+	temporary, err := store.createTemporaryRecord()
 	if err != nil {
-		return fmt.Errorf("create temporary review record: %w", err)
+		return err
 	}
 	temporaryPath := temporary.Name()
 	defer os.Remove(temporaryPath)
@@ -58,6 +55,17 @@ func (store *fileRecordStore) Save(record ReviewRecord) error {
 		return fmt.Errorf("publish review record: %w", err)
 	}
 	return nil
+}
+
+func (store *fileRecordStore) createTemporaryRecord() (*os.File, error) {
+	if err := os.MkdirAll(store.directory, 0o700); err != nil {
+		return nil, fmt.Errorf("create record directory: %w", err)
+	}
+	temporary, err := os.CreateTemp(store.directory, ".record-*.tmp")
+	if err != nil {
+		return nil, fmt.Errorf("create temporary review record: %w", err)
+	}
+	return temporary, nil
 }
 
 func (store *fileRecordStore) Load(id ReviewID) (ReviewRecord, error) {

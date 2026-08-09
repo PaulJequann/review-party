@@ -19,18 +19,22 @@ func TestRepositoryProfileShadowsGlobalAsWholeDefinition(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(profile.prompt, "REPOSITORY UNIQUE GUIDANCE") || strings.Contains(profile.prompt, "GLOBAL UNIQUE GUIDANCE") {
-		t.Fatalf("compiled prompt did not use the repository definition as a whole:\n%s", profile.prompt)
+	prompt := profile.prompt(ReviewSubject{Repository: repository})
+	if !strings.Contains(prompt, "REPOSITORY UNIQUE GUIDANCE") || strings.Contains(prompt, "GLOBAL UNIQUE GUIDANCE") {
+		t.Fatalf("compiled prompt did not use the repository definition as a whole:\n%s", prompt)
 	}
 	if profile.revision.Source != "repository:.reviewparty/profiles/bugs.md" {
 		t.Fatalf("source = %q", profile.revision.Source)
+	}
+	if profile.revision.Passes[0].PromptRevision == "bugs-v3" || profile.revision.Purpose == "Find material defects in the Review Subject." {
+		t.Fatalf("repository override retained packaged recipe metadata: %#v", profile.revision)
 	}
 }
 
 func TestGlobalDefaultsSelectProfileAndReviewer(t *testing.T) {
 	repository := changedTestRepository(t)
 	globalDirectory := t.TempDir()
-	writeProfileConfigFixture(t, filepath.Join(globalDirectory, "config.json"), `{"schema":1,"defaultProfile":"security","defaultReviewer":"opencode"}`)
+	writeProfileConfigFixture(t, filepath.Join(globalDirectory, "config.json"), `{"schema":1,"defaultProfile":"security","defaultReviewer":"copilot"}`)
 	writeProfileFixture(t, filepath.Join(globalDirectory, "profiles", "security.md"), "GLOBAL SECURITY GUIDANCE")
 
 	grok := &scriptedExecutor{
@@ -40,21 +44,21 @@ func TestGlobalDefaultsSelectProfileAndReviewer(t *testing.T) {
 			return attemptExecution{}
 		},
 	}
-	opencode := successfulExecutor(cleanReview)
+	copilot := successfulExecutor(cleanReview)
 	store, err := newFileRecordStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	conductor := newConductorWithProfiles(store, catalogWithExecutors(map[string]attemptExecutor{
-		"grok":     grok,
-		"opencode": opencode,
+		"grok":    grok,
+		"copilot": copilot,
 	}), newProfileLibrary(globalDirectory), time.Second)
 
 	record, err := conductor.Review(context.Background(), ReviewSelection{Repository: repository, Subject: WorkingChanges()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertGlobalDefaultReview(t, record, grok, opencode)
+	assertGlobalDefaultReview(t, record, grok, copilot)
 }
 
 func TestInvalidRepositoryProfileFailsBeforeLaunchWithoutFallback(t *testing.T) {
@@ -84,16 +88,16 @@ func TestInvalidRepositoryProfileFailsBeforeLaunchWithoutFallback(t *testing.T) 
 	}
 }
 
-func assertGlobalDefaultReview(t *testing.T, record ReviewRecord, grok, opencode *scriptedExecutor) {
+func assertGlobalDefaultReview(t *testing.T, record ReviewRecord, grok, copilot *scriptedExecutor) {
 	t.Helper()
-	if record.ProfileRevision.Name != "security" || record.ProfileRevision.ReviewerID != "opencode" {
+	if record.ProfileRevision.Name != "security" || record.ProfileRevision.ReviewerID != "copilot" {
 		t.Fatalf("revision = %#v", record.ProfileRevision)
 	}
 	if record.ProfileRevision.Source != "global:profiles/security.md" || !strings.Contains(record.ProfileSnapshot.Instructions, "GLOBAL SECURITY GUIDANCE") {
 		t.Fatalf("profile provenance = %#v, snapshot = %#v", record.ProfileRevision, record.ProfileSnapshot)
 	}
-	if grok.attemptCount() != 0 || opencode.attemptCount() != 1 {
-		t.Fatalf("grok attempts = %d, opencode attempts = %d", grok.attemptCount(), opencode.attemptCount())
+	if grok.attemptCount() != 0 || copilot.attemptCount() != 1 {
+		t.Fatalf("grok attempts = %d, copilot attempts = %d", grok.attemptCount(), copilot.attemptCount())
 	}
 }
 
@@ -129,7 +133,7 @@ func TestMissingProfileExplainsSearchAndAvailableNames(t *testing.T) {
 		"repository:.reviewparty/profiles/architecture.md",
 		"global:profiles/architecture.md",
 		"packaged:profiles/architecture.md",
-		"available: bugs, security",
+		"available: bugs, documentation, security",
 	} {
 		if !strings.Contains(err.Error(), expected) {
 			t.Fatalf("error %q does not contain %q", err, expected)
@@ -182,8 +186,8 @@ func TestPackagedBugsProfileRemainsZeroConfigurationDefault(t *testing.T) {
 	if profile.revision.Name != "bugs" || profile.revision.Source != "packaged:profiles/bugs.md" {
 		t.Fatalf("revision = %#v", profile.revision)
 	}
-	if !strings.Contains(profile.prompt, "Review for material bugs") {
-		t.Fatalf("prompt = %q", profile.prompt)
+	if prompt := profile.prompt(ReviewSubject{}); !strings.Contains(prompt, "Review for material bugs") {
+		t.Fatalf("prompt = %q", prompt)
 	}
 }
 

@@ -1,11 +1,10 @@
 package reviewparty
 
 import (
-	"crypto/sha256"
 	"embed"
-	"encoding/hex"
 	"fmt"
 	"strings"
+	"time"
 )
 
 const (
@@ -20,51 +19,10 @@ type profileLibrary struct {
 	globalDirectory string
 }
 
-// ProfileCatalog provides read-only access to resolved review Profiles without
-// initializing review-record persistence.
-type ProfileCatalog struct {
-	library   profileLibrary
-	reviewers reviewerCatalog
-}
-
-type ProfileExplanationRequest struct {
-	Repository string
-	Name       string
-	Reviewer   string
-}
-
 type profileRequest struct {
 	repository string
 	name       string
 	reviewer   string
-}
-
-func NewProfileCatalog(globalDirectory string) *ProfileCatalog {
-	return &ProfileCatalog{library: newProfileLibrary(globalDirectory), reviewers: defaultReviewerCatalog()}
-}
-
-func (catalog *ProfileCatalog) Profiles(repository string) ([]ProfileSummary, error) {
-	root, err := resolveRepositoryRoot(repository)
-	if err != nil {
-		return nil, err
-	}
-	return catalog.library.list(root)
-}
-
-func (catalog *ProfileCatalog) Explain(request ProfileExplanationRequest) (ProfileExplanation, error) {
-	root, err := resolveRepositoryRoot(request.Repository)
-	if err != nil {
-		return ProfileExplanation{}, err
-	}
-	profile, err := catalog.library.compile(catalog.reviewers, profileRequest{name: request.Name, reviewer: request.Reviewer}, ReviewSubject{Repository: root})
-	if err != nil {
-		return ProfileExplanation{}, err
-	}
-	passes := make([]ProfilePassSummary, 0, len(profile.passes))
-	for _, pass := range profile.passes {
-		passes = append(passes, ProfilePassSummary{Name: pass.name, Required: pass.required})
-	}
-	return ProfileExplanation{Revision: profile.revision, Instructions: profile.snapshot.Instructions, Passes: passes}, nil
 }
 
 type resolvedProfile struct {
@@ -90,59 +48,89 @@ func newProfileLibrary(globalDirectory string) profileLibrary {
 }
 
 func (library profileLibrary) compile(catalog reviewerCatalog, request profileRequest, subject ReviewSubject) (compiledProfile, error) {
-	request.repository = subject.Repository
-	resolved, err := library.resolve(catalog, request)
+	conductor := Conductor{reviewers: catalog, profiles: library, attemptDeadline: 10 * time.Minute}
+	return conductor.compileFilesystemProfile(ProfileSelection{Profile: request.name, Reviewer: request.reviewer}, subject.Repository)
+}
+
+func (conductor *Conductor) compileFilesystemProfile(selection ProfileSelection, repository string) (compiledProfile, error) {
+	reviewerWasDefault := selection.Reviewer == ""
+	resolved, err := conductor.profiles.resolve(conductor.reviewers, profileRequest{repository: repository, name: selection.Profile, reviewer: selection.Reviewer})
 	if err != nil {
 		return compiledProfile{}, err
 	}
-	registration, err := catalog.resolve(resolved.reviewer)
+	selection.Profile = resolved.name
+	if selection.Reviewer == "" {
+		selection.Reviewer = resolved.reviewer
+	}
+	definition, err := profileDefinitionFor(resolved)
 	if err != nil {
 		return compiledProfile{}, err
 	}
-
-	passName := resolved.name + "-review"
-	if resolved.name == "bugs" {
-		passName = "bug-review"
+	profile, err := compileProfileDefinition(conductor.reviewers, selection, conductor.attemptDeadline, definition)
+	if err != nil {
+		return compiledProfile{}, err
 	}
-	passes := []passPlan{{name: passName, required: true}}
-	candidate := registration.candidate
-	revisionInput := strings.Join([]string{
-		resolved.name,
-		resolved.instructions,
-		candidate.ID,
-		candidate.Model,
-		candidate.Effort,
-		candidate.Harness,
-		candidate.Transport,
-		profileCompilerRevision,
-		canonicalReviewResultContract.revision(),
-	}, "\x00")
-	for _, pass := range passes {
-		revisionInput += fmt.Sprintf("\x00%s\x00%t", pass.name, pass.required)
-	}
-	revisionHash := sha256.Sum256([]byte(revisionInput))
+	profile.revision.Source = resolved.source
+	profile.revision.SourceDigest = resolved.digest
+	profile.revision.CompilerRevision = profileCompilerRevision
+	profile.revision.Revision = profileRevisionIdentity(profile.revision)
+	profile.snapshot = ProfileSnapshot{Name: resolved.name, Source: resolved.source, SourceDigest: resolved.digest, Instructions: resolved.instructions}
+	profile.reviewerWasDefault = reviewerWasDefault
+	profile.buildPrompt = func(subject ReviewSubject) string { return renderReviewPrompt(resolved, subject) }
+	return profile, nil
+}
 
-	return compiledProfile{
-		revision: ProfileRevision{
-			Name:             resolved.name,
-			Revision:         hex.EncodeToString(revisionHash[:]),
-			ReviewerID:       candidate.ID,
-			Model:            candidate.Model,
-			Effort:           candidate.Effort,
-			Source:           resolved.source,
-			SourceDigest:     resolved.digest,
-			CompilerRevision: profileCompilerRevision,
-		},
-		snapshot: ProfileSnapshot{
-			Name:         resolved.name,
-			Source:       resolved.source,
-			SourceDigest: resolved.digest,
-			Instructions: resolved.instructions,
-		},
-		reviewer: registration,
-		prompt:   renderReviewPrompt(resolved, subject),
-		passes:   passes,
+func profileDefinitionFor(profile resolvedProfile) (profileDefinition, error) {
+	if strings.HasPrefix(profile.source, "packaged:") {
+		definition, err := findProfileDefinition(profile.name)
+		if err == nil {
+			return definition, nil
+		}
+	}
+	return profileDefinition{
+		name:                 profile.name,
+		description:          "User-defined review Profile",
+		purpose:              "Apply the authored review instructions to the Review Subject.",
+		materialityThreshold: "A concrete actionable issue under the authored Profile instructions.",
+		defaultReviewer:      defaultReviewer,
+		pass:                 ReviewPassRevision{Name: filesystemPassName(profile.name), Required: true, Purpose: "Apply the authored Profile.", PromptRevision: profileCompilerRevision + ":" + profile.digest},
+		requiredCapabilities: restrictedReviewCapabilities(),
 	}, nil
+}
+
+func filesystemPassName(profileName string) string {
+	if profileName == "bugs" {
+		return "bug-review"
+	}
+	return profileName + "-review"
+}
+
+func (conductor *Conductor) profileSummaries(repository string) ([]ProfileSummary, error) {
+	summaries, err := conductor.profiles.list(repository)
+	if err != nil {
+		return nil, err
+	}
+	for index := range summaries {
+		if summaries[index].Error != "" {
+			continue
+		}
+		resolved, resolveErr := conductor.profiles.resolve(conductor.reviewers, profileRequest{repository: repository, name: summaries[index].Name})
+		if resolveErr != nil {
+			summaries[index].Error = resolveErr.Error()
+			continue
+		}
+		definition, _ := profileDefinitionFor(resolved)
+		registration, resolveErr := conductor.reviewers.resolve(resolved.reviewer)
+		if resolveErr != nil {
+			summaries[index].Error = resolveErr.Error()
+			continue
+		}
+		summaries[index].Description = definition.description
+		summaries[index].DefaultReviewer = registration.candidate.provenance()
+		summaries[index].Passes = []ReviewPassRevision{definition.pass}
+		summaries[index].RequiredCapabilities = canonicalCapabilities(definition.requiredCapabilities)
+	}
+	return summaries, nil
 }
 
 func (library profileLibrary) resolve(catalog reviewerCatalog, request profileRequest) (resolvedProfile, error) {

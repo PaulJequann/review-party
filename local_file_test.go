@@ -50,7 +50,8 @@ func TestProfileReaderRejectsSymlinkedLibraryDirectory(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "must not traverse symlink") {
 		t.Fatalf("profile = %#v, error = %v", profile, err)
 	}
-	if strings.Contains(profile.prompt, "OUT_OF_TREE") || strings.Contains(profile.snapshot.Instructions, "OUT_OF_TREE") {
+	promptContainsOutside := profile.buildPrompt != nil && strings.Contains(profile.prompt(ReviewSubject{}), "OUT_OF_TREE")
+	if promptContainsOutside || strings.Contains(profile.snapshot.Instructions, "OUT_OF_TREE") {
 		t.Fatalf("out-of-tree content entered compiled profile: %#v", profile)
 	}
 }

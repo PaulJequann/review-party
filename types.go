@@ -30,6 +30,13 @@ type ReviewSelection struct {
 	Subject    SubjectReference
 	Profile    string
 	Reviewer   string
+	Model      string
+}
+
+type ProfileSelection struct {
+	Profile  string
+	Reviewer string
+	Model    string
 }
 
 type ReviewSubject struct {
@@ -41,14 +48,23 @@ type ReviewSubject struct {
 }
 
 type ProfileRevision struct {
-	Name             string `json:"name"`
-	Revision         string `json:"revision"`
-	ReviewerID       string `json:"reviewer_id"`
-	Model            string `json:"model"`
-	Effort           string `json:"effort"`
-	Source           string `json:"source"`
-	SourceDigest     string `json:"source_digest"`
-	CompilerRevision string `json:"compiler_revision"`
+	Name                 string               `json:"name"`
+	Revision             string               `json:"revision"`
+	Description          string               `json:"description"`
+	Purpose              string               `json:"purpose"`
+	MaterialityThreshold string               `json:"materiality_threshold"`
+	ReviewerID           string               `json:"reviewer_id"`
+	Model                string               `json:"model"`
+	Effort               string               `json:"effort"`
+	Reviewer             ReviewerProvenance   `json:"reviewer"`
+	Passes               []ReviewPassRevision `json:"passes"`
+	RequiredCapabilities []Capability         `json:"required_capabilities"`
+	AttemptLimit         int                  `json:"attempt_limit"`
+	ExecutionDeadline    string               `json:"execution_deadline"`
+	ResultContract       string               `json:"result_contract_revision"`
+	Source               string               `json:"source"`
+	SourceDigest         string               `json:"source_digest"`
+	CompilerRevision     string               `json:"compiler_revision"`
 }
 
 type ProfileSnapshot struct {
@@ -58,22 +74,38 @@ type ProfileSnapshot struct {
 	Instructions string `json:"instructions"`
 }
 
-type ProfileSummary struct {
-	Name   string `json:"name"`
-	Source string `json:"source"`
-	Path   string `json:"path"`
-	Error  string `json:"error,omitempty"`
+type Capability string
+
+const (
+	CapabilityRepositoryRead           Capability = "repository-read"
+	CapabilityRepositorySearch         Capability = "repository-search"
+	CapabilityRepositoryMutationDenied Capability = "repository-mutation-denied"
+	CapabilityShellDenied              Capability = "shell-denied"
+	CapabilityWebDenied                Capability = "web-denied"
+)
+
+type ReviewPassRevision struct {
+	Name           string `json:"name"`
+	Required       bool   `json:"required"`
+	Purpose        string `json:"purpose"`
+	PromptRevision string `json:"prompt_revision"`
 }
 
-type ProfilePassSummary struct {
-	Name     string `json:"name"`
-	Required bool   `json:"required"`
+type ProfileSummary struct {
+	Name                 string               `json:"name"`
+	Description          string               `json:"description"`
+	DefaultReviewer      ReviewerProvenance   `json:"default_reviewer"`
+	Passes               []ReviewPassRevision `json:"passes"`
+	RequiredCapabilities []Capability         `json:"required_capabilities"`
+	Source               string               `json:"source"`
+	Path                 string               `json:"path"`
+	Error                string               `json:"error,omitempty"`
 }
 
 type ProfileExplanation struct {
-	Revision     ProfileRevision      `json:"revision"`
-	Instructions string               `json:"instructions"`
-	Passes       []ProfilePassSummary `json:"passes"`
+	ProfileRevision    ProfileRevision `json:"profile_revision"`
+	ReviewerWasDefault bool            `json:"reviewer_was_default"`
+	Instructions       string          `json:"instructions"`
 }
 
 type AttemptOutcome string

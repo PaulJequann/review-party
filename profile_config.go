@@ -59,7 +59,7 @@ func (settings profileSettings) selectProfile(catalog reviewerCatalog, request p
 	if err := validateProfileName(name); err != nil {
 		return profileSelection{}, fmt.Errorf("profile name %q: %w", name, err)
 	}
-	reviewer := firstNonempty(request.reviewer, settings.repository.DefaultReviewer, settings.global.DefaultReviewer, defaultReviewer)
+	reviewer := firstNonempty(request.reviewer, settings.repository.DefaultReviewer, settings.global.DefaultReviewer, catalog.defaultReviewer, defaultReviewer)
 	if _, err := catalog.resolve(reviewer); err != nil {
 		return profileSelection{}, err
 	}

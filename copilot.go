@@ -64,6 +64,16 @@ type decodedCopilotOutput struct {
 	effort        string
 }
 
+type copilotEvent struct {
+	Type string `json:"type"`
+	Data struct {
+		Content         string `json:"content"`
+		Model           string `json:"model"`
+		ChosenModel     string `json:"chosenModel"`
+		ReasoningBucket string `json:"reasoningBucket"`
+	} `json:"data"`
+}
+
 func decodeCopilotOutput(output []byte) (decodedCopilotOutput, error) {
 	scanner := bufio.NewScanner(bytes.NewReader(output))
 	scanner.Buffer(make([]byte, 64*1024), 2*1024*1024)
@@ -73,34 +83,33 @@ func decodeCopilotOutput(output []byte) (decodedCopilotOutput, error) {
 		if strings.TrimSpace(scanner.Text()) == "" {
 			continue
 		}
-		var event struct {
-			Type string `json:"type"`
-			Data struct {
-				Content         string `json:"content"`
-				Model           string `json:"model"`
-				ChosenModel     string `json:"chosenModel"`
-				ReasoningBucket string `json:"reasoningBucket"`
-			} `json:"data"`
-		}
+		var event copilotEvent
 		if err := json.Unmarshal(scanner.Bytes(), &event); err != nil {
 			return decodedCopilotOutput{}, fmt.Errorf("decode copilot event: %w", err)
 		}
-		if event.Type == "assistant.message" {
-			chunks.WriteString(event.Data.Content)
-			if event.Data.Model != "" {
-				decoded.model = event.Data.Model
-			}
-		}
-		if event.Type == "session.auto_mode_resolved" {
-			decoded.model = event.Data.ChosenModel
-			decoded.effort = event.Data.ReasoningBucket
-		}
+		applyCopilotEvent(&decoded, &chunks, event)
 	}
 	if err := scanner.Err(); err != nil {
 		return decodedCopilotOutput{}, fmt.Errorf("scan copilot output: %w", err)
 	}
 	decoded.assistantText = chunks.String()
 	return decoded, nil
+}
+
+func applyCopilotEvent(decoded *decodedCopilotOutput, chunks *strings.Builder, event copilotEvent) {
+	switch event.Type {
+	case "assistant.message":
+		if chunks.Len() > 0 {
+			chunks.WriteByte('\n')
+		}
+		chunks.WriteString(event.Data.Content)
+		if event.Data.Model != "" {
+			decoded.model = event.Data.Model
+		}
+	case "session.auto_mode_resolved":
+		decoded.model = event.Data.ChosenModel
+		decoded.effort = event.Data.ReasoningBucket
+	}
 }
 
 func classifyCopilotFailure(diagnostic string, waitErr error) attemptExecution {

@@ -26,24 +26,31 @@ func run(ctx context.Context, arguments []string, stdout, stderr io.Writer) int 
 		printUsage(stderr)
 		return 2
 	}
-	switch arguments[0] {
-	case "review":
-		return runReview(ctx, arguments[1:], stdout, stderr)
-	case "inspect":
-		return runInspect(ctx, arguments[1:], stdout, stderr)
-	case "init":
-		return runInit(arguments[1:], stdout, stderr)
-	case "profiles":
-		return runProfiles(ctx, arguments[1:], stdout, stderr)
-	case "profile":
-		return runProfile(ctx, arguments[1:], stdout, stderr)
-	case "help", "-h", "--help":
-		printUsage(stdout)
-		return 0
-	default:
+	handler, exists := commandHandlers(ctx, stdout, stderr)[arguments[0]]
+	if !exists {
 		fmt.Fprintf(stderr, "review-party: unknown command %q\n", arguments[0])
 		printUsage(stderr)
 		return 2
+	}
+	return handler(arguments[1:])
+}
+
+func commandHandlers(ctx context.Context, stdout, stderr io.Writer) map[string]func([]string) int {
+	help := func([]string) int {
+		printUsage(stdout)
+		return 0
+	}
+	return map[string]func([]string) int{
+		"review":   func(arguments []string) int { return runReview(ctx, arguments, stdout, stderr) },
+		"profiles": func(arguments []string) int { return runProfiles(ctx, arguments, stdout, stderr) },
+		"explain":  func(arguments []string) int { return runExplain(ctx, arguments, stdout, stderr) },
+		"config":   func(arguments []string) int { return runConfig(arguments, stdout, stderr) },
+		"inspect":  func(arguments []string) int { return runInspect(ctx, arguments, stdout, stderr) },
+		"init":     func(arguments []string) int { return runInit(arguments, stdout, stderr) },
+		"profile":  func(arguments []string) int { return runProfile(ctx, arguments, stdout, stderr) },
+		"help":     help,
+		"-h":       help,
+		"--help":   help,
 	}
 }
 
@@ -55,7 +62,9 @@ func runReview(ctx context.Context, arguments []string, stdout, stderr io.Writer
 	format := flags.String("format", "human", "Output format: human or json")
 	records := flags.String("records", "", "Review Record directory")
 	deadline := flags.Duration("deadline", 10*time.Minute, "Attempt deadline")
-	reviewer := flags.String("reviewer", "", "Reviewer adapter: "+strings.Join(reviewparty.SupportedReviewers(), ", "))
+	configuration := flags.String("config", defaultUserConfigurationPath(), "User configuration path")
+	reviewer := flags.String("reviewer", "", "Reviewer adapter: "+strings.Join(reviewparty.SupportedReviewers(), ", ")+"; empty uses configured/Profile default")
+	model := flags.String("model", "", "Explicit model for the selected Reviewer")
 	if err := flags.Parse(arguments); err != nil {
 		return 2
 	}
@@ -65,8 +74,9 @@ func runReview(ctx context.Context, arguments []string, stdout, stderr io.Writer
 	}
 
 	conductor, err := reviewparty.New(reviewparty.Config{
-		RecordDirectory: *records,
-		AttemptDeadline: *deadline,
+		RecordDirectory:       *records,
+		AttemptDeadline:       *deadline,
+		UserConfigurationPath: *configuration,
 	})
 	if err != nil {
 		fmt.Fprintf(stderr, "review-party: %v\n", err)
@@ -77,6 +87,7 @@ func runReview(ctx context.Context, arguments []string, stdout, stderr io.Writer
 		Subject:    reviewparty.WorkingChanges(),
 		Profile:    profile,
 		Reviewer:   *reviewer,
+		Model:      *model,
 	})
 	if err != nil {
 		fmt.Fprintf(stderr, "review-party: %v\n", err)
@@ -184,9 +195,10 @@ func takeLeadingValue(arguments []string) (string, []string) {
 
 func printUsage(output io.Writer) {
 	fmt.Fprintln(output, "usage:")
-	fmt.Fprintf(output, "  review-party review [PROFILE] [--reviewer %s] [--repo PATH] [--format human|json]\n", strings.Join(reviewparty.SupportedReviewers(), "|"))
+	fmt.Fprintln(output, "  review-party profiles [--repo PATH] [--format human|json]")
+	fmt.Fprintln(output, "  review-party config path|show [--config PATH]")
+	fmt.Fprintf(output, "  review-party explain PROFILE [--repo PATH] [--reviewer %s] [--model MODEL] [--format human|json]\n", strings.Join(reviewparty.SupportedReviewers(), "|"))
+	fmt.Fprintf(output, "  review-party review [PROFILE] [--reviewer %s] [--model MODEL] [--config PATH] [--repo PATH] [--format human|json]\n", strings.Join(reviewparty.SupportedReviewers(), "|"))
 	fmt.Fprintln(output, "  review-party inspect REVIEW_ID [--format human|json]")
 	fmt.Fprintln(output, "  review-party init [--repo PATH] [--global]")
-	fmt.Fprintln(output, "  review-party profiles [--repo PATH] [--format human|json]")
-	fmt.Fprintln(output, "  review-party profile explain PROFILE [--repo PATH] [--reviewer REVIEWER] [--format human|json]")
 }

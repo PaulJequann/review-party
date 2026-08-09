@@ -14,6 +14,7 @@ type Config struct {
 	RecordDirectory        string
 	GlobalProfileDirectory string
 	AttemptDeadline        time.Duration
+	UserConfigurationPath  string
 }
 
 type Conductor struct {
@@ -35,7 +36,15 @@ func New(config Config) (*Conductor, error) {
 	if err != nil {
 		return nil, err
 	}
-	return newConductorWithProfiles(store, defaultReviewerCatalog(), newProfileLibrary(config.GlobalProfileDirectory), config.AttemptDeadline), nil
+	userConfiguration, err := loadUserConfiguration(config.UserConfigurationPath)
+	if err != nil {
+		return nil, err
+	}
+	reviewers, err := configureReviewerCatalog(defaultReviewerCatalog(), userConfiguration, config.UserConfigurationPath)
+	if err != nil {
+		return nil, err
+	}
+	return newConductorWithProfiles(store, reviewers, newProfileLibrary(config.GlobalProfileDirectory), config.AttemptDeadline), nil
 }
 
 func newConductor(store recordStore, executors map[string]attemptExecutor, deadline time.Duration) *Conductor {
@@ -60,11 +69,7 @@ func (conductor *Conductor) Review(ctx context.Context, selection ReviewSelectio
 	if err := ctx.Err(); err != nil {
 		return ReviewRecord{}, err
 	}
-	subject, err := resolveSubject(selection.Repository, selection.Subject)
-	if err != nil {
-		return ReviewRecord{}, err
-	}
-	profile, err := conductor.profiles.compile(conductor.reviewers, profileRequest{name: selection.Profile, reviewer: selection.Reviewer}, subject)
+	subject, profile, err := conductor.prepareReview(selection)
 	if err != nil {
 		return ReviewRecord{}, err
 	}
@@ -90,12 +95,83 @@ func (conductor *Conductor) Review(ctx context.Context, selection ReviewSelectio
 	return conductor.executePass(ctx, record, profile, executor)
 }
 
-func (conductor *Conductor) Profiles(_ context.Context, repository string) ([]ProfileSummary, error) {
-	return (&ProfileCatalog{library: conductor.profiles, reviewers: conductor.reviewers}).Profiles(repository)
+func (conductor *Conductor) prepareReview(selection ReviewSelection) (ReviewSubject, compiledProfile, error) {
+	profileSelection := ProfileSelection{Profile: selection.Profile, Reviewer: selection.Reviewer, Model: selection.Model}
+	if err := conductor.validateExplicitReviewer(profileSelection); err != nil {
+		return ReviewSubject{}, compiledProfile{}, err
+	}
+	repository, err := resolveRepositoryRoot(selection.Repository)
+	if err != nil {
+		return ReviewSubject{}, compiledProfile{}, err
+	}
+	profile, err := conductor.compileFilesystemProfile(profileSelection, repository)
+	if err != nil {
+		return ReviewSubject{}, compiledProfile{}, err
+	}
+	subject, err := resolveSubject(repository, selection.Subject)
+	return subject, profile, err
 }
 
-func (conductor *Conductor) ExplainProfile(_ context.Context, repository, name, reviewer string) (ProfileExplanation, error) {
-	return (&ProfileCatalog{library: conductor.profiles, reviewers: conductor.reviewers}).Explain(ProfileExplanationRequest{Repository: repository, Name: name, Reviewer: reviewer})
+func (conductor *Conductor) Profiles(ctx context.Context) ([]ProfileSummary, error) {
+	return conductor.profilesAt(ctx, "")
+}
+
+func (conductor *Conductor) ProfilesForRepository(ctx context.Context, repository string) ([]ProfileSummary, error) {
+	root, err := resolveRepositoryRoot(repository)
+	if err != nil {
+		return nil, err
+	}
+	return conductor.profilesAt(ctx, root)
+}
+
+func (conductor *Conductor) profilesAt(ctx context.Context, repository string) ([]ProfileSummary, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return conductor.profileSummaries(repository)
+}
+
+func (conductor *Conductor) Explain(ctx context.Context, selection ProfileSelection) (ProfileExplanation, error) {
+	return conductor.explainAt(ctx, selection, "")
+}
+
+func (conductor *Conductor) ExplainForRepository(ctx context.Context, selection ProfileSelection, repository string) (ProfileExplanation, error) {
+	root, err := resolveRepositoryRoot(repository)
+	if err != nil {
+		return ProfileExplanation{}, err
+	}
+	return conductor.explainAt(ctx, selection, root)
+}
+
+func (conductor *Conductor) explainAt(ctx context.Context, selection ProfileSelection, repository string) (ProfileExplanation, error) {
+	if err := ctx.Err(); err != nil {
+		return ProfileExplanation{}, err
+	}
+	profile, err := conductor.compileFilesystemProfile(selection, repository)
+	if err != nil {
+		return ProfileExplanation{}, err
+	}
+	return ProfileExplanation{
+		ProfileRevision:    profile.revision,
+		ReviewerWasDefault: profile.reviewerWasDefault,
+		Instructions:       profile.snapshot.Instructions,
+	}, nil
+}
+
+func (conductor *Conductor) validateExplicitReviewer(selection ProfileSelection) error {
+	if selection.Reviewer == "" {
+		return nil
+	}
+	registration, err := conductor.reviewers.resolve(selection.Reviewer)
+	if err != nil {
+		return err
+	}
+	missing := missingCapabilities(restrictedReviewCapabilities(), registration.capabilities)
+	if len(missing) > 0 {
+		return UnsupportedCapabilitiesError{Profile: firstNonempty(selection.Profile, "bugs"), Reviewer: registration.candidate.ID, Missing: missing}
+	}
+	_, err = resolveReviewerModel(registration, selection.Model)
+	return err
 }
 
 func (conductor *Conductor) Inspect(_ context.Context, id ReviewID) (ReviewRecord, error) {
@@ -111,9 +187,9 @@ func (conductor *Conductor) pendingRecord(subject ReviewSubject, profile compile
 		return ReviewRecord{}, err
 	}
 	now := conductor.now().UTC()
-	passes := make([]PassRecord, 0, len(profile.passes))
-	for _, planned := range profile.passes {
-		passes = append(passes, PassRecord{Name: planned.name, Required: planned.required, Attempts: []AttemptRecord{}})
+	passes := make([]PassRecord, 0, len(profile.revision.Passes))
+	for _, planned := range profile.revision.Passes {
+		passes = append(passes, PassRecord{Name: planned.Name, Required: planned.Required, Attempts: []AttemptRecord{}})
 	}
 	return ReviewRecord{
 		ID:              id,
@@ -133,7 +209,7 @@ func (conductor *Conductor) executePass(ctx context.Context, record ReviewRecord
 	defer cancel()
 	execution := executor.Execute(attemptContext, attemptSpec{
 		Repository: record.Subject.Repository,
-		Prompt:     profile.prompt,
+		Prompt:     profile.prompt(record.Subject),
 		Candidate:  profile.reviewer.candidate,
 	})
 

@@ -24,7 +24,7 @@ func TestInitAndProfilesCommandsExposeRepositoryLibrary(t *testing.T) {
 	profilesOutput := runProfileCommand(t, []string{"profiles", "--repo", repository})
 	assertOutputContains(t, profilesOutput, "bugs", "repository:.reviewparty/profiles/bugs.md")
 	explainOutput := runProfileCommand(t, []string{"profile", "explain", "bugs", "--repo", repository})
-	assertOutputContains(t, explainOutput, "repository:.reviewparty/profiles/bugs.md", "grok/grok-4.5", "bug-review", "PROFILE MARKDOWN")
+	assertOutputContains(t, explainOutput, "repository:.reviewparty/profiles/bugs.md", "grok-4.5/high", "bug-review", "PROFILE MARKDOWN")
 }
 
 func runProfileCommand(t *testing.T, arguments []string) string {
