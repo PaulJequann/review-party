@@ -69,11 +69,11 @@ func TestReviewerSelectionChangesProfileRevision(t *testing.T) {
 		{candidate: reviewerCandidate{ID: "reviewer-a", Model: "same-model", Effort: "same-effort", Harness: "same-harness", Transport: "same-transport"}, capabilities: capabilities, executor: executor},
 		{candidate: reviewerCandidate{ID: "reviewer-b", Model: "same-model", Effort: "same-effort", Harness: "same-harness", Transport: "same-transport"}, capabilities: capabilities, executor: executor},
 	})
-	first, err := compileProfile(catalog, ProfileSelection{Profile: "bugs", Reviewer: "reviewer-a"}, time.Second)
+	first, err := compileSelectedTestProfile(catalog, ProfileSelection{Profile: "bugs", Reviewer: "reviewer-a"}, time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := compileProfile(catalog, ProfileSelection{Profile: "bugs", Reviewer: "reviewer-b"}, time.Second)
+	second, err := compileSelectedTestProfile(catalog, ProfileSelection{Profile: "bugs", Reviewer: "reviewer-b"}, time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +83,7 @@ func TestReviewerSelectionChangesProfileRevision(t *testing.T) {
 }
 
 func TestCompiledBugProfileIncludesPromisedPass(t *testing.T) {
-	profile, err := compileProfile(defaultReviewerCatalog(), ProfileSelection{Profile: "bugs", Reviewer: "grok"}, time.Second)
+	profile, err := compileSelectedTestProfile(defaultReviewerCatalog(), ProfileSelection{Profile: "bugs", Reviewer: "grok"}, time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}

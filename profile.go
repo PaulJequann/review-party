@@ -26,7 +26,6 @@ type profileDefinition struct {
 	defaultReviewer      string
 	pass                 ReviewPassRevision
 	requiredCapabilities []Capability
-	buildPrompt          func(ReviewSubject) string
 }
 
 type UnknownProfileError struct {
@@ -50,17 +49,6 @@ func (failure UnsupportedCapabilitiesError) Error() string {
 		missing[index] = string(capability)
 	}
 	return fmt.Sprintf("review profile %q requires capabilities unavailable from reviewer %q: %s", failure.Profile, failure.Reviewer, strings.Join(missing, ", "))
-}
-
-func compileProfile(catalog reviewerCatalog, selection ProfileSelection, deadline time.Duration) (compiledProfile, error) {
-	if selection.Profile == "" {
-		selection.Profile = "bugs"
-	}
-	definition, err := findProfileDefinition(selection.Profile)
-	if err != nil {
-		return compiledProfile{}, err
-	}
-	return compileProfileDefinition(catalog, selection, deadline, definition)
 }
 
 func compileProfileDefinition(catalog reviewerCatalog, selection ProfileSelection, deadline time.Duration, definition profileDefinition) (compiledProfile, error) {
@@ -99,7 +87,6 @@ func compileProfileDefinition(catalog reviewerCatalog, selection ProfileSelectio
 		revision:           revision,
 		reviewer:           registration,
 		reviewerWasDefault: reviewerWasDefault,
-		buildPrompt:        definition.buildPrompt,
 	}, nil
 }
 
@@ -167,9 +154,8 @@ func builtInProfileDefinitions() []profileDefinition {
 			purpose:              "Find material defects in the Review Subject.",
 			materialityThreshold: "A concrete actionable regression in behavior or an applicable Project Rule.",
 			defaultReviewer:      defaultReviewer,
-			pass:                 ReviewPassRevision{Name: "bug-review", Required: true, Purpose: "Evaluate material correctness and delivery-risk defects.", PromptRevision: "bugs-v3"},
+			pass:                 ReviewPassRevision{Name: "bug-review", Required: true, Purpose: "Evaluate material correctness and delivery-risk defects.", PromptRevision: "bugs-v4"},
 			requiredCapabilities: capabilities,
-			buildPrompt:          buildBugReviewPrompt,
 		},
 		{
 			name:                 "documentation",
@@ -179,7 +165,6 @@ func builtInProfileDefinitions() []profileDefinition {
 			defaultReviewer:      defaultReviewer,
 			pass:                 ReviewPassRevision{Name: "documentation-review", Required: true, Purpose: "Evaluate material documentation defects.", PromptRevision: "documentation-v1"},
 			requiredCapabilities: capabilities,
-			buildPrompt:          buildDocumentationReviewPrompt,
 		},
 	}
 }
@@ -204,30 +189,6 @@ func SupportedProfiles() []string {
 	return names
 }
 
-func profileSummaries(catalog reviewerCatalog) ([]ProfileSummary, error) {
-	definitions := builtInProfileDefinitions()
-	sort.Slice(definitions, func(left, right int) bool { return definitions[left].name < definitions[right].name })
-	summaries := make([]ProfileSummary, 0, len(definitions))
-	for _, definition := range definitions {
-		defaultReviewer := catalog.defaultReviewer
-		if defaultReviewer == "" {
-			defaultReviewer = definition.defaultReviewer
-		}
-		registration, err := catalog.resolve(defaultReviewer)
-		if err != nil {
-			return nil, err
-		}
-		summaries = append(summaries, ProfileSummary{
-			Name:                 definition.name,
-			Description:          definition.description,
-			DefaultReviewer:      registration.candidate.provenance(),
-			Passes:               []ReviewPassRevision{definition.pass},
-			RequiredCapabilities: canonicalCapabilities(definition.requiredCapabilities),
-		})
-	}
-	return summaries, nil
-}
-
 func missingCapabilities(required, available []Capability) []Capability {
 	provided := make(map[Capability]struct{}, len(available))
 	for _, capability := range available {
@@ -250,50 +211,6 @@ func canonicalCapabilities(capabilities []Capability) []Capability {
 
 func (profile compiledProfile) prompt(subject ReviewSubject) string {
 	return profile.buildPrompt(subject)
-}
-
-func buildBugReviewPrompt(subject ReviewSubject) string {
-	return buildReviewPrompt(subject, `Review for material bugs: concrete regressions in correctness, security,
-privacy, data integrity, concurrency, failure handling, public contracts,
-operability, test validity, and applicable Project Rules. Report an unresolved
-approval requirement precisely; absence of approval evidence is not proof that
-approval was denied.`)
-}
-
-func buildDocumentationReviewPrompt(subject ReviewSubject) string {
-	return buildReviewPrompt(subject, `Perform a Documentation Review for material inaccuracies, omissions,
-internal contradictions, stale claims, misleading procedures, and misuse of
-accepted project language. Verify documentation claims against relevant code
-and identify changed behavior that requires documentation. Cite exact evidence.
-Treat Project Context as potentially stale and never promote it into a Project
-Rule merely because it is documentation.`)
-}
-
-func buildReviewPrompt(subject ReviewSubject, focus string) string {
-	return fmt.Sprintf(`Act as a senior code reviewer. Be terse and skip praise.
-
-Use repository-scoped read and search tools only. Do not use shell, terminal,
-web, write, edit, delete, or move tools. Treat the supplied patch as the Review
-Subject. Use surrounding repository files only to verify callers, contracts,
-tests, and assumptions.
-
-Read applicable AGENTS.md instructions. Look for CONTEXT.md or CONTEXT-MAP.md
-and use the applicable project language. Consult README files for orientation
-when relevant, then pursue other documentation only when the Subject or
-emerging evidence warrants it. Treat contextual documentation as potentially
-stale; surface material contradictions with provenance rather than assuming a
-document is correct.
-
-%s
-
-%s
-
-Review Subject identity: %s
-Changed paths:
-%s
-
---- PATCH ---
-%s`, focus, canonicalReviewResultContract.instructions(), subject.Identity, joinLines(subject.ChangedPaths), subject.Patch)
 }
 
 func joinLines(lines []string) string {

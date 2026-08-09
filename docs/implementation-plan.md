@@ -330,6 +330,57 @@ conflating intent with runtime details.
 - A profile fails before launch when its adapter cannot meet its requirements.
 - Profile selection does not alter project governance or editing authority.
 
+## Slice 8a — Profile-owned reviewer judgment
+
+Status: **Implemented on `feat/profile-owned-review-judgment`**
+
+### Goal
+
+Make a Review Profile the complete, inspectable definition of purpose-specific
+Reviewer Judgment while keeping Review Party's enforceable execution and result
+guarantees behind the profile-library Module.
+
+### Operations
+
+1. Move the mature material-bug methodology into packaged `profiles/bugs.md`,
+   including materiality, evidence, confidence, root-cause, false-positive,
+   test-gap, and subject-sensitive risk guidance.
+2. Compile packaged Profiles through the same filesystem-backed path used by
+   repository and global Profiles so Markdown remains the single judgment
+   source.
+3. Preserve compiler-owned capability restrictions, Context Discovery,
+   immutable Review Subject framing, canonical Review Result validation,
+   provenance, deadlines, and incomplete-result semantics.
+4. Prove that a repository override replaces packaged judgment as a whole while
+   retaining the compiler-owned guarantee kernel.
+5. Keep the authored Profile and effective compiler recipe inspectable through
+   the existing Profile explanation and Review Record surfaces.
+
+### Non-goals
+
+- Typed user-defined Pass graphs, Recovery Policy, capabilities, result parsers,
+  commands, Agent Harnesses, or Transports.
+- Prompt prose that pretends to control Attempts, independent Reviewers,
+  fallback, Substitution, or lifecycle state.
+- Shared hidden judgment fragments inherited by every Profile.
+- Shipping the companion Profile-authoring agent skill in this slice.
+
+### Stop rule
+
+Do not add configurable orchestration fields or reusable prompt inheritance
+without two demonstrated Profile recipes that require the new seam and a
+separate accepted design.
+
+### Acceptance evidence
+
+- The packaged `bugs` prompt contains the accepted material-review judgment
+  rules and targeted risk priorities.
+- A repository `bugs.md` receives Subject framing and the canonical result
+  contract without inheriting packaged bug-review judgment.
+- Packaged and custom Profiles compile through one prompt-assembly path.
+- Focused Go tests, formatter, vet, build, and CodeScene checks pass for the
+  changed implementation.
+
 ## Slice 9 — ACPX transport adapter
 
 Status: **Pending**
@@ -437,6 +488,53 @@ human-facing policy, validation, and governance responsibilities.
   executable specification.
 - Existing supported review behavior has explicit parity evidence.
 - Rollback to the prior runner remains possible during migration.
+
+## Slice 12a — Profile-authoring companion skill
+
+Status: **Pending; begin after the Profile authoring interface is stable**
+
+### Goal
+
+Ship an installable coding-agent skill that lets a Caller configure and adjust
+Review Party Profiles without first learning the storage, precedence, and
+compiler details.
+
+### Operations
+
+1. Teach the agent to inspect effective configuration and authored judgment with
+   `review-party profiles` and `review-party profile explain` before editing.
+2. Teach the seam explicitly: Markdown controls Reviewer Judgment; typed
+   configuration and Review Party control enforceable execution and lifecycle
+   behavior.
+3. Support explicit repository-local and global installation targets without
+   silently modifying an existing agent setup.
+4. Guide bounded edits to Profile Markdown, preserve whole-definition shadowing,
+   and verify the effective Profile before running a live Reviewer.
+5. Keep agent-vendor paths and packaging conventions behind an installer
+   interface rather than embedding one coding agent's layout in the Profile
+   format.
+
+### Non-goals
+
+- Granting the skill delivery, remediation, or Substitution authority.
+- Letting prompt text configure tools, executable commands, transports,
+  Attempts, fallback, or Review lifecycle state.
+- Automatically installing or overwriting a global or repository skill during
+  `review-party init` without an explicit Caller choice.
+
+### Stop rule
+
+Do not ship the skill until its supported installation targets, update behavior,
+and ownership of generated versus user-edited files are explicit and the
+Profile format it teaches is no longer being changed in the same slice.
+
+### Acceptance evidence
+
+- A fresh Caller can ask a supported coding agent to create or adjust a Profile,
+  inspect the effective recipe, and explain what Review Party will enforce.
+- Repository-local and global installation are independently selectable and do
+  not overwrite existing paths without explicit authorization.
+- The skill cannot misrepresent prompt guidance as an execution guarantee.
 
 ## Slice 13 — Delivery baseline
 

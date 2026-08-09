@@ -18,7 +18,11 @@ func TestReviewAcceptsCRLFFindings(t *testing.T) {
 }
 
 func TestCanonicalResultExamplesSatisfyContract(t *testing.T) {
-	prompt := buildBugReviewPrompt(ReviewSubject{})
+	profile, err := compileTestProfile(profileLibrary{}, "bugs", "grok", ReviewSubject{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompt := profile.prompt(ReviewSubject{})
 	for _, example := range []string{cleanReviewExample, findingsReviewExample} {
 		if _, err := canonicalReviewResultContract.parse(example); err != nil {
 			t.Fatalf("canonical example is invalid: %v\n%s", err, example)
