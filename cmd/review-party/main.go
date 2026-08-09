@@ -55,7 +55,7 @@ func commandHandlers(ctx context.Context, stdout, stderr io.Writer) map[string]f
 }
 
 func runReview(ctx context.Context, arguments []string, stdout, stderr io.Writer) int {
-	profile, arguments := optionalLeadingArgument(arguments, "bugs")
+	profile, arguments := takeLeadingValue(arguments)
 	flags := flag.NewFlagSet("review", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	repository := flags.String("repo", ".", "Git repository to review")
@@ -103,14 +103,6 @@ func runReview(ctx context.Context, arguments []string, stdout, stderr io.Writer
 		return 2
 	}
 	return 0
-}
-
-func optionalLeadingArgument(arguments []string, fallback string) (string, []string) {
-	value, remaining := takeLeadingValue(arguments)
-	if value == "" {
-		return fallback, arguments
-	}
-	return value, remaining
 }
 
 func runInspect(ctx context.Context, arguments []string, stdout, stderr io.Writer) int {
