@@ -29,6 +29,12 @@ func run(ctx context.Context, arguments []string, stdout, stderr io.Writer) int 
 	switch arguments[0] {
 	case "review":
 		return runReview(ctx, arguments[1:], stdout, stderr)
+	case "profiles":
+		return runProfiles(ctx, arguments[1:], stdout, stderr)
+	case "explain":
+		return runExplain(ctx, arguments[1:], stdout, stderr)
+	case "config":
+		return runConfig(arguments[1:], stdout, stderr)
 	case "inspect":
 		return runInspect(ctx, arguments[1:], stdout, stderr)
 	case "help", "-h", "--help":
@@ -53,7 +59,9 @@ func runReview(ctx context.Context, arguments []string, stdout, stderr io.Writer
 	format := flags.String("format", "human", "Output format: human or json")
 	records := flags.String("records", "", "Review Record directory")
 	deadline := flags.Duration("deadline", 10*time.Minute, "Attempt deadline")
-	reviewer := flags.String("reviewer", "grok", "Reviewer adapter: "+strings.Join(reviewparty.SupportedReviewers(), ", "))
+	configuration := flags.String("config", defaultUserConfigurationPath(), "User configuration path")
+	reviewer := flags.String("reviewer", "", "Reviewer adapter: "+strings.Join(reviewparty.SupportedReviewers(), ", ")+"; empty uses configured/Profile default")
+	model := flags.String("model", "", "Explicit model for the selected Reviewer")
 	if err := flags.Parse(arguments); err != nil {
 		return 2
 	}
@@ -63,8 +71,9 @@ func runReview(ctx context.Context, arguments []string, stdout, stderr io.Writer
 	}
 
 	conductor, err := reviewparty.New(reviewparty.Config{
-		RecordDirectory: *records,
-		AttemptDeadline: *deadline,
+		RecordDirectory:       *records,
+		AttemptDeadline:       *deadline,
+		UserConfigurationPath: *configuration,
 	})
 	if err != nil {
 		fmt.Fprintf(stderr, "review-party: %v\n", err)
@@ -75,6 +84,7 @@ func runReview(ctx context.Context, arguments []string, stdout, stderr io.Writer
 		Subject:    reviewparty.WorkingChanges(),
 		Profile:    profile,
 		Reviewer:   *reviewer,
+		Model:      *model,
 	})
 	if err != nil {
 		fmt.Fprintf(stderr, "review-party: %v\n", err)
@@ -162,6 +172,9 @@ func printRecord(output io.Writer, record reviewparty.ReviewRecord, format strin
 
 func printUsage(output io.Writer) {
 	fmt.Fprintln(output, "usage:")
-	fmt.Fprintf(output, "  review-party review [bugs] [--reviewer %s] [--repo PATH] [--format human|json]\n", strings.Join(reviewparty.SupportedReviewers(), "|"))
+	fmt.Fprintln(output, "  review-party profiles [--format human|json]")
+	fmt.Fprintln(output, "  review-party config path|show [--config PATH]")
+	fmt.Fprintf(output, "  review-party explain PROFILE [--reviewer %s] [--model MODEL] [--format human|json]\n", strings.Join(reviewparty.SupportedReviewers(), "|"))
+	fmt.Fprintf(output, "  review-party review [%s] [--reviewer %s] [--model MODEL] [--config PATH] [--repo PATH] [--format human|json]\n", strings.Join(reviewparty.SupportedProfiles(), "|"), strings.Join(reviewparty.SupportedReviewers(), "|"))
 	fmt.Fprintln(output, "  review-party inspect REVIEW_ID [--format human|json]")
 }
