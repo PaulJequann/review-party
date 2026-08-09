@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestCopilotCommandRestrictsVisibleTools(t *testing.T) {
@@ -40,6 +41,13 @@ func TestCopilotAutoModelOmitsEffortAndCapturesResolution(t *testing.T) {
 	}
 }
 
+func TestCopilotDecoderPreservesAssistantMessageBoundaries(t *testing.T) {
+	output := []byte("{\"type\":\"assistant.message\",\"data\":{\"content\":\"Inspecting files.\"}}\n" +
+		"{\"type\":\"assistant.message\",\"data\":{\"content\":\"" + strings.ReplaceAll(cleanReview, "\n", "\\n") + "\"}}\n")
+	decoded, err := decodeCopilotOutput(output)
+	assertReviewWithPreamble(t, decoded.assistantText, err)
+}
+
 func TestCopilotUnavailableModelIsClassifiedWithoutRetry(t *testing.T) {
 	execution := classifyCopilotFailure(`Error: Model "gpt-5.6-luna" from --model flag is not available.`, context.Canceled)
 	if execution.Outcome != AttemptReviewerUnavailable {
@@ -48,57 +56,76 @@ func TestCopilotUnavailableModelIsClassifiedWithoutRetry(t *testing.T) {
 }
 
 func TestReviewerSelectionChangesProfileRevision(t *testing.T) {
-	subject := ReviewSubject{Kind: SubjectWorkingChanges, Identity: "subject", Patch: "patch"}
-	catalog := defaultReviewerCatalog()
-	grok, err := compileProfile(catalog, "bugs", "grok", subject)
+	executor := successfulExecutor(cleanReview)
+	capabilities := restrictedReviewCapabilities()
+	catalog := newReviewerCatalog([]reviewerRegistration{
+		{candidate: reviewerCandidate{ID: "reviewer-a", Model: "same-model", Effort: "same-effort", Harness: "same-harness", Transport: "same-transport"}, capabilities: capabilities, executor: executor},
+		{candidate: reviewerCandidate{ID: "reviewer-b", Model: "same-model", Effort: "same-effort", Harness: "same-harness", Transport: "same-transport"}, capabilities: capabilities, executor: executor},
+	})
+	first, err := compileProfile(catalog, ProfileSelection{Profile: "bugs", Reviewer: "reviewer-a"}, time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
-	opencode, err := compileProfile(catalog, "bugs", "opencode", subject)
+	second, err := compileProfile(catalog, ProfileSelection{Profile: "bugs", Reviewer: "reviewer-b"}, time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if grok.revision.Revision == opencode.revision.Revision {
+	if first.revision.Revision == second.revision.Revision {
 		t.Fatal("different reviewers produced the same Profile Revision")
 	}
 }
 
 func TestCompiledBugProfileIncludesPromisedPass(t *testing.T) {
-	profile, err := compileProfile(defaultReviewerCatalog(), "bugs", "grok", ReviewSubject{})
+	profile, err := compileProfile(defaultReviewerCatalog(), ProfileSelection{Profile: "bugs", Reviewer: "grok"}, time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(profile.passes) != 1 {
-		t.Fatalf("passes = %#v, want one pass", profile.passes)
+	passes := profile.revision.Passes
+	if len(passes) != 1 {
+		t.Fatalf("passes = %#v, want one pass", passes)
 	}
-	if profile.passes[0].name != "bug-review" {
-		t.Fatalf("pass name = %q, want bug-review", profile.passes[0].name)
+	if passes[0].Name != "bug-review" {
+		t.Fatalf("pass name = %q, want bug-review", passes[0].Name)
 	}
-	if !profile.passes[0].required {
+	if !passes[0].Required {
 		t.Fatal("bug-review pass is not required")
 	}
 }
 
 func TestSupportedReviewersResolveToMatchingAdapters(t *testing.T) {
 	catalog := defaultReviewerCatalog()
-	for _, id := range SupportedReviewers() {
+	want := []string{"copilot", "grok", "opencode"}
+	wantCandidates := map[string]reviewerCandidate{
+		"copilot":  {ID: "copilot", Model: "auto", Effort: "auto", Harness: "github-copilot-cli", Transport: "direct-cli"},
+		"grok":     {ID: "grok", Model: "grok-4.5", Effort: "high", Harness: "grok-build-cli", Transport: "direct-cli"},
+		"opencode": {ID: "opencode", Effort: "default", Harness: "opencode-cli", Transport: "direct-cli"},
+	}
+	if got := SupportedReviewers(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("supported reviewers = %#v, want %#v", got, want)
+	}
+	for _, id := range want {
 		registration, err := catalog.resolve(id)
 		if err != nil {
 			t.Fatalf("resolve %q: %v", id, err)
 		}
-		if registration.candidate.ID != id || registration.executor == nil {
-			t.Fatalf("registration for %q = %#v", id, registration)
+		if !reflect.DeepEqual(registration.candidate, wantCandidates[id]) {
+			t.Fatalf("candidate for %q = %#v, want %#v", id, registration.candidate, wantCandidates[id])
+		}
+		executor, ok := registration.executor.(directExecutor)
+		if !ok || executor.adapter.Name() != id {
+			t.Fatalf("executor for %q = %#v", id, registration.executor)
+		}
+		if !reflect.DeepEqual(registration.capabilities, restrictedReviewCapabilities()) {
+			t.Fatalf("capabilities for %q = %#v", id, registration.capabilities)
 		}
 	}
 }
 
 func TestGrokCommandRestrictsCapabilities(t *testing.T) {
-	command := grokCommand(reviewerCandidate{Model: "grok-4.5", Effort: "high"}, "/repo", "/tmp/prompt")
-	joined := strings.Join(command, " ")
-	for _, required := range []string{"--tools view,grep,glob", "--disable-web-search", "--no-subagents", "--permission-mode dontAsk", "--prompt-file /tmp/prompt"} {
-		if !strings.Contains(joined, required) {
-			t.Fatalf("command %q does not contain %q", joined, required)
-		}
+	got := grokCommand(reviewerCandidate{Model: "grok-4.5", Effort: "high"}, "/repo", "/tmp/prompt")
+	want := []string{"grok", "--prompt-file", "/tmp/prompt", "--cwd", "/repo", "--model", "grok-4.5", "--reasoning-effort", "high", "--tools", "view,grep,glob", "--disable-web-search", "--no-subagents", "--no-memory", "--no-plan", "--permission-mode", "dontAsk", "--max-turns", "30", "--output-format", "streaming-json", "--verbatim"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("command = %#v, want %#v", got, want)
 	}
 }
 
@@ -117,8 +144,8 @@ func TestGrokDecoderPreservesAssistantMessageBoundaries(t *testing.T) {
 }
 
 func TestOpenCodeCommandAndConfigDenyUnreviewedCapabilities(t *testing.T) {
-	command := openCodeCommand(reviewerCandidate{Model: "zai-coding-plan/glm-5.2", Effort: "default"})
-	want := []string{"opencode", "run", "--pure", "--agent", "build", "--format", "json", "--model", "zai-coding-plan/glm-5.2"}
+	command := openCodeCommand(reviewerCandidate{Model: "meta/muse-spark-1.2-contributor", Effort: "default"})
+	want := []string{"opencode", "run", "--pure", "--agent", "build", "--format", "json", "--model", "meta/muse-spark-1.2-contributor"}
 	if !reflect.DeepEqual(command, want) {
 		t.Fatalf("command = %#v", command)
 	}
@@ -129,9 +156,10 @@ func TestOpenCodeCommandAndConfigDenyUnreviewedCapabilities(t *testing.T) {
 	if err := json.Unmarshal([]byte(openCodeReviewConfig), &config); err != nil {
 		t.Fatal(err)
 	}
-	assertPermission(t, config.Permission, "*", "deny")
-	assertPermission(t, config.Permission, "read", "allow")
-	assertPermission(t, config.Permission, "grep", "allow")
+	wantPermissions := map[string]string{"*": "deny", "read": "allow", "glob": "allow", "grep": "allow", "list": "allow"}
+	if !reflect.DeepEqual(config.Permission, wantPermissions) {
+		t.Fatalf("permissions = %#v, want %#v", config.Permission, wantPermissions)
+	}
 	if config.Share != "disabled" {
 		t.Fatalf("share = %q", config.Share)
 	}
@@ -149,6 +177,26 @@ func TestOpenCodeDecoderUsesOnlyTextEvents(t *testing.T) {
 	}
 }
 
+func TestOpenCodeDecoderPreservesCompletedTextPartBoundaries(t *testing.T) {
+	output := []byte("{\"type\":\"text\",\"part\":{\"text\":\"Inspecting files.\"}}\n" +
+		"{\"type\":\"text\",\"part\":{\"text\":\"" + strings.ReplaceAll(cleanReview, "\n", "\\n") + "\"}}\n")
+	decoded, err := decodeOpenCodeOutput(output)
+	assertReviewWithPreamble(t, decoded.assistantText, err)
+}
+
+func assertReviewWithPreamble(t *testing.T, assistantText string, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if assistantText != "Inspecting files.\n"+cleanReview {
+		t.Fatalf("assistant text = %q", assistantText)
+	}
+	if _, err := parseReviewResult(assistantText); err != nil {
+		t.Fatalf("parse review result: %v", err)
+	}
+}
+
 func TestOpenCodeAuthenticationFailureIsUnavailable(t *testing.T) {
 	execution := classifyHarnessFailure("Token refresh failed: 401", context.Canceled)
 	if execution.Outcome != AttemptReviewerUnavailable {
@@ -161,12 +209,5 @@ func TestDecodeFailurePreservesHarnessFailureClassification(t *testing.T) {
 	execution := decodedRunFailure(run, errors.New("decode event"), "opencode")
 	if execution.Outcome != AttemptReviewerUnavailable || execution.AssistantText != "not-json" {
 		t.Fatalf("execution = %#v", execution)
-	}
-}
-
-func assertPermission(t *testing.T, permissions map[string]string, name, want string) {
-	t.Helper()
-	if permissions[name] != want {
-		t.Fatalf("permission %q = %q, want %q", name, permissions[name], want)
 	}
 }

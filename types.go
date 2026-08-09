@@ -30,6 +30,13 @@ type ReviewSelection struct {
 	Subject    SubjectReference
 	Profile    string
 	Reviewer   string
+	Model      string
+}
+
+type ProfileSelection struct {
+	Profile  string
+	Reviewer string
+	Model    string
 }
 
 type ReviewSubject struct {
@@ -41,11 +48,50 @@ type ReviewSubject struct {
 }
 
 type ProfileRevision struct {
-	Name       string `json:"name"`
-	Revision   string `json:"revision"`
-	ReviewerID string `json:"reviewer_id"`
-	Model      string `json:"model"`
-	Effort     string `json:"effort"`
+	Name                 string               `json:"name"`
+	Revision             string               `json:"revision"`
+	Description          string               `json:"description"`
+	Purpose              string               `json:"purpose"`
+	MaterialityThreshold string               `json:"materiality_threshold"`
+	ReviewerID           string               `json:"reviewer_id"`
+	Model                string               `json:"model"`
+	Effort               string               `json:"effort"`
+	Reviewer             ReviewerProvenance   `json:"reviewer"`
+	Passes               []ReviewPassRevision `json:"passes"`
+	RequiredCapabilities []Capability         `json:"required_capabilities"`
+	AttemptLimit         int                  `json:"attempt_limit"`
+	ExecutionDeadline    string               `json:"execution_deadline"`
+	ResultContract       string               `json:"result_contract_revision"`
+}
+
+type Capability string
+
+const (
+	CapabilityRepositoryRead           Capability = "repository-read"
+	CapabilityRepositorySearch         Capability = "repository-search"
+	CapabilityRepositoryMutationDenied Capability = "repository-mutation-denied"
+	CapabilityShellDenied              Capability = "shell-denied"
+	CapabilityWebDenied                Capability = "web-denied"
+)
+
+type ReviewPassRevision struct {
+	Name           string `json:"name"`
+	Required       bool   `json:"required"`
+	Purpose        string `json:"purpose"`
+	PromptRevision string `json:"prompt_revision"`
+}
+
+type ProfileSummary struct {
+	Name                 string               `json:"name"`
+	Description          string               `json:"description"`
+	DefaultReviewer      ReviewerProvenance   `json:"default_reviewer"`
+	Passes               []ReviewPassRevision `json:"passes"`
+	RequiredCapabilities []Capability         `json:"required_capabilities"`
+}
+
+type ProfileExplanation struct {
+	ProfileRevision    ProfileRevision `json:"profile_revision"`
+	ReviewerWasDefault bool            `json:"reviewer_was_default"`
 }
 
 type AttemptOutcome string

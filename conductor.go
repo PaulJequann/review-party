@@ -11,8 +11,9 @@ import (
 )
 
 type Config struct {
-	RecordDirectory string
-	AttemptDeadline time.Duration
+	RecordDirectory       string
+	AttemptDeadline       time.Duration
+	UserConfigurationPath string
 }
 
 type Conductor struct {
@@ -33,7 +34,15 @@ func New(config Config) (*Conductor, error) {
 	if err != nil {
 		return nil, err
 	}
-	return newConductorWithCatalog(store, defaultReviewerCatalog(), config.AttemptDeadline), nil
+	userConfiguration, err := loadUserConfiguration(config.UserConfigurationPath)
+	if err != nil {
+		return nil, err
+	}
+	reviewers, err := configureReviewerCatalog(defaultReviewerCatalog(), userConfiguration, config.UserConfigurationPath)
+	if err != nil {
+		return nil, err
+	}
+	return newConductorWithCatalog(store, reviewers, config.AttemptDeadline), nil
 }
 
 func newConductor(store recordStore, executors map[string]attemptExecutor, deadline time.Duration) *Conductor {
@@ -53,11 +62,11 @@ func (conductor *Conductor) Review(ctx context.Context, selection ReviewSelectio
 	if err := ctx.Err(); err != nil {
 		return ReviewRecord{}, err
 	}
-	subject, err := resolveSubject(selection.Repository, selection.Subject)
+	profile, err := compileProfile(conductor.reviewers, ProfileSelection{Profile: selection.Profile, Reviewer: selection.Reviewer, Model: selection.Model}, conductor.attemptDeadline)
 	if err != nil {
 		return ReviewRecord{}, err
 	}
-	profile, err := compileProfile(conductor.reviewers, selection.Profile, selection.Reviewer, subject)
+	subject, err := resolveSubject(selection.Repository, selection.Subject)
 	if err != nil {
 		return ReviewRecord{}, err
 	}
@@ -83,6 +92,27 @@ func (conductor *Conductor) Review(ctx context.Context, selection ReviewSelectio
 	return conductor.executePass(ctx, record, profile, executor)
 }
 
+func (conductor *Conductor) Profiles(ctx context.Context) ([]ProfileSummary, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return profileSummaries(conductor.reviewers)
+}
+
+func (conductor *Conductor) Explain(ctx context.Context, selection ProfileSelection) (ProfileExplanation, error) {
+	if err := ctx.Err(); err != nil {
+		return ProfileExplanation{}, err
+	}
+	profile, err := compileProfile(conductor.reviewers, selection, conductor.attemptDeadline)
+	if err != nil {
+		return ProfileExplanation{}, err
+	}
+	return ProfileExplanation{
+		ProfileRevision:    profile.revision,
+		ReviewerWasDefault: profile.reviewerWasDefault,
+	}, nil
+}
+
 func (conductor *Conductor) Inspect(_ context.Context, id ReviewID) (ReviewRecord, error) {
 	if !validReviewID(id) {
 		return ReviewRecord{}, fmt.Errorf("invalid review id %q", id)
@@ -96,9 +126,9 @@ func (conductor *Conductor) pendingRecord(subject ReviewSubject, profile compile
 		return ReviewRecord{}, err
 	}
 	now := conductor.now().UTC()
-	passes := make([]PassRecord, 0, len(profile.passes))
-	for _, planned := range profile.passes {
-		passes = append(passes, PassRecord{Name: planned.name, Required: planned.required, Attempts: []AttemptRecord{}})
+	passes := make([]PassRecord, 0, len(profile.revision.Passes))
+	for _, planned := range profile.revision.Passes {
+		passes = append(passes, PassRecord{Name: planned.Name, Required: planned.Required, Attempts: []AttemptRecord{}})
 	}
 	return ReviewRecord{
 		ID:              id,
@@ -117,7 +147,7 @@ func (conductor *Conductor) executePass(ctx context.Context, record ReviewRecord
 	defer cancel()
 	execution := executor.Execute(attemptContext, attemptSpec{
 		Repository: record.Subject.Repository,
-		Prompt:     profile.prompt,
+		Prompt:     profile.prompt(record.Subject),
 		Candidate:  profile.reviewer.candidate,
 	})
 

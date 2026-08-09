@@ -3,18 +3,24 @@
 Status: active planning ledger
 
 This document orders the work from project inception through replacement of the
-current skill-owned execution machinery. It records completed groundwork as
-well as future slices so a new session can see the whole sequence.
+current skill-owned execution machinery. It records the shipped local CLI,
+remaining acceptance evidence, and future slices so a new session can see the
+whole sequence without mistaking the original plan for current state.
 
-The terminology in the research notes and prototype is provisional. In
-particular, `ReviewRequest`, `ReviewPackage`, `lane`, and similar names are not
-accepted domain language. Slice 3 exists to settle that language before types,
-commands, or package boundaries are designed.
+The accepted language now lives in [`../CONTEXT.md`](../CONTEXT.md). Provisional
+research terms such as `ReviewRequest`, `ReviewPackage`, and `lane` remain
+rejected unless they are deliberately reconsidered through domain modeling.
 
 ## Status legend
 
-- **Complete locally**: work and acceptance evidence exist in the current
-  worktree, but the repository has not yet made its first commit.
+- **Complete**: the slice and its acceptance evidence are present in the
+  version-controlled implementation.
+- **Implemented; evidence pending**: the code path exists, but one named
+  acceptance proof still needs a real external run or environment.
+- **Implemented for V1**: the accepted first slice is complete while an
+  explicitly recorded extension remains deferred.
+- **Implemented locally**: the slice is present and verified in the current
+  worktree but has not yet been committed and delivered.
 - **Next**: the next slice to execute.
 - **Pending**: ordered future work whose details may change based on earlier
   decisions.
@@ -36,9 +42,33 @@ commands, or package boundaries are designed.
 - Prefer vertical slices that produce one executable behavior and observable
   evidence. Do not build every abstraction before the first end-to-end run.
 
+## Current implementation baseline — 2026-08-08
+
+Review Party is a working experimental Go CLI with a synchronous, caller-first
+`Conductor` Module. It currently provides:
+
+- profile discovery and recipe explanation without Agent Harness launch or a
+  Review Record;
+- `review-party review [bugs|documentation]` over one frozen working-changes
+  Review Subject;
+- explicit Grok, OpenCode, or Copilot Reviewer selection with no fallback;
+- strict XDG user configuration for the Default Reviewer, Reviewer enablement,
+  and per-Reviewer model selection/allowlists;
+- direct CLI adapters with repository read/search-only capability backstops;
+- finite Attempt deadlines, process-tree cleanup, and bounded diagnostics;
+- canonical clean/findings validation with fail-closed Incomplete semantics;
+- filesystem-backed Review Records and `review-party inspect`;
+- human and JSON output with actual Reviewer provenance; and
+- focused tests for subject freezing, lifecycle, adapter decoding, capability
+  restrictions, result validation, persistence, and process cleanup.
+
+The current implementation does not provide user-defined Review Profiles,
+commit/branch/pull-request Subjects, retry or fallback execution, Verification
+Reviews, Parties, ACPX transport, hosted execution, or skill migration.
+
 ## Slice 1 — Repository foundation
 
-Status: **Complete locally**
+Status: **Complete**
 
 ### Goal
 
@@ -46,8 +76,8 @@ Create a safe repository in which the review tool can be designed and built.
 
 ### Completed work
 
-- Initialized `/home/pj/dev/personal/review-party` as a Git repository on local
-  `main`.
+- Initialized `/home/pj/dev/personal/review-party` as a Git repository on
+  `main` with an established remote delivery path.
 - Adapted the portable agent, deletion, scratch, dependency, CodeScene,
   verification, research, and Go rules from Kashbot into [`AGENTS.md`](../AGENTS.md).
 - Added a minimal [`README.md`](../README.md), documentation index, ignored
@@ -55,14 +85,14 @@ Create a safe repository in which the review tool can be designed and built.
 
 ### Acceptance evidence
 
-- Repository exists on `main` with no dependencies or implementation code.
+- Repository exists on `main` with no third-party Go dependencies.
 - `scratch/` is ignored by Git.
 - Scaffold whitespace checks passed.
-- No initial commit or remote exists yet.
+- Repository history and remote delivery are established.
 
 ## Slice 2 — Architecture and harness research
 
-Status: **Complete locally**
+Status: **Complete**
 
 ### Goal
 
@@ -98,37 +128,24 @@ This direction remains revisable; it is not a substitute for the domain model.
 
 ## Slice 3 — Domain language and review lifecycle
 
-Status: **Next**
+Status: **Complete**
 
 ### Goal
 
 Establish the user-recognized concepts, lifecycle, and ownership boundaries for
 Review Party before naming types or commands.
 
-### Operations
+### Completed work
 
-1. Use `domain-modeling` and `grilling` with concrete review situations.
-2. Decide what begins when the user asks for a review and what durable thing, if
-   any, counts as “the review.”
-3. Decide what a named review profile promises: intent only, a complete
-   execution strategy, or another concept.
-4. Determine whether one review may contain multiple independent reviewers and
-   how disagreement is represented.
-5. Define user-meaningful lifecycle states, including malformed output,
-   unavailable capabilities, cancellation, retry, fallback, and completion.
-6. Decide whether checking fixes continues an earlier review or creates a
-   related new review.
-7. Map ownership among the invoking skill, Review Party, harness, transport,
-   and project governance.
-8. Record only confirmed language and decisions in a durable domain document.
-
-### Non-goals
-
-- Do not write Go code or choose Go package names.
-- Do not accept the prototype vocabulary merely because it already exists.
-- Do not decide configuration syntax, persistence format, or adapter interface.
-- Do not assume multi-reviewer profiles, automatic fallback, or persistent
-  history are required.
+- Established the accepted language in [`../CONTEXT.md`](../CONTEXT.md).
+- Defined Review, Review Subject, Review Profile, Review Pass, Attempt, Review
+  Result, Review Record, Reviewer, Agent Harness, Transport, and provenance.
+- Defined Pending, Running, Completed, and Incomplete as the Review Lifecycle.
+- Distinguished retry, fallback, and caller-authorized Substitution.
+- Defined Verification Review as a new related Review over a changed Subject.
+- Kept remediation and delivery authority with the Caller and project rules.
+- Modeled Party, Review Pipeline, Review Dependency, and Synthesis Review
+  without requiring them in V1.
 
 ### Acceptance evidence
 
@@ -144,28 +161,23 @@ different scenarios.
 
 ## Slice 4 — Design the executable contract twice
 
-Status: **Pending**
+Status: **Complete**
 
 ### Goal
 
 Translate the accepted domain model into the smallest executable CLI boundary
 without prematurely copying the current skill implementation.
 
-### Operations
+### Completed work
 
-1. Use `codebase-design` to create two materially different interface designs.
-2. Compare at least:
-   - a stateless command that accepts a fully resolved review description; and
-   - an orchestration command that resolves user-facing targets and maintains a
-     review lifecycle.
-3. For each design, trace general review, specialized review, unavailable
-   reviewer, malformed output, and fix-verification scenarios.
-4. Decide the authoritative input, output, error, capability, snapshot identity,
-   and diagnostic shapes using the accepted domain language.
-5. Define what is versioned and which raw adapter artifacts remain diagnostic
-   rather than public contract.
-6. Select one design and capture the decision, rejected alternative, non-goals,
-   and migration implications.
+- Selected the synchronous, caller-first `Conductor` Module documented in
+  [`design/conductor-v1.md`](design/conductor-v1.md).
+- Kept the external Interface to `Review` and `Inspect` for V1.
+- Put Agent Harness variation behind one real internal Attempt-execution seam.
+- Kept native event formats, launch flags, and raw diagnostics out of the
+  caller-facing Interface.
+- Deferred durable `Start`/`Await`/`Cancel`, Party execution, and hosted workers
+  until a concrete second lifecycle requires them.
 
 ### Acceptance evidence
 
@@ -178,23 +190,20 @@ without prematurely copying the current skill implementation.
 
 ## Slice 5 — Go bootstrap and one deterministic local path
 
-Status: **Pending**
+Status: **Complete**
 
 ### Goal
 
 Create the Go module and prove the selected contract without invoking a live
 coding agent.
 
-### Operations
+### Completed work
 
-1. Initialize the Go module and minimal command entry point.
-2. Implement only the accepted core types and one in-memory or fixture-backed
-   adapter.
-3. Add one built-in review behavior sufficient to compile a concrete execution
-   description from a fixed subject.
-4. Parse a captured successful result and a captured incomplete result into the
-   public outcome contract.
-5. Emit deterministic machine-readable output and useful human diagnostics.
+- Initialized the standard-library-only Go module and `review-party` command.
+- Implemented the accepted core types and scripted test adapter.
+- Compiled the built-in `bugs` Profile Revision and required `bug-review` Pass.
+- Added canonical clean/findings parsing and fail-closed incomplete handling.
+- Added human and JSON output plus filesystem-backed inspection.
 
 ### Verification intent
 
@@ -210,52 +219,70 @@ clean outcome and that an unsupported capability prevents launch.
 
 ## Slice 6 — Immutable review-subject resolution
 
-Status: **Pending**
+Status: **Implemented for V1**
 
 ### Goal
 
 Resolve the first agreed user-facing Git target into an immutable, inspectable
 subject for repeatable review.
 
-### Operations
+### Completed work
 
-1. Implement only the first target form selected during domain modeling, likely
-   the current working changes or an explicit commit.
-2. Capture changed paths, diff payload, repository root, and a stable identity.
-3. Detect an empty subject and target mutation before or during execution.
-4. Establish size/materiality guards without silently truncating the subject.
-5. Keep Git command construction argv-based and repository-scoped.
+- Implemented the working-changes Review Subject as the only V1 target form.
+- Captured tracked and untracked changes, changed paths, absolute repository
+  root, binary diff payload, and a stable content identity.
+- Rejected an empty Subject and froze its payload before Attempt execution.
+- Kept every Git invocation argv-based and repository-scoped.
+
+### Deferred extension
+
+- Add an explicit oversized/materiality outcome before introducing larger
+  Subject forms. Current capture is bounded later at harness output, not at
+  Review Subject construction.
 
 ### Acceptance evidence
 
 - The same resolved subject yields the same identity and payload.
 - Untracked files follow an explicit, tested rule.
-- Empty, oversized, and mutated subjects have distinct observable outcomes.
+- Empty Subjects are rejected, and later working-tree mutation cannot alter the
+  frozen Subject used by a Running Review.
+- Oversized Subject handling remains an explicit follow-up rather than silent
+  truncation.
 
 ## Slice 7 — First live adapter and end-to-end review
 
-Status: **Pending**
+Status: **Complete**
 
 ### Goal
 
 Run one real review through the best-supported initial harness while preserving
 the selected domain and output contracts.
 
-### Likely starting point
+### Completed work
 
-Direct Copilot is the current evidence-backed candidate because its native CLI
-can hide unavailable tools from the model and emits structured output. Confirm
-that choice against the live installed version before implementation.
+- Implemented direct Grok, OpenCode, and Copilot adapters behind the same
+  Attempt-execution seam.
+- Added explicit argv, working directory, model/effort selection, read/search
+  capability restrictions, non-interactive execution, deadlines,
+  cancellation, bounded capture, and process-tree cleanup.
+- Normalized native event streams without exposing their schemas to the core
+  domain types.
+- Centralized canonical result validation and honest Attempt Outcomes.
+- Added fixture-backed adapter decoder, failure, overflow, and cleanup tests.
 
-### Operations
+### Dated live evidence
 
-1. Implement adapter availability and capability reporting.
-2. Launch with explicit argv, working directory, model, effort, tool visibility,
-   non-interactive behavior, timeout, cancellation, and process-tree cleanup.
-3. Normalize native events without exposing their schema to core domain code.
-4. Validate the agent's final result against the canonical outcome contract.
-5. Preserve bounded diagnostics and usage telemetry without logging secrets or
-   unrestricted repository contents.
+- Copilot completed a bounded Documentation Review after a decoder correction
+  for native assistant-message boundaries; it remains secondary compatibility
+  coverage rather than the primary verifier.
+- OpenCode Muse and Grok both completed bounded Bug Reviews of Review Party's
+  own non-empty Slice 8 changes and produced actionable findings that were
+  assessed and remediated.
+- OpenCode DeepSeek reached the explicitly selected model but hit its
+  five-minute deadline, so that model-specific run remains honestly Incomplete.
+- Commands, immutable Subject identities, Review IDs, outcomes, and finding
+  dispositions are retained in
+  [`research/live-adapter-audit-2026-08-09.md`](research/live-adapter-audit-2026-08-09.md).
 
 ### Acceptance evidence
 
@@ -266,25 +293,33 @@ that choice against the live installed version before implementation.
 
 ## Slice 8 — Named review profiles
 
-Status: **Pending**
+Status: **Implemented locally**
 
 ### Goal
 
 Expose the first user-recognized specialized review behaviors without
 conflating intent with runtime details.
 
-### Operations
+### Completed work
 
-1. Implement only the profiles accepted in Slice 3, beginning with the smallest
-   useful set.
-2. Give each profile explicit required capabilities, prompt material,
-   materiality threshold, budget, and result contract.
-3. Validate profiles before launch and explain the compiled execution in a
-   dry-run or inspection command.
-4. Keep agent/model/transport defaults visible and reject unauthorized
-   substitution.
-5. Avoid inheritance or arbitrary user scripting until repetition proves the
-   need.
+- Added the domain-backed `documentation` Profile beside `bugs`.
+- Gave each Profile an explicit purpose, materiality threshold, required Pass,
+  prompt revision, capability contract, Attempt Limit, Execution Deadline, and
+  canonical result-contract revision.
+- Added deterministic `profiles` discovery and subject-independent `explain`
+  behavior in human and JSON formats.
+- Kept Reviewer/model/Agent Harness/Transport defaults visible in the effective
+  Profile Revision.
+- Added typed unknown Profile, unknown Reviewer, and capability-mismatch errors.
+- Added caller-owned, versioned user configuration so Reviewer enablement and
+  model preferences are resolved before Subject resolution and participate in
+  the effective Profile Revision.
+- Removed the personal OpenCode model choice from the in-process catalog;
+  OpenCode now requires a configured or explicit allowed model.
+- Rejects a capability mismatch before Review Subject resolution, Availability
+  Check, Review Record creation, or Agent Harness launch.
+- Kept definitions built in; no inheritance, arbitrary scripting, Parties,
+  fallback, or new profile-provider seam was added.
 
 ### Acceptance evidence
 
@@ -322,6 +357,9 @@ domain model.
 ## Slice 10 — OpenCode and Pi adapter experiments
 
 Status: **Decision gate**
+
+Direct OpenCode execution now exists. The native-versus-ACPX comparison and all
+Pi experiments remain gated on a named Profile demonstrating a concrete need.
 
 ### Goal
 
@@ -428,7 +466,13 @@ Establish the first supported local release and close the initial migration.
 
 ## Immediate next action
 
-Run Slice 3 as a domain-modeling and grilling session. Start with one concrete
-question: when the user says “review my current changes for bugs,” what single
-thing does Review Party promise to do and return? Do not introduce a type name
-until the user recognizes the underlying thing.
+Close the local Slice 8 change set:
+
+1. Run focused Go, race, vet, build, and CodeScene verification.
+2. Review the retained Grok/OpenCode dogfood findings and their regression
+   evidence.
+3. Commit and deliver Slice 8 only with explicit delivery authorization.
+
+After delivery, evaluate Slice 9 against the existing ACPX research before
+starting implementation. Do not start Verification Review, Party execution, or
+skill migration as part of Slice 8 closeout.

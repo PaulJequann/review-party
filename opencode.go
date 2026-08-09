@@ -54,6 +54,18 @@ type decodedOpenCodeOutput struct {
 	diagnostic    string
 }
 
+type openCodeEvent struct {
+	Type string `json:"type"`
+	Part struct {
+		Text string `json:"text"`
+	} `json:"part"`
+	Error struct {
+		Data struct {
+			Message string `json:"message"`
+		} `json:"data"`
+	} `json:"error"`
+}
+
 func decodeOpenCodeOutput(output []byte) (decodedOpenCodeOutput, error) {
 	scanner := bufio.NewScanner(bytes.NewReader(output))
 	scanner.Buffer(make([]byte, 64*1024), 2*1024*1024)
@@ -63,30 +75,27 @@ func decodeOpenCodeOutput(output []byte) (decodedOpenCodeOutput, error) {
 		if strings.TrimSpace(scanner.Text()) == "" {
 			continue
 		}
-		var event struct {
-			Type string `json:"type"`
-			Part struct {
-				Text string `json:"text"`
-			} `json:"part"`
-			Error struct {
-				Data struct {
-					Message string `json:"message"`
-				} `json:"data"`
-			} `json:"error"`
-		}
+		var event openCodeEvent
 		if err := json.Unmarshal(scanner.Bytes(), &event); err != nil {
 			return decodedOpenCodeOutput{}, fmt.Errorf("decode opencode event: %w", err)
 		}
-		if event.Type == "text" {
-			text.WriteString(event.Part.Text)
-		}
-		if event.Type == "error" {
-			decoded.diagnostic = event.Error.Data.Message
-		}
+		applyOpenCodeEvent(&decoded, &text, event)
 	}
 	if err := scanner.Err(); err != nil {
 		return decodedOpenCodeOutput{}, fmt.Errorf("scan opencode output: %w", err)
 	}
 	decoded.assistantText = text.String()
 	return decoded, nil
+}
+
+func applyOpenCodeEvent(decoded *decodedOpenCodeOutput, text *strings.Builder, event openCodeEvent) {
+	switch event.Type {
+	case "text":
+		if text.Len() > 0 {
+			text.WriteByte('\n')
+		}
+		text.WriteString(event.Part.Text)
+	case "error":
+		decoded.diagnostic = event.Error.Data.Message
+	}
 }

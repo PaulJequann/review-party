@@ -32,10 +32,14 @@ type scriptedExecutor struct {
 	execute      func(context.Context, attemptSpec) attemptExecution
 
 	mu       sync.Mutex
+	checks   int
 	attempts []attemptSpec
 }
 
 func (executor *scriptedExecutor) Check(context.Context, reviewerCandidate) availability {
+	executor.mu.Lock()
+	executor.checks++
+	executor.mu.Unlock()
 	return executor.availability
 }
 
@@ -50,6 +54,18 @@ func (executor *scriptedExecutor) attemptCount() int {
 	executor.mu.Lock()
 	defer executor.mu.Unlock()
 	return len(executor.attempts)
+}
+
+func (executor *scriptedExecutor) checkCount() int {
+	executor.mu.Lock()
+	defer executor.mu.Unlock()
+	return executor.checks
+}
+
+func (executor *scriptedExecutor) lastAttempt() attemptSpec {
+	executor.mu.Lock()
+	defer executor.mu.Unlock()
+	return executor.attempts[len(executor.attempts)-1]
 }
 
 func TestReviewFreezesWorkingChangesBeforeExecution(t *testing.T) {
@@ -203,6 +219,7 @@ func TestExplicitReviewerRoutesToMatchingAdapter(t *testing.T) {
 	}, time.Second)
 	selection := testSelection(repository)
 	selection.Reviewer = "opencode"
+	selection.Model = "meta/muse-spark-1.2-contributor"
 
 	record, err := conductor.Review(context.Background(), selection)
 	if err != nil {
@@ -212,7 +229,7 @@ func TestExplicitReviewerRoutesToMatchingAdapter(t *testing.T) {
 		t.Fatalf("grok attempts = %d, opencode attempts = %d", grok.attemptCount(), opencode.attemptCount())
 	}
 	provenance := record.Passes[0].Attempts[0].Provenance
-	if provenance.ReviewerID != "opencode" || provenance.Model != "zai-coding-plan/glm-5.2" {
+	if provenance.ReviewerID != "opencode" || provenance.Model != "meta/muse-spark-1.2-contributor" {
 		t.Fatalf("provenance = %#v, want selected opencode reviewer", provenance)
 	}
 }
