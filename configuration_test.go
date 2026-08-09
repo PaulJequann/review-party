@@ -170,6 +170,22 @@ func TestNullReviewerEnabledIsInvalid(t *testing.T) {
 	assertInvalidConfigurationReason(t, configuration, "enabled must not be null")
 }
 
+func TestNullDefaultReviewerIsInvalid(t *testing.T) {
+	configuration := `{
+  "version": 1,
+  "default_reviewer": null
+}`
+	assertInvalidConfigurationReason(t, configuration, "default_reviewer must not be null")
+}
+
+func TestNullReviewersPolicyIsInvalid(t *testing.T) {
+	configuration := `{
+  "version": 1,
+  "reviewers": null
+}`
+	assertInvalidConfigurationReason(t, configuration, "reviewers must not be null")
+}
+
 func TestInvalidUserConfigurationFailsClosed(t *testing.T) {
 	invalidConfigurationFromPayload(t, `{"version":1,"unexpected":true}`)
 }

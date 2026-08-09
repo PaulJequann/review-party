@@ -16,6 +16,16 @@ type userConfiguration struct {
 	Reviewers       map[string]userReviewerPolicy `json:"reviewers,omitempty"`
 }
 
+func (configuration *userConfiguration) UnmarshalJSON(payload []byte) error {
+	type plainConfiguration userConfiguration
+	var decoded plainConfiguration
+	if err := decodeStrictObject(payload, &decoded, "user configuration", "default_reviewer", "reviewers"); err != nil {
+		return err
+	}
+	*configuration = userConfiguration(decoded)
+	return nil
+}
+
 type userReviewerPolicy struct {
 	Enabled       *bool                    `json:"enabled,omitempty"`
 	Model         string                   `json:"model,omitempty"`
@@ -23,27 +33,34 @@ type userReviewerPolicy struct {
 }
 
 func (policy *userReviewerPolicy) UnmarshalJSON(payload []byte) error {
+	type plainPolicy userReviewerPolicy
+	var decoded plainPolicy
+	if err := decodeStrictObject(payload, &decoded, "reviewer policy", "enabled", "model"); err != nil {
+		return err
+	}
+	*policy = userReviewerPolicy(decoded)
+	return nil
+}
+
+func decodeStrictObject(payload []byte, destination any, objectName string, nonNullFields ...string) error {
 	if bytes.Equal(bytes.TrimSpace(payload), []byte("null")) {
-		return errors.New("reviewer policy must be an object, not null")
+		return fmt.Errorf("%s must be an object, not null", objectName)
 	}
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(payload, &fields); err != nil {
 		return err
 	}
-	for _, name := range []string{"enabled", "model"} {
+	for _, name := range nonNullFields {
 		if value, exists := fields[name]; exists && bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
 			return fmt.Errorf("%s must not be null", name)
 		}
 	}
-	type plainPolicy userReviewerPolicy
 	decoder := json.NewDecoder(bytes.NewReader(payload))
 	decoder.DisallowUnknownFields()
-	var decoded plainPolicy
-	if err := decoder.Decode(&decoded); err != nil {
+	if err := decoder.Decode(destination); err != nil {
 		return err
 	}
-	*policy = userReviewerPolicy(decoded)
-	return nil
+	return rejectTrailingJSON(decoder)
 }
 
 type configuredModelAllowlist struct {
