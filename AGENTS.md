@@ -111,3 +111,14 @@ claim the CodeScene gate passed.
   explicit at adapter boundaries.
 - Run `gofmt` on changed Go files and targeted `go test` commands for affected
   packages. Do not run unrelated integration or live-agent suites routinely.
+
+## Linear issue tracking
+
+Issues are tracked in Linear under team `DEV`.
+
+- Repository label: `Repository/Review Party`
+- Use the global `capture-linear-issue` skill to create issues.
+- Use the global `investigate-linear-issue` skill to investigate issues.
+- Do not create repository-local backlogs, task databases, or issue caches.
+- Do not implement issues marked `Readiness/Needs investigation` unless the
+  user explicitly overrides the workflow.
