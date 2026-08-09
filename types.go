@@ -1,0 +1,118 @@
+package reviewparty
+
+import "time"
+
+type ReviewID string
+
+type Lifecycle string
+
+const (
+	LifecyclePending    Lifecycle = "pending"
+	LifecycleRunning    Lifecycle = "running"
+	LifecycleCompleted  Lifecycle = "completed"
+	LifecycleIncomplete Lifecycle = "incomplete"
+)
+
+type SubjectKind string
+
+const SubjectWorkingChanges SubjectKind = "working-changes"
+
+type SubjectReference struct {
+	Kind SubjectKind
+}
+
+func WorkingChanges() SubjectReference {
+	return SubjectReference{Kind: SubjectWorkingChanges}
+}
+
+type ReviewSelection struct {
+	Repository string
+	Subject    SubjectReference
+	Profile    string
+	Reviewer   string
+}
+
+type ReviewSubject struct {
+	Kind         SubjectKind `json:"kind"`
+	Repository   string      `json:"repository"`
+	Identity     string      `json:"identity"`
+	ChangedPaths []string    `json:"changed_paths"`
+	Patch        string      `json:"patch"`
+}
+
+type ProfileRevision struct {
+	Name       string `json:"name"`
+	Revision   string `json:"revision"`
+	ReviewerID string `json:"reviewer_id"`
+	Model      string `json:"model"`
+	Effort     string `json:"effort"`
+}
+
+type AttemptOutcome string
+
+const (
+	AttemptCompleted           AttemptOutcome = "completed"
+	AttemptTransientFailure    AttemptOutcome = "transient_failure"
+	AttemptReviewerUnavailable AttemptOutcome = "reviewer_unavailable"
+	AttemptInvalidResult       AttemptOutcome = "invalid_result"
+	AttemptCancelled           AttemptOutcome = "cancelled"
+	AttemptUnknownFailure      AttemptOutcome = "unknown_failure"
+)
+
+type ReviewerProvenance struct {
+	ReviewerID string `json:"reviewer_id"`
+	Model      string `json:"model"`
+	Effort     string `json:"effort"`
+	Harness    string `json:"harness"`
+	Transport  string `json:"transport"`
+}
+
+type AttemptRecord struct {
+	Number      int                `json:"number"`
+	Outcome     AttemptOutcome     `json:"outcome"`
+	Provenance  ReviewerProvenance `json:"provenance"`
+	Diagnostic  string             `json:"diagnostic,omitempty"`
+	RawOutput   string             `json:"raw_output,omitempty"`
+	StartedAt   time.Time          `json:"started_at"`
+	CompletedAt time.Time          `json:"completed_at"`
+}
+
+type PassRecord struct {
+	Name     string          `json:"name"`
+	Required bool            `json:"required"`
+	Attempts []AttemptRecord `json:"attempts"`
+}
+
+type ResultStatus string
+
+const (
+	ResultClean    ResultStatus = "clean"
+	ResultFindings ResultStatus = "findings"
+)
+
+type ReviewResult struct {
+	Status       ResultStatus `json:"status"`
+	Summary      string       `json:"summary"`
+	FindingCount int          `json:"finding_count"`
+	Raw          string       `json:"raw"`
+}
+
+type ReviewRecord struct {
+	ID              ReviewID        `json:"id"`
+	Lifecycle       Lifecycle       `json:"lifecycle"`
+	Subject         ReviewSubject   `json:"subject"`
+	ProfileRevision ProfileRevision `json:"profile_revision"`
+	Passes          []PassRecord    `json:"passes"`
+	Result          *ReviewResult   `json:"result,omitempty"`
+	IncompleteCause string          `json:"incomplete_cause,omitempty"`
+	CreatedAt       time.Time       `json:"created_at"`
+	UpdatedAt       time.Time       `json:"updated_at"`
+}
+
+func (r ReviewRecord) AttemptCount() int {
+	count := 0
+	for _, pass := range r.Passes {
+		count += len(pass.Attempts)
+	}
+	return count
+}
