@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 type ProfileInitialization struct {
@@ -32,11 +33,11 @@ func InitializeProfiles(initialization ProfileInitialization) (ProfileInitializa
 		return ProfileInitializationResult{}, err
 	}
 	profilesDirectory := filepath.Join(directory, "profiles")
-	repositoryRoot, err := prepareProfileDirectory(initialization.Global, directory, profilesDirectory, permissions)
+	profileRoot, err := prepareProfileDirectory(directory, permissions)
 	if err != nil {
 		return ProfileInitializationResult{}, err
 	}
-	defer closeRepositoryRoot(repositoryRoot)
+	defer profileRoot.Close()
 
 	files, err := starterProfileFiles(directory, profilesDirectory)
 	if err != nil {
@@ -45,7 +46,7 @@ func InitializeProfiles(initialization ProfileInitialization) (ProfileInitializa
 	filePermissions := profileInitializationFilePermissions(initialization.Global)
 	result := ProfileInitializationResult{Directory: directory}
 	for _, file := range files {
-		created, writeErr := writeProfileFile(repositoryRoot, file, filePermissions)
+		created, writeErr := writeProfileFile(profileRoot, file, filePermissions)
 		if writeErr != nil {
 			return ProfileInitializationResult{}, writeErr
 		}
@@ -54,73 +55,84 @@ func InitializeProfiles(initialization ProfileInitialization) (ProfileInitializa
 	return result, nil
 }
 
-func prepareProfileDirectory(global bool, directory, profilesDirectory string, permissions fs.FileMode) (*os.Root, error) {
-	if !global {
-		return createRepositoryProfileDirectory(filepath.Dir(directory), permissions)
-	}
-	if err := os.MkdirAll(profilesDirectory, permissions); err != nil {
-		return nil, fmt.Errorf("create profile directory %q: %w", profilesDirectory, err)
-	}
-	return nil, nil
-}
-
-func closeRepositoryRoot(root *os.Root) {
-	if root != nil {
-		root.Close()
-	}
-}
-
-func createRepositoryProfileDirectory(repository string, permissions fs.FileMode) (*os.Root, error) {
-	root, err := os.OpenRoot(repository)
+func prepareProfileDirectory(directory string, permissions fs.FileMode) (*os.Root, error) {
+	anchor, err := nearestExistingDirectory(filepath.Dir(directory))
 	if err != nil {
-		return nil, fmt.Errorf("open repository root %q: %w", repository, err)
+		return nil, err
 	}
-	profilesPath := filepath.Join(".reviewparty", "profiles")
-	if err := validateRepositoryProfileDirectories(root, repository, profilesPath); err != nil {
+	root, err := os.OpenRoot(anchor)
+	if err != nil {
+		return nil, fmt.Errorf("open profile directory anchor %q: %w", anchor, err)
+	}
+	relativeDirectory, err := filepath.Rel(anchor, directory)
+	if err != nil {
+		root.Close()
+		return nil, fmt.Errorf("resolve profile directory %q within %q: %w", directory, anchor, err)
+	}
+	profilesPath := filepath.Join(relativeDirectory, "profiles")
+	if err := validateProfileDirectories(root, anchor, profilesPath); err != nil {
 		root.Close()
 		return nil, err
 	}
 	if err := root.MkdirAll(profilesPath, permissions); err != nil {
 		root.Close()
-		return nil, fmt.Errorf("create profile directory %q: %w", filepath.Join(repository, profilesPath), err)
+		return nil, fmt.Errorf("create profile directory %q: %w", filepath.Join(anchor, profilesPath), err)
 	}
-	if err := validateRepositoryProfileDirectories(root, repository, profilesPath); err != nil {
+	if err := validateProfileDirectories(root, anchor, profilesPath); err != nil {
 		root.Close()
 		return nil, err
 	}
 	return root, nil
 }
 
-func validateRepositoryProfileDirectories(root *os.Root, repository, profilesPath string) error {
-	for _, path := range []string{".reviewparty", profilesPath} {
+func nearestExistingDirectory(directory string) (string, error) {
+	for candidate := filepath.Clean(directory); ; candidate = filepath.Dir(candidate) {
+		info, err := os.Lstat(candidate)
+		if err == nil {
+			if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+				return "", fmt.Errorf("profile directory ancestor %q must be a directory, not a symlink or special file", candidate)
+			}
+			return candidate, nil
+		}
+		if !errors.Is(err, fs.ErrNotExist) {
+			return "", fmt.Errorf("inspect profile directory ancestor %q: %w", candidate, err)
+		}
+		if filepath.Dir(candidate) == candidate {
+			return "", fmt.Errorf("resolve existing profile directory ancestor for %q", directory)
+		}
+	}
+}
+
+func validateProfileDirectories(root *os.Root, anchor, profilesPath string) error {
+	current := ""
+	for _, component := range strings.Split(filepath.Clean(profilesPath), string(filepath.Separator)) {
+		current = filepath.Join(current, component)
+		path := current
 		info, inspectErr := root.Lstat(path)
 		if inspectErr != nil {
 			if errors.Is(inspectErr, fs.ErrNotExist) {
 				continue
 			}
-			return fmt.Errorf("inspect profile directory %q: %w", filepath.Join(repository, path), inspectErr)
+			return fmt.Errorf("inspect profile directory %q: %w", filepath.Join(anchor, path), inspectErr)
 		}
 		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
-			return fmt.Errorf("profile directory %q must be a directory, not a symlink or special file", filepath.Join(repository, path))
+			return fmt.Errorf("profile directory %q must be a directory, not a symlink or special file", filepath.Join(anchor, path))
 		}
 	}
 	return nil
 }
 
-func writeProfileFile(repositoryRoot *os.Root, file starterProfileFile, permissions fs.FileMode) (bool, error) {
-	if repositoryRoot == nil {
-		return writeNewProfileFile(file.path, file.payload, permissions)
-	}
-	relative, err := filepath.Rel(repositoryRoot.Name(), file.path)
+func writeProfileFile(profileRoot *os.Root, file starterProfileFile, permissions fs.FileMode) (bool, error) {
+	relative, err := filepath.Rel(profileRoot.Name(), file.path)
 	if err != nil {
 		return false, fmt.Errorf("resolve profile file %q within repository: %w", file.path, err)
 	}
 	operations := profileFileOperations{
 		open: func() (*os.File, error) {
-			return repositoryRoot.OpenFile(relative, os.O_WRONLY|os.O_CREATE|os.O_EXCL, permissions)
+			return profileRoot.OpenFile(relative, os.O_WRONLY|os.O_CREATE|os.O_EXCL, permissions)
 		},
-		inspect: func() (fs.FileInfo, error) { return repositoryRoot.Lstat(relative) },
-		remove:  func() error { return repositoryRoot.Remove(relative) },
+		inspect: func() (fs.FileInfo, error) { return profileRoot.Lstat(relative) },
+		remove:  func() error { return profileRoot.Remove(relative) },
 	}
 	return writeNewProfileFileUsing(file.path, file.payload, operations, writeProfilePayload)
 }
@@ -169,7 +181,11 @@ func initializationDirectory(initialization ProfileInitialization) (string, fs.F
 		if directory == "" {
 			return "", 0, errors.New("resolve global profile directory: user home is unavailable; set REVIEW_PARTY_HOME")
 		}
-		return directory, 0o700, nil
+		absolute, err := filepath.Abs(directory)
+		if err != nil {
+			return "", 0, fmt.Errorf("resolve global profile directory %q: %w", directory, err)
+		}
+		return absolute, 0o700, nil
 	}
 	root, err := resolveRepositoryRoot(initialization.Repository)
 	if err != nil {

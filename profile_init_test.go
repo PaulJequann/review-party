@@ -52,6 +52,20 @@ func TestInitializeProfilesCreatesStarterWithoutOverwriting(t *testing.T) {
 	}
 }
 
+func TestInitializeProfilesCreatesGlobalStarterInMissingDirectory(t *testing.T) {
+	directory := filepath.Join(t.TempDir(), "nested", "global-library")
+	result, err := InitializeProfiles(ProfileInitialization{Global: true, GlobalDirectory: directory})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertInitializationCounts(t, result, 2, 0)
+	for _, path := range []string{filepath.Join(directory, "config.json"), filepath.Join(directory, "profiles", "bugs.md")} {
+		if info, statErr := os.Stat(path); statErr != nil || !info.Mode().IsRegular() {
+			t.Fatalf("starter file %q: info = %v, error = %v", path, info, statErr)
+		}
+	}
+}
+
 func assertInitializationCounts(t *testing.T, result ProfileInitializationResult, created, existing int) {
 	t.Helper()
 	if len(result.Created) != created {
@@ -78,29 +92,54 @@ func TestInitializeProfilesRejectsExistingSymlink(t *testing.T) {
 	assertProfileInitializationBlocked(t, repository)
 }
 
-func TestInitializeProfilesRejectsSymlinkedDirectoriesWithoutWritingOutsideRepository(t *testing.T) {
-	for _, component := range []string{".reviewparty", filepath.Join(".reviewparty", "profiles")} {
-		t.Run(component, func(t *testing.T) {
-			repository := testRepository(t)
-			external := t.TempDir()
-			link := filepath.Join(repository, component)
-			if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.Symlink(external, link); err != nil {
-				t.Skipf("symlinks unavailable: %v", err)
-			}
-
-			result, err := InitializeProfiles(ProfileInitialization{Repository: repository})
-			if err == nil || !strings.Contains(err.Error(), "symlink") {
-				t.Fatalf("result = %#v, error = %v", result, err)
-			}
-			for _, name := range []string{"config.json", "bugs.md"} {
-				if _, statErr := os.Stat(filepath.Join(external, name)); !errors.Is(statErr, os.ErrNotExist) {
-					t.Fatalf("external file %q was created: %v", name, statErr)
-				}
-			}
+func TestInitializeProfilesRejectsSymlinkedDirectoriesWithoutWritingOutside(t *testing.T) {
+	cases := []struct {
+		name      string
+		global    bool
+		component string
+	}{
+		{name: "repository library", component: ".reviewparty"},
+		{name: "repository profiles", component: filepath.Join(".reviewparty", "profiles")},
+		{name: "global library", global: true, component: "library"},
+		{name: "global profiles", global: true, component: filepath.Join("library", "profiles")},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			root, initialization := symlinkedInitializationFixture(t, test.global)
+			assertSymlinkedInitializationRejected(t, root, test.component, initialization)
 		})
+	}
+}
+
+func symlinkedInitializationFixture(t *testing.T, global bool) (string, ProfileInitialization) {
+	t.Helper()
+	if global {
+		root := t.TempDir()
+		return root, ProfileInitialization{Global: true, GlobalDirectory: filepath.Join(root, "library")}
+	}
+	repository := testRepository(t)
+	return repository, ProfileInitialization{Repository: repository}
+}
+
+func assertSymlinkedInitializationRejected(t *testing.T, root, component string, initialization ProfileInitialization) {
+	t.Helper()
+	external := t.TempDir()
+	link := filepath.Join(root, component)
+	if err := os.MkdirAll(filepath.Dir(link), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(external, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	result, err := InitializeProfiles(initialization)
+	if err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("result = %#v, error = %v", result, err)
+	}
+	for _, name := range []string{"config.json", "bugs.md"} {
+		if _, statErr := os.Stat(filepath.Join(external, name)); !errors.Is(statErr, os.ErrNotExist) {
+			t.Fatalf("external file %q was created: %v", name, statErr)
+		}
 	}
 }
 
