@@ -17,9 +17,27 @@ type userConfiguration struct {
 }
 
 type userReviewerPolicy struct {
-	Enabled       *bool     `json:"enabled,omitempty"`
-	Model         string    `json:"model,omitempty"`
-	AllowedModels *[]string `json:"allowed_models,omitempty"`
+	Enabled       *bool                    `json:"enabled,omitempty"`
+	Model         string                   `json:"model,omitempty"`
+	AllowedModels configuredModelAllowlist `json:"allowed_models,omitempty"`
+}
+
+type configuredModelAllowlist struct {
+	models  []string
+	present bool
+}
+
+func (allowlist *configuredModelAllowlist) UnmarshalJSON(payload []byte) error {
+	if bytes.Equal(bytes.TrimSpace(payload), []byte("null")) {
+		return errors.New("allowed_models must be an array, not null")
+	}
+	var models []string
+	if err := json.Unmarshal(payload, &models); err != nil {
+		return err
+	}
+	allowlist.models = models
+	allowlist.present = true
+	return nil
 }
 
 type InvalidUserConfigurationError struct {
@@ -118,8 +136,8 @@ func applyReviewerPolicy(registration reviewerRegistration, policy userReviewerP
 	if policy.Enabled != nil {
 		registration.disabled = !*policy.Enabled
 	}
-	if policy.AllowedModels != nil {
-		registration.allowedModels = canonicalModels(*policy.AllowedModels)
+	if policy.AllowedModels.present {
+		registration.allowedModels = canonicalModels(policy.AllowedModels.models)
 		registration.modelAllowlistConfigured = true
 	}
 	if policy.Model != "" {

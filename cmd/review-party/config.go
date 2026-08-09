@@ -11,7 +11,7 @@ import (
 func defaultUserConfigurationPath() string {
 	directory, err := os.UserConfigDir()
 	if err != nil {
-		return filepath.Join(".", "review-party-config.json")
+		return ""
 	}
 	return filepath.Join(directory, "review-party", "config.json")
 }

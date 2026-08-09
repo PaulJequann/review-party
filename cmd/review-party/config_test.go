@@ -98,3 +98,29 @@ func TestReviewAppliesConfiguredModelPolicyBeforeSubjectResolution(t *testing.T)
 		t.Fatalf("stderr = %q", stderr.String())
 	}
 }
+
+func TestExplainDoesNotLoadConfigurationFromWorkingDirectory(t *testing.T) {
+	repository := t.TempDir()
+	payload := `{"version":1,"reviewers":{"grok":{"enabled":false}}}`
+	if err := os.WriteFile(filepath.Join(repository, "review-party-config.json"), []byte(payload), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(repository)
+	t.Setenv("HOME", "")
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := run(context.Background(), []string{"explain", "bugs", "--format", "json"}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("exit = %d, stderr = %q", exitCode, stderr.String())
+	}
+	var explanation reviewparty.ProfileExplanation
+	if err := json.Unmarshal(stdout.Bytes(), &explanation); err != nil {
+		t.Fatal(err)
+	}
+	if explanation.ProfileRevision.Reviewer.ReviewerID != "grok" {
+		t.Fatalf("reviewer = %#v", explanation.ProfileRevision.Reviewer)
+	}
+}

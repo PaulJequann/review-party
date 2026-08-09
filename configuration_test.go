@@ -143,6 +143,17 @@ func TestExplicitEmptyModelAllowlistRejectsExplicitModel(t *testing.T) {
 	}
 }
 
+func TestNullModelAllowlistIsInvalid(t *testing.T) {
+	configuration := `{
+  "version": 1,
+  "reviewers": {"opencode": {"enabled": true, "allowed_models": null}}
+}`
+	invalid, _ := invalidConfigurationFromPayload(t, configuration)
+	if !strings.Contains(invalid.Reason, "allowed_models must be an array, not null") {
+		t.Fatalf("reason = %q", invalid.Reason)
+	}
+}
+
 func TestInvalidUserConfigurationFailsClosed(t *testing.T) {
 	invalidConfigurationFromPayload(t, `{"version":1,"unexpected":true}`)
 }
