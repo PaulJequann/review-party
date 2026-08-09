@@ -9,11 +9,12 @@ import (
 const defaultReviewer = "grok"
 
 type reviewerRegistration struct {
-	candidate     reviewerCandidate
-	capabilities  []Capability
-	disabled      bool
-	allowedModels []string
-	executor      attemptExecutor
+	candidate                reviewerCandidate
+	capabilities             []Capability
+	disabled                 bool
+	allowedModels            []string
+	modelAllowlistConfigured bool
+	executor                 attemptExecutor
 }
 
 type reviewerCatalog struct {

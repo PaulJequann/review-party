@@ -116,7 +116,7 @@ func resolveProfileReviewer(catalog reviewerCatalog, definition profileDefinitio
 
 func resolveReviewerModel(registration reviewerRegistration, model string) (reviewerRegistration, error) {
 	if model != "" {
-		if len(registration.allowedModels) > 0 && !containsModel(registration.allowedModels, model) {
+		if registration.modelAllowlistConfigured && !containsModel(registration.allowedModels, model) {
 			return reviewerRegistration{}, ReviewerModelNotAllowedError{Reviewer: registration.candidate.ID, Model: model, Allowed: registration.allowedModels}
 		}
 		registration.candidate.Model = model

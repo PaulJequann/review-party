@@ -82,6 +82,67 @@ func TestOpenCodeModelOverrideMustBeAllowed(t *testing.T) {
 	}
 }
 
+func TestOmittedModelAllowlistAllowsExplicitModel(t *testing.T) {
+	configuration := `{
+  "version": 1,
+  "reviewers": {"opencode": {"enabled": true}}
+}`
+	conductor := configuredTestConductor(t, configuration)
+
+	explanation, err := conductor.Explain(context.Background(), ProfileSelection{
+		Profile:  "bugs",
+		Reviewer: "opencode",
+		Model:    "caller-selected/model",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if explanation.ProfileRevision.Model != "caller-selected/model" {
+		t.Fatalf("model = %q", explanation.ProfileRevision.Model)
+	}
+}
+
+func TestExplicitEmptyModelAllowlistRejectsConfiguredModel(t *testing.T) {
+	configuration := `{
+  "version": 1,
+  "reviewers": {
+    "opencode": {
+      "enabled": true,
+      "model": "meta/muse-spark-1.2-contributor",
+      "allowed_models": []
+    }
+  }
+}`
+	invalid, _ := invalidConfigurationFromPayload(t, configuration)
+	if !strings.Contains(invalid.Reason, `model "meta/muse-spark-1.2-contributor" is not allowed for reviewer "opencode"`) {
+		t.Fatalf("reason = %q", invalid.Reason)
+	}
+}
+
+func TestExplicitEmptyModelAllowlistRejectsExplicitModel(t *testing.T) {
+	configuration := `{
+  "version": 1,
+  "reviewers": {"opencode": {"enabled": true, "allowed_models": []}}
+}`
+	conductor := configuredTestConductor(t, configuration)
+
+	_, err := conductor.Explain(context.Background(), ProfileSelection{
+		Profile:  "bugs",
+		Reviewer: "opencode",
+		Model:    "caller-selected/model",
+	})
+	var disallowed ReviewerModelNotAllowedError
+	if !errors.As(err, &disallowed) {
+		t.Fatalf("error = %v, want ReviewerModelNotAllowedError", err)
+	}
+	if disallowed.Model != "caller-selected/model" {
+		t.Fatalf("model = %q", disallowed.Model)
+	}
+	if len(disallowed.Allowed) != 0 {
+		t.Fatalf("allowed models = %#v, want empty", disallowed.Allowed)
+	}
+}
+
 func TestInvalidUserConfigurationFailsClosed(t *testing.T) {
 	invalidConfigurationFromPayload(t, `{"version":1,"unexpected":true}`)
 }

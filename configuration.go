@@ -17,9 +17,9 @@ type userConfiguration struct {
 }
 
 type userReviewerPolicy struct {
-	Enabled       *bool    `json:"enabled,omitempty"`
-	Model         string   `json:"model,omitempty"`
-	AllowedModels []string `json:"allowed_models,omitempty"`
+	Enabled       *bool     `json:"enabled,omitempty"`
+	Model         string    `json:"model,omitempty"`
+	AllowedModels *[]string `json:"allowed_models,omitempty"`
 }
 
 type InvalidUserConfigurationError struct {
@@ -118,7 +118,10 @@ func applyReviewerPolicy(registration reviewerRegistration, policy userReviewerP
 	if policy.Enabled != nil {
 		registration.disabled = !*policy.Enabled
 	}
-	registration.allowedModels = canonicalModels(policy.AllowedModels)
+	if policy.AllowedModels != nil {
+		registration.allowedModels = canonicalModels(*policy.AllowedModels)
+		registration.modelAllowlistConfigured = true
+	}
 	if policy.Model != "" {
 		registration.candidate.Model = policy.Model
 	}
@@ -176,7 +179,7 @@ func cloneReviewerCatalog(catalog reviewerCatalog) reviewerCatalog {
 }
 
 func validateConfiguredModel(registration reviewerRegistration) error {
-	if registration.candidate.Model == "" || len(registration.allowedModels) == 0 {
+	if registration.candidate.Model == "" || !registration.modelAllowlistConfigured {
 		return nil
 	}
 	if !containsModel(registration.allowedModels, registration.candidate.Model) {
