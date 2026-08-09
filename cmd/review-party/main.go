@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -52,7 +53,7 @@ func runReview(ctx context.Context, arguments []string, stdout, stderr io.Writer
 	format := flags.String("format", "human", "Output format: human or json")
 	records := flags.String("records", "", "Review Record directory")
 	deadline := flags.Duration("deadline", 10*time.Minute, "Attempt deadline")
-	reviewer := flags.String("reviewer", "grok", "Reviewer adapter: grok, opencode, or copilot")
+	reviewer := flags.String("reviewer", "grok", "Reviewer adapter: "+strings.Join(reviewparty.SupportedReviewers(), ", "))
 	if err := flags.Parse(arguments); err != nil {
 		return 2
 	}
@@ -161,6 +162,6 @@ func printRecord(output io.Writer, record reviewparty.ReviewRecord, format strin
 
 func printUsage(output io.Writer) {
 	fmt.Fprintln(output, "usage:")
-	fmt.Fprintln(output, "  review-party review [bugs] [--reviewer grok|opencode|copilot] [--repo PATH] [--format human|json]")
+	fmt.Fprintf(output, "  review-party review [bugs] [--reviewer %s] [--repo PATH] [--format human|json]\n", strings.Join(reviewparty.SupportedReviewers(), "|"))
 	fmt.Fprintln(output, "  review-party inspect REVIEW_ID [--format human|json]")
 }

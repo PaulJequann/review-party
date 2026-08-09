@@ -10,33 +10,32 @@ import (
 	"strings"
 )
 
-type copilotExecutor struct{}
+type copilotAdapter struct{}
 
-func (copilotExecutor) Check(_ context.Context, _ reviewerCandidate) availability {
+func (copilotAdapter) Name() string { return "copilot" }
+
+func (copilotAdapter) Check(_ context.Context, _ reviewerCandidate) availability {
 	if _, err := exec.LookPath("copilot"); err != nil {
 		return availability{Diagnostic: "copilot is not installed"}
 	}
 	return availability{Available: true}
 }
 
-func (copilotExecutor) Execute(ctx context.Context, spec attemptSpec) attemptExecution {
+func (copilotAdapter) Prepare(spec attemptSpec) (preparedAttempt, error) {
 	arguments := copilotCommand(spec.Candidate)
 	command := exec.Command(arguments[0], arguments[1:]...)
 	command.Dir = spec.Repository
 	command.Stdin = strings.NewReader(spec.Prompt)
-	run := runCommand(ctx, command)
-	if run.StartErr != nil {
-		return finalizeHarnessRun(run, "", run.Stderr, "", "", "copilot")
-	}
-	if run.OutputOverflow {
-		return overflowExecution(run, "copilot")
-	}
+	return preparedAttempt{command: command}, nil
+}
 
-	decoded, decodeErr := decodeCopilotOutput(run.Stdout)
-	if decodeErr != nil {
-		return decodedRunFailure(run, decodeErr, "copilot")
-	}
-	return finalizeHarnessRun(run, decoded.assistantText, run.Stderr, decoded.model, decoded.effort, "copilot")
+func (copilotAdapter) Decode(output []byte) (decodedHarnessOutput, error) {
+	decoded, err := decodeCopilotOutput(output)
+	return decodedHarnessOutput{
+		assistantText: decoded.assistantText,
+		model:         decoded.model,
+		effort:        decoded.effort,
+	}, err
 }
 
 func copilotCommand(candidate reviewerCandidate) []string {

@@ -56,6 +56,79 @@ type attemptExecutor interface {
 	Execute(context.Context, attemptSpec) attemptExecution
 }
 
+type preparedAttempt struct {
+	command *exec.Cmd
+	cleanup func()
+}
+
+type decodedHarnessOutput struct {
+	assistantText string
+	diagnostic    string
+	model         string
+	effort        string
+}
+
+type harnessAdapter interface {
+	Name() string
+	Check(context.Context, reviewerCandidate) availability
+	Prepare(attemptSpec) (preparedAttempt, error)
+	Decode([]byte) (decodedHarnessOutput, error)
+}
+
+type directExecutor struct {
+	adapter harnessAdapter
+	run     func(context.Context, *exec.Cmd) commandRun
+}
+
+func newDirectExecutor(adapter harnessAdapter) directExecutor {
+	return directExecutor{adapter: adapter, run: runCommand}
+}
+
+func (executor directExecutor) Check(ctx context.Context, candidate reviewerCandidate) availability {
+	return executor.adapter.Check(ctx, candidate)
+}
+
+func (executor directExecutor) Execute(ctx context.Context, spec attemptSpec) attemptExecution {
+	prepared, err := executor.adapter.Prepare(spec)
+	if err != nil {
+		return attemptExecution{Outcome: AttemptUnknownFailure, Diagnostic: err.Error()}
+	}
+	if prepared.command == nil {
+		return attemptExecution{Outcome: AttemptUnknownFailure, Diagnostic: executor.adapter.Name() + " prepared no command"}
+	}
+	if prepared.cleanup != nil {
+		defer prepared.cleanup()
+	}
+	return executor.executePrepared(ctx, spec, prepared.command)
+}
+
+func (executor directExecutor) executePrepared(ctx context.Context, spec attemptSpec, command *exec.Cmd) attemptExecution {
+	run := executor.run(ctx, command)
+	if run.StartErr != nil {
+		return finalizeHarnessRun(run, decodedHarnessOutput{diagnostic: run.Stderr}, executor.adapter.Name())
+	}
+	if run.OutputOverflow {
+		return overflowExecution(run, executor.adapter.Name())
+	}
+	decoded, decodeErr := executor.adapter.Decode(run.Stdout)
+	if decodeErr != nil {
+		return decodedRunFailure(run, decodeErr, executor.adapter.Name())
+	}
+	diagnostic := strings.TrimSpace(strings.Join([]string{decoded.diagnostic, run.Stderr}, " "))
+	model := decoded.model
+	if model == "" {
+		model = spec.Candidate.Model
+	}
+	effort := decoded.effort
+	if effort == "" {
+		effort = spec.Candidate.Effort
+	}
+	decoded.diagnostic = diagnostic
+	decoded.model = model
+	decoded.effort = effort
+	return finalizeHarnessRun(run, decoded, executor.adapter.Name())
+}
+
 type commandRun struct {
 	Stdout         []byte
 	Stderr         string
@@ -162,34 +235,34 @@ func contextExecution(err error) attemptExecution {
 	return attemptExecution{Outcome: outcome, Diagnostic: err.Error()}
 }
 
-func finalizeHarnessRun(run commandRun, assistantText, diagnostic, model, effort, harness string) attemptExecution {
+func finalizeHarnessRun(run commandRun, decoded decodedHarnessOutput, harness string) attemptExecution {
 	if run.StartErr != nil {
 		return attemptExecution{Outcome: AttemptReviewerUnavailable, Diagnostic: run.StartErr.Error()}
 	}
 	if run.ContextErr != nil {
 		execution := contextExecution(run.ContextErr)
-		execution.AssistantText = assistantText
+		execution.AssistantText = decoded.assistantText
 		return execution
 	}
 	if run.WaitErr != nil {
-		execution := classifyHarnessFailure(diagnostic, run.WaitErr)
-		execution.AssistantText = assistantText
-		execution.ResolvedModel = model
-		execution.ResolvedEffort = effort
+		execution := classifyHarnessFailure(decoded.diagnostic, run.WaitErr)
+		execution.AssistantText = decoded.assistantText
+		execution.ResolvedModel = decoded.model
+		execution.ResolvedEffort = decoded.effort
 		return execution
 	}
-	if assistantText == "" {
-		if strings.TrimSpace(diagnostic) != "" {
-			return classifyHarnessFailure(diagnostic, errors.New(harness+" produced no assistant text"))
+	if decoded.assistantText == "" {
+		if strings.TrimSpace(decoded.diagnostic) != "" {
+			return classifyHarnessFailure(decoded.diagnostic, errors.New(harness+" produced no assistant text"))
 		}
 		return attemptExecution{Outcome: AttemptInvalidResult, Diagnostic: harness + " produced no assistant text"}
 	}
 	return attemptExecution{
-		AssistantText:  assistantText,
+		AssistantText:  decoded.assistantText,
 		Outcome:        AttemptCompleted,
-		Diagnostic:     compactDiagnostic(diagnostic),
-		ResolvedModel:  model,
-		ResolvedEffort: effort,
+		Diagnostic:     compactDiagnostic(decoded.diagnostic),
+		ResolvedModel:  decoded.model,
+		ResolvedEffort: decoded.effort,
 	}
 }
 
@@ -204,7 +277,7 @@ func overflowExecution(run commandRun, harness string) attemptExecution {
 func decodedRunFailure(run commandRun, decodeErr error, harness string) attemptExecution {
 	diagnostic := strings.TrimSpace(strings.Join([]string{run.Stderr, decodeErr.Error()}, " "))
 	if run.WaitErr != nil || run.ContextErr != nil {
-		return finalizeHarnessRun(run, string(run.Stdout), diagnostic, "", "", harness)
+		return finalizeHarnessRun(run, decodedHarnessOutput{assistantText: string(run.Stdout), diagnostic: diagnostic}, harness)
 	}
 	return attemptExecution{
 		AssistantText: string(run.Stdout),

@@ -7,14 +7,18 @@ import (
 )
 
 type compiledProfile struct {
-	revision  ProfileRevision
-	candidate reviewerCandidate
-	prompt    string
+	revision ProfileRevision
+	reviewer reviewerRegistration
+	prompt   string
+	passes   []passPlan
 }
 
-const defaultReviewer = "grok"
+type passPlan struct {
+	name     string
+	required bool
+}
 
-func compileProfile(name, reviewer string, subject ReviewSubject) (compiledProfile, error) {
+func compileProfile(catalog reviewerCatalog, name, reviewer string, subject ReviewSubject) (compiledProfile, error) {
 	if name == "" {
 		name = "bugs"
 	}
@@ -25,12 +29,18 @@ func compileProfile(name, reviewer string, subject ReviewSubject) (compiledProfi
 	if reviewer == "" {
 		reviewer = defaultReviewer
 	}
-	candidate, err := reviewerCandidateFor(reviewer)
+	registration, err := catalog.resolve(reviewer)
 	if err != nil {
 		return compiledProfile{}, err
 	}
+	candidate := registration.candidate
+	passes := []passPlan{{name: "bug-review", required: true}}
 	prompt := buildBugReviewPrompt(subject)
-	hash := sha256.Sum256([]byte(name + "\x00" + candidate.ID + "\x00" + candidate.Model + "\x00" + candidate.Effort + "\x00" + candidate.Harness + "\x00" + candidate.Transport + "\x00" + promptTemplateVersion))
+	revisionInput := name + "\x00" + candidate.ID + "\x00" + candidate.Model + "\x00" + candidate.Effort + "\x00" + candidate.Harness + "\x00" + candidate.Transport + "\x00" + promptTemplateVersion + "\x00" + canonicalReviewResultContract.revision()
+	for _, pass := range passes {
+		revisionInput += fmt.Sprintf("\x00%s\x00%t", pass.name, pass.required)
+	}
+	hash := sha256.Sum256([]byte(revisionInput))
 
 	return compiledProfile{
 		revision: ProfileRevision{
@@ -40,22 +50,10 @@ func compileProfile(name, reviewer string, subject ReviewSubject) (compiledProfi
 			Model:      candidate.Model,
 			Effort:     candidate.Effort,
 		},
-		candidate: candidate,
-		prompt:    prompt,
+		reviewer: registration,
+		prompt:   prompt,
+		passes:   passes,
 	}, nil
-}
-
-func reviewerCandidateFor(reviewer string) (reviewerCandidate, error) {
-	switch reviewer {
-	case "grok":
-		return reviewerCandidate{ID: "grok", Model: "grok-4.5", Effort: "high", Harness: "grok-build-cli", Transport: "direct-cli"}, nil
-	case "opencode":
-		return reviewerCandidate{ID: "opencode", Model: "zai-coding-plan/glm-5.2", Effort: "default", Harness: "opencode-cli", Transport: "direct-cli"}, nil
-	case "copilot":
-		return reviewerCandidate{ID: "copilot", Model: "auto", Effort: "auto", Harness: "github-copilot-cli", Transport: "direct-cli"}, nil
-	default:
-		return reviewerCandidate{}, fmt.Errorf("unknown reviewer %q; expected grok, opencode, or copilot", reviewer)
-	}
 }
 
 const promptTemplateVersion = "bugs-v3"
@@ -81,31 +79,14 @@ operability, test validity, and applicable Project Rules. Report an unresolved
 approval requirement precisely; absence of approval evidence is not proof that
 approval was denied.
 
-Return exactly one block and no text before or after it.
-
-For no actionable findings:
-BEGIN_REVIEW
-status: clean
-summary: No actionable findings.
-END_REVIEW
-
-For findings, return at most eight MEDIUM, HIGH, or CRITICAL items:
-BEGIN_REVIEW
-status: findings
-
-1. HIGH | correctness | path/to/file.go:123
-Failure: Concrete supported scenario that fails.
-Evidence: Why the Subject permits the failure.
-Fix: Smallest safe correction.
-Test: Regression that fails before the correction.
-END_REVIEW
+%s
 
 Review Subject identity: %s
 Changed paths:
 %s
 
 --- PATCH ---
-%s`, subject.Identity, joinLines(subject.ChangedPaths), subject.Patch)
+%s`, canonicalReviewResultContract.instructions(), subject.Identity, joinLines(subject.ChangedPaths), subject.Patch)
 }
 
 func joinLines(lines []string) string {

@@ -17,7 +17,7 @@ type Config struct {
 
 type Conductor struct {
 	store           recordStore
-	executors       map[string]attemptExecutor
+	reviewers       reviewerCatalog
 	attemptDeadline time.Duration
 	now             func() time.Time
 }
@@ -33,17 +33,17 @@ func New(config Config) (*Conductor, error) {
 	if err != nil {
 		return nil, err
 	}
-	return newConductor(store, map[string]attemptExecutor{
-		"grok":     grokExecutor{},
-		"opencode": openCodeExecutor{},
-		"copilot":  copilotExecutor{},
-	}, config.AttemptDeadline), nil
+	return newConductorWithCatalog(store, defaultReviewerCatalog(), config.AttemptDeadline), nil
 }
 
 func newConductor(store recordStore, executors map[string]attemptExecutor, deadline time.Duration) *Conductor {
+	return newConductorWithCatalog(store, catalogWithExecutors(executors), deadline)
+}
+
+func newConductorWithCatalog(store recordStore, reviewers reviewerCatalog, deadline time.Duration) *Conductor {
 	return &Conductor{
 		store:           store,
-		executors:       executors,
+		reviewers:       reviewers,
 		attemptDeadline: deadline,
 		now:             time.Now,
 	}
@@ -57,7 +57,7 @@ func (conductor *Conductor) Review(ctx context.Context, selection ReviewSelectio
 	if err != nil {
 		return ReviewRecord{}, err
 	}
-	profile, err := compileProfile(selection.Profile, selection.Reviewer, subject)
+	profile, err := compileProfile(conductor.reviewers, selection.Profile, selection.Reviewer, subject)
 	if err != nil {
 		return ReviewRecord{}, err
 	}
@@ -75,11 +75,8 @@ func (conductor *Conductor) Review(ctx context.Context, selection ReviewSelectio
 		return record, err
 	}
 
-	executor, exists := conductor.executors[profile.candidate.ID]
-	if !exists {
-		return conductor.finishIncomplete(record, fmt.Sprintf("reviewer adapter %q is not registered", profile.candidate.ID))
-	}
-	check := executor.Check(ctx, profile.candidate)
+	executor := profile.reviewer.executor
+	check := executor.Check(ctx, profile.reviewer.candidate)
 	if !check.Available {
 		return conductor.finishIncomplete(record, check.Diagnostic)
 	}
@@ -99,18 +96,18 @@ func (conductor *Conductor) pendingRecord(subject ReviewSubject, profile compile
 		return ReviewRecord{}, err
 	}
 	now := conductor.now().UTC()
+	passes := make([]PassRecord, 0, len(profile.passes))
+	for _, planned := range profile.passes {
+		passes = append(passes, PassRecord{Name: planned.name, Required: planned.required, Attempts: []AttemptRecord{}})
+	}
 	return ReviewRecord{
 		ID:              id,
 		Lifecycle:       LifecyclePending,
 		Subject:         subject,
 		ProfileRevision: profile.revision,
-		Passes: []PassRecord{{
-			Name:     "bug-review",
-			Required: true,
-			Attempts: []AttemptRecord{},
-		}},
-		CreatedAt: now,
-		UpdatedAt: now,
+		Passes:          passes,
+		CreatedAt:       now,
+		UpdatedAt:       now,
 	}, nil
 }
 
@@ -121,10 +118,10 @@ func (conductor *Conductor) executePass(ctx context.Context, record ReviewRecord
 	execution := executor.Execute(attemptContext, attemptSpec{
 		Repository: record.Subject.Repository,
 		Prompt:     profile.prompt,
-		Candidate:  profile.candidate,
+		Candidate:  profile.reviewer.candidate,
 	})
 
-	result, parseErr := parseReviewResult(execution.AssistantText)
+	result, parseErr := canonicalReviewResultContract.parse(execution.AssistantText)
 	outcome := execution.Outcome
 	if outcome == AttemptCompleted && parseErr == nil {
 		record.Result = &result
@@ -141,7 +138,7 @@ func (conductor *Conductor) executePass(ctx context.Context, record ReviewRecord
 	record.Passes[0].Attempts = append(record.Passes[0].Attempts, AttemptRecord{
 		Number:      1,
 		Outcome:     outcome,
-		Provenance:  resolvedProvenance(profile.candidate, execution),
+		Provenance:  resolvedProvenance(profile.reviewer.candidate, execution),
 		Diagnostic:  execution.Diagnostic,
 		RawOutput:   boundedAttemptOutput(execution.AssistantText),
 		StartedAt:   started,

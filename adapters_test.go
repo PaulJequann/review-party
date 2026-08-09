@@ -49,16 +49,46 @@ func TestCopilotUnavailableModelIsClassifiedWithoutRetry(t *testing.T) {
 
 func TestReviewerSelectionChangesProfileRevision(t *testing.T) {
 	subject := ReviewSubject{Kind: SubjectWorkingChanges, Identity: "subject", Patch: "patch"}
-	grok, err := compileProfile("bugs", "grok", subject)
+	catalog := defaultReviewerCatalog()
+	grok, err := compileProfile(catalog, "bugs", "grok", subject)
 	if err != nil {
 		t.Fatal(err)
 	}
-	opencode, err := compileProfile("bugs", "opencode", subject)
+	opencode, err := compileProfile(catalog, "bugs", "opencode", subject)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if grok.revision.Revision == opencode.revision.Revision {
 		t.Fatal("different reviewers produced the same Profile Revision")
+	}
+}
+
+func TestCompiledBugProfileIncludesPromisedPass(t *testing.T) {
+	profile, err := compileProfile(defaultReviewerCatalog(), "bugs", "grok", ReviewSubject{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(profile.passes) != 1 {
+		t.Fatalf("passes = %#v, want one pass", profile.passes)
+	}
+	if profile.passes[0].name != "bug-review" {
+		t.Fatalf("pass name = %q, want bug-review", profile.passes[0].name)
+	}
+	if !profile.passes[0].required {
+		t.Fatal("bug-review pass is not required")
+	}
+}
+
+func TestSupportedReviewersResolveToMatchingAdapters(t *testing.T) {
+	catalog := defaultReviewerCatalog()
+	for _, id := range SupportedReviewers() {
+		registration, err := catalog.resolve(id)
+		if err != nil {
+			t.Fatalf("resolve %q: %v", id, err)
+		}
+		if registration.candidate.ID != id || registration.executor == nil {
+			t.Fatalf("registration for %q = %#v", id, registration)
+		}
 	}
 }
 

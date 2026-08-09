@@ -11,34 +11,31 @@ import (
 	"strings"
 )
 
-type grokExecutor struct{}
+type grokAdapter struct{}
 
-func (grokExecutor) Check(_ context.Context, _ reviewerCandidate) availability {
+func (grokAdapter) Name() string { return "grok" }
+
+func (grokAdapter) Check(_ context.Context, _ reviewerCandidate) availability {
 	if _, err := exec.LookPath("grok"); err != nil {
 		return availability{Diagnostic: "grok is not installed"}
 	}
 	return availability{Available: true}
 }
 
-func (grokExecutor) Execute(ctx context.Context, spec attemptSpec) attemptExecution {
+func (grokAdapter) Prepare(spec attemptSpec) (preparedAttempt, error) {
 	promptPath, err := writePromptFile(spec.Prompt)
 	if err != nil {
-		return attemptExecution{Outcome: AttemptUnknownFailure, Diagnostic: err.Error()}
+		return preparedAttempt{}, err
 	}
-	defer os.Remove(promptPath)
-
 	arguments := grokCommand(spec.Candidate, spec.Repository, promptPath)
 	command := exec.Command(arguments[0], arguments[1:]...)
 	command.Dir = spec.Repository
-	run := runCommand(ctx, command)
-	if run.OutputOverflow {
-		return overflowExecution(run, "grok")
-	}
-	assistantText, decodeErr := decodeGrokOutput(run.Stdout)
-	if decodeErr != nil {
-		return decodedRunFailure(run, decodeErr, "grok")
-	}
-	return finalizeHarnessRun(run, assistantText, run.Stderr, spec.Candidate.Model, spec.Candidate.Effort, "grok")
+	return preparedAttempt{command: command, cleanup: func() { _ = os.Remove(promptPath) }}, nil
+}
+
+func (grokAdapter) Decode(output []byte) (decodedHarnessOutput, error) {
+	assistantText, err := decodeGrokOutput(output)
+	return decodedHarnessOutput{assistantText: assistantText}, err
 }
 
 func grokCommand(candidate reviewerCandidate, repository, promptPath string) []string {

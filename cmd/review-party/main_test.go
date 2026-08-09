@@ -24,3 +24,13 @@ func TestPrintRecordUsesActualAttemptProvenance(t *testing.T) {
 		t.Fatalf("output = %q", output.String())
 	}
 }
+
+func TestUsageListsEverySupportedReviewer(t *testing.T) {
+	var output bytes.Buffer
+	printUsage(&output)
+	for _, reviewer := range reviewparty.SupportedReviewers() {
+		if !strings.Contains(output.String(), reviewer) {
+			t.Fatalf("usage omits supported reviewer %q:\n%s", reviewer, output.String())
+		}
+	}
+}

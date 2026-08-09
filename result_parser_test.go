@@ -17,6 +17,18 @@ func TestReviewAcceptsCRLFFindings(t *testing.T) {
 	}
 }
 
+func TestCanonicalResultExamplesSatisfyContract(t *testing.T) {
+	prompt := buildBugReviewPrompt(ReviewSubject{})
+	for _, example := range []string{cleanReviewExample, findingsReviewExample} {
+		if _, err := canonicalReviewResultContract.parse(example); err != nil {
+			t.Fatalf("canonical example is invalid: %v\n%s", err, example)
+		}
+		if !strings.Contains(prompt, example) {
+			t.Fatalf("Review Profile prompt omits canonical example:\n%s", example)
+		}
+	}
+}
+
 func TestInlineMarkerNamesDoNotReplaceTerminalReviewBlock(t *testing.T) {
 	review := strings.Replace(findingsReview, "Fix: Update the caller with the state change.", "Fix: Preserve literal `BEGIN_REVIEW` and `END_REVIEW` examples.", 1)
 	result, err := parseReviewResult(review)

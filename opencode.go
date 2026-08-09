@@ -13,16 +13,18 @@ import (
 
 const openCodeReviewConfig = `{"permission":{"*":"deny","read":"allow","glob":"allow","grep":"allow","list":"allow"},"share":"disabled"}`
 
-type openCodeExecutor struct{}
+type openCodeAdapter struct{}
 
-func (openCodeExecutor) Check(_ context.Context, _ reviewerCandidate) availability {
+func (openCodeAdapter) Name() string { return "opencode" }
+
+func (openCodeAdapter) Check(_ context.Context, _ reviewerCandidate) availability {
 	if _, err := exec.LookPath("opencode"); err != nil {
 		return availability{Diagnostic: "opencode is not installed"}
 	}
 	return availability{Available: true}
 }
 
-func (openCodeExecutor) Execute(ctx context.Context, spec attemptSpec) attemptExecution {
+func (openCodeAdapter) Prepare(spec attemptSpec) (preparedAttempt, error) {
 	arguments := openCodeCommand(spec.Candidate)
 	command := exec.Command(arguments[0], arguments[1:]...)
 	command.Dir = spec.Repository
@@ -31,19 +33,12 @@ func (openCodeExecutor) Execute(ctx context.Context, spec attemptSpec) attemptEx
 		"OPENCODE_CONFIG_CONTENT="+openCodeReviewConfig,
 		"OPENCODE_DISABLE_AUTOUPDATE=true",
 	)
-	run := runCommand(ctx, command)
-	if run.StartErr != nil {
-		return finalizeHarnessRun(run, "", run.Stderr, "", "", "opencode")
-	}
-	if run.OutputOverflow {
-		return overflowExecution(run, "opencode")
-	}
-	decoded, err := decodeOpenCodeOutput(run.Stdout)
-	if err != nil {
-		return decodedRunFailure(run, err, "opencode")
-	}
-	diagnostic := strings.TrimSpace(strings.Join([]string{decoded.diagnostic, run.Stderr}, " "))
-	return finalizeHarnessRun(run, decoded.assistantText, diagnostic, spec.Candidate.Model, spec.Candidate.Effort, "opencode")
+	return preparedAttempt{command: command}, nil
+}
+
+func (openCodeAdapter) Decode(output []byte) (decodedHarnessOutput, error) {
+	decoded, err := decodeOpenCodeOutput(output)
+	return decodedHarnessOutput{assistantText: decoded.assistantText, diagnostic: decoded.diagnostic}, err
 }
 
 func openCodeCommand(candidate reviewerCandidate) []string {

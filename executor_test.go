@@ -8,9 +8,71 @@ import (
 	"time"
 )
 
+type stubHarnessAdapter struct {
+	decode func([]byte) (decodedHarnessOutput, error)
+}
+
+func (stubHarnessAdapter) Name() string { return "stub" }
+
+func (stubHarnessAdapter) Check(context.Context, reviewerCandidate) availability {
+	return availability{Available: true}
+}
+
+func (stubHarnessAdapter) Prepare(attemptSpec) (preparedAttempt, error) {
+	return preparedAttempt{command: exec.Command("stub")}, nil
+}
+
+func (adapter stubHarnessAdapter) Decode(output []byte) (decodedHarnessOutput, error) {
+	return adapter.decode(output)
+}
+
+func TestDirectExecutorHandlesStartFailureBeforeDecoding(t *testing.T) {
+	decoded := false
+	executor := directExecutor{
+		adapter: stubHarnessAdapter{decode: func([]byte) (decodedHarnessOutput, error) {
+			decoded = true
+			return decodedHarnessOutput{}, errors.New("decode should not run")
+		}},
+		run: func(context.Context, *exec.Cmd) commandRun {
+			return commandRun{Stdout: []byte("not-json"), StartErr: errors.New("executable not found")}
+		},
+	}
+
+	execution := executor.Execute(context.Background(), attemptSpec{})
+
+	if execution.Outcome != AttemptReviewerUnavailable {
+		t.Fatalf("outcome = %q, want %q", execution.Outcome, AttemptReviewerUnavailable)
+	}
+	if decoded {
+		t.Fatal("decoder ran after command start failure")
+	}
+}
+
+func TestDirectExecutorRejectsOverflowBeforeDecoding(t *testing.T) {
+	decoded := false
+	executor := directExecutor{
+		adapter: stubHarnessAdapter{decode: func([]byte) (decodedHarnessOutput, error) {
+			decoded = true
+			return decodedHarnessOutput{assistantText: cleanReview}, nil
+		}},
+		run: func(context.Context, *exec.Cmd) commandRun {
+			return commandRun{Stdout: []byte(cleanReview), OutputOverflow: true}
+		},
+	}
+
+	execution := executor.Execute(context.Background(), attemptSpec{})
+
+	if execution.Outcome != AttemptInvalidResult || execution.Diagnostic != "stub output exceeded the capture limit" {
+		t.Fatalf("execution = %#v, want invalid overflow result", execution)
+	}
+	if decoded {
+		t.Fatal("decoder ran after output overflow")
+	}
+}
+
 func TestNonzeroHarnessExitCannotCompleteValidPayload(t *testing.T) {
 	run := commandRun{WaitErr: errors.New("exit status 1")}
-	execution := finalizeHarnessRun(run, cleanReview, "authentication failed", "model", "high", "reviewer")
+	execution := finalizeHarnessRun(run, decodedHarnessOutput{assistantText: cleanReview, diagnostic: "authentication failed", model: "model", effort: "high"}, "reviewer")
 	if execution.Outcome != AttemptReviewerUnavailable || execution.AssistantText != cleanReview {
 		t.Fatalf("execution = %#v, want unavailable with preserved output", execution)
 	}
