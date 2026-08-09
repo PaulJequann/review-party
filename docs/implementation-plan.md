@@ -144,7 +144,9 @@ different scenarios.
 
 ## Slice 4 — Design the executable contract twice
 
-Status: **Pending**
+Status: **Implemented for filesystem-backed V1**
+
+See [`design/profile-library-v1.md`](design/profile-library-v1.md).
 
 ### Goal
 

@@ -41,11 +41,39 @@ type ReviewSubject struct {
 }
 
 type ProfileRevision struct {
-	Name       string `json:"name"`
-	Revision   string `json:"revision"`
-	ReviewerID string `json:"reviewer_id"`
-	Model      string `json:"model"`
-	Effort     string `json:"effort"`
+	Name             string `json:"name"`
+	Revision         string `json:"revision"`
+	ReviewerID       string `json:"reviewer_id"`
+	Model            string `json:"model"`
+	Effort           string `json:"effort"`
+	Source           string `json:"source"`
+	SourceDigest     string `json:"source_digest"`
+	CompilerRevision string `json:"compiler_revision"`
+}
+
+type ProfileSnapshot struct {
+	Name         string `json:"name"`
+	Source       string `json:"source"`
+	SourceDigest string `json:"source_digest"`
+	Instructions string `json:"instructions"`
+}
+
+type ProfileSummary struct {
+	Name   string `json:"name"`
+	Source string `json:"source"`
+	Path   string `json:"path"`
+	Error  string `json:"error,omitempty"`
+}
+
+type ProfilePassSummary struct {
+	Name     string `json:"name"`
+	Required bool   `json:"required"`
+}
+
+type ProfileExplanation struct {
+	Revision     ProfileRevision      `json:"revision"`
+	Instructions string               `json:"instructions"`
+	Passes       []ProfilePassSummary `json:"passes"`
 }
 
 type AttemptOutcome string
@@ -102,6 +130,7 @@ type ReviewRecord struct {
 	Lifecycle       Lifecycle       `json:"lifecycle"`
 	Subject         ReviewSubject   `json:"subject"`
 	ProfileRevision ProfileRevision `json:"profile_revision"`
+	ProfileSnapshot ProfileSnapshot `json:"profile_snapshot"`
 	Passes          []PassRecord    `json:"passes"`
 	Result          *ReviewResult   `json:"result,omitempty"`
 	IncompleteCause string          `json:"incomplete_cause,omitempty"`

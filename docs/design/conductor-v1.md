@@ -44,7 +44,8 @@ represents real variation rather than speculative indirection.
 ## First dogfooded slice
 
 - Working-changes Review Subject, frozen before execution.
-- One built-in `bugs` Profile Revision with one required Review Pass.
+- One packaged Markdown `bugs` Profile plus repository/global Markdown Profile
+  libraries, each compiling to one required Review Pass.
 - Direct Grok, OpenCode, and Copilot Reviewer candidates selected explicitly;
   Grok is the default.
 - Attempt Limit one and a finite deadline; retry and fallback remain modeled but

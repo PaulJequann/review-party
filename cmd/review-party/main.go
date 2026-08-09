@@ -31,6 +31,12 @@ func run(ctx context.Context, arguments []string, stdout, stderr io.Writer) int 
 		return runReview(ctx, arguments[1:], stdout, stderr)
 	case "inspect":
 		return runInspect(ctx, arguments[1:], stdout, stderr)
+	case "init":
+		return runInit(arguments[1:], stdout, stderr)
+	case "profiles":
+		return runProfiles(ctx, arguments[1:], stdout, stderr)
+	case "profile":
+		return runProfile(ctx, arguments[1:], stdout, stderr)
 	case "help", "-h", "--help":
 		printUsage(stdout)
 		return 0
@@ -42,18 +48,14 @@ func run(ctx context.Context, arguments []string, stdout, stderr io.Writer) int 
 }
 
 func runReview(ctx context.Context, arguments []string, stdout, stderr io.Writer) int {
-	profile := "bugs"
-	if len(arguments) > 0 && arguments[0] != "" && arguments[0][0] != '-' {
-		profile = arguments[0]
-		arguments = arguments[1:]
-	}
+	profile, arguments := takeLeadingValue(arguments)
 	flags := flag.NewFlagSet("review", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	repository := flags.String("repo", ".", "Git repository to review")
 	format := flags.String("format", "human", "Output format: human or json")
 	records := flags.String("records", "", "Review Record directory")
 	deadline := flags.Duration("deadline", 10*time.Minute, "Attempt deadline")
-	reviewer := flags.String("reviewer", "grok", "Reviewer adapter: "+strings.Join(reviewparty.SupportedReviewers(), ", "))
+	reviewer := flags.String("reviewer", "", "Reviewer adapter: "+strings.Join(reviewparty.SupportedReviewers(), ", "))
 	if err := flags.Parse(arguments); err != nil {
 		return 2
 	}
@@ -91,16 +93,17 @@ func runReview(ctx context.Context, arguments []string, stdout, stderr io.Writer
 }
 
 func runInspect(ctx context.Context, arguments []string, stdout, stderr io.Writer) int {
-	if len(arguments) == 0 || arguments[0] == "" || arguments[0][0] == '-' {
+	idValue, remaining := takeLeadingValue(arguments)
+	if idValue == "" {
 		fmt.Fprintln(stderr, "review-party: inspect requires a review id")
 		return 2
 	}
-	id := reviewparty.ReviewID(arguments[0])
+	id := reviewparty.ReviewID(idValue)
 	flags := flag.NewFlagSet("inspect", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	format := flags.String("format", "human", "Output format: human or json")
 	records := flags.String("records", "", "Review Record directory")
-	if err := flags.Parse(arguments[1:]); err != nil {
+	if err := flags.Parse(remaining); err != nil {
 		return 2
 	}
 	if flags.NArg() != 0 {
@@ -134,11 +137,31 @@ func printRecord(output io.Writer, record reviewparty.ReviewRecord, format strin
 	if format != "human" {
 		return fmt.Errorf("unknown output format %q", format)
 	}
+	printHumanRecord(output, record)
+	return nil
+}
+
+func printHumanRecord(output io.Writer, record reviewparty.ReviewRecord) {
 	findings := 0
 	if record.Result != nil {
 		findings = record.Result.FindingCount
 	}
 	fmt.Fprintf(output, "review %s\n", record.ID)
+	provenance := latestProvenance(record)
+	fmt.Fprintf(output, "%s · %d finding(s) · %s/%s (%s)\n", record.Lifecycle, findings, provenance.ReviewerID, provenance.Model, provenance.Effort)
+	if record.ProfileRevision.Source != "" {
+		fmt.Fprintf(output, "profile: %s · %s\n", record.ProfileRevision.Name, record.ProfileRevision.Source)
+	}
+	if record.Result != nil {
+		fmt.Fprintln(output, record.Result.Raw)
+	}
+	if record.IncompleteCause != "" {
+		fmt.Fprintf(output, "incomplete: %s\n", record.IncompleteCause)
+	}
+	fmt.Fprintf(output, "inspect: review-party inspect %s\n", record.ID)
+}
+
+func latestProvenance(record reviewparty.ReviewRecord) reviewparty.ReviewerProvenance {
 	provenance := reviewparty.ReviewerProvenance{
 		ReviewerID: record.ProfileRevision.ReviewerID,
 		Model:      record.ProfileRevision.Model,
@@ -149,19 +172,21 @@ func printRecord(output io.Writer, record reviewparty.ReviewRecord, format strin
 			provenance = pass.Attempts[len(pass.Attempts)-1].Provenance
 		}
 	}
-	fmt.Fprintf(output, "%s · %d finding(s) · %s/%s (%s)\n", record.Lifecycle, findings, provenance.ReviewerID, provenance.Model, provenance.Effort)
-	if record.Result != nil {
-		fmt.Fprintln(output, record.Result.Raw)
+	return provenance
+}
+
+func takeLeadingValue(arguments []string) (string, []string) {
+	if len(arguments) == 0 || arguments[0] == "" || strings.HasPrefix(arguments[0], "-") {
+		return "", arguments
 	}
-	if record.IncompleteCause != "" {
-		fmt.Fprintf(output, "incomplete: %s\n", record.IncompleteCause)
-	}
-	fmt.Fprintf(output, "inspect: review-party inspect %s\n", record.ID)
-	return nil
+	return arguments[0], arguments[1:]
 }
 
 func printUsage(output io.Writer) {
 	fmt.Fprintln(output, "usage:")
-	fmt.Fprintf(output, "  review-party review [bugs] [--reviewer %s] [--repo PATH] [--format human|json]\n", strings.Join(reviewparty.SupportedReviewers(), "|"))
+	fmt.Fprintf(output, "  review-party review [PROFILE] [--reviewer %s] [--repo PATH] [--format human|json]\n", strings.Join(reviewparty.SupportedReviewers(), "|"))
 	fmt.Fprintln(output, "  review-party inspect REVIEW_ID [--format human|json]")
+	fmt.Fprintln(output, "  review-party init [--repo PATH] [--global]")
+	fmt.Fprintln(output, "  review-party profiles [--repo PATH] [--format human|json]")
+	fmt.Fprintln(output, "  review-party profile explain PROFILE [--repo PATH] [--reviewer REVIEWER] [--format human|json]")
 }
