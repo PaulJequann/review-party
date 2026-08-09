@@ -162,6 +162,14 @@ func TestNullReviewerModelIsInvalid(t *testing.T) {
 	assertInvalidConfigurationReason(t, configuration, "model must not be null")
 }
 
+func TestEmptyReviewerModelIsInvalid(t *testing.T) {
+	configuration := `{
+  "version": 1,
+  "reviewers": {"grok": {"model": ""}}
+}`
+	assertInvalidConfigurationReason(t, configuration, "model must not be empty")
+}
+
 func TestNullReviewerEnabledIsInvalid(t *testing.T) {
 	configuration := `{
   "version": 1,

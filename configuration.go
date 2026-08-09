@@ -28,8 +28,26 @@ func (configuration *userConfiguration) UnmarshalJSON(payload []byte) error {
 
 type userReviewerPolicy struct {
 	Enabled       *bool                    `json:"enabled,omitempty"`
-	Model         string                   `json:"model,omitempty"`
+	Model         configuredReviewerModel  `json:"model,omitempty"`
 	AllowedModels configuredModelAllowlist `json:"allowed_models,omitempty"`
+}
+
+type configuredReviewerModel struct {
+	value   string
+	present bool
+}
+
+func (model *configuredReviewerModel) UnmarshalJSON(payload []byte) error {
+	var value string
+	if err := json.Unmarshal(payload, &value); err != nil {
+		return err
+	}
+	if value == "" {
+		return errors.New("model must not be empty")
+	}
+	model.value = value
+	model.present = true
+	return nil
 }
 
 func (policy *userReviewerPolicy) UnmarshalJSON(payload []byte) error {
@@ -181,8 +199,8 @@ func applyReviewerPolicy(registration reviewerRegistration, policy userReviewerP
 		registration.allowedModels = canonicalModels(policy.AllowedModels.models)
 		registration.modelAllowlistConfigured = true
 	}
-	if policy.Model != "" {
-		registration.candidate.Model = policy.Model
+	if policy.Model.present {
+		registration.candidate.Model = policy.Model.value
 	}
 	if registration.disabled {
 		return registration, nil
