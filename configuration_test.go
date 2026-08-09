@@ -47,12 +47,37 @@ func TestDisabledReviewerFailsBeforeSubjectResolution(t *testing.T) {
 	_, err := conductor.Review(context.Background(), ReviewSelection{
 		Repository: "/repository-must-not-be-resolved",
 		Subject:    WorkingChanges(),
-		Profile:    "bugs",
+		Profile:    "security",
 		Reviewer:   "copilot",
 	})
 	var disabled DisabledReviewerError
 	if !errors.As(err, &disabled) {
 		t.Fatalf("error = %v, want DisabledReviewerError", err)
+	}
+}
+
+func TestRepositoryDefaultReviewerOwnsExplicitModelValidation(t *testing.T) {
+	configuration := `{
+  "version": 1,
+  "reviewers": {
+    "grok": {"enabled": true, "model": "grok-4.5", "allowed_models": ["grok-4.5"]},
+    "opencode": {"enabled": true, "model": "model-m", "allowed_models": ["model-m"]}
+  }
+}`
+	conductor := configuredTestConductor(t, configuration)
+	executor := successfulExecutor(cleanReview)
+	registration := conductor.reviewers.registrations["opencode"]
+	registration.executor = executor
+	conductor.reviewers.registrations["opencode"] = registration
+	repository := changedTestRepository(t)
+	writeProfileConfigFixture(t, filepath.Join(repository, ".reviewparty", "config.json"), `{"schema":1,"defaultReviewer":"opencode"}`)
+
+	record, err := conductor.Review(context.Background(), ReviewSelection{Repository: repository, Subject: WorkingChanges(), Model: "model-m"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record.ProfileRevision.ReviewerID != "opencode" || executor.attemptCount() != 1 {
+		t.Fatalf("revision = %#v, attempts = %d", record.ProfileRevision, executor.attemptCount())
 	}
 }
 

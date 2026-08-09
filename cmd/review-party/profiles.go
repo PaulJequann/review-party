@@ -16,6 +16,7 @@ func runProfiles(ctx context.Context, arguments []string, stdout, stderr io.Writ
 	flags := flag.NewFlagSet("profiles", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	format := flags.String("format", "human", "Output format: human or json")
+	repository := flags.String("repo", ".", "Git repository whose Profiles should be listed")
 	configuration := flags.String("config", defaultUserConfigurationPath(), "User configuration path")
 	if err := flags.Parse(arguments); err != nil {
 		return 2
@@ -29,7 +30,7 @@ func runProfiles(ctx context.Context, arguments []string, stdout, stderr io.Writ
 	if err != nil {
 		return printFailure(stderr, err)
 	}
-	profiles, err := conductor.Profiles(ctx)
+	profiles, err := conductor.ProfilesForRepository(ctx, *repository)
 	if err != nil {
 		return printFailure(stderr, err)
 	}
@@ -49,7 +50,7 @@ func runExplain(ctx context.Context, arguments []string, stdout, stderr io.Write
 	if err != nil {
 		return printFailure(stderr, err)
 	}
-	explanation, err := conductor.Explain(ctx, reviewparty.ProfileSelection{Profile: options.profile, Reviewer: options.reviewer, Model: options.model})
+	explanation, err := conductor.ExplainForRepository(ctx, reviewparty.ProfileSelection{Profile: options.profile, Reviewer: options.reviewer, Model: options.model}, options.repository)
 	if err != nil {
 		return printFailure(stderr, err)
 	}
@@ -66,6 +67,7 @@ type explainOptions struct {
 	configuration string
 	reviewer      string
 	model         string
+	repository    string
 }
 
 func parseExplainOptions(arguments []string, stderr io.Writer) (explainOptions, int) {
@@ -81,6 +83,7 @@ func parseExplainOptions(arguments []string, stderr io.Writer) (explainOptions, 
 	configuration := flags.String("config", defaultUserConfigurationPath(), "User configuration path")
 	reviewer := flags.String("reviewer", "", "Reviewer: "+strings.Join(reviewparty.SupportedReviewers(), ", ")+"; empty uses configured/Profile default")
 	model := flags.String("model", "", "Explicit model for the selected Reviewer")
+	repository := flags.String("repo", ".", "Git repository whose Profile should be explained")
 	if err := flags.Parse(remaining); err != nil {
 		return explainOptions{}, 2
 	}
@@ -88,7 +91,7 @@ func parseExplainOptions(arguments []string, stderr io.Writer) (explainOptions, 
 		fmt.Fprintln(stderr, "review-party: explain accepts one profile name")
 		return explainOptions{}, 2
 	}
-	return explainOptions{profile: profile, format: *format, deadline: *deadline, configuration: *configuration, reviewer: *reviewer, model: *model}, 0
+	return explainOptions{profile: profile, format: *format, deadline: *deadline, configuration: *configuration, reviewer: *reviewer, model: *model, repository: *repository}, 0
 }
 
 func requiredLeadingArgument(arguments []string) (string, []string, bool) {
@@ -113,7 +116,11 @@ func printProfiles(output io.Writer, profiles []reviewparty.ProfileSummary, form
 		return fmt.Errorf("unknown output format %q", format)
 	}
 	for _, profile := range profiles {
-		fmt.Fprintf(output, "%s\t%s\tdefault %s/%s via %s/%s\n", profile.Name, profile.Description, profile.DefaultReviewer.ReviewerID, profile.DefaultReviewer.Model, profile.DefaultReviewer.Harness, profile.DefaultReviewer.Transport)
+		if profile.Error != "" {
+			fmt.Fprintf(output, "%s\tinvalid: %s\n", profile.Name, profile.Error)
+			continue
+		}
+		fmt.Fprintf(output, "%s\t%s\t%s\tdefault %s/%s via %s/%s\n", profile.Name, profile.Source, profile.Description, profile.DefaultReviewer.ReviewerID, profile.DefaultReviewer.Model, profile.DefaultReviewer.Harness, profile.DefaultReviewer.Transport)
 	}
 	return nil
 }
@@ -132,6 +139,7 @@ func printProfileExplanation(output io.Writer, explanation reviewparty.ProfileEx
 	}
 	fmt.Fprintf(output, "profile: %s\n", revision.Name)
 	fmt.Fprintf(output, "revision: %s\n", revision.Revision)
+	fmt.Fprintf(output, "source: %s\n", revision.Source)
 	fmt.Fprintf(output, "purpose: %s\n", revision.Purpose)
 	fmt.Fprintf(output, "materiality: %s\n", revision.MaterialityThreshold)
 	fmt.Fprintf(output, "reviewer: %s (%s)\n", revision.Reviewer.ReviewerID, selection)
@@ -145,6 +153,7 @@ func printProfileExplanation(output io.Writer, explanation reviewparty.ProfileEx
 	fmt.Fprintf(output, "result contract: %s\n", revision.ResultContract)
 	fmt.Fprintln(output, "availability: not checked")
 	fmt.Fprintln(output, "no Agent Harness launched; no Review Record created")
+	fmt.Fprintf(output, "\n--- PROFILE MARKDOWN ---\n%s\n", explanation.Instructions)
 	return nil
 }
 

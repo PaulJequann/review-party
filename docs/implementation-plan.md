@@ -161,7 +161,9 @@ different scenarios.
 
 ## Slice 4 — Design the executable contract twice
 
-Status: **Complete**
+Status: **Complete, including filesystem-backed V1 Profiles**
+
+See [`design/profile-library-v1.md`](design/profile-library-v1.md).
 
 ### Goal
 
