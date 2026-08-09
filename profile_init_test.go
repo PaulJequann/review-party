@@ -78,6 +78,32 @@ func TestInitializeProfilesRejectsExistingSymlink(t *testing.T) {
 	assertProfileInitializationBlocked(t, repository)
 }
 
+func TestInitializeProfilesRejectsSymlinkedDirectoriesWithoutWritingOutsideRepository(t *testing.T) {
+	for _, component := range []string{".reviewparty", filepath.Join(".reviewparty", "profiles")} {
+		t.Run(component, func(t *testing.T) {
+			repository := testRepository(t)
+			external := t.TempDir()
+			link := filepath.Join(repository, component)
+			if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(external, link); err != nil {
+				t.Skipf("symlinks unavailable: %v", err)
+			}
+
+			result, err := InitializeProfiles(ProfileInitialization{Repository: repository})
+			if err == nil || !strings.Contains(err.Error(), "symlink") {
+				t.Fatalf("result = %#v, error = %v", result, err)
+			}
+			for _, name := range []string{"config.json", "bugs.md"} {
+				if _, statErr := os.Stat(filepath.Join(external, name)); !errors.Is(statErr, os.ErrNotExist) {
+					t.Fatalf("external file %q was created: %v", name, statErr)
+				}
+			}
+		})
+	}
+}
+
 func blockingProfilePath(t *testing.T) (string, string) {
 	t.Helper()
 	repository := testRepository(t)
