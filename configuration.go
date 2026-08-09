@@ -22,6 +22,30 @@ type userReviewerPolicy struct {
 	AllowedModels configuredModelAllowlist `json:"allowed_models,omitempty"`
 }
 
+func (policy *userReviewerPolicy) UnmarshalJSON(payload []byte) error {
+	if bytes.Equal(bytes.TrimSpace(payload), []byte("null")) {
+		return errors.New("reviewer policy must be an object, not null")
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &fields); err != nil {
+		return err
+	}
+	for _, name := range []string{"enabled", "model"} {
+		if value, exists := fields[name]; exists && bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
+			return fmt.Errorf("%s must not be null", name)
+		}
+	}
+	type plainPolicy userReviewerPolicy
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	decoder.DisallowUnknownFields()
+	var decoded plainPolicy
+	if err := decoder.Decode(&decoded); err != nil {
+		return err
+	}
+	*policy = userReviewerPolicy(decoded)
+	return nil
+}
+
 type configuredModelAllowlist struct {
 	models  []string
 	present bool

@@ -154,6 +154,22 @@ func TestNullModelAllowlistIsInvalid(t *testing.T) {
 	}
 }
 
+func TestNullReviewerModelIsInvalid(t *testing.T) {
+	configuration := `{
+  "version": 1,
+  "reviewers": {"grok": {"model": null}}
+}`
+	assertInvalidConfigurationReason(t, configuration, "model must not be null")
+}
+
+func TestNullReviewerEnabledIsInvalid(t *testing.T) {
+	configuration := `{
+  "version": 1,
+  "reviewers": {"grok": {"enabled": null}}
+}`
+	assertInvalidConfigurationReason(t, configuration, "enabled must not be null")
+}
+
 func TestInvalidUserConfigurationFailsClosed(t *testing.T) {
 	invalidConfigurationFromPayload(t, `{"version":1,"unexpected":true}`)
 }
@@ -295,4 +311,12 @@ func invalidConfigurationFromPayload(t *testing.T, payload string) (InvalidUserC
 		t.Fatalf("error = %v, want InvalidUserConfigurationError", err)
 	}
 	return invalid, path
+}
+
+func assertInvalidConfigurationReason(t *testing.T, payload, reason string) {
+	t.Helper()
+	invalid, _ := invalidConfigurationFromPayload(t, payload)
+	if !strings.Contains(invalid.Reason, reason) {
+		t.Fatalf("reason = %q, want it to contain %q", invalid.Reason, reason)
+	}
 }
