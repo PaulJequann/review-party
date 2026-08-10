@@ -132,3 +132,9 @@ Profile Markdown controls Reviewer Judgment. Review Party still owns tool and
 capability restrictions, Context Discovery, immutable Review Subject framing,
 the canonical Review Result contract, deadlines, and incomplete-result
 semantics. Profiles cannot configure executables, transports, or shell commands.
+
+Packaged Profiles contain their complete purpose-specific judgment instructions.
+A repository or global Profile that shadows one of them does not silently inherit
+the packaged risk taxonomy, evidence rules, confidence threshold, or review
+style. `review-party profile explain PROFILE` shows the authored Markdown and
+the compiler-owned execution recipe separately before a Reviewer is launched.

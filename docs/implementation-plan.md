@@ -330,6 +330,57 @@ conflating intent with runtime details.
 - A profile fails before launch when its adapter cannot meet its requirements.
 - Profile selection does not alter project governance or editing authority.
 
+## Slice 8a — Profile-owned reviewer judgment
+
+Status: **Implemented on `feat/profile-owned-review-judgment`**
+
+### Goal
+
+Make a Review Profile the complete, inspectable definition of purpose-specific
+Reviewer Judgment while keeping Review Party's enforceable execution and result
+guarantees behind the profile-library Module.
+
+### Operations
+
+1. Move the mature material-bug methodology into packaged `profiles/bugs.md`,
+   including materiality, evidence, confidence, root-cause, false-positive,
+   test-gap, and subject-sensitive risk guidance.
+2. Compile packaged Profiles through the same filesystem-backed path used by
+   repository and global Profiles so Markdown remains the single judgment
+   source.
+3. Preserve compiler-owned capability restrictions, Context Discovery,
+   immutable Review Subject framing, canonical Review Result validation,
+   provenance, deadlines, and incomplete-result semantics.
+4. Prove that a repository override replaces packaged judgment as a whole while
+   retaining the compiler-owned guarantee kernel.
+5. Keep the authored Profile and effective compiler recipe inspectable through
+   the existing Profile explanation and Review Record surfaces.
+
+### Non-goals
+
+- Typed user-defined Pass graphs, Recovery Policy, capabilities, result parsers,
+  commands, Agent Harnesses, or Transports.
+- Prompt prose that pretends to control Attempts, independent Reviewers,
+  fallback, Substitution, or lifecycle state.
+- Shared hidden judgment fragments inherited by every Profile.
+- Shipping the companion Profile-authoring agent skill in this slice.
+
+### Stop rule
+
+Do not add configurable orchestration fields or reusable prompt inheritance
+without two demonstrated Profile recipes that require the new seam and a
+separate accepted design.
+
+### Acceptance evidence
+
+- The packaged `bugs` prompt contains the accepted material-review judgment
+  rules and targeted risk priorities.
+- A repository `bugs.md` receives Subject framing and the canonical result
+  contract without inheriting packaged bug-review judgment.
+- Packaged and custom Profiles compile through one prompt-assembly path.
+- Focused Go tests, formatter, vet, build, and CodeScene checks pass for the
+  changed implementation.
+
 ## Slice 9 — ACPX transport adapter
 
 Status: **Pending**

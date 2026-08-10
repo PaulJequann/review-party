@@ -23,10 +23,12 @@ func TestRepositoryProfileShadowsGlobalAsWholeDefinition(t *testing.T) {
 	if !strings.Contains(prompt, "REPOSITORY UNIQUE GUIDANCE") || strings.Contains(prompt, "GLOBAL UNIQUE GUIDANCE") {
 		t.Fatalf("compiled prompt did not use the repository definition as a whole:\n%s", prompt)
 	}
+	assertPromptOmits(t, prompt, "Report a pre-existing defect only when", "Consolidate duplicate symptoms")
+	assertPromptContains(t, prompt, "Use repository-scoped read and search tools only", "BEGIN_REVIEW", "Review Subject identity:")
 	if profile.revision.Source != "repository:.reviewparty/profiles/bugs.md" {
 		t.Fatalf("source = %q", profile.revision.Source)
 	}
-	if profile.revision.Passes[0].PromptRevision == "bugs-v3" || profile.revision.Purpose == "Find material defects in the Review Subject." {
+	if profile.revision.Passes[0].PromptRevision == "bugs-v4" || profile.revision.Purpose == "Find material defects in the Review Subject." {
 		t.Fatalf("repository override retained packaged recipe metadata: %#v", profile.revision)
 	}
 }
@@ -186,8 +188,31 @@ func TestPackagedBugsProfileRemainsZeroConfigurationDefault(t *testing.T) {
 	if profile.revision.Name != "bugs" || profile.revision.Source != "packaged:profiles/bugs.md" {
 		t.Fatalf("revision = %#v", profile.revision)
 	}
-	if prompt := profile.prompt(ReviewSubject{}); !strings.Contains(prompt, "Review for material bugs") {
-		t.Fatalf("prompt = %q", prompt)
+	assertPromptContains(t, profile.prompt(ReviewSubject{}),
+		"Report only the highest-risk Findings that could justify changing or delaying",
+		"Report a pre-existing defect only when",
+		"Identify a concrete failing path or violated invariant",
+		"For a test gap, explain the false-green or regression",
+		"Consolidate duplicate symptoms under their root cause",
+		"Drop speculative, low-confidence, purely stylistic",
+	)
+}
+
+func assertPromptContains(t *testing.T, prompt string, expected ...string) {
+	t.Helper()
+	for _, fragment := range expected {
+		if !strings.Contains(prompt, fragment) {
+			t.Fatalf("compiled prompt omits %q:\n%s", fragment, prompt)
+		}
+	}
+}
+
+func assertPromptOmits(t *testing.T, prompt string, unexpected ...string) {
+	t.Helper()
+	for _, fragment := range unexpected {
+		if strings.Contains(prompt, fragment) {
+			t.Fatalf("compiled prompt silently includes %q:\n%s", fragment, prompt)
+		}
 	}
 }
 
@@ -205,5 +230,11 @@ func writeProfileConfigFixture(t *testing.T, path, content string) {
 }
 
 func compileTestProfile(library profileLibrary, name, reviewer string, subject ReviewSubject) (compiledProfile, error) {
-	return library.compile(defaultReviewerCatalog(), profileRequest{name: name, reviewer: reviewer}, subject)
+	conductor := Conductor{reviewers: defaultReviewerCatalog(), profiles: library, attemptDeadline: 10 * time.Minute}
+	return conductor.compileFilesystemProfile(ProfileSelection{Profile: name, Reviewer: reviewer}, subject.Repository)
+}
+
+func compileSelectedTestProfile(catalog reviewerCatalog, selection ProfileSelection, deadline time.Duration) (compiledProfile, error) {
+	conductor := Conductor{reviewers: catalog, profiles: profileLibrary{}, attemptDeadline: deadline}
+	return conductor.compileFilesystemProfile(selection, "")
 }

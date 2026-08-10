@@ -62,6 +62,12 @@ Reviewer provenance, Pass plan, compiler revision, and result-contract revision
 contribute to the Profile Revision. The Review Record preserves stable source
 provenance, the source digest, and the normalized authored instruction snapshot.
 
+Profile Markdown is the whole purpose-specific Reviewer Judgment definition.
+The compiler does not silently append a packaged Profile's risk taxonomy,
+materiality guidance, evidence heuristics, confidence threshold, or review
+style after a repository or global Profile shadows it. Compiler-owned additions
+remain profile-neutral Review Party constraints and result framing.
+
 ## Operations
 
 - `review-party init [--repo PATH]` creates repository starter files without

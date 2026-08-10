@@ -59,11 +59,11 @@ func TestExplainCompilesWithoutStartingReview(t *testing.T) {
 
 func TestDocumentationReviewUsesDistinctRecipeAndPrompt(t *testing.T) {
 	catalog := defaultReviewerCatalog()
-	bugs, err := compileProfile(catalog, ProfileSelection{Profile: "bugs", Reviewer: "grok"}, time.Minute)
+	bugs, err := compileSelectedTestProfile(catalog, ProfileSelection{Profile: "bugs", Reviewer: "grok"}, time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
-	documentation, err := compileProfile(catalog, ProfileSelection{Profile: "documentation", Reviewer: "grok"}, time.Minute)
+	documentation, err := compileSelectedTestProfile(catalog, ProfileSelection{Profile: "documentation", Reviewer: "grok"}, time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}

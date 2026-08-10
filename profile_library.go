@@ -4,7 +4,6 @@ import (
 	"embed"
 	"fmt"
 	"strings"
-	"time"
 )
 
 const (
@@ -45,11 +44,6 @@ func newProfileLibrary(globalDirectory string) profileLibrary {
 		globalDirectory = defaultGlobalProfileDirectory()
 	}
 	return profileLibrary{globalDirectory: globalDirectory}
-}
-
-func (library profileLibrary) compile(catalog reviewerCatalog, request profileRequest, subject ReviewSubject) (compiledProfile, error) {
-	conductor := Conductor{reviewers: catalog, profiles: library, attemptDeadline: 10 * time.Minute}
-	return conductor.compileFilesystemProfile(ProfileSelection{Profile: request.name, Reviewer: request.reviewer}, subject.Repository)
 }
 
 func (conductor *Conductor) compileFilesystemProfile(selection ProfileSelection, repository string) (compiledProfile, error) {
