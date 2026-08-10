@@ -23,6 +23,7 @@ type Conductor struct {
 	profiles        profileLibrary
 	attemptDeadline time.Duration
 	now             func() time.Time
+	buildProvenance func() RuntimeProvenance
 }
 
 func New(config Config) (*Conductor, error) {
@@ -62,6 +63,7 @@ func newConductorWithProfiles(store recordStore, reviewers reviewerCatalog, prof
 		profiles:        profiles,
 		attemptDeadline: deadline,
 		now:             time.Now,
+		buildProvenance: currentRuntimeProvenance,
 	}
 }
 
@@ -69,11 +71,12 @@ func (conductor *Conductor) Review(ctx context.Context, selection ReviewSelectio
 	if err := ctx.Err(); err != nil {
 		return ReviewRecord{}, err
 	}
-	subject, profile, err := conductor.prepareReview(selection)
+	reviewStarted := conductor.now().UTC()
+	prepared, err := conductor.prepareReview(selection)
 	if err != nil {
 		return ReviewRecord{}, err
 	}
-	record, err := conductor.pendingRecord(subject, profile)
+	record, err := conductor.pendingRecord(prepared.subject, prepared.profile, prepared.timings)
 	if err != nil {
 		return ReviewRecord{}, err
 	}
@@ -87,29 +90,53 @@ func (conductor *Conductor) Review(ctx context.Context, selection ReviewSelectio
 		return record, err
 	}
 
-	executor := profile.reviewer.executor
-	check := executor.Check(ctx, profile.reviewer.candidate)
+	executor := prepared.profile.reviewer.executor
+	availabilityStarted := conductor.now().UTC()
+	check := executor.Check(ctx, prepared.profile.reviewer.candidate)
+	record.Timings.AvailabilityCheckMS = elapsedMilliseconds(availabilityStarted, conductor.now().UTC())
 	if !check.Available {
-		return conductor.finishIncomplete(record, check.Diagnostic)
+		termination := terminationForAvailability(check.Diagnostic)
+		return conductor.finishIncomplete(record, termination, reviewStarted)
 	}
-	return conductor.executePass(ctx, record, profile, executor)
+	return conductor.executePass(ctx, passExecution{
+		record:        record,
+		profile:       prepared.profile,
+		executor:      executor,
+		reviewStarted: reviewStarted,
+	})
 }
 
-func (conductor *Conductor) prepareReview(selection ReviewSelection) (ReviewSubject, compiledProfile, error) {
+type preparedReview struct {
+	subject ReviewSubject
+	profile compiledProfile
+	timings ReviewTimings
+}
+
+func (conductor *Conductor) prepareReview(selection ReviewSelection) (preparedReview, error) {
 	profileSelection := selection.profileSelection()
 	if err := conductor.validateExplicitReviewer(profileSelection); err != nil {
-		return ReviewSubject{}, compiledProfile{}, err
+		return preparedReview{}, err
 	}
+	timings := ReviewTimings{}
+	subjectStarted := conductor.now().UTC()
 	repository, err := resolveRepositoryRoot(selection.Repository)
+	timings.SubjectResolutionMS += elapsedMilliseconds(subjectStarted, conductor.now().UTC())
 	if err != nil {
-		return ReviewSubject{}, compiledProfile{}, err
+		return preparedReview{}, err
 	}
+	profileStarted := conductor.now().UTC()
 	profile, err := conductor.compileFilesystemProfile(profileSelection, repository)
+	timings.ProfileCompilationMS = elapsedMilliseconds(profileStarted, conductor.now().UTC())
 	if err != nil {
-		return ReviewSubject{}, compiledProfile{}, err
+		return preparedReview{}, err
 	}
+	subjectStarted = conductor.now().UTC()
 	subject, err := resolveSubject(repository, selection.Subject)
-	return subject, profile, err
+	timings.SubjectResolutionMS += elapsedMilliseconds(subjectStarted, conductor.now().UTC())
+	if err != nil {
+		return preparedReview{}, err
+	}
+	return preparedReview{subject: subject, profile: profile, timings: timings}, nil
 }
 
 func (conductor *Conductor) Profiles(ctx context.Context) ([]ProfileSummary, error) {
@@ -181,39 +208,55 @@ func (conductor *Conductor) Inspect(_ context.Context, id ReviewID) (ReviewRecor
 	return conductor.store.Load(id)
 }
 
-func (conductor *Conductor) pendingRecord(subject ReviewSubject, profile compiledProfile) (ReviewRecord, error) {
+func (conductor *Conductor) pendingRecord(subject ReviewSubject, profile compiledProfile, timings ReviewTimings) (ReviewRecord, error) {
 	id, err := newReviewID(conductor.now())
 	if err != nil {
 		return ReviewRecord{}, err
 	}
 	now := conductor.now().UTC()
+	runtime := conductor.buildProvenance()
 	passes := make([]PassRecord, 0, len(profile.revision.Passes))
 	for _, planned := range profile.revision.Passes {
 		passes = append(passes, PassRecord{Name: planned.Name, Required: planned.Required, Attempts: []AttemptRecord{}})
 	}
 	return ReviewRecord{
+		SchemaVersion:   currentReviewRecordSchemaVersion,
 		ID:              id,
 		Lifecycle:       LifecyclePending,
 		Subject:         subject,
 		ProfileRevision: profile.revision,
 		ProfileSnapshot: profile.snapshot,
 		Passes:          passes,
+		Runtime:         &runtime,
+		Timings:         &timings,
 		CreatedAt:       now,
 		UpdatedAt:       now,
 	}, nil
 }
 
-func (conductor *Conductor) executePass(ctx context.Context, record ReviewRecord, profile compiledProfile, executor attemptExecutor) (ReviewRecord, error) {
+type passExecution struct {
+	record        ReviewRecord
+	profile       compiledProfile
+	executor      attemptExecutor
+	reviewStarted time.Time
+}
+
+func (conductor *Conductor) executePass(ctx context.Context, pass passExecution) (ReviewRecord, error) {
+	record := pass.record
 	started := conductor.now().UTC()
 	attemptContext, cancel := context.WithTimeout(ctx, conductor.attemptDeadline)
 	defer cancel()
-	execution := executor.Execute(attemptContext, attemptSpec{
+	execution := pass.executor.Execute(attemptContext, attemptSpec{
 		Repository: record.Subject.Repository,
-		Prompt:     profile.prompt(record.Subject),
-		Candidate:  profile.reviewer.candidate,
+		Prompt:     pass.profile.prompt(record.Subject),
+		Candidate:  pass.profile.reviewer.candidate,
 	})
+	completed := conductor.now().UTC()
+	record.Timings.AttemptExecutionMS = elapsedMilliseconds(started, completed)
 
+	validationStarted := conductor.now().UTC()
 	result, parseErr := canonicalReviewResultContract.parse(execution.AssistantText)
+	record.Timings.ResultValidationMS = elapsedMilliseconds(validationStarted, conductor.now().UTC())
 	outcome := execution.Outcome
 	if outcome == AttemptCompleted && parseErr == nil {
 		record.Result = &result
@@ -225,18 +268,19 @@ func (conductor *Conductor) executePass(ctx context.Context, record ReviewRecord
 			outcome = AttemptUnknownFailure
 		}
 		record.Lifecycle = LifecycleIncomplete
-		record.IncompleteCause = incompleteCause(outcome, execution.Diagnostic, parseErr)
+		termination := terminationForAttempt(execution, outcome, parseErr)
+		record.Termination = &termination
 	}
 	record.Passes[0].Attempts = append(record.Passes[0].Attempts, AttemptRecord{
 		Number:      1,
 		Outcome:     outcome,
-		Provenance:  resolvedProvenance(profile.reviewer.candidate, execution),
+		Provenance:  resolvedProvenance(pass.profile.reviewer.candidate, execution),
 		Diagnostic:  execution.Diagnostic,
 		RawOutput:   boundedAttemptOutput(execution.AssistantText),
 		StartedAt:   started,
-		CompletedAt: conductor.now().UTC(),
+		CompletedAt: completed,
 	})
-	record.UpdatedAt = conductor.now().UTC()
+	conductor.finalizeOperationalRecord(&record, pass.reviewStarted)
 	if err := conductor.store.Save(record); err != nil {
 		return record, err
 	}
@@ -261,17 +305,52 @@ func resolvedProvenance(candidate reviewerCandidate, execution attemptExecution)
 	return provenance
 }
 
-func (conductor *Conductor) finishIncomplete(record ReviewRecord, cause string) (ReviewRecord, error) {
+func (conductor *Conductor) finishIncomplete(record ReviewRecord, termination ReviewTermination, reviewStarted time.Time) (ReviewRecord, error) {
 	record.Lifecycle = LifecycleIncomplete
-	record.IncompleteCause = cause
-	record.UpdatedAt = conductor.now().UTC()
+	record.Termination = &termination
+	conductor.finalizeOperationalRecord(&record, reviewStarted)
 	if err := conductor.store.Save(record); err != nil {
 		return record, err
 	}
 	return record, nil
 }
 
-func incompleteCause(outcome AttemptOutcome, diagnostic string, parseErr error) string {
+func (conductor *Conductor) finalizeOperationalRecord(record *ReviewRecord, reviewStarted time.Time) {
+	completed := conductor.now().UTC()
+	record.UpdatedAt = completed
+	record.Timings.TotalMS = elapsedMilliseconds(reviewStarted, completed)
+}
+
+func terminationForAvailability(diagnostic string) ReviewTermination {
+	category := TerminationReviewerUnavailable
+	if diagnosticFailureCategory(diagnostic) == TerminationAuthenticationFailure {
+		category = TerminationAuthenticationFailure
+	}
+	return ReviewTermination{Category: category, Phase: PhaseAvailabilityCheck, Message: diagnostic}
+}
+
+func terminationForAttempt(execution attemptExecution, outcome AttemptOutcome, parseErr error) ReviewTermination {
+	message := attemptTerminationMessage(outcome, execution.Diagnostic, parseErr)
+	if execution.FailureCategory != "" {
+		return ReviewTermination{Category: execution.FailureCategory, Phase: execution.FailurePhase, Message: message}
+	}
+	switch {
+	case execution.Outcome == AttemptCompleted && parseErr != nil:
+		return ReviewTermination{Category: TerminationResultValidationFailure, Phase: PhaseResultValidation, Message: message}
+	case outcome == AttemptInvalidResult:
+		return ReviewTermination{Category: TerminationMalformedOutput, Phase: PhaseOutputDecode, Message: message}
+	case outcome == AttemptReviewerUnavailable:
+		return ReviewTermination{Category: TerminationReviewerUnavailable, Phase: PhaseHarnessLaunch, Message: message}
+	case outcome == AttemptTransientFailure:
+		return ReviewTermination{Category: TerminationTransportFailure, Phase: PhaseReviewerExecution, Message: message}
+	case outcome == AttemptCancelled:
+		return ReviewTermination{Category: TerminationCancelled, Phase: PhaseReviewerExecution, Message: message}
+	default:
+		return ReviewTermination{Category: TerminationUnknownFailure, Phase: PhaseReviewerExecution, Message: message}
+	}
+}
+
+func attemptTerminationMessage(outcome AttemptOutcome, diagnostic string, parseErr error) string {
 	if outcome == AttemptInvalidResult && parseErr != nil {
 		if diagnostic == "" {
 			return parseErr.Error()
@@ -281,10 +360,14 @@ func incompleteCause(outcome AttemptOutcome, diagnostic string, parseErr error) 
 	if diagnostic != "" {
 		return diagnostic
 	}
-	if parseErr != nil {
-		return parseErr.Error()
-	}
 	return fmt.Sprintf("attempt ended with %s", outcome)
+}
+
+func elapsedMilliseconds(started, completed time.Time) int64 {
+	if completed.Before(started) {
+		return 0
+	}
+	return completed.Sub(started).Milliseconds()
 }
 
 func newReviewID(now time.Time) (ReviewID, error) {

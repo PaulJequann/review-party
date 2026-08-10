@@ -25,9 +25,9 @@ func newFileRecordStore(directory string) (*fileRecordStore, error) {
 }
 
 func (store *fileRecordStore) Save(record ReviewRecord) error {
-	payload, err := json.MarshalIndent(record, "", "  ")
+	payload, err := encodeReviewRecord(record)
 	if err != nil {
-		return fmt.Errorf("encode review record: %w", err)
+		return err
 	}
 	temporary, err := store.createTemporaryRecord()
 	if err != nil {
@@ -57,6 +57,17 @@ func (store *fileRecordStore) Save(record ReviewRecord) error {
 	return nil
 }
 
+func encodeReviewRecord(record ReviewRecord) ([]byte, error) {
+	if record.SchemaVersion != currentReviewRecordSchemaVersion {
+		return nil, fmt.Errorf("save review record schema %d: current schema is %d", record.SchemaVersion, currentReviewRecordSchemaVersion)
+	}
+	payload, err := json.MarshalIndent(record, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("encode review record: %w", err)
+	}
+	return payload, nil
+}
+
 func (store *fileRecordStore) createTemporaryRecord() (*os.File, error) {
 	if err := os.MkdirAll(store.directory, 0o700); err != nil {
 		return nil, fmt.Errorf("create record directory: %w", err)
@@ -77,10 +88,26 @@ func (store *fileRecordStore) Load(id ReviewID) (ReviewRecord, error) {
 	if err := json.Unmarshal(payload, &record); err != nil {
 		return ReviewRecord{}, fmt.Errorf("decode review record %q: %w", id, err)
 	}
+	if err := normalizeLoadedReviewRecord(&record); err != nil {
+		return ReviewRecord{}, fmt.Errorf("decode review record %q: %w", id, err)
+	}
 	if record.ID != id {
 		return ReviewRecord{}, fmt.Errorf("review record %q has mismatched identity %q", id, record.ID)
 	}
 	return record, nil
+}
+
+func normalizeLoadedReviewRecord(record *ReviewRecord) error {
+	if record.SchemaVersion == 0 {
+		record.SchemaVersion = legacyReviewRecordSchemaVersion
+	}
+	if record.SchemaVersion > currentReviewRecordSchemaVersion {
+		return fmt.Errorf("record schema %d is newer than supported schema %d", record.SchemaVersion, currentReviewRecordSchemaVersion)
+	}
+	if record.SchemaVersion < legacyReviewRecordSchemaVersion {
+		return fmt.Errorf("record schema %d is invalid", record.SchemaVersion)
+	}
+	return nil
 }
 
 func (store *fileRecordStore) path(id ReviewID) string {

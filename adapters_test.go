@@ -214,15 +214,16 @@ func assertReviewWithPreamble(t *testing.T, assistantText string, err error) {
 
 func TestOpenCodeAuthenticationFailureIsUnavailable(t *testing.T) {
 	execution := classifyHarnessFailure("Token refresh failed: 401", context.Canceled)
-	if execution.Outcome != AttemptReviewerUnavailable {
-		t.Fatalf("outcome = %q", execution.Outcome)
-	}
+	assertAttemptOutcome(t, execution, AttemptReviewerUnavailable)
+	assertFailureLocation(t, execution, TerminationAuthenticationFailure, PhaseReviewerExecution)
 }
 
 func TestDecodeFailurePreservesHarnessFailureClassification(t *testing.T) {
 	run := commandRun{Stdout: []byte("not-json"), Stderr: "authentication failed", WaitErr: errors.New("exit status 1")}
 	execution := decodedRunFailure(run, errors.New("decode event"), "opencode")
-	if execution.Outcome != AttemptReviewerUnavailable || execution.AssistantText != "not-json" {
-		t.Fatalf("execution = %#v", execution)
+	assertAttemptOutcome(t, execution, AttemptReviewerUnavailable)
+	assertFailureLocation(t, execution, TerminationAuthenticationFailure, PhaseReviewerExecution)
+	if execution.AssistantText != "not-json" {
+		t.Fatalf("assistant text = %q", execution.AssistantText)
 	}
 }

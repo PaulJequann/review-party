@@ -168,7 +168,9 @@ func printHumanRecord(output io.Writer, record reviewparty.ReviewRecord) {
 	if record.Result != nil {
 		fmt.Fprintln(output, record.Result.Raw)
 	}
-	if record.IncompleteCause != "" {
+	if record.Termination != nil {
+		fmt.Fprintf(output, "incomplete: %s at %s: %s\n", record.Termination.Category, record.Termination.Phase, record.Termination.Message)
+	} else if record.IncompleteCause != "" {
 		fmt.Fprintf(output, "incomplete: %s\n", record.IncompleteCause)
 	}
 	fmt.Fprintf(output, "inspect: review-party inspect %s\n", record.ID)

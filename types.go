@@ -4,6 +4,11 @@ import "time"
 
 type ReviewID string
 
+const (
+	legacyReviewRecordSchemaVersion  = 1
+	currentReviewRecordSchemaVersion = 2
+)
+
 type Lifecycle string
 
 const (
@@ -51,11 +56,19 @@ func (selection ReviewSelection) profileSelection() ProfileSelection {
 }
 
 type ReviewSubject struct {
-	Kind         SubjectKind `json:"kind"`
-	Repository   string      `json:"repository"`
-	Identity     string      `json:"identity"`
-	ChangedPaths []string    `json:"changed_paths"`
-	Patch        string      `json:"patch"`
+	Kind         SubjectKind   `json:"kind"`
+	Repository   string        `json:"repository"`
+	Identity     string        `json:"identity"`
+	ChangedPaths []string      `json:"changed_paths"`
+	Patch        string        `json:"patch"`
+	Facts        *SubjectFacts `json:"facts,omitempty"`
+}
+
+type SubjectFacts struct {
+	ChangedFiles int `json:"changed_files"`
+	Additions    int `json:"additions"`
+	Deletions    int `json:"deletions"`
+	BinaryFiles  int `json:"binary_files"`
 }
 
 type ProfileRevision struct {
@@ -130,6 +143,51 @@ const (
 	AttemptUnknownFailure      AttemptOutcome = "unknown_failure"
 )
 
+type TerminationCategory string
+
+const (
+	TerminationReviewerUnavailable     TerminationCategory = "reviewer_unavailable"
+	TerminationAuthenticationFailure   TerminationCategory = "authentication_failure"
+	TerminationDeadlineExceeded        TerminationCategory = "deadline_exceeded"
+	TerminationCancelled               TerminationCategory = "cancelled"
+	TerminationTransportFailure        TerminationCategory = "transport_failure"
+	TerminationMalformedOutput         TerminationCategory = "malformed_output"
+	TerminationResultValidationFailure TerminationCategory = "result_validation_failure"
+	TerminationUnknownFailure          TerminationCategory = "unknown_failure"
+)
+
+type ExecutionPhase string
+
+const (
+	PhaseAvailabilityCheck ExecutionPhase = "availability_check"
+	PhaseHarnessLaunch     ExecutionPhase = "harness_launch"
+	PhaseReviewerExecution ExecutionPhase = "reviewer_execution"
+	PhaseOutputCapture     ExecutionPhase = "output_capture"
+	PhaseOutputDecode      ExecutionPhase = "output_decode"
+	PhaseResultValidation  ExecutionPhase = "result_validation"
+)
+
+type ReviewTermination struct {
+	Category TerminationCategory `json:"category"`
+	Phase    ExecutionPhase      `json:"phase"`
+	Message  string              `json:"message"`
+}
+
+type RuntimeProvenance struct {
+	Version     string `json:"version,omitempty"`
+	VCSRevision string `json:"vcs_revision,omitempty"`
+	VCSModified *bool  `json:"vcs_modified,omitempty"`
+}
+
+type ReviewTimings struct {
+	SubjectResolutionMS  int64 `json:"subject_resolution_ms"`
+	ProfileCompilationMS int64 `json:"profile_compilation_ms"`
+	AvailabilityCheckMS  int64 `json:"availability_check_ms"`
+	AttemptExecutionMS   int64 `json:"attempt_execution_ms"`
+	ResultValidationMS   int64 `json:"result_validation_ms"`
+	TotalMS              int64 `json:"total_ms"`
+}
+
 type ReviewerProvenance struct {
 	ReviewerID string `json:"reviewer_id"`
 	Model      string `json:"model"`
@@ -169,16 +227,21 @@ type ReviewResult struct {
 }
 
 type ReviewRecord struct {
-	ID              ReviewID        `json:"id"`
-	Lifecycle       Lifecycle       `json:"lifecycle"`
-	Subject         ReviewSubject   `json:"subject"`
-	ProfileRevision ProfileRevision `json:"profile_revision"`
-	ProfileSnapshot ProfileSnapshot `json:"profile_snapshot"`
-	Passes          []PassRecord    `json:"passes"`
-	Result          *ReviewResult   `json:"result,omitempty"`
-	IncompleteCause string          `json:"incomplete_cause,omitempty"`
-	CreatedAt       time.Time       `json:"created_at"`
-	UpdatedAt       time.Time       `json:"updated_at"`
+	SchemaVersion   int                `json:"schema_version"`
+	ID              ReviewID           `json:"id"`
+	Lifecycle       Lifecycle          `json:"lifecycle"`
+	Subject         ReviewSubject      `json:"subject"`
+	ProfileRevision ProfileRevision    `json:"profile_revision"`
+	ProfileSnapshot ProfileSnapshot    `json:"profile_snapshot"`
+	Passes          []PassRecord       `json:"passes"`
+	Result          *ReviewResult      `json:"result,omitempty"`
+	Termination     *ReviewTermination `json:"termination,omitempty"`
+	Runtime         *RuntimeProvenance `json:"runtime,omitempty"`
+	Timings         *ReviewTimings     `json:"timings,omitempty"`
+	// IncompleteCause is retained only when loading schema-v1 Review Records.
+	IncompleteCause string    `json:"incomplete_cause,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 func (r ReviewRecord) AttemptCount() int {
