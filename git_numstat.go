@@ -30,8 +30,7 @@ func measureCapturedPatch(repositoryRoot string, patch []byte) ([]string, Subjec
 
 func parseGitNumStat(output []byte) ([]string, SubjectFacts, error) {
 	entries := bytes.Split(output, []byte{0})
-	paths := make([]string, 0, len(entries))
-	facts := SubjectFacts{}
+	byPath := make(map[string]numStatCounts)
 	for index := 0; index < len(entries); index++ {
 		entry := entries[index]
 		fields := bytes.SplitN(entry, []byte{'\t'}, 3)
@@ -40,12 +39,23 @@ func parseGitNumStat(output []byte) ([]string, SubjectFacts, error) {
 		}
 		path, consumed := numStatPath(entries, index, fields[2])
 		index += consumed
-		paths = append(paths, path)
-		if err := addNumStatCounts(&facts, fields[0], fields[1]); err != nil {
+		counts, err := parseNumStatCounts(fields[0], fields[1])
+		if err != nil {
 			return nil, SubjectFacts{}, err
 		}
+		current := byPath[path]
+		current.additions += counts.additions
+		current.deletions += counts.deletions
+		current.binary = current.binary || counts.binary
+		byPath[path] = current
 	}
-	return paths, facts, nil
+	return summarizeNumStat(byPath), summarizeNumStatFacts(byPath), nil
+}
+
+type numStatCounts struct {
+	additions int
+	deletions int
+	binary    bool
 }
 
 func numStatPath(entries [][]byte, index int, encoded []byte) (string, int) {
@@ -55,20 +65,37 @@ func numStatPath(entries [][]byte, index int, encoded []byte) (string, int) {
 	return string(entries[index+2]), 2
 }
 
-func addNumStatCounts(facts *SubjectFacts, additionsField, deletionsField []byte) error {
+func parseNumStatCounts(additionsField, deletionsField []byte) (numStatCounts, error) {
 	if bytes.Equal(additionsField, []byte("-")) || bytes.Equal(deletionsField, []byte("-")) {
-		facts.BinaryFiles++
-		return nil
+		return numStatCounts{binary: true}, nil
 	}
 	additions, err := strconv.Atoi(string(additionsField))
 	if err != nil {
-		return fmt.Errorf("invalid addition count %q", additionsField)
+		return numStatCounts{}, fmt.Errorf("invalid addition count %q", additionsField)
 	}
 	deletions, err := strconv.Atoi(string(deletionsField))
 	if err != nil {
-		return fmt.Errorf("invalid deletion count %q", deletionsField)
+		return numStatCounts{}, fmt.Errorf("invalid deletion count %q", deletionsField)
 	}
-	facts.Additions += additions
-	facts.Deletions += deletions
-	return nil
+	return numStatCounts{additions: additions, deletions: deletions}, nil
+}
+
+func summarizeNumStat(byPath map[string]numStatCounts) []string {
+	paths := make([]string, 0, len(byPath))
+	for path := range byPath {
+		paths = append(paths, path)
+	}
+	return paths
+}
+
+func summarizeNumStatFacts(byPath map[string]numStatCounts) SubjectFacts {
+	facts := SubjectFacts{}
+	for _, counts := range byPath {
+		facts.Additions += counts.additions
+		facts.Deletions += counts.deletions
+		if counts.binary {
+			facts.BinaryFiles++
+		}
+	}
+	return facts
 }

@@ -46,6 +46,32 @@ func TestWorkingChangeFactsMatchPatchWhenWorktreeChangesDuringCapture(t *testing
 	}
 }
 
+func TestWorkingChangeFactsDeduplicateRecreatedTrackedPath(t *testing.T) {
+	repository := testRepository(t)
+	path := filepath.Join(repository, "image.bin")
+	if err := os.WriteFile(path, []byte{0, 1, 2}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runTestCommand(t, repository, "git", "add", "image.bin")
+	runTestCommand(t, repository, "git", "commit", "--quiet", "-m", "test: add binary")
+	runTestCommand(t, repository, "git", "rm", "--cached", "--quiet", "image.bin")
+	if err := os.WriteFile(path, []byte{0, 3, 4}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	subject, err := resolveWorkingChanges(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(subject.ChangedPaths, []string{"image.bin"}) {
+		t.Fatalf("changed paths = %#v", subject.ChangedPaths)
+	}
+	want := SubjectFacts{ChangedFiles: 1, BinaryFiles: 1}
+	if !reflect.DeepEqual(subject.Facts, &want) {
+		t.Fatalf("facts = %#v, want %#v", subject.Facts, want)
+	}
+}
+
 func installMutatingGitWrapper(t *testing.T, mutateFile string) {
 	t.Helper()
 	realGit, err := exec.LookPath("git")
