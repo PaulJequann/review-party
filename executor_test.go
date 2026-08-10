@@ -81,6 +81,44 @@ func TestNonzeroHarnessExitCannotCompleteValidPayload(t *testing.T) {
 	}
 }
 
+func TestEmptyAssistantTextPreservesUnknownDiagnostic(t *testing.T) {
+	execution := finalizeHarnessRun(commandRun{}, decodedHarnessOutput{diagnostic: "provider internal error"}, "reviewer")
+
+	assertAttemptOutcome(t, execution, AttemptUnknownFailure)
+	assertFailureLocation(t, execution, TerminationUnknownFailure, PhaseReviewerExecution)
+	if execution.Diagnostic != "provider internal error" {
+		t.Fatalf("diagnostic = %q", execution.Diagnostic)
+	}
+}
+
+func TestContextTerminationClassificationSurvivesRecordTranslation(t *testing.T) {
+	tests := map[string]struct {
+		err      error
+		outcome  AttemptOutcome
+		category TerminationCategory
+	}{
+		"deadline": {
+			err: context.DeadlineExceeded, outcome: AttemptTransientFailure, category: TerminationDeadlineExceeded,
+		},
+		"caller cancellation": {
+			err: context.Canceled, outcome: AttemptCancelled, category: TerminationCancelled,
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			execution := finalizeHarnessRun(commandRun{ContextErr: test.err}, decodedHarnessOutput{}, "reviewer")
+			assertAttemptOutcome(t, execution, test.outcome)
+			assertFailureLocation(t, execution, test.category, PhaseReviewerExecution)
+
+			termination := terminationForAttempt(execution, execution.Outcome, nil)
+			if termination.Category != test.category || termination.Phase != PhaseReviewerExecution {
+				t.Fatalf("termination = %#v", termination)
+			}
+		})
+	}
+}
+
 func assertAttemptOutcome(t *testing.T, execution attemptExecution, want AttemptOutcome) {
 	t.Helper()
 	if execution.Outcome != want {

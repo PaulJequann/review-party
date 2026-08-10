@@ -257,10 +257,7 @@ func finalizeHarnessRun(run commandRun, decoded decodedHarnessOutput, harness st
 	}
 	if decoded.assistantText == "" {
 		if strings.TrimSpace(decoded.diagnostic) != "" {
-			failure := classifyHarnessFailure(decoded.diagnostic, errors.New(harness+" produced no assistant text"))
-			if failure.FailureCategory != TerminationUnknownFailure {
-				return failure
-			}
+			return classifyHarnessFailure(decoded.diagnostic, errors.New(harness+" produced no assistant text"))
 		}
 		return failedExecution(AttemptInvalidResult, TerminationMalformedOutput, PhaseOutputDecode, harness+" produced no assistant text")
 	}
