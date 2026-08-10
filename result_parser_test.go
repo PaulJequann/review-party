@@ -67,7 +67,7 @@ END_REVIEW`
 }
 
 func TestInvalidResultCausePrefersParseError(t *testing.T) {
-	cause := incompleteCause(AttemptInvalidResult, "deprecation warning", errors.New("review result is missing END_REVIEW"))
+	cause := attemptTerminationMessage(AttemptInvalidResult, "deprecation warning", errors.New("review result is missing END_REVIEW"))
 	if !strings.HasPrefix(cause, "review result is missing END_REVIEW") {
 		t.Fatalf("cause = %q", cause)
 	}

@@ -85,6 +85,22 @@ launch. A missing file preserves the built-in zero-configuration behavior.
 Review Party currently invokes all three harnesses directly. ACPX remains a
 future transport option rather than part of the current execution path.
 
+## Operational Review Records
+
+New Review Records use schema version 2 and retain machine-readable operational
+facts alongside the canonical result. JSON inspection includes the exact
+runtime version/VCS information available from the built binary, immutable
+Subject size facts, owned-phase and total timings, and a categorical termination
+with its phase when a Review is incomplete. Review lifecycle remains limited to
+Pending, Running, Completed, and Incomplete; execution phases are diagnostic
+facts rather than additional states.
+
+Review Party distinguishes unavailable Reviewers, authentication failures,
+deadlines, cancellation, transport failures, malformed harness output, result
+validation failures, and unknown failures without requiring callers to parse a
+diagnostic string. Existing unversioned filesystem records remain inspectable
+as legacy schema-v1 records and retain their original `incomplete_cause`.
+
 ## Review Profiles
 
 Review Party ships a zero-configuration `bugs` Profile and can load ordinary

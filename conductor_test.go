@@ -149,6 +149,7 @@ func TestMalformedOutputIsIncompleteNeverClean(t *testing.T) {
 	if record.Passes[0].Attempts[0].Outcome != AttemptInvalidResult {
 		t.Fatalf("outcome = %q, want %q", record.Passes[0].Attempts[0].Outcome, AttemptInvalidResult)
 	}
+	assertTermination(t, record, TerminationResultValidationFailure, PhaseResultValidation)
 }
 
 func TestFailedExecutionCannotBeCompletedByValidPayload(t *testing.T) {
@@ -175,6 +176,7 @@ func TestFailedExecutionCannotBeCompletedByValidPayload(t *testing.T) {
 	if record.Passes[0].Attempts[0].Outcome != AttemptTransientFailure {
 		t.Fatalf("outcome = %q, want %q", record.Passes[0].Attempts[0].Outcome, AttemptTransientFailure)
 	}
+	assertTermination(t, record, TerminationTransportFailure, PhaseReviewerExecution)
 }
 
 func TestUnavailableReviewerLaunchesNoAttempt(t *testing.T) {
@@ -201,6 +203,7 @@ func TestUnavailableReviewerLaunchesNoAttempt(t *testing.T) {
 	if record.AttemptCount() != 0 {
 		t.Fatalf("record = %#v, launches = %d; want incomplete with no attempts", record, executor.attemptCount())
 	}
+	assertTermination(t, record, TerminationReviewerUnavailable, PhaseAvailabilityCheck)
 }
 
 func TestExplicitReviewerRoutesToMatchingAdapter(t *testing.T) {
@@ -291,7 +294,12 @@ func TestAttemptDeadlineProducesInspectableIncompleteRecord(t *testing.T) {
 		availability: availability{Available: true},
 		execute: func(ctx context.Context, _ attemptSpec) attemptExecution {
 			<-ctx.Done()
-			return attemptExecution{Outcome: AttemptTransientFailure, Diagnostic: ctx.Err().Error()}
+			return attemptExecution{
+				Outcome:         AttemptTransientFailure,
+				Diagnostic:      ctx.Err().Error(),
+				FailureCategory: TerminationDeadlineExceeded,
+				FailurePhase:    PhaseReviewerExecution,
+			}
 		},
 	}
 	conductor := testConductor(t, executor, 20*time.Millisecond)
@@ -309,6 +317,70 @@ func TestAttemptDeadlineProducesInspectableIncompleteRecord(t *testing.T) {
 	}
 	if !reflect.DeepEqual(record, stored) {
 		t.Fatalf("stored record differs\nrecord: %#v\nstored: %#v", record, stored)
+	}
+	assertTermination(t, record, TerminationDeadlineExceeded, PhaseReviewerExecution)
+	if !strings.Contains(record.Termination.Message, context.DeadlineExceeded.Error()) {
+		t.Fatalf("termination message = %q", record.Termination.Message)
+	}
+}
+
+func TestReviewRecordsCoherentOperationalTimingAndBuildProvenance(t *testing.T) {
+	repository := changedTestRepository(t)
+	conductor := testConductor(t, successfulExecutor(cleanReview), time.Second)
+	instant := time.Date(2026, time.August, 9, 12, 0, 0, 0, time.UTC)
+	conductor.now = func() time.Time {
+		instant = instant.Add(10 * time.Millisecond)
+		return instant
+	}
+	modified := false
+	conductor.buildProvenance = func() RuntimeProvenance {
+		return RuntimeProvenance{Version: "0.4.0", VCSRevision: "abc123", VCSModified: &modified}
+	}
+
+	record, err := conductor.Review(context.Background(), testSelection(repository))
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertOperationalSchemaAndRuntime(t, record)
+	assertCoherentTimings(t, record)
+}
+
+func assertOperationalSchemaAndRuntime(t *testing.T, record ReviewRecord) {
+	t.Helper()
+	if record.SchemaVersion != currentReviewRecordSchemaVersion {
+		t.Fatalf("schema version = %d", record.SchemaVersion)
+	}
+	if record.Runtime.Version != "0.4.0" {
+		t.Fatalf("runtime version = %q", record.Runtime.Version)
+	}
+	if record.Runtime.VCSRevision != "abc123" {
+		t.Fatalf("runtime revision = %q", record.Runtime.VCSRevision)
+	}
+	if record.Runtime.VCSModified == nil {
+		t.Fatalf("runtime modified = %#v", record.Runtime.VCSModified)
+	}
+	if *record.Runtime.VCSModified {
+		t.Fatal("runtime was unexpectedly modified")
+	}
+}
+
+func assertCoherentTimings(t *testing.T, record ReviewRecord) {
+	t.Helper()
+	phaseTotal := record.Timings.SubjectResolutionMS + record.Timings.ProfileCompilationMS +
+		record.Timings.AvailabilityCheckMS + record.Timings.AttemptExecutionMS +
+		record.Timings.ResultValidationMS
+	if phaseTotal <= 0 {
+		t.Fatalf("timings = %#v, phase total = %d", record.Timings, phaseTotal)
+	}
+	if record.Timings.TotalMS < phaseTotal {
+		t.Fatalf("timings = %#v, phase total = %d", record.Timings, phaseTotal)
+	}
+}
+
+func TestElapsedMillisecondsNeverReportsNegativeDuration(t *testing.T) {
+	later := time.Date(2026, time.August, 9, 12, 0, 1, 0, time.UTC)
+	if got := elapsedMilliseconds(later, later.Add(-time.Second)); got != 0 {
+		t.Fatalf("elapsed milliseconds = %d, want 0", got)
 	}
 }
 
@@ -397,4 +469,14 @@ func slicesContainPrefix(values []string, prefix string) bool {
 		}
 	}
 	return false
+}
+
+func assertTermination(t *testing.T, record ReviewRecord, category TerminationCategory, phase ExecutionPhase) {
+	t.Helper()
+	if record.Termination == nil {
+		t.Fatal("termination is nil")
+	}
+	if record.Termination.Category != category || record.Termination.Phase != phase {
+		t.Fatalf("termination = %#v, want category %q phase %q", record.Termination, category, phase)
+	}
 }
