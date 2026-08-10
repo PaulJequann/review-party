@@ -25,17 +25,13 @@ func captureWorkingChanges(repositoryRoot string) (workingChangesCapture, error)
 	if err != nil {
 		return workingChangesCapture{}, fmt.Errorf("list untracked files: %w", err)
 	}
-	paths, err := changedPaths(repositoryRoot, base, untracked)
-	if err != nil {
-		return workingChangesCapture{}, err
-	}
 
 	untrackedPaths := splitNUL(untracked)
 	patch, err := combineWorkingChangePatches(repositoryRoot, trackedPatch, untrackedPaths)
 	if err != nil {
 		return workingChangesCapture{}, err
 	}
-	facts, err := captureWorkingChangeFacts(repositoryRoot, base, untrackedPaths)
+	paths, facts, err := measureCapturedPatch(repositoryRoot, patch)
 	if err != nil {
 		return workingChangesCapture{}, err
 	}

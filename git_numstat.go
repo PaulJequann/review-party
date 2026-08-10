@@ -3,56 +3,72 @@ package reviewparty
 import (
 	"bytes"
 	"fmt"
-	"os"
+	"os/exec"
+	"sort"
 	"strconv"
+	"strings"
 )
 
-func captureWorkingChangeFacts(repositoryRoot, base string, untrackedPaths []string) (SubjectFacts, error) {
-	tracked, err := gitOutput(repositoryRoot, "diff", "--numstat", "-z", base, "--")
+func measureCapturedPatch(repositoryRoot string, patch []byte) ([]string, SubjectFacts, error) {
+	command := exec.Command("git", "apply", "--numstat", "-z")
+	command.Dir = repositoryRoot
+	command.Stdin = bytes.NewReader(patch)
+	output, err := command.Output()
 	if err != nil {
-		return SubjectFacts{}, fmt.Errorf("measure tracked working changes: %w", err)
+		if exitError, ok := err.(*exec.ExitError); ok {
+			return nil, SubjectFacts{}, fmt.Errorf("measure captured patch: %s", strings.TrimSpace(string(exitError.Stderr)))
+		}
+		return nil, SubjectFacts{}, fmt.Errorf("measure captured patch: %w", err)
 	}
-	facts, err := parseGitNumStat(tracked)
+	paths, facts, err := parseGitNumStat(output)
 	if err != nil {
-		return SubjectFacts{}, fmt.Errorf("parse tracked working-change facts: %w", err)
+		return nil, SubjectFacts{}, fmt.Errorf("parse captured patch facts: %w", err)
 	}
-	for _, path := range untrackedPaths {
-		stat, statErr := gitDiffNoIndex(repositoryRoot, []string{"--numstat", "-z"}, os.DevNull, path)
-		if statErr != nil {
-			return SubjectFacts{}, fmt.Errorf("measure untracked file %q: %w", path, statErr)
-		}
-		untracked, parseErr := parseGitNumStat(stat)
-		if parseErr != nil {
-			return SubjectFacts{}, fmt.Errorf("parse untracked file %q facts: %w", path, parseErr)
-		}
-		facts.Additions += untracked.Additions
-		facts.Deletions += untracked.Deletions
-		facts.BinaryFiles += untracked.BinaryFiles
-	}
-	return facts, nil
+	sort.Strings(paths)
+	return paths, facts, nil
 }
 
-func parseGitNumStat(output []byte) (SubjectFacts, error) {
+func parseGitNumStat(output []byte) ([]string, SubjectFacts, error) {
+	entries := bytes.Split(output, []byte{0})
+	paths := make([]string, 0, len(entries))
 	facts := SubjectFacts{}
-	for _, entry := range bytes.Split(output, []byte{0}) {
+	for index := 0; index < len(entries); index++ {
+		entry := entries[index]
 		fields := bytes.SplitN(entry, []byte{'\t'}, 3)
 		if len(fields) < 3 {
 			continue
 		}
-		if bytes.Equal(fields[0], []byte("-")) || bytes.Equal(fields[1], []byte("-")) {
-			facts.BinaryFiles++
-			continue
+		path, consumed := numStatPath(entries, index, fields[2])
+		index += consumed
+		paths = append(paths, path)
+		if err := addNumStatCounts(&facts, fields[0], fields[1]); err != nil {
+			return nil, SubjectFacts{}, err
 		}
-		additions, err := strconv.Atoi(string(fields[0]))
-		if err != nil {
-			return SubjectFacts{}, fmt.Errorf("invalid addition count %q", fields[0])
-		}
-		deletions, err := strconv.Atoi(string(fields[1]))
-		if err != nil {
-			return SubjectFacts{}, fmt.Errorf("invalid deletion count %q", fields[1])
-		}
-		facts.Additions += additions
-		facts.Deletions += deletions
 	}
-	return facts, nil
+	return paths, facts, nil
+}
+
+func numStatPath(entries [][]byte, index int, encoded []byte) (string, int) {
+	if len(encoded) > 0 || index+2 >= len(entries) {
+		return string(encoded), 0
+	}
+	return string(entries[index+2]), 2
+}
+
+func addNumStatCounts(facts *SubjectFacts, additionsField, deletionsField []byte) error {
+	if bytes.Equal(additionsField, []byte("-")) || bytes.Equal(deletionsField, []byte("-")) {
+		facts.BinaryFiles++
+		return nil
+	}
+	additions, err := strconv.Atoi(string(additionsField))
+	if err != nil {
+		return fmt.Errorf("invalid addition count %q", additionsField)
+	}
+	deletions, err := strconv.Atoi(string(deletionsField))
+	if err != nil {
+		return fmt.Errorf("invalid deletion count %q", deletionsField)
+	}
+	facts.Additions += additions
+	facts.Deletions += deletions
+	return nil
 }

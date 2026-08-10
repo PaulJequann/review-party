@@ -2,8 +2,10 @@ package reviewparty
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -23,4 +25,54 @@ func TestWorkingChangesRecordsTrackedAndUntrackedSubjectFacts(t *testing.T) {
 	if !reflect.DeepEqual(subject.Facts, &want) {
 		t.Fatalf("facts = %#v, want %#v", subject.Facts, want)
 	}
+}
+
+func TestWorkingChangeFactsMatchPatchWhenWorktreeChangesDuringCapture(t *testing.T) {
+	repository := testRepository(t)
+	path := filepath.Join(repository, "review.go")
+	writeTestFile(t, path, "package demo\n\nconst state = \"captured\"\n")
+	installMutatingGitWrapper(t, path)
+
+	subject, err := resolveWorkingChanges(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(subject.Patch, "later") {
+		t.Fatalf("captured patch contains later worktree mutation:\n%s", subject.Patch)
+	}
+	want := SubjectFacts{ChangedFiles: 1, Additions: 1, Deletions: 1}
+	if !reflect.DeepEqual(subject.Facts, &want) {
+		t.Fatalf("facts = %#v, want facts from captured patch %#v", subject.Facts, want)
+	}
+}
+
+func installMutatingGitWrapper(t *testing.T, mutateFile string) {
+	t.Helper()
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory := t.TempDir()
+	wrapper := filepath.Join(directory, "git")
+	marker := filepath.Join(directory, "mutated")
+	script := `#!/bin/sh
+"$REAL_GIT" "$@"
+status=$?
+if [ "$1" = "diff" ]; then
+  if [ "$2" = "--binary" ]; then
+    if [ ! -e "$MUTATION_MARKER" ]; then
+      printf 'package demo\n\nconst state = "later"\nconst extra = true\n' > "$MUTATE_FILE"
+      : > "$MUTATION_MARKER"
+    fi
+  fi
+fi
+exit "$status"
+`
+	if err := os.WriteFile(wrapper, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("REAL_GIT", realGit)
+	t.Setenv("MUTATE_FILE", mutateFile)
+	t.Setenv("MUTATION_MARKER", marker)
+	t.Setenv("PATH", directory+string(os.PathListSeparator)+os.Getenv("PATH"))
 }

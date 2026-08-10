@@ -307,11 +307,28 @@ func diagnosticFailureCategory(diagnostic string) TerminationCategory {
 		return TerminationAuthenticationFailure
 	case strings.Contains(normalized, "model") && strings.Contains(normalized, "not available"):
 		return TerminationReviewerUnavailable
-	case strings.Contains(normalized, "rate limit"), strings.Contains(normalized, "too many requests"):
+	case isTransportDiagnostic(normalized):
 		return TerminationTransportFailure
 	default:
 		return TerminationUnknownFailure
 	}
+}
+
+func isTransportDiagnostic(normalized string) bool {
+	fragments := []string{
+		"rate limit", "too many requests",
+		"connection refused", "connection reset", "connection closed",
+		"network unreachable", "network is unreachable", "no route to host",
+		"temporary failure in name resolution", "dial tcp", "tls handshake timeout",
+		"i/o timeout", "request timeout", "request timed out", "upstream timeout",
+		"internal server error", "bad gateway", "service unavailable", "gateway timeout",
+	}
+	for _, fragment := range fragments {
+		if strings.Contains(normalized, fragment) {
+			return true
+		}
+	}
+	return false
 }
 
 func attemptOutcomeForTermination(category TerminationCategory) AttemptOutcome {

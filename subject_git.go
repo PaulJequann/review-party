@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
-	"sort"
 	"strings"
 )
 
@@ -65,23 +64,6 @@ func resolveRepositoryRoot(repository string) (string, error) {
 		return "", fmt.Errorf("make repository root absolute: %w", err)
 	}
 	return repositoryRoot, nil
-}
-
-func changedPaths(repositoryRoot, base string, untracked []byte) ([]string, error) {
-	tracked, err := gitOutput(repositoryRoot, "diff", "--name-only", "-z", base, "--")
-	if err != nil {
-		return nil, fmt.Errorf("list tracked working changes: %w", err)
-	}
-	unique := make(map[string]struct{})
-	for _, path := range append(splitNUL(tracked), splitNUL(untracked)...) {
-		unique[path] = struct{}{}
-	}
-	paths := make([]string, 0, len(unique))
-	for path := range unique {
-		paths = append(paths, path)
-	}
-	sort.Strings(paths)
-	return paths, nil
 }
 
 func gitOutput(repository string, args ...string) ([]byte, error) {

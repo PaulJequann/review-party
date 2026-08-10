@@ -119,6 +119,23 @@ func TestContextTerminationClassificationSurvivesRecordTranslation(t *testing.T)
 	}
 }
 
+func TestDiagnosticFailureCategoryRecognizesTransportFailures(t *testing.T) {
+	for _, diagnostic := range []string{
+		"dial tcp: connection refused",
+		"read: connection reset by peer",
+		"network is unreachable",
+		"upstream request timed out",
+		"HTTP 503 Service Unavailable",
+	} {
+		if got := diagnosticFailureCategory(diagnostic); got != TerminationTransportFailure {
+			t.Errorf("diagnostic %q classified as %q", diagnostic, got)
+		}
+	}
+	if got := diagnosticFailureCategory("provider internal bookkeeping failed"); got != TerminationUnknownFailure {
+		t.Fatalf("unknown diagnostic classified as %q", got)
+	}
+}
+
 func assertAttemptOutcome(t *testing.T, execution attemptExecution, want AttemptOutcome) {
 	t.Helper()
 	if execution.Outcome != want {
