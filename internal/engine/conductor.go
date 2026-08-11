@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reviewparty/internal/artifact"
 	"time"
 )
 
@@ -24,6 +25,7 @@ type Conductor struct {
 	attemptDeadline time.Duration
 	now             func() time.Time
 	buildProvenance func() RuntimeProvenance
+	artifacts       *artifact.Store
 }
 
 func New(config Config) (*Conductor, error) {
@@ -45,7 +47,12 @@ func New(config Config) (*Conductor, error) {
 	if err != nil {
 		return nil, err
 	}
-	return newConductorWithProfiles(store, reviewers, newProfileLibrary(config.GlobalProfileDirectory), config.AttemptDeadline), nil
+	conductor := newConductorWithProfiles(store, reviewers, newProfileLibrary(config.GlobalProfileDirectory), config.AttemptDeadline)
+	conductor.artifacts, err = artifact.NewStore(filepath.Dir(config.RecordDirectory))
+	if err != nil {
+		return nil, err
+	}
+	return conductor, nil
 }
 
 func newConductor(store recordStore, executors map[string]attemptExecutor, deadline time.Duration) *Conductor {
@@ -246,9 +253,10 @@ func (conductor *Conductor) executePass(ctx context.Context, pass passExecution)
 	started := conductor.now().UTC()
 	attemptContext, cancel := context.WithTimeout(ctx, conductor.attemptDeadline)
 	defer cancel()
+	prompt := pass.profile.prompt(record.Subject)
 	execution := pass.executor.Execute(attemptContext, attemptSpec{
 		Repository: record.Subject.Repository,
-		Prompt:     pass.profile.prompt(record.Subject),
+		Prompt:     prompt,
 		Candidate:  pass.profile.reviewer.candidate,
 	})
 	completed := conductor.now().UTC()
@@ -271,17 +279,14 @@ func (conductor *Conductor) executePass(ctx context.Context, pass passExecution)
 		termination := terminationForAttempt(execution, outcome, parseErr)
 		record.Termination = &termination
 	}
-	record.Passes[0].Attempts = append(record.Passes[0].Attempts, AttemptRecord{
-		Number:      1,
-		Outcome:     outcome,
-		Provenance:  resolvedProvenance(pass.profile.reviewer.candidate, execution),
-		Diagnostic:  execution.Diagnostic,
-		RawOutput:   boundedAttemptOutput(execution.AssistantText),
-		StartedAt:   started,
-		CompletedAt: completed,
-	})
+	attempt, artifactErr := conductor.buildAttempt(record.ID, prompt, pass.profile.reviewer.candidate, execution, outcome, started, completed)
+	if artifactErr != nil {
+		return record, artifactErr
+	}
+	record.Passes[0].Attempts = append(record.Passes[0].Attempts, attempt)
 	conductor.finalizeOperationalRecord(&record, pass.reviewStarted)
 	if err := conductor.store.Save(record); err != nil {
+		conductor.removeArtifacts(attempt.Artifacts)
 		return record, err
 	}
 	return record, nil

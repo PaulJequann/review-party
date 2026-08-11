@@ -44,13 +44,14 @@ type attemptSpec struct {
 }
 
 type attemptExecution struct {
-	AssistantText   string
-	Outcome         AttemptOutcome
-	Diagnostic      string
-	ResolvedModel   string
-	ResolvedEffort  string
-	FailureCategory TerminationCategory
-	FailurePhase    ExecutionPhase
+	AssistantText     string
+	ArtifactTruncated bool
+	Outcome           AttemptOutcome
+	Diagnostic        string
+	ResolvedModel     string
+	ResolvedEffort    string
+	FailureCategory   TerminationCategory
+	FailurePhase      ExecutionPhase
 }
 
 type attemptExecutor interface {
@@ -273,6 +274,7 @@ func finalizeHarnessRun(run commandRun, decoded decodedHarnessOutput, harness st
 func overflowExecution(run commandRun, harness string) attemptExecution {
 	execution := failedExecution(AttemptInvalidResult, TerminationMalformedOutput, PhaseOutputCapture, harness+" output exceeded the capture limit")
 	execution.AssistantText = string(run.Stdout)
+	execution.ArtifactTruncated = true
 	return execution
 }
 

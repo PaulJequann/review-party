@@ -25,6 +25,26 @@ result contract does not require every agent to use the same wire protocol.
   and validated results, but repository instructions and the caller decide
   whether a finding blocks delivery or whether remediation is authorized.
 
+## Dogfooding
+
+For a bounded local dogfood Review of this repository, use the configured
+OpenCode Muse selection. It is the accepted fast feedback path; do not silently
+replace it with Grok or another model:
+
+```sh
+go run ./cmd/review-party review bugs --repo . --reviewer opencode \
+  --model meta/muse-spark-1.2-contributor --deadline 3m \
+  --records scratch/dogfood-records --format json
+```
+
+- Inspect the persisted record with the same `--records` directory and
+  `--format json`; verify the recorded Reviewer/model provenance and result
+  contract revision.
+- Treat an unavailable, malformed, or timed-out Muse run as Incomplete. A
+  different Reviewer or model requires explicit caller authorization.
+- Keep dogfood records and temporary builds under `scratch/`; they are evidence
+  for the current session, not durable repository records.
+
 ## No Deletions (Absolute)
 
 You may **not** delete any file or directory without explicit user approval for

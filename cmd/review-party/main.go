@@ -117,6 +117,7 @@ func runInspect(ctx context.Context, arguments []string, stdout, stderr io.Write
 	flags.SetOutput(stderr)
 	format := flags.String("format", "human", "Output format: human or json")
 	records := flags.String("records", "", "Review Record directory")
+	verifyArtifacts := flags.Bool("verify-artifacts", false, "Verify referenced artifact files")
 	if err := flags.Parse(remaining); err != nil {
 		return 2
 	}
@@ -134,6 +135,12 @@ func runInspect(ctx context.Context, arguments []string, stdout, stderr io.Write
 	if err != nil {
 		fmt.Fprintf(stderr, "review-party: %v\n", err)
 		return 1
+	}
+	if *verifyArtifacts {
+		if err := conductor.VerifyArtifacts(record); err != nil {
+			fmt.Fprintf(stderr, "review-party: verify artifacts: %v\n", err)
+			return 1
+		}
 	}
 	if err := printRecord(stdout, record, *format); err != nil {
 		fmt.Fprintf(stderr, "review-party: %v\n", err)
@@ -158,7 +165,7 @@ func printRecord(output io.Writer, record model.ReviewRecord, format string) err
 func printHumanRecord(output io.Writer, record model.ReviewRecord) {
 	findings := 0
 	if record.Result != nil {
-		findings = record.Result.FindingCount
+		findings = record.Result.FindingCount()
 	}
 	fmt.Fprintf(output, "review %s\n", record.ID)
 	provenance := latestProvenance(record)
@@ -169,6 +176,7 @@ func printHumanRecord(output io.Writer, record model.ReviewRecord) {
 	if record.Result != nil {
 		fmt.Fprintln(output, record.Result.Raw)
 	}
+	printArtifactReferences(output, record)
 	if record.Termination != nil {
 		fmt.Fprintf(output, "incomplete: %s at %s: %s\n", record.Termination.Category, record.Termination.Phase, record.Termination.Message)
 	} else if record.IncompleteCause != "" {
@@ -210,6 +218,6 @@ func printUsage(output io.Writer) {
 	fmt.Fprintln(output, "  review-party config path|show [--config PATH]")
 	fmt.Fprintf(output, "  review-party explain PROFILE [--repo PATH] [--reviewer %s] [--model MODEL] [--effort EFFORT] [--format human|json]\n", strings.Join(engine.SupportedReviewers(), "|"))
 	fmt.Fprintf(output, "  review-party review [PROFILE] [--reviewer %s] [--model MODEL] [--effort EFFORT] [--config PATH] [--repo PATH] [--format human|json]\n", strings.Join(engine.SupportedReviewers(), "|"))
-	fmt.Fprintln(output, "  review-party inspect REVIEW_ID [--format human|json]")
+	fmt.Fprintln(output, "  review-party inspect REVIEW_ID [--format human|json] [--verify-artifacts]")
 	fmt.Fprintln(output, "  review-party init [--repo PATH] [--global]")
 }

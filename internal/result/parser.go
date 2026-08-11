@@ -14,7 +14,7 @@ const (
 	MaxResultSize = 24_576
 )
 
-var findingHeader = regexp.MustCompile(`(?m)^\d+\. (MEDIUM|HIGH|CRITICAL) \| [^|]+ \| .+$`)
+var findingHeader = regexp.MustCompile(`(?m)^(\d+)\. (MEDIUM|HIGH|CRITICAL) \| ([^|]+) \| (.+)$`)
 
 func parseReviewResult(assistantText string) (model.ReviewResult, error) {
 	review, err := extractLastReview(assistantText)
@@ -66,25 +66,26 @@ func parseCleanReview(review string, body []string) (model.ReviewResult, error) 
 	if body[1] != "summary: No actionable findings." {
 		return model.ReviewResult{}, errors.New("clean review contains unexpected content")
 	}
-	return model.ReviewResult{Status: model.ResultClean, Summary: "No actionable findings.", Raw: review}, nil
+	return model.ReviewResult{Status: model.ResultClean, Summary: "No actionable findings.", Findings: []model.Finding{}, Raw: review}, nil
 }
 
 func parseFindings(review string, body []string) (model.ReviewResult, error) {
 	if countExact(body, "status: findings") != 1 || countExact(body, "status: clean") != 0 {
 		return model.ReviewResult{}, errors.New("findings review has contradictory status")
 	}
-	headerLocations := findingHeader.FindAllStringIndex(review, -1)
+	headerLocations := findingHeader.FindAllStringSubmatchIndex(review, -1)
 	if err := validateFindingCount(headerLocations); err != nil {
 		return model.ReviewResult{}, err
 	}
-	if err := validateFindingSections(review, headerLocations); err != nil {
+	findings, err := parseFindingSections(review, headerLocations)
+	if err != nil {
 		return model.ReviewResult{}, err
 	}
 	return model.ReviewResult{
-		Status:       model.ResultFindings,
-		Summary:      fmt.Sprintf("%d actionable finding(s).", len(headerLocations)),
-		FindingCount: len(headerLocations),
-		Raw:          review,
+		Status:   model.ResultFindings,
+		Summary:  fmt.Sprintf("%d actionable finding(s).", len(findings)),
+		Findings: findings,
+		Raw:      review,
 	}, nil
 }
 
@@ -94,22 +95,6 @@ func validateFindingCount(locations [][]int) error {
 	}
 	if len(locations) > 8 {
 		return errors.New("findings review must contain one to eight findings")
-	}
-	return nil
-}
-
-func validateFindingSections(review string, locations [][]int) error {
-	for index, location := range locations {
-		end := len(review)
-		if index+1 < len(locations) {
-			end = locations[index+1][0]
-		}
-		section := review[location[0]:end]
-		for _, field := range []string{"Failure:", "Evidence:", "Fix:", "Test:"} {
-			if strings.Count(section, "\n"+field) != 1 {
-				return fmt.Errorf("each finding must contain one %s field", field)
-			}
-		}
 	}
 	return nil
 }

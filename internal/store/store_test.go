@@ -48,6 +48,33 @@ func TestFileRecordStoreLoadsUnversionedReviewRecord(t *testing.T) {
 	}
 }
 
+func TestFileRecordStoreLoadsCountOnlyResultFromCanonicalV1(t *testing.T) {
+	directory := t.TempDir()
+	id := ReviewID("rp_1723200000000_0123456789abcdef")
+	payload := `{
+  "schema_version": 2,
+  "id": "rp_1723200000000_0123456789abcdef",
+  "lifecycle": "completed",
+  "subject": {"kind":"working-changes","repository":"/repo","identity":"subject","changed_paths":[],"patch":"diff"},
+  "profile_revision": {"result_contract_revision":"canonical-v1"},
+  "profile_snapshot": {},
+  "passes": [],
+  "result": {"status":"findings","summary":"1 actionable finding(s).","finding_count":1,"raw":"BEGIN_REVIEW\\nstatus: findings\\nEND_REVIEW"},
+  "created_at": "2026-08-09T12:00:00Z",
+  "updated_at": "2026-08-09T12:00:01Z"
+}`
+	writeRecordFixture(t, directory, id, payload)
+	store := mustNewFileRecordStore(t, directory)
+
+	record, err := store.Load(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record.Result == nil || record.Result.Findings != nil || record.Result.FindingCount() != 1 {
+		t.Fatalf("result = %#v, want count-only canonical-v1 result", record.Result)
+	}
+}
+
 func TestFileRecordStoreRejectsNewerSchema(t *testing.T) {
 	directory := t.TempDir()
 	id := ReviewID("rp_1723200000000_0123456789abcdef")

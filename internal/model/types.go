@@ -1,6 +1,9 @@
 package model
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 type ReviewID string
 
@@ -201,13 +204,22 @@ type ReviewerProvenance struct {
 }
 
 type AttemptRecord struct {
-	Number      int                `json:"number"`
-	Outcome     AttemptOutcome     `json:"outcome"`
-	Provenance  ReviewerProvenance `json:"provenance"`
-	Diagnostic  string             `json:"diagnostic,omitempty"`
-	RawOutput   string             `json:"raw_output,omitempty"`
-	StartedAt   time.Time          `json:"started_at"`
-	CompletedAt time.Time          `json:"completed_at"`
+	Number      int                 `json:"number"`
+	Outcome     AttemptOutcome      `json:"outcome"`
+	Provenance  ReviewerProvenance  `json:"provenance"`
+	Diagnostic  string              `json:"diagnostic,omitempty"`
+	RawOutput   string              `json:"raw_output,omitempty"`
+	Artifacts   []ArtifactReference `json:"artifacts,omitempty"`
+	StartedAt   time.Time           `json:"started_at"`
+	CompletedAt time.Time           `json:"completed_at"`
+}
+
+type ArtifactReference struct {
+	Kind      string `json:"kind"`
+	Path      string `json:"path"`
+	Size      int64  `json:"size"`
+	Digest    string `json:"digest"`
+	Truncated bool   `json:"truncated"`
 }
 
 type PassRecord struct {
@@ -224,10 +236,78 @@ const (
 )
 
 type ReviewResult struct {
-	Status       ResultStatus `json:"status"`
-	Summary      string       `json:"summary"`
-	FindingCount int          `json:"finding_count"`
-	Raw          string       `json:"raw"`
+	Status   ResultStatus `json:"status"`
+	Summary  string       `json:"summary"`
+	Findings []Finding    `json:"findings,omitempty"`
+	Raw      string       `json:"raw"`
+
+	legacyFindingCount int
+}
+
+type Finding struct {
+	Ordinal  int    `json:"ordinal"`
+	Severity string `json:"severity"`
+	Category string `json:"category"`
+	Location string `json:"location"`
+	Failure  string `json:"failure"`
+	Evidence string `json:"evidence"`
+	Fix      string `json:"fix"`
+	Test     string `json:"test"`
+}
+
+func (result ReviewResult) FindingCount() int {
+	if result.Findings != nil {
+		return len(result.Findings)
+	}
+	return result.legacyFindingCount
+}
+
+func (result ReviewResult) MarshalJSON() ([]byte, error) {
+	type reviewResultJSON struct {
+		Status       ResultStatus `json:"status"`
+		Summary      string       `json:"summary"`
+		FindingCount int          `json:"finding_count"`
+		Findings     *[]Finding   `json:"findings,omitempty"`
+		Raw          string       `json:"raw"`
+	}
+	var findings *[]Finding
+	if result.Findings != nil {
+		findings = &result.Findings
+	}
+	return json.Marshal(reviewResultJSON{
+		Status:       result.Status,
+		Summary:      result.Summary,
+		FindingCount: result.FindingCount(),
+		Findings:     findings,
+		Raw:          result.Raw,
+	})
+}
+
+func (result *ReviewResult) UnmarshalJSON(payload []byte) error {
+	type reviewResultJSON struct {
+		Status       ResultStatus    `json:"status"`
+		Summary      string          `json:"summary"`
+		FindingCount int             `json:"finding_count"`
+		Findings     json.RawMessage `json:"findings"`
+		Raw          string          `json:"raw"`
+	}
+	var decoded reviewResultJSON
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		return err
+	}
+	result.Status = decoded.Status
+	result.Summary = decoded.Summary
+	result.Raw = decoded.Raw
+	if decoded.Findings == nil || string(decoded.Findings) == "null" {
+		result.Findings = nil
+		result.legacyFindingCount = decoded.FindingCount
+		return nil
+	}
+	if err := json.Unmarshal(decoded.Findings, &result.Findings); err != nil {
+		return err
+	}
+	result.legacyFindingCount = 0
+	return nil
 }
 
 type ReviewRecord struct {

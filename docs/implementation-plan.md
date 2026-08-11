@@ -172,8 +172,8 @@ manual inspection, and one-time compatibility proof under acceptance checks.
 | Behavior | Plausible defect | Boundary | Observable result | Decision |
 | --- | --- | --- | --- | --- |
 | Incomplete Reviews retain a typed cause and phase | An error string is persisted while its category is lost or misclassified | Conductor Review/Inspect Interface | JSON inspection distinguishes deadline, cancellation, availability, transport, and invalid-result failures | Test |
-| Findings are machine-readable without scraping formatted output | The parser counts headers but assigns one finding's evidence or location to another | Canonical result parser | Returned `ReviewResult.Findings` contains the exact validated fields in order | Test |
-| Diagnostic artifacts support a Review without replacing its result | The record points to a missing, partial, or different artifact | Real filesystem artifact implementation | Opening a recorded reference returns bytes matching its size and digest or a precise integrity error | Test |
+| Findings are machine-readable without scraping formatted output | The parser cross-associates a finding's evidence, location, correction, or regression-test intent | Canonical result parser | Returned `ReviewResult.Findings` contains the exact validated fields in source order | Test |
+| Diagnostic artifacts support a Review without replacing its result | The record points to missing, partial, tampered, or root-escaping evidence | Real filesystem artifact implementation | Opening a recorded reference returns bytes matching its size and digest or a precise integrity error | Test |
 | SQLite is authoritative for a persisted Review | A multi-table write partially succeeds or reconstructs a different Review Record | Real SQLite ledger implementation | A fresh ledger load returns the same aggregate; failed writes expose no partial Review | Test |
 | History filters use effective recorded provenance | A query consults current configuration or profile defaults instead of the recorded run | Public CLI over real SQLite | History returns only records whose stored reviewer/profile/lifecycle matches the filter | Test |
 | A committed Subject is reviewed against its recorded head state | The diff is frozen but repository tools inspect the caller's newer working tree | Public Conductor Interface with a real temporary Git repository | The harness fixture reads the historical head content while the caller worktree remains unchanged | Test |
@@ -602,7 +602,7 @@ The Review Record is the local execution trace for this phase.
 
 ## Slice 10 — Structured canonical Findings
 
-Status: **Pending**
+Status: **Implemented locally**
 
 Depends on: Slice 9.
 
@@ -625,16 +625,16 @@ history, replay, and evals never have to scrape `ReviewResult.Raw`.
 
 ### Implementation checklist
 
-- [ ] Refine the Slice 10 test-intent row before writing tests.
-- [ ] Define `Finding` fields for ordinal or stable within-result identity,
+- [x] Refine the Slice 10 test-intent row before writing tests.
+- [x] Define `Finding` fields for ordinal or stable within-result identity,
   severity, category, location, failure, evidence, smallest safe correction,
   and regression-test intent.
-- [ ] Decide and document whether location is represented as one validated
+- [x] Decide and document whether location is represented as one validated
   string or separate path/line fields. Do not guess at language-specific spans.
-- [ ] Parse every validated finding section into exactly one structured value.
-- [ ] Reject duplicated, missing, or cross-associated fields.
-- [ ] Render human output and JSON from the same structured result.
-- [ ] Preserve backward loading of old count/raw-only Review Records.
+- [x] Parse every validated finding section into exactly one structured value.
+- [x] Reject duplicated, missing, or cross-associated fields.
+- [x] Render human output and JSON from the same structured result.
+- [x] Preserve backward loading of old count/raw-only Review Records.
 
 ### Smallest purposeful test set
 
@@ -646,11 +646,17 @@ history, replay, and evals never have to scrape `ReviewResult.Raw`.
 
 ### Acceptance checklist
 
-- [ ] A caller can enumerate Findings from inspected JSON without parsing text.
-- [ ] Existing canonical-v1 records remain inspectable.
-- [ ] A real bounded Review demonstrates structured Findings or a structurally
+- [x] A caller can enumerate Findings from inspected JSON without parsing text.
+- [x] Existing canonical-v1 records remain inspectable.
+- [x] A real bounded Review demonstrates structured Findings or a structurally
   valid clean collection.
 - [ ] Focused verification and CodeScene gates pass.
+
+Local acceptance evidence (uncommitted): OpenCode Muse
+`meta/muse-spark-1.2-contributor` completed bounded Bugs Review
+`rp_1786417505648_4ffb4ccf9e7eed00` on 2026-08-10. Its persisted `inspect`
+JSON recorded `canonical-v2`, `status: clean`, `finding_count: 0`, and
+`findings: []`.
 
 ### Stop rule
 
@@ -664,7 +670,7 @@ rendering, and parser/Conductor tests.
 
 ## Slice 11 — Filesystem artifact evidence
 
-Status: **Pending**
+Status: **Implemented locally**
 
 Depends on: Slices 9-10.
 
@@ -691,18 +697,18 @@ result.
 
 ### Implementation checklist
 
-- [ ] Refine the Slice 11 test-intent row before writing tests.
-- [ ] Design the on-disk layout under the existing configured record/state root,
+- [x] Refine the Slice 11 test-intent row before writing tests.
+- [x] Design the on-disk layout under the existing configured record/state root,
   for example `artifacts/<review-id>/<attempt-number>/...`.
-- [ ] Add an `ArtifactReference` to the relevant Attempt Record.
-- [ ] Publish via a temporary file, sync where required by the current record
+- [x] Add an `ArtifactReference` to the relevant Attempt Record.
+- [x] Publish via a temporary file, sync where required by the current record
   durability contract, restrict permissions, then atomically rename.
-- [ ] Record a digest and byte count over the published bytes.
-- [ ] Define cleanup behavior when artifact publication succeeds but Review
+- [x] Record a digest and byte count over the published bytes.
+- [x] Define cleanup behavior when artifact publication succeeds but Review
   Record publication fails. Do not delete pre-existing user artifacts.
-- [ ] Add an inspection path that reports references and integrity failures;
+- [x] Add an inspection path that reports references and integrity failures;
   avoid printing large artifacts by default.
-- [ ] Document retention and sensitivity in the README.
+- [x] Document retention and sensitivity in the README.
 
 ### Smallest purposeful test set
 
@@ -714,12 +720,12 @@ result.
 
 ### Acceptance checklist
 
-- [ ] Decoder failure evidence is inspectable without parsing the database or
+- [x] Decoder failure evidence is inspectable without parsing the database or
   record file manually.
-- [ ] Artifact paths cannot escape the configured root through traversal or
+- [x] Artifact paths cannot escape the configured root through traversal or
   symlinks.
-- [ ] Record JSON remains reasonably sized.
-- [ ] Focused filesystem, Conductor, and CLI tests plus CodeScene gates pass.
+- [x] Record JSON remains reasonably sized.
+- [x] Focused filesystem, Conductor, and CLI tests plus CodeScene gates pass.
 
 ### Stop rule
 

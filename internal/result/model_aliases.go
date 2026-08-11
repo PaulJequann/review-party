@@ -3,6 +3,7 @@ package result
 import "reviewparty/internal/model"
 
 type ReviewResult = model.ReviewResult
+type Finding = model.Finding
 type ResultStatus = model.ResultStatus
 type ReviewSubject = model.ReviewSubject
 

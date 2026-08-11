@@ -2,10 +2,12 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"reviewparty/internal/artifact"
 	"strings"
 	"sync"
 	"testing"
@@ -129,9 +131,63 @@ func TestReviewPreservesValidFindings(t *testing.T) {
 	if record.Result.Status != ResultFindings {
 		t.Fatalf("status = %q", record.Result.Status)
 	}
-	if record.Result.FindingCount != 1 {
+	if record.Result.FindingCount() != 1 {
 		t.Fatalf("result = %#v, want one finding", record.Result)
 	}
+}
+
+func TestRecordSaveFailureRemovesPublishedAttemptArtifacts(t *testing.T) {
+	repository := changedTestRepository(t)
+	store := &failFinalRecordStore{}
+	conductor := newConductor(store, map[string]attemptExecutor{defaultReviewer: successfulExecutor(cleanReview)}, time.Second)
+	artifactRoot := t.TempDir()
+	conductor.artifacts = mustNewArtifactStore(t, artifactRoot)
+
+	_, err := conductor.Review(context.Background(), testSelection(repository))
+	if err == nil || !strings.Contains(err.Error(), "final record save") {
+		t.Fatalf("error = %v, want final record save failure", err)
+	}
+	entries, err := filepath.Glob(filepath.Join(artifactRoot, "artifacts", "*", "*", "*.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("artifacts = %v, want cleanup after failed record save", entries)
+	}
+}
+
+func TestOverflowedExecutionMarksAssistantArtifactTruncated(t *testing.T) {
+	conductor := &Conductor{artifacts: mustNewArtifactStore(t, t.TempDir())}
+	attempt, err := conductor.buildAttempt("rp_1723200000000_0123456789abcdef", "prompt", reviewerCandidate{}, attemptExecution{AssistantText: "captured prefix", ArtifactTruncated: true}, AttemptInvalidResult, time.Time{}, time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(attempt.Artifacts) != 2 || !attempt.Artifacts[1].Truncated || attempt.RawOutput != "" {
+		t.Fatalf("attempt = %#v, want truncated assistant artifact and no raw record output", attempt)
+	}
+}
+
+type failFinalRecordStore struct{ saves int }
+
+func (store *failFinalRecordStore) Save(ReviewRecord) error {
+	store.saves++
+	if store.saves == 3 {
+		return errors.New("final record save failed")
+	}
+	return nil
+}
+
+func (*failFinalRecordStore) Load(ReviewID) (ReviewRecord, error) {
+	return ReviewRecord{}, errors.New("not found")
+}
+
+func mustNewArtifactStore(t *testing.T, root string) *artifact.Store {
+	t.Helper()
+	store, err := artifact.NewStore(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return store
 }
 
 func TestMalformedOutputIsIncompleteNeverClean(t *testing.T) {

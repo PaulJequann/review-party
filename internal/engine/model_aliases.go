@@ -27,6 +27,7 @@ type RuntimeProvenance = model.RuntimeProvenance
 type ReviewTimings = model.ReviewTimings
 type ReviewerProvenance = model.ReviewerProvenance
 type AttemptRecord = model.AttemptRecord
+type ArtifactReference = model.ArtifactReference
 type PassRecord = model.PassRecord
 type ResultStatus = model.ResultStatus
 type ReviewResult = model.ReviewResult

@@ -88,8 +88,11 @@ future transport option rather than part of the current execution path.
 ## Operational Review Records
 
 New Review Records use schema version 2 and retain machine-readable operational
-facts alongside the canonical result. JSON inspection includes the exact
-runtime version/VCS information available from the built binary, immutable
+facts alongside the canonical result. Canonical-v2 results expose an ordered
+`findings` collection with each Reviewer claim's severity, category, validated
+location string, failure, evidence, smallest safe correction, and regression
+test intent; `finding_count` is derived from that collection. JSON inspection
+also includes the exact runtime version/VCS information available from the built binary, immutable
 Subject size facts, owned-phase and total timings, and a categorical termination
 with its phase when a Review is incomplete. Review lifecycle remains limited to
 Pending, Running, Completed, and Incomplete; execution phases are diagnostic
@@ -100,6 +103,18 @@ deadlines, cancellation, transport failures, malformed harness output, result
 validation failures, and unknown failures without requiring callers to parse a
 diagnostic string. Existing unversioned filesystem records remain inspectable
 as legacy schema-v1 records and retain their original `incomplete_cause`.
+Earlier canonical-v1 count/raw-only results remain inspectable as well.
+
+## Artifact evidence
+
+New Attempts keep bounded constructed prompts and decoded assistant text as
+private files under the Review Party state root, while their Review Record holds
+only relative paths, byte counts, SHA-256 digests, and truncation state. Use
+`inspect --format json` for automation or ordinary `inspect` to see references;
+add `--verify-artifacts` to reopen and validate every referenced file. Artifact
+contents are intentionally not printed. The filesystem artifact store rejects
+paths outside its configured root and reports missing or digest-mismatched files
+as integrity failures. Treat artifacts as sensitive review context.
 
 ## Review Profiles
 
