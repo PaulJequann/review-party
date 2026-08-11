@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"io"
 
-	"reviewparty"
+	"reviewparty/internal/engine"
 )
 
 func runProfile(ctx context.Context, arguments []string, stdout, stderr io.Writer) int {
@@ -29,7 +29,7 @@ func runInit(arguments []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "review-party: init accepts no positional arguments")
 		return 2
 	}
-	result, err := reviewparty.InitializeProfiles(reviewparty.ProfileInitialization{
+	result, err := engine.InitializeProfiles(engine.ProfileInitialization{
 		Repository: *repository,
 		Global:     *global,
 	})
@@ -41,7 +41,7 @@ func runInit(arguments []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-func printInitialization(output io.Writer, result reviewparty.ProfileInitializationResult) {
+func printInitialization(output io.Writer, result engine.ProfileInitializationResult) {
 	fmt.Fprintf(output, "profile library %s\n", result.Directory)
 	for _, path := range result.Created {
 		fmt.Fprintf(output, "created  %s\n", path)

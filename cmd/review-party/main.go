@@ -12,7 +12,8 @@ import (
 	"syscall"
 	"time"
 
-	"reviewparty"
+	"reviewparty/internal/engine"
+	"reviewparty/internal/model"
 )
 
 func main() {
@@ -63,8 +64,8 @@ func runReview(ctx context.Context, arguments []string, stdout, stderr io.Writer
 	records := flags.String("records", "", "Review Record directory")
 	deadline := flags.Duration("deadline", 10*time.Minute, "Attempt deadline")
 	configuration := flags.String("config", defaultUserConfigurationPath(), "User configuration path")
-	reviewer := flags.String("reviewer", "", "Reviewer adapter: "+strings.Join(reviewparty.SupportedReviewers(), ", ")+"; empty uses configured/Profile default")
-	model := flags.String("model", "", "Explicit model for the selected Reviewer")
+	reviewer := flags.String("reviewer", "", "Reviewer adapter: "+strings.Join(engine.SupportedReviewers(), ", ")+"; empty uses configured/Profile default")
+	modelName := flags.String("model", "", "Explicit model for the selected Reviewer")
 	effort := flags.String("effort", "", "Explicit reasoning effort for the selected Reviewer")
 	if err := flags.Parse(arguments); err != nil {
 		return 2
@@ -74,7 +75,7 @@ func runReview(ctx context.Context, arguments []string, stdout, stderr io.Writer
 		return 2
 	}
 
-	conductor, err := reviewparty.New(reviewparty.Config{
+	conductor, err := engine.New(engine.Config{
 		RecordDirectory:       *records,
 		AttemptDeadline:       *deadline,
 		UserConfigurationPath: *configuration,
@@ -83,12 +84,12 @@ func runReview(ctx context.Context, arguments []string, stdout, stderr io.Writer
 		fmt.Fprintf(stderr, "review-party: %v\n", err)
 		return 1
 	}
-	record, err := conductor.Review(ctx, reviewparty.ReviewSelection{
+	record, err := conductor.Review(ctx, model.ReviewSelection{
 		Repository: *repository,
-		Subject:    reviewparty.WorkingChanges(),
+		Subject:    model.WorkingChanges(),
 		Profile:    profile,
 		Reviewer:   *reviewer,
-		Model:      *model,
+		Model:      *modelName,
 		Effort:     *effort,
 	})
 	if err != nil {
@@ -99,7 +100,7 @@ func runReview(ctx context.Context, arguments []string, stdout, stderr io.Writer
 		fmt.Fprintf(stderr, "review-party: %v\n", err)
 		return 1
 	}
-	if record.Lifecycle == reviewparty.LifecycleIncomplete {
+	if record.Lifecycle == model.LifecycleIncomplete {
 		return 2
 	}
 	return 0
@@ -111,7 +112,7 @@ func runInspect(ctx context.Context, arguments []string, stdout, stderr io.Write
 		fmt.Fprintln(stderr, "review-party: inspect requires a review id")
 		return 2
 	}
-	id := reviewparty.ReviewID(idValue)
+	id := model.ReviewID(idValue)
 	flags := flag.NewFlagSet("inspect", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	format := flags.String("format", "human", "Output format: human or json")
@@ -124,7 +125,7 @@ func runInspect(ctx context.Context, arguments []string, stdout, stderr io.Write
 		return 2
 	}
 
-	conductor, err := reviewparty.New(reviewparty.Config{RecordDirectory: *records})
+	conductor, err := engine.New(engine.Config{RecordDirectory: *records})
 	if err != nil {
 		fmt.Fprintf(stderr, "review-party: %v\n", err)
 		return 1
@@ -141,7 +142,7 @@ func runInspect(ctx context.Context, arguments []string, stdout, stderr io.Write
 	return 0
 }
 
-func printRecord(output io.Writer, record reviewparty.ReviewRecord, format string) error {
+func printRecord(output io.Writer, record model.ReviewRecord, format string) error {
 	if format == "json" {
 		encoder := json.NewEncoder(output)
 		encoder.SetIndent("", "  ")
@@ -154,7 +155,7 @@ func printRecord(output io.Writer, record reviewparty.ReviewRecord, format strin
 	return nil
 }
 
-func printHumanRecord(output io.Writer, record reviewparty.ReviewRecord) {
+func printHumanRecord(output io.Writer, record model.ReviewRecord) {
 	findings := 0
 	if record.Result != nil {
 		findings = record.Result.FindingCount
@@ -176,8 +177,8 @@ func printHumanRecord(output io.Writer, record reviewparty.ReviewRecord) {
 	fmt.Fprintf(output, "inspect: review-party inspect %s\n", record.ID)
 }
 
-func latestProvenance(record reviewparty.ReviewRecord) reviewparty.ReviewerProvenance {
-	provenance := reviewparty.ReviewerProvenance{
+func latestProvenance(record model.ReviewRecord) model.ReviewerProvenance {
+	provenance := model.ReviewerProvenance{
 		ReviewerID: record.ProfileRevision.ReviewerID,
 		Model:      record.ProfileRevision.Model,
 		Effort:     record.ProfileRevision.Effort,
@@ -207,8 +208,8 @@ func printUsage(output io.Writer) {
 	fmt.Fprintln(output, "usage:")
 	fmt.Fprintln(output, "  review-party profiles [--repo PATH] [--format human|json]")
 	fmt.Fprintln(output, "  review-party config path|show [--config PATH]")
-	fmt.Fprintf(output, "  review-party explain PROFILE [--repo PATH] [--reviewer %s] [--model MODEL] [--effort EFFORT] [--format human|json]\n", strings.Join(reviewparty.SupportedReviewers(), "|"))
-	fmt.Fprintf(output, "  review-party review [PROFILE] [--reviewer %s] [--model MODEL] [--effort EFFORT] [--config PATH] [--repo PATH] [--format human|json]\n", strings.Join(reviewparty.SupportedReviewers(), "|"))
+	fmt.Fprintf(output, "  review-party explain PROFILE [--repo PATH] [--reviewer %s] [--model MODEL] [--effort EFFORT] [--format human|json]\n", strings.Join(engine.SupportedReviewers(), "|"))
+	fmt.Fprintf(output, "  review-party review [PROFILE] [--reviewer %s] [--model MODEL] [--effort EFFORT] [--config PATH] [--repo PATH] [--format human|json]\n", strings.Join(engine.SupportedReviewers(), "|"))
 	fmt.Fprintln(output, "  review-party inspect REVIEW_ID [--format human|json]")
 	fmt.Fprintln(output, "  review-party init [--repo PATH] [--global]")
 }

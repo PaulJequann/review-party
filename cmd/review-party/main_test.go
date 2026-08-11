@@ -5,15 +5,16 @@ import (
 	"strings"
 	"testing"
 
-	"reviewparty"
+	"reviewparty/internal/engine"
+	"reviewparty/internal/model"
 )
 
 func TestPrintRecordUsesActualAttemptProvenance(t *testing.T) {
-	record := reviewparty.ReviewRecord{
-		Lifecycle:       reviewparty.LifecycleCompleted,
-		ProfileRevision: reviewparty.ProfileRevision{ReviewerID: "copilot", Model: "auto", Effort: "auto"},
-		Passes: []reviewparty.PassRecord{{Attempts: []reviewparty.AttemptRecord{{
-			Provenance: reviewparty.ReviewerProvenance{ReviewerID: "copilot", Model: "gpt-5-mini", Effort: "high"},
+	record := model.ReviewRecord{
+		Lifecycle:       model.LifecycleCompleted,
+		ProfileRevision: model.ProfileRevision{ReviewerID: "copilot", Model: "auto", Effort: "auto"},
+		Passes: []model.PassRecord{{Attempts: []model.AttemptRecord{{
+			Provenance: model.ReviewerProvenance{ReviewerID: "copilot", Model: "gpt-5-mini", Effort: "high"},
 		}}}},
 	}
 	var output bytes.Buffer
@@ -28,7 +29,7 @@ func TestPrintRecordUsesActualAttemptProvenance(t *testing.T) {
 func TestUsageListsEverySupportedReviewer(t *testing.T) {
 	var output bytes.Buffer
 	printUsage(&output)
-	for _, reviewer := range reviewparty.SupportedReviewers() {
+	for _, reviewer := range engine.SupportedReviewers() {
 		if !strings.Contains(output.String(), reviewer) {
 			t.Fatalf("usage omits supported reviewer %q:\n%s", reviewer, output.String())
 		}

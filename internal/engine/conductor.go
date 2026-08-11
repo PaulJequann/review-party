@@ -1,0 +1,412 @@
+package engine
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"fmt"
+	"os"
+	"path/filepath"
+	"time"
+)
+
+type Config struct {
+	RecordDirectory        string
+	GlobalProfileDirectory string
+	AttemptDeadline        time.Duration
+	UserConfigurationPath  string
+}
+
+type Conductor struct {
+	store           recordStore
+	reviewers       reviewerCatalog
+	profiles        profileLibrary
+	attemptDeadline time.Duration
+	now             func() time.Time
+	buildProvenance func() RuntimeProvenance
+}
+
+func New(config Config) (*Conductor, error) {
+	if config.RecordDirectory == "" {
+		config.RecordDirectory = defaultRecordDirectory()
+	}
+	if config.AttemptDeadline <= 0 {
+		config.AttemptDeadline = 10 * time.Minute
+	}
+	store, err := newFileRecordStore(config.RecordDirectory)
+	if err != nil {
+		return nil, err
+	}
+	userConfiguration, err := loadUserConfiguration(config.UserConfigurationPath)
+	if err != nil {
+		return nil, err
+	}
+	reviewers, err := configureReviewerCatalog(defaultReviewerCatalog(), userConfiguration, config.UserConfigurationPath)
+	if err != nil {
+		return nil, err
+	}
+	return newConductorWithProfiles(store, reviewers, newProfileLibrary(config.GlobalProfileDirectory), config.AttemptDeadline), nil
+}
+
+func newConductor(store recordStore, executors map[string]attemptExecutor, deadline time.Duration) *Conductor {
+	return newConductorWithCatalog(store, catalogWithExecutors(executors), deadline)
+}
+
+func newConductorWithCatalog(store recordStore, reviewers reviewerCatalog, deadline time.Duration) *Conductor {
+	return newConductorWithProfiles(store, reviewers, profileLibrary{}, deadline)
+}
+
+func newConductorWithProfiles(store recordStore, reviewers reviewerCatalog, profiles profileLibrary, deadline time.Duration) *Conductor {
+	return &Conductor{
+		store:           store,
+		reviewers:       reviewers,
+		profiles:        profiles,
+		attemptDeadline: deadline,
+		now:             time.Now,
+		buildProvenance: currentRuntimeProvenance,
+	}
+}
+
+func (conductor *Conductor) Review(ctx context.Context, selection ReviewSelection) (ReviewRecord, error) {
+	if err := ctx.Err(); err != nil {
+		return ReviewRecord{}, err
+	}
+	reviewStarted := conductor.now().UTC()
+	prepared, err := conductor.prepareReview(selection)
+	if err != nil {
+		return ReviewRecord{}, err
+	}
+	record, err := conductor.pendingRecord(prepared.subject, prepared.profile, prepared.timings)
+	if err != nil {
+		return ReviewRecord{}, err
+	}
+	if err := conductor.store.Save(record); err != nil {
+		return ReviewRecord{}, err
+	}
+
+	record.Lifecycle = LifecycleRunning
+	record.UpdatedAt = conductor.now().UTC()
+	if err := conductor.store.Save(record); err != nil {
+		return record, err
+	}
+
+	executor := prepared.profile.reviewer.executor
+	availabilityStarted := conductor.now().UTC()
+	check := executor.Check(ctx, prepared.profile.reviewer.candidate)
+	record.Timings.AvailabilityCheckMS = elapsedMilliseconds(availabilityStarted, conductor.now().UTC())
+	if !check.Available {
+		termination := terminationForAvailability(check.Diagnostic)
+		return conductor.finishIncomplete(record, termination, reviewStarted)
+	}
+	return conductor.executePass(ctx, passExecution{
+		record:        record,
+		profile:       prepared.profile,
+		executor:      executor,
+		reviewStarted: reviewStarted,
+	})
+}
+
+type preparedReview struct {
+	subject ReviewSubject
+	profile compiledProfile
+	timings ReviewTimings
+}
+
+func (conductor *Conductor) prepareReview(selection ReviewSelection) (preparedReview, error) {
+	profileSelection := selection.ProfileSelection()
+	if err := conductor.validateExplicitReviewer(profileSelection); err != nil {
+		return preparedReview{}, err
+	}
+	timings := ReviewTimings{}
+	subjectStarted := conductor.now().UTC()
+	repository, err := resolveRepositoryRoot(selection.Repository)
+	timings.SubjectResolutionMS += elapsedMilliseconds(subjectStarted, conductor.now().UTC())
+	if err != nil {
+		return preparedReview{}, err
+	}
+	profileStarted := conductor.now().UTC()
+	profile, err := conductor.compileFilesystemProfile(profileSelection, repository)
+	timings.ProfileCompilationMS = elapsedMilliseconds(profileStarted, conductor.now().UTC())
+	if err != nil {
+		return preparedReview{}, err
+	}
+	subjectStarted = conductor.now().UTC()
+	subject, err := resolveSubject(repository, selection.Subject)
+	timings.SubjectResolutionMS += elapsedMilliseconds(subjectStarted, conductor.now().UTC())
+	if err != nil {
+		return preparedReview{}, err
+	}
+	return preparedReview{subject: subject, profile: profile, timings: timings}, nil
+}
+
+func (conductor *Conductor) Profiles(ctx context.Context) ([]ProfileSummary, error) {
+	return conductor.profilesAt(ctx, "")
+}
+
+func (conductor *Conductor) ProfilesForRepository(ctx context.Context, repository string) ([]ProfileSummary, error) {
+	root, err := resolveRepositoryRoot(repository)
+	if err != nil {
+		return nil, err
+	}
+	return conductor.profilesAt(ctx, root)
+}
+
+func (conductor *Conductor) profilesAt(ctx context.Context, repository string) ([]ProfileSummary, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return conductor.profileSummaries(repository)
+}
+
+func (conductor *Conductor) Explain(ctx context.Context, selection ProfileSelection) (ProfileExplanation, error) {
+	return conductor.explainAt(ctx, selection, "")
+}
+
+func (conductor *Conductor) ExplainForRepository(ctx context.Context, selection ProfileSelection, repository string) (ProfileExplanation, error) {
+	root, err := resolveRepositoryRoot(repository)
+	if err != nil {
+		return ProfileExplanation{}, err
+	}
+	return conductor.explainAt(ctx, selection, root)
+}
+
+func (conductor *Conductor) explainAt(ctx context.Context, selection ProfileSelection, repository string) (ProfileExplanation, error) {
+	if err := ctx.Err(); err != nil {
+		return ProfileExplanation{}, err
+	}
+	profile, err := conductor.compileFilesystemProfile(selection, repository)
+	if err != nil {
+		return ProfileExplanation{}, err
+	}
+	return ProfileExplanation{
+		ProfileRevision:    profile.revision,
+		ReviewerWasDefault: profile.reviewerWasDefault,
+		Instructions:       profile.snapshot.Instructions,
+	}, nil
+}
+
+func (conductor *Conductor) validateExplicitReviewer(selection ProfileSelection) error {
+	if selection.Reviewer == "" {
+		return nil
+	}
+	registration, err := conductor.reviewers.resolve(selection.Reviewer)
+	if err != nil {
+		return err
+	}
+	missing := missingCapabilities(restrictedReviewCapabilities(), registration.capabilities)
+	if len(missing) > 0 {
+		return UnsupportedCapabilitiesError{Profile: firstNonempty(selection.Profile, "bugs"), Reviewer: registration.candidate.ID, Missing: missing}
+	}
+	_, err = resolveReviewerModel(registration, selection.Model)
+	return err
+}
+
+func (conductor *Conductor) Inspect(_ context.Context, id ReviewID) (ReviewRecord, error) {
+	if !validReviewID(id) {
+		return ReviewRecord{}, fmt.Errorf("invalid review id %q", id)
+	}
+	return conductor.store.Load(id)
+}
+
+func (conductor *Conductor) pendingRecord(subject ReviewSubject, profile compiledProfile, timings ReviewTimings) (ReviewRecord, error) {
+	id, err := newReviewID(conductor.now())
+	if err != nil {
+		return ReviewRecord{}, err
+	}
+	now := conductor.now().UTC()
+	runtime := conductor.buildProvenance()
+	passes := make([]PassRecord, 0, len(profile.revision.Passes))
+	for _, planned := range profile.revision.Passes {
+		passes = append(passes, PassRecord{Name: planned.Name, Required: planned.Required, Attempts: []AttemptRecord{}})
+	}
+	return ReviewRecord{
+		SchemaVersion:   currentReviewRecordSchemaVersion,
+		ID:              id,
+		Lifecycle:       LifecyclePending,
+		Subject:         subject,
+		ProfileRevision: profile.revision,
+		ProfileSnapshot: profile.snapshot,
+		Passes:          passes,
+		Runtime:         &runtime,
+		Timings:         &timings,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}, nil
+}
+
+type passExecution struct {
+	record        ReviewRecord
+	profile       compiledProfile
+	executor      attemptExecutor
+	reviewStarted time.Time
+}
+
+func (conductor *Conductor) executePass(ctx context.Context, pass passExecution) (ReviewRecord, error) {
+	record := pass.record
+	started := conductor.now().UTC()
+	attemptContext, cancel := context.WithTimeout(ctx, conductor.attemptDeadline)
+	defer cancel()
+	execution := pass.executor.Execute(attemptContext, attemptSpec{
+		Repository: record.Subject.Repository,
+		Prompt:     pass.profile.prompt(record.Subject),
+		Candidate:  pass.profile.reviewer.candidate,
+	})
+	completed := conductor.now().UTC()
+	record.Timings.AttemptExecutionMS = elapsedMilliseconds(started, completed)
+
+	validationStarted := conductor.now().UTC()
+	result, parseErr := canonicalReviewResultContract.Parse(execution.AssistantText)
+	record.Timings.ResultValidationMS = elapsedMilliseconds(validationStarted, conductor.now().UTC())
+	outcome := execution.Outcome
+	if outcome == AttemptCompleted && parseErr == nil {
+		record.Result = &result
+		record.Lifecycle = LifecycleCompleted
+	} else {
+		if outcome == AttemptCompleted {
+			outcome = AttemptInvalidResult
+		} else if outcome == "" {
+			outcome = AttemptUnknownFailure
+		}
+		record.Lifecycle = LifecycleIncomplete
+		termination := terminationForAttempt(execution, outcome, parseErr)
+		record.Termination = &termination
+	}
+	record.Passes[0].Attempts = append(record.Passes[0].Attempts, AttemptRecord{
+		Number:      1,
+		Outcome:     outcome,
+		Provenance:  resolvedProvenance(pass.profile.reviewer.candidate, execution),
+		Diagnostic:  execution.Diagnostic,
+		RawOutput:   boundedAttemptOutput(execution.AssistantText),
+		StartedAt:   started,
+		CompletedAt: completed,
+	})
+	conductor.finalizeOperationalRecord(&record, pass.reviewStarted)
+	if err := conductor.store.Save(record); err != nil {
+		return record, err
+	}
+	return record, nil
+}
+
+func boundedAttemptOutput(output string) string {
+	if len(output) <= maxResultSize {
+		return output
+	}
+	return "[truncated to final bytes]\n" + output[len(output)-maxResultSize:]
+}
+
+func resolvedProvenance(candidate reviewerCandidate, execution attemptExecution) ReviewerProvenance {
+	provenance := candidate.provenance()
+	if execution.ResolvedModel != "" {
+		provenance.Model = execution.ResolvedModel
+	}
+	if execution.ResolvedEffort != "" {
+		provenance.Effort = execution.ResolvedEffort
+	}
+	return provenance
+}
+
+func (conductor *Conductor) finishIncomplete(record ReviewRecord, termination ReviewTermination, reviewStarted time.Time) (ReviewRecord, error) {
+	record.Lifecycle = LifecycleIncomplete
+	record.Termination = &termination
+	conductor.finalizeOperationalRecord(&record, reviewStarted)
+	if err := conductor.store.Save(record); err != nil {
+		return record, err
+	}
+	return record, nil
+}
+
+func (conductor *Conductor) finalizeOperationalRecord(record *ReviewRecord, reviewStarted time.Time) {
+	completed := conductor.now().UTC()
+	record.UpdatedAt = completed
+	record.Timings.TotalMS = elapsedMilliseconds(reviewStarted, completed)
+}
+
+func terminationForAvailability(diagnostic string) ReviewTermination {
+	category := TerminationReviewerUnavailable
+	if diagnosticFailureCategory(diagnostic) == TerminationAuthenticationFailure {
+		category = TerminationAuthenticationFailure
+	}
+	return ReviewTermination{Category: category, Phase: PhaseAvailabilityCheck, Message: diagnostic}
+}
+
+func terminationForAttempt(execution attemptExecution, outcome AttemptOutcome, parseErr error) ReviewTermination {
+	message := attemptTerminationMessage(outcome, execution.Diagnostic, parseErr)
+	if execution.FailureCategory != "" {
+		return ReviewTermination{Category: execution.FailureCategory, Phase: execution.FailurePhase, Message: message}
+	}
+	switch {
+	case execution.Outcome == AttemptCompleted && parseErr != nil:
+		return ReviewTermination{Category: TerminationResultValidationFailure, Phase: PhaseResultValidation, Message: message}
+	case outcome == AttemptInvalidResult:
+		return ReviewTermination{Category: TerminationMalformedOutput, Phase: PhaseOutputDecode, Message: message}
+	case outcome == AttemptReviewerUnavailable:
+		return ReviewTermination{Category: TerminationReviewerUnavailable, Phase: PhaseHarnessLaunch, Message: message}
+	case outcome == AttemptTransientFailure:
+		return ReviewTermination{Category: TerminationTransportFailure, Phase: PhaseReviewerExecution, Message: message}
+	case outcome == AttemptCancelled:
+		return ReviewTermination{Category: TerminationCancelled, Phase: PhaseReviewerExecution, Message: message}
+	default:
+		return ReviewTermination{Category: TerminationUnknownFailure, Phase: PhaseReviewerExecution, Message: message}
+	}
+}
+
+func attemptTerminationMessage(outcome AttemptOutcome, diagnostic string, parseErr error) string {
+	if outcome == AttemptInvalidResult && parseErr != nil {
+		if diagnostic == "" {
+			return parseErr.Error()
+		}
+		return parseErr.Error() + "; adapter diagnostic: " + diagnostic
+	}
+	if diagnostic != "" {
+		return diagnostic
+	}
+	return fmt.Sprintf("attempt ended with %s", outcome)
+}
+
+func elapsedMilliseconds(started, completed time.Time) int64 {
+	if completed.Before(started) {
+		return 0
+	}
+	return completed.Sub(started).Milliseconds()
+}
+
+func newReviewID(now time.Time) (ReviewID, error) {
+	random := make([]byte, 8)
+	if _, err := rand.Read(random); err != nil {
+		return "", fmt.Errorf("generate review id: %w", err)
+	}
+	return ReviewID(fmt.Sprintf("rp_%d_%s", now.UTC().UnixMilli(), hex.EncodeToString(random))), nil
+}
+
+func validReviewID(id ReviewID) bool {
+	if len(id) < 24 || len(id) > 64 {
+		return false
+	}
+	for _, character := range id {
+		if !validReviewIDCharacter(character) {
+			return false
+		}
+	}
+	return true
+}
+
+func validReviewIDCharacter(character rune) bool {
+	if character == '_' {
+		return true
+	}
+	if character >= 'a' && character <= 'z' {
+		return true
+	}
+	return character >= '0' && character <= '9'
+}
+
+func defaultRecordDirectory() string {
+	if stateHome := os.Getenv("XDG_STATE_HOME"); stateHome != "" {
+		return filepath.Join(stateHome, "review-party", "records")
+	}
+	home, err := os.UserHomeDir()
+	if err == nil {
+		return filepath.Join(home, ".local", "state", "review-party", "records")
+	}
+	return filepath.Join(os.TempDir(), "review-party-records")
+}

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"reviewparty"
+	"reviewparty/internal/model"
 )
 
 func TestExplainUsesDefaultUserConfiguration(t *testing.T) {
@@ -32,7 +32,7 @@ func TestExplainUsesDefaultUserConfiguration(t *testing.T) {
 	if exitCode != 0 {
 		t.Fatalf("exit = %d, stderr = %q", exitCode, stderr.String())
 	}
-	var explanation reviewparty.ProfileExplanation
+	var explanation model.ProfileExplanation
 	if err := json.Unmarshal(stdout.Bytes(), &explanation); err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +55,7 @@ func TestExplainAppliesExplicitEffort(t *testing.T) {
 	if exitCode != 0 {
 		t.Fatalf("exit = %d, stderr = %q", exitCode, stderr.String())
 	}
-	var explanation reviewparty.ProfileExplanation
+	var explanation model.ProfileExplanation
 	if err := json.Unmarshal(stdout.Bytes(), &explanation); err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +145,7 @@ func TestExplainDoesNotLoadConfigurationFromWorkingDirectory(t *testing.T) {
 	if exitCode != 0 {
 		t.Fatalf("exit = %d, stderr = %q", exitCode, stderr.String())
 	}
-	var explanation reviewparty.ProfileExplanation
+	var explanation model.ProfileExplanation
 	if err := json.Unmarshal(stdout.Bytes(), &explanation); err != nil {
 		t.Fatal(err)
 	}

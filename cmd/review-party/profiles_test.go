@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"reviewparty"
+	"reviewparty/internal/model"
 )
 
 func TestProfilesCommandEmitsJSONCatalog(t *testing.T) {
@@ -25,7 +25,7 @@ func TestProfilesCommandEmitsJSONCatalog(t *testing.T) {
 	if exitCode != 0 {
 		t.Fatalf("exit = %d, stderr = %q", exitCode, stderr.String())
 	}
-	var profiles []reviewparty.ProfileSummary
+	var profiles []model.ProfileSummary
 	if err := json.Unmarshal(stdout.Bytes(), &profiles); err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +72,7 @@ func TestProfilesCommandUsesConfiguredDefault(t *testing.T) {
 	if exitCode != 0 {
 		t.Fatalf("exit = %d, stderr = %q", exitCode, stderr.String())
 	}
-	var profiles []reviewparty.ProfileSummary
+	var profiles []model.ProfileSummary
 	if err := json.Unmarshal(stdout.Bytes(), &profiles); err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +100,7 @@ func TestProfilesDoesNotRequireUsableRecordStorage(t *testing.T) {
 	if exitCode != 0 {
 		t.Fatalf("exit = %d, stderr = %q", exitCode, stderr.String())
 	}
-	var profiles []reviewparty.ProfileSummary
+	var profiles []model.ProfileSummary
 	if err := json.Unmarshal(stdout.Bytes(), &profiles); err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +120,7 @@ func isolatedProfilesRepository(t *testing.T) string {
 	return repository
 }
 
-func assertProfileNames(t *testing.T, profiles []reviewparty.ProfileSummary) {
+func assertProfileNames(t *testing.T, profiles []model.ProfileSummary) {
 	t.Helper()
 	if len(profiles) != 2 {
 		t.Fatalf("profiles = %#v", profiles)

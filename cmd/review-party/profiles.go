@@ -9,7 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"reviewparty"
+	"reviewparty/internal/engine"
+	"reviewparty/internal/model"
 )
 
 func runProfiles(ctx context.Context, arguments []string, stdout, stderr io.Writer) int {
@@ -26,7 +27,7 @@ func runProfiles(ctx context.Context, arguments []string, stdout, stderr io.Writ
 		return 2
 	}
 
-	conductor, err := reviewparty.New(reviewparty.Config{UserConfigurationPath: *configuration})
+	conductor, err := engine.New(engine.Config{UserConfigurationPath: *configuration})
 	if err != nil {
 		return printFailure(stderr, err)
 	}
@@ -46,11 +47,11 @@ func runExplain(ctx context.Context, arguments []string, stdout, stderr io.Write
 		return exitCode
 	}
 
-	conductor, err := reviewparty.New(reviewparty.Config{AttemptDeadline: options.deadline, UserConfigurationPath: options.configuration})
+	conductor, err := engine.New(engine.Config{AttemptDeadline: options.deadline, UserConfigurationPath: options.configuration})
 	if err != nil {
 		return printFailure(stderr, err)
 	}
-	explanation, err := conductor.ExplainForRepository(ctx, reviewparty.ProfileSelection{Profile: options.profile, Reviewer: options.reviewer, Model: options.model, Effort: options.effort}, options.repository)
+	explanation, err := conductor.ExplainForRepository(ctx, model.ProfileSelection{Profile: options.profile, Reviewer: options.reviewer, Model: options.model, Effort: options.effort}, options.repository)
 	if err != nil {
 		return printFailure(stderr, err)
 	}
@@ -82,8 +83,8 @@ func parseExplainOptions(arguments []string, stderr io.Writer) (explainOptions, 
 	format := flags.String("format", "human", "Output format: human or json")
 	deadline := flags.Duration("deadline", 10*time.Minute, "Attempt deadline")
 	configuration := flags.String("config", defaultUserConfigurationPath(), "User configuration path")
-	reviewer := flags.String("reviewer", "", "Reviewer: "+strings.Join(reviewparty.SupportedReviewers(), ", ")+"; empty uses configured/Profile default")
-	model := flags.String("model", "", "Explicit model for the selected Reviewer")
+	reviewer := flags.String("reviewer", "", "Reviewer: "+strings.Join(engine.SupportedReviewers(), ", ")+"; empty uses configured/Profile default")
+	modelName := flags.String("model", "", "Explicit model for the selected Reviewer")
 	effort := flags.String("effort", "", "Explicit reasoning effort for the selected Reviewer")
 	repository := flags.String("repo", ".", "Git repository whose Profile should be explained")
 	if err := flags.Parse(remaining); err != nil {
@@ -93,7 +94,7 @@ func parseExplainOptions(arguments []string, stderr io.Writer) (explainOptions, 
 		fmt.Fprintln(stderr, "review-party: explain accepts one profile name")
 		return explainOptions{}, 2
 	}
-	return explainOptions{profile: profile, format: *format, deadline: *deadline, configuration: *configuration, reviewer: *reviewer, model: *model, effort: *effort, repository: *repository}, 0
+	return explainOptions{profile: profile, format: *format, deadline: *deadline, configuration: *configuration, reviewer: *reviewer, model: *modelName, effort: *effort, repository: *repository}, 0
 }
 
 func requiredLeadingArgument(arguments []string) (string, []string, bool) {
@@ -110,7 +111,7 @@ func requiredLeadingArgument(arguments []string) (string, []string, bool) {
 	return value, arguments[1:], true
 }
 
-func printProfiles(output io.Writer, profiles []reviewparty.ProfileSummary, format string) error {
+func printProfiles(output io.Writer, profiles []model.ProfileSummary, format string) error {
 	if format == "json" {
 		return writeJSON(output, profiles)
 	}
@@ -127,7 +128,7 @@ func printProfiles(output io.Writer, profiles []reviewparty.ProfileSummary, form
 	return nil
 }
 
-func printProfileExplanation(output io.Writer, explanation reviewparty.ProfileExplanation, format string) error {
+func printProfileExplanation(output io.Writer, explanation model.ProfileExplanation, format string) error {
 	if format == "json" {
 		return writeJSON(output, explanation)
 	}
@@ -159,7 +160,7 @@ func printProfileExplanation(output io.Writer, explanation reviewparty.ProfileEx
 	return nil
 }
 
-func joinCapabilities(capabilities []reviewparty.Capability) string {
+func joinCapabilities(capabilities []model.Capability) string {
 	values := make([]string, len(capabilities))
 	for index, capability := range capabilities {
 		values[index] = string(capability)
