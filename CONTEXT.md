@@ -88,6 +88,18 @@ _Avoid_: Profile name, mutable configuration
 The retrievable history of one review, containing its Review Result, provenance, Passes, Attempts, and available diagnostics. It supports inspection without making diagnostic detail the primary result.
 _Avoid_: Review Result, console output, transcript
 
+**Review Record State Preparation**:
+The deterministic local operation that makes a Review Record ledger usable by applying known migrations and establishing its managed state. It is distinct from observing an already prepared Review Record and does not preserve retired record formats.
+_Avoid_: Legacy import, exposed records-directory setup, implicit inspect setup
+
+**Review Party Initialization**:
+The first-use operation that prepares Review Party for one repository, including its managed Review Record state. It does not create a custom Review Profile.
+_Avoid_: Profile initialization, first Review
+
+**Profile Creation**:
+The operation that creates the editable local material for one named Review Profile. It is separate from Review Party Initialization.
+_Avoid_: Profile init, unnamed profile material
+
 **Incomplete Review**:
 A review that ended without fulfilling its Profile Revision. Evidence from completed Passes remains available, but the review cannot claim that no actionable findings were found.
 _Avoid_: Clean review, partial success

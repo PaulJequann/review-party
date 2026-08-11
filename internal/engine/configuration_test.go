@@ -108,7 +108,8 @@ func TestOpenCodeModelOverrideMustBeAllowed(t *testing.T) {
 }
 
 func TestExplainRejectsUnsupportedExplicitEffort(t *testing.T) {
-	conductor, err := New(Config{RecordDirectory: t.TempDir()})
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	conductor, err := New(Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -335,8 +336,8 @@ func TestDisabledReviewerIgnoresInactiveModelAllowlist(t *testing.T) {
 }
 
 func TestMissingUserConfigurationPreservesBuiltInDefault(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	conductor, err := New(Config{
-		RecordDirectory:       t.TempDir(),
 		UserConfigurationPath: filepath.Join(t.TempDir(), "missing.json"),
 	})
 	if err != nil {
@@ -352,7 +353,8 @@ func TestMissingUserConfigurationPreservesBuiltInDefault(t *testing.T) {
 }
 
 func TestOpenCodeRequiresCallerOwnedModelWithoutConfiguration(t *testing.T) {
-	conductor, err := New(Config{RecordDirectory: t.TempDir()})
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	conductor, err := New(Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -369,7 +371,16 @@ func configuredTestConductor(t *testing.T, configuration string) *Conductor {
 	if err := os.WriteFile(path, []byte(configuration), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	conductor, err := New(Config{RecordDirectory: t.TempDir(), UserConfigurationPath: path})
+	stateHome := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", stateHome)
+	ledger, err := newLedgerRecordStore(filepath.Join(stateHome, "review-party"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ledger.Close(); err != nil {
+		t.Fatal(err)
+	}
+	conductor, err := New(Config{UserConfigurationPath: path})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -382,7 +393,8 @@ func invalidConfigurationFromPayload(t *testing.T, payload string) (InvalidUserC
 	if err := os.WriteFile(path, []byte(payload), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, err := New(Config{RecordDirectory: t.TempDir(), UserConfigurationPath: path})
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	_, err := New(Config{UserConfigurationPath: path})
 	var invalid InvalidUserConfigurationError
 	if !errors.As(err, &invalid) {
 		t.Fatalf("error = %v, want InvalidUserConfigurationError", err)

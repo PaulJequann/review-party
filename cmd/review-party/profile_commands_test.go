@@ -3,14 +3,17 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"reviewparty/internal/store"
 )
 
-func TestInitAndProfilesCommandsExposeRepositoryLibrary(t *testing.T) {
+func TestInitPreparesManagedStateWithoutCreatingProfiles(t *testing.T) {
 	isolateProfileCommandEnvironment(t)
 	repository := t.TempDir()
 	command := exec.Command("git", "init", "--quiet")
@@ -20,11 +23,115 @@ func TestInitAndProfilesCommandsExposeRepositoryLibrary(t *testing.T) {
 	}
 
 	initOutput := runProfileCommand(t, []string{"init", "--repo", repository})
-	assertOutputContains(t, initOutput, ".reviewparty", "bugs.md")
-	profilesOutput := runProfileCommand(t, []string{"profiles", "--repo", repository})
-	assertOutputContains(t, profilesOutput, "bugs", "repository:.reviewparty/profiles/bugs.md")
-	explainOutput := runProfileCommand(t, []string{"profile", "explain", "bugs", "--repo", repository})
-	assertOutputContains(t, explainOutput, "repository:.reviewparty/profiles/bugs.md", "grok-4.5/high", "bug-review", "PROFILE MARKDOWN")
+	assertOutputContains(t, initOutput, "Review Party is ready", "State is managed automatically", "Next: review-party review bugs")
+	if _, err := os.Stat(filepath.Join(os.Getenv("XDG_STATE_HOME"), "review-party", "ledger.sqlite")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(repository, ".reviewparty")); !os.IsNotExist(err) {
+		t.Fatalf("init created Profile material: %v", err)
+	}
+	second := runProfileCommand(t, []string{"init", "--repo", repository})
+	assertOutputContains(t, second, "Existing state was kept unchanged")
+}
+
+func TestProfileCreateRequiresExplicitSourceAndRefusesOverwrite(t *testing.T) {
+	isolateProfileCommandEnvironment(t)
+	repository := t.TempDir()
+	runProfileTestCommand(t, exec.Command("git", "-C", repository, "init", "--quiet"))
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if exit := run(context.Background(), []string{"profile", "create", "security", "--repo", repository}, &stdout, &stderr); exit != 1 || !strings.Contains(stderr.String(), "exactly one starting point") {
+		t.Fatalf("exit = %d, stderr = %q", exit, stderr.String())
+	}
+	output := runProfileCommand(t, []string{"profile", "create", "security", "--repo", repository, "--from-packaged", "documentation"})
+	assertOutputContains(t, output, "Created owned Profile", "shadow packaged updates")
+	stdout.Reset()
+	stderr.Reset()
+	if exit := run(context.Background(), []string{"profile", "create", "security", "--repo", repository, "--blank"}, &stdout, &stderr); exit != 1 || !strings.Contains(stderr.String(), "refusing to overwrite") {
+		t.Fatalf("exit = %d, stderr = %q", exit, stderr.String())
+	}
+}
+
+func TestProfileInstallDefaultsCreatesCompleteOwnedSetWithoutSelectingDefault(t *testing.T) {
+	isolateProfileCommandEnvironment(t)
+	repository := t.TempDir()
+	runProfileTestCommand(t, exec.Command("git", "-C", repository, "init", "--quiet"))
+	output := runProfileCommand(t, []string{"profile", "install-defaults", "--repo", repository})
+	assertOutputContains(t, output, "Installed 2", "Default Profile selection was not changed")
+	for _, name := range []string{"bugs.md", "documentation.md"} {
+		if _, err := os.Stat(filepath.Join(repository, ".reviewparty", "profiles", name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(repository, ".reviewparty", "config.json")); !os.IsNotExist(err) {
+		t.Fatalf("default selection configuration was created: %v", err)
+	}
+}
+
+func TestInitRemembersAdvancedStateSelection(t *testing.T) {
+	isolateProfileCommandEnvironment(t)
+	repository := t.TempDir()
+	runProfileTestCommand(t, exec.Command("git", "-C", repository, "init", "--quiet"))
+	configurationPath := defaultUserConfigurationPath()
+	if err := os.MkdirAll(filepath.Dir(configurationPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	payload := `{"version":1}`
+	if err := os.WriteFile(configurationPath, []byte(payload), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stateDirectory := filepath.Join(t.TempDir(), "advanced-state")
+	output := runProfileCommand(t, []string{"init", "--repo", repository, "--state-dir", stateDirectory})
+	assertOutputContains(t, output, "Advanced state location: "+stateDirectory)
+	second := runProfileCommand(t, []string{"init", "--repo", repository})
+	assertOutputContains(t, second, "Existing state was kept unchanged", stateDirectory)
+	assertEmptyHistory(t, runProfileCommand(t, []string{"history", "--format", "json"}))
+	if _, err := os.Stat(filepath.Join(os.Getenv("XDG_STATE_HOME"), "review-party")); !os.IsNotExist(err) {
+		t.Fatalf("default state was created despite remembered advanced selection: %v", err)
+	}
+	assertStateSwitchRejected(t, repository)
+}
+
+func assertEmptyHistory(t *testing.T, history string) {
+	t.Helper()
+	if strings.TrimSpace(history) != "[]" {
+		t.Fatalf("empty history JSON = %q, want []", history)
+	}
+	var entries []store.HistoryEntry
+	if err := json.Unmarshal([]byte(history), &entries); err != nil || len(entries) != 0 {
+		t.Fatalf("history = %q, entries = %#v, error = %v", history, entries, err)
+	}
+}
+
+func assertStateSwitchRejected(t *testing.T, repository string) {
+	t.Helper()
+	other := filepath.Join(t.TempDir(), "other-state")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if exit := run(context.Background(), []string{"init", "--repo", repository, "--state-dir", other}, &stdout, &stderr); exit != 1 {
+		t.Fatalf("exit = %d, stderr = %q", exit, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "refusing to switch") {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+	if _, err := os.Stat(other); !os.IsNotExist(err) {
+		t.Fatalf("conflicting state was created: %v", err)
+	}
+}
+
+func TestReviewBeforeInitDoesNotCreateState(t *testing.T) {
+	isolateProfileCommandEnvironment(t)
+	repository := t.TempDir()
+	runProfileTestCommand(t, exec.Command("git", "-C", repository, "init", "--quiet"))
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exit := run(context.Background(), []string{"review", "bugs", "--repo", repository, "--reviewer", "opencode", "--model", "meta/muse-spark-1.2-contributor"}, &stdout, &stderr)
+	if exit != 1 || !strings.Contains(stderr.String(), "run review-party init --repo") {
+		t.Fatalf("exit = %d, stderr = %q", exit, stderr.String())
+	}
+	if _, err := os.Stat(filepath.Join(os.Getenv("XDG_STATE_HOME"), "review-party")); !os.IsNotExist(err) {
+		t.Fatalf("review created state before init: %v", err)
+	}
 }
 
 func runProfileCommand(t *testing.T, arguments []string) string {
@@ -90,6 +197,7 @@ func TestReviewWithoutProfileUsesRepositoryDefault(t *testing.T) {
 	}
 	runProfileTestCommand(t, exec.Command("git", "-C", repository, "add", ".reviewparty"))
 	runProfileTestCommand(t, exec.Command("git", "-C", repository, "commit", "--quiet", "-m", "test fixture"))
+	runProfileCommand(t, []string{"init", "--repo", repository})
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -114,4 +222,15 @@ func runProfileTestCommand(t *testing.T, command *exec.Cmd) {
 func isolateProfileCommandEnvironment(t *testing.T) {
 	t.Helper()
 	t.Setenv("REVIEW_PARTY_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+}
+
+func prepareCommandState(t *testing.T) {
+	t.Helper()
+	stateHome := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", stateHome)
+	if err := store.PrepareReviewRecordState(filepath.Join(stateHome, "review-party")); err != nil {
+		t.Fatal(err)
+	}
 }

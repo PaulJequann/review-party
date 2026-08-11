@@ -41,10 +41,15 @@ slice status and this checklist when the acceptance evidence is committed.
   reviewer/model/effort provenance.
 - [x] Slice 8a: Profile-owned reviewer judgment.
 - [x] Slice 9: structured operational Review Record.
-- [ ] Slice 10 — structured canonical Findings.
-- [ ] Slice 11 — filesystem artifact evidence.
-- [ ] Slice 12 — SQLite ledger design and dependency decision.
-- [ ] Slice 13 — SQLite ledger plus minimal history.
+- [x] Slice 10 — structured canonical Findings (implemented locally).
+- [x] Slice 11 — filesystem artifact evidence (implemented locally).
+- [x] Slice 12 — SQLite ledger design and dependency decision.
+- [x] Slice 13 — SQLite ledger plus minimal history.
+- [x] DEV-56 — managed SQLite state and retired JSON compatibility (implemented locally).
+- [x] DEV-57 — validated first-use onboarding contract (completed in Linear).
+- [x] DEV-58 — deep internal Review Record projection (implemented locally).
+- [x] DEV-59 — initialization and remembered managed-state selection (implemented locally).
+- [x] DEV-60 — explicit Profile Creation and complete owned starter-set installation (implemented locally).
 - [ ] Slice 14 — history filters and operational queries.
 - [ ] Slice 15 — reproducible committed Review Subjects.
 - [ ] Slice 16 — replay of recorded experiment inputs.
@@ -58,9 +63,9 @@ slice status and this checklist when the acceptance evidence is committed.
 - [ ] Slice 24 — thin skill integration and migration.
 - [ ] Slice 25 — supported local delivery baseline.
 
-Current state: Slice 9 is complete. Slice 10, structured canonical Findings, is
-the next product implementation scope. Do not start SQLite source changes until
-the Slice 12 dependency decision receives explicit user approval.
+Current state: Slices 10 through 13 and DEV-56 through DEV-60 are complete or
+implemented locally. Linear owns future work selection; use Ready issues there
+before the older roadmap below as execution authority.
 
 ## Dependency order
 
@@ -1517,12 +1522,6 @@ migration without claiming hosted or distributed capabilities.
 
 ## Immediate next action
 
-Begin Slice 10 only:
-
-1. Reconfirm the delivered commit baseline and read the Slice 10 interface and
-   ownership decisions before editing.
-2. Run `purposeful-test-design` and refine the Slice 10 test-intent row before
-   writing tests.
-3. Implement structured canonical Findings without beginning artifacts,
-   SQLite, evals, ACPX, Verification Review, or skill migration in the same
-   change set.
+Begin Slice 12's design and dependency decision only. Do not implement SQLite
+source changes, history, replay, evals, ACPX, Verification Review, or skill
+migration without the required explicit approval.

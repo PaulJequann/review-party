@@ -13,6 +13,20 @@ The accepted first implementation slice is documented in
 
 ## Current CLI
 
+Initialize Review Party once for the repository before the first Review. This
+prepares managed per-user state without creating repository files or Profile
+copies:
+
+```sh
+review-party init --repo .
+```
+
+Advanced callers may select a state location during initialization with
+`--state-dir PATH`; Review Party remembers that choice in the selected user
+configuration. Pass `--config PATH` consistently to init, Review, inspect, and
+history when using a non-default configuration. Initialization is idempotent,
+and Review, inspect, and history refuse to create or migrate state.
+
 List and explain the built-in Review Profiles without launching an Agent
 Harness or creating a Review Record:
 
@@ -55,7 +69,9 @@ effort; Review Party reports that unsupported choice instead of dropping it.
 Review Party loads user policy from
 `${XDG_CONFIG_HOME:-$HOME/.config}/review-party/config.json`. The versioned JSON
 document may set one Default Reviewer and enable, disable, select, or restrict
-models for each supported Reviewer:
+models for each supported Reviewer. An advanced initialization may also add a
+`state_directory` field; ordinary callers should let `review-party init`
+manage it:
 
 ```json
 {
@@ -101,9 +117,10 @@ facts rather than additional states.
 Review Party distinguishes unavailable Reviewers, authentication failures,
 deadlines, cancellation, transport failures, malformed harness output, result
 validation failures, and unknown failures without requiring callers to parse a
-diagnostic string. Existing unversioned filesystem records remain inspectable
-as legacy schema-v1 records and retain their original `incomplete_cause`.
-Earlier canonical-v1 count/raw-only results remain inspectable as well.
+diagnostic string. Review Records are persisted in the managed SQLite ledger at
+`$XDG_STATE_HOME/review-party/ledger.sqlite` (or the corresponding
+`$HOME/.local/state` fallback). The CLI intentionally exposes no storage-path
+selector; isolate tests and experiments with `XDG_STATE_HOME`.
 
 ## Artifact evidence
 
@@ -119,16 +136,23 @@ as integrity failures. Treat artifacts as sensitive review context.
 ## Review Profiles
 
 Review Party ships a zero-configuration `bugs` Profile and can load ordinary
-Markdown Profiles from a repository or a user-wide library. Initialize a
-repository library and create another Profile by adding a Markdown file:
+Markdown Profiles from a repository or a user-wide library. Packaged Profiles
+need no installation and are not copied by `review-party init`. Advanced
+callers can create one owned Profile from an explicit starting point:
 
 ```sh
-review-party init
-$EDITOR .reviewparty/profiles/security.md
+review-party profile create security --repo . --blank
+review-party profile create docs-team --global --from-packaged documentation
 review-party profiles
 review-party profile explain security
 review-party review security
 ```
+
+To own the complete packaged starter set, run `review-party profile
+install-defaults --repo .` for a deliberately team-shareable repository copy,
+or use `--global` for personal copies. Existing files are retained. Owned
+Profiles shadow packaged updates, and installation does not change the selected
+default Profile.
 
 Repository and global libraries use the same shape:
 
@@ -141,7 +165,7 @@ Repository and global libraries use the same shape:
 ```
 
 The global library is `~/.reviewparty/`. Set `REVIEW_PARTY_HOME` to relocate
-it, or run `review-party init --global` to create it. Configuration is optional
+it. Profile configuration is optional
 and only selects defaults:
 
 ```json

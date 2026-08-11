@@ -472,7 +472,7 @@ func testConductor(t *testing.T, executor attemptExecutor, deadline time.Duratio
 
 func testConductorWithExecutors(t *testing.T, executors map[string]attemptExecutor, deadline time.Duration) *Conductor {
 	t.Helper()
-	store, err := newFileRecordStore(t.TempDir())
+	store, err := newLedgerRecordStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
