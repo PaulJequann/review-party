@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -65,11 +66,11 @@ func TestLedgerPreparationIsIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reopened.Close()
-	history, err := reopened.History(10)
+	history, err := reopened.History(HistoryQuery{Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(history) != 1 {
+	if len(history.Entries) != 1 {
 		t.Fatalf("history = %#v", history)
 	}
 }
@@ -113,7 +114,7 @@ func TestDeferredLedgerReadDoesNotCreateMissingState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = store.History(10)
+	_, err = store.History(HistoryQuery{Limit: 10})
 	if !errors.Is(err, ErrReviewRecordStateNotInitialized) {
 		t.Fatalf("error = %v", err)
 	}
@@ -148,7 +149,7 @@ func TestLedgerRejectsCorruptStateWithoutReplacingIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = store.History(10)
+	_, err = store.History(HistoryQuery{Limit: 10})
 	if err == nil || !strings.Contains(err.Error(), "is corrupt") {
 		t.Fatalf("error = %v", err)
 	}
@@ -211,13 +212,160 @@ func TestLedgerHistoryBreaksTimestampTiesByReviewID(t *testing.T) {
 	if err := store.Save(second); err != nil {
 		t.Fatal(err)
 	}
-	history, err := store.History(2)
+	history, err := store.History(HistoryQuery{Limit: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual([]model.ReviewID{history[0].ID, history[1].ID}, []model.ReviewID{second.ID, first.ID}) {
+	if !reflect.DeepEqual([]model.ReviewID{history.Entries[0].ID, history.Entries[1].ID}, []model.ReviewID{second.ID, first.ID}) {
 		t.Fatalf("history = %#v", history)
 	}
+}
+
+func TestLedgerHistoryCombinesRecordedFilters(t *testing.T) {
+	ledger := newTestLedger(t, t.TempDir())
+	defer ledger.Close()
+	matching := ledgerFixture(model.LifecycleIncomplete)
+	matching.ID = "rp_1723200000000_aaaaaaaaaaaaaaaa"
+	matching.Subject.Repository = "/repo/one"
+	matching.Subject.Identity = "subject-one"
+	matching.ProfileRevision.Name = "bugs"
+	matching.ProfileRevision.ReviewerID = "opencode"
+	other := matching
+	other.ID = "rp_1723200000000_bbbbbbbbbbbbbbbb"
+	other.ProfileRevision.ReviewerID = "grok"
+	saveTestReviews(t, ledger, matching, other)
+	since := matching.CreatedAt.Add(-time.Second)
+	page := loadTestHistory(t, ledger, HistoryQuery{Repository: "/repo/one", Reviewer: "opencode", Profile: "bugs", Lifecycle: model.LifecycleIncomplete, Termination: model.TerminationDeadlineExceeded, Subject: "subject-one", Since: &since, Limit: 10})
+	if len(page.Entries) != 1 {
+		t.Fatalf("history = %#v, want one entry", page)
+	}
+	if page.Entries[0].ID != matching.ID {
+		t.Fatalf("history = %#v, want %s", page, matching.ID)
+	}
+	entry := page.Entries[0]
+	if entry.Reviewer != "opencode" {
+		t.Fatalf("reviewer = %s", entry.Reviewer)
+	}
+	if entry.Profile != "bugs" {
+		t.Fatalf("profile = %s", entry.Profile)
+	}
+	if entry.Termination != model.TerminationDeadlineExceeded {
+		t.Fatalf("termination = %s", entry.Termination)
+	}
+}
+
+func TestLedgerHistoryEnforcesLimitAndReportsMore(t *testing.T) {
+	ledger := newTestLedger(t, t.TempDir())
+	defer ledger.Close()
+	first, second := ledgerFixture(model.LifecycleCompleted), ledgerFixture(model.LifecycleCompleted)
+	second.ID = "rp_1723200000000_bbbbbbbbbbbbbbbb"
+	saveTestReviews(t, ledger, first, second)
+	page := loadTestHistory(t, ledger, HistoryQuery{Limit: 1})
+	if len(page.Entries) != 1 {
+		t.Fatalf("entries = %#v", page.Entries)
+	}
+	if !page.HasMore {
+		t.Fatalf("page = %#v, want more", page)
+	}
+	if page.Limit != 1 {
+		t.Fatalf("limit = %d", page.Limit)
+	}
+	if _, err := ledger.History(HistoryQuery{Limit: MaxHistoryLimit + 1}); err == nil {
+		t.Fatal("expected excessive limit error")
+	}
+}
+
+func TestLedgerHistoryReviewerQueryUsesApprovedIndex(t *testing.T) {
+	ledger := newTestLedger(t, t.TempDir())
+	defer ledger.Close()
+	for index := 0; index < 32; index++ {
+		record := ledgerFixture(model.LifecycleCompleted)
+		record.ID = model.ReviewID(fmt.Sprintf("rp_1723200000000_%016x", index))
+		record.ProfileRevision.ReviewerID = []string{"opencode", "grok"}[index%2]
+		saveTestReviews(t, ledger, record)
+	}
+	details := historyReviewerQueryPlan(t, ledger)
+	if !strings.Contains(strings.Join(details, "\n"), "reviews_history_reviewer") {
+		t.Fatalf("query plan = %q, want reviewer history index", details)
+	}
+}
+
+func historyReviewerQueryPlan(t *testing.T, ledger *LedgerRecordStore) []string {
+	t.Helper()
+	rows, err := ledger.db.Query(`EXPLAIN QUERY PLAN SELECT id FROM reviews
+		WHERE json_extract(profile_revision,'$.reviewer_id') = ?
+		ORDER BY created_at DESC,id DESC LIMIT ?`, "opencode", 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var details []string
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		details = append(details, detail)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return details
+}
+
+func TestLedgerPreparationMigratesVersionOneHistoryState(t *testing.T) {
+	directory := t.TempDir()
+	ledger := newTestLedger(t, directory)
+	if err := ledger.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", filepath.Join(directory, ledgerFilename))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("DROP INDEX reviews_replay_source; ALTER TABLE reviews DROP COLUMN replays_review_id; DROP INDEX reviews_history_order; DROP INDEX reviews_history_reviewer; DELETE FROM schema_migrations WHERE version>=2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	migrated := newTestLedger(t, directory)
+	defer migrated.Close()
+	var count int
+	if err := migrated.db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name LIKE 'reviews_history_%'").Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 2 {
+		t.Fatalf("history index count = %d, want 2", count)
+	}
+}
+
+func newTestLedger(t *testing.T, directory string) *LedgerRecordStore {
+	t.Helper()
+	ledger, err := NewLedgerRecordStore(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ledger
+}
+
+func saveTestReviews(t *testing.T, ledger *LedgerRecordStore, records ...model.ReviewRecord) {
+	t.Helper()
+	for _, record := range records {
+		if err := ledger.Save(record); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func loadTestHistory(t *testing.T, ledger *LedgerRecordStore, query HistoryQuery) HistoryPage {
+	t.Helper()
+	page, err := ledger.History(query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return page
 }
 
 func TestLedgerRejectsNewerSchema(t *testing.T) {
@@ -242,7 +390,7 @@ func TestDeferredLedgerReadDoesNotMigrateOlderSchema(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := deferred.History(10); err == nil || !strings.Contains(err.Error(), "requires state preparation") {
+	if _, err := deferred.History(HistoryQuery{Limit: 10}); err == nil || !strings.Contains(err.Error(), "requires state preparation") {
 		t.Fatalf("error = %v", err)
 	}
 	if version := readSchemaVersion(t, directory); version != 0 {

@@ -6,3 +6,4 @@ import "reviewparty/internal/subject"
 var resolveSubject = subject.ResolveSubject
 var resolveRepositoryRoot = subject.ResolveRepositoryRoot
 var resolveWorkingChanges = subject.ResolveWorkingChanges
+var prepareSubjectExecution = subject.PrepareExecution

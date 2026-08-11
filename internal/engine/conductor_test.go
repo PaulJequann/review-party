@@ -511,11 +511,18 @@ func writeTestFile(t *testing.T, path, content string) {
 
 func runTestCommand(t *testing.T, directory, name string, arguments ...string) {
 	t.Helper()
+	runTestCommandOutput(t, directory, name, arguments...)
+}
+
+func runTestCommandOutput(t *testing.T, directory, name string, arguments ...string) string {
+	t.Helper()
 	command := exec.Command(name, arguments...)
 	command.Dir = directory
-	if output, err := command.CombinedOutput(); err != nil {
+	output, err := command.CombinedOutput()
+	if err != nil {
 		t.Fatalf("%s %v: %v\n%s", name, arguments, err, output)
 	}
+	return string(output)
 }
 
 func slicesContainPrefix(values []string, prefix string) bool {

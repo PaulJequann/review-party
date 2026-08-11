@@ -32,6 +32,7 @@ func (grokAdapter) Prepare(spec attemptSpec) (preparedAttempt, error) {
 	arguments := grokCommand(spec.Candidate, spec.Repository, promptPath)
 	command := exec.Command(arguments[0], arguments[1:]...)
 	command.Dir = spec.Repository
+	command.Env = reviewerEnvironment(spec.Candidate.ID)
 	return preparedAttempt{command: command, cleanup: func() { _ = os.Remove(promptPath) }}, nil
 }
 

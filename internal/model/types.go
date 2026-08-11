@@ -9,7 +9,7 @@ type ReviewID string
 
 const (
 	LegacyReviewRecordSchemaVersion  = 1
-	CurrentReviewRecordSchemaVersion = 2
+	CurrentReviewRecordSchemaVersion = 3
 )
 
 type Lifecycle string
@@ -23,14 +23,23 @@ const (
 
 type SubjectKind string
 
-const SubjectWorkingChanges SubjectKind = "working-changes"
+const (
+	SubjectWorkingChanges SubjectKind = "working-changes"
+	SubjectCommittedRange SubjectKind = "committed-range"
+)
 
 type SubjectReference struct {
 	Kind SubjectKind
+	Base string
+	Head string
 }
 
 func WorkingChanges() SubjectReference {
 	return SubjectReference{Kind: SubjectWorkingChanges}
+}
+
+func CommittedRange(base, head string) SubjectReference {
+	return SubjectReference{Kind: SubjectCommittedRange, Base: base, Head: head}
 }
 
 type ReviewSelection struct {
@@ -40,6 +49,13 @@ type ReviewSelection struct {
 	Reviewer   string
 	Model      string
 	Effort     string
+}
+
+type ReplaySelection struct {
+	SourceReviewID ReviewID
+	Reviewer       string
+	Model          string
+	Effort         string
 }
 
 type ProfileSelection struct {
@@ -66,6 +82,8 @@ type ReviewSubject struct {
 	Kind         SubjectKind   `json:"kind"`
 	Repository   string        `json:"repository"`
 	Identity     string        `json:"identity"`
+	BaseObject   string        `json:"base_object,omitempty"`
+	HeadObject   string        `json:"head_object,omitempty"`
 	ChangedPaths []string      `json:"changed_paths"`
 	Patch        string        `json:"patch"`
 	Facts        *SubjectFacts `json:"facts,omitempty"`
@@ -313,6 +331,7 @@ func (result *ReviewResult) UnmarshalJSON(payload []byte) error {
 type ReviewRecord struct {
 	SchemaVersion   int                `json:"schema_version"`
 	ID              ReviewID           `json:"id"`
+	ReplaysReviewID *ReviewID          `json:"replays_review_id,omitempty"`
 	Lifecycle       Lifecycle          `json:"lifecycle"`
 	Subject         ReviewSubject      `json:"subject"`
 	ProfileRevision ProfileRevision    `json:"profile_revision"`

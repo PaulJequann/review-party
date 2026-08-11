@@ -39,6 +39,7 @@ func (copilotAdapter) Prepare(spec attemptSpec) (preparedAttempt, error) {
 	command := exec.Command(arguments[0], arguments[1:]...)
 	command.Dir = spec.Repository
 	command.Stdin = strings.NewReader(spec.Prompt)
+	command.Env = reviewerEnvironment(spec.Candidate.ID)
 	return preparedAttempt{command: command}, nil
 }
 

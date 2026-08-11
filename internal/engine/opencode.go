@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"os/exec"
 	"strings"
 )
@@ -32,7 +31,7 @@ func (openCodeAdapter) Prepare(spec attemptSpec) (preparedAttempt, error) {
 	command := exec.Command(arguments[0], arguments[1:]...)
 	command.Dir = spec.Repository
 	command.Stdin = strings.NewReader(spec.Prompt)
-	command.Env = append(os.Environ(),
+	command.Env = reviewerEnvironment(spec.Candidate.ID,
 		"OPENCODE_CONFIG_CONTENT="+openCodeReviewConfig,
 		"OPENCODE_DISABLE_AUTOUPDATE=true",
 	)

@@ -3,10 +3,30 @@ package engine
 import (
 	"context"
 	"errors"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
 )
+
+func reviewerEnvironment(reviewer string, additions ...string) []string {
+	allowed := map[string]bool{"PATH": true, "HOME": true, "TMPDIR": true, "LANG": true, "LC_ALL": true, "TERM": true, "NO_COLOR": true, "XDG_CONFIG_HOME": true, "XDG_CACHE_HOME": true, "XDG_DATA_HOME": true, "XDG_STATE_HOME": true, "HTTP_PROXY": true, "HTTPS_PROXY": true, "NO_PROXY": true, "SSL_CERT_FILE": true, "SSL_CERT_DIR": true}
+	for _, name := range map[string][]string{
+		"grok":     {"GROK_API_KEY", "XAI_API_KEY"},
+		"opencode": {"OPENCODE_CONFIG", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY", "GROQ_API_KEY", "OPENROUTER_API_KEY", "MISTRAL_API_KEY", "DEEPSEEK_API_KEY"},
+		"copilot":  {"GH_TOKEN", "GITHUB_TOKEN"},
+	}[reviewer] {
+		allowed[name] = true
+	}
+	result := make([]string, 0, len(allowed)+len(additions))
+	for _, value := range os.Environ() {
+		name, _, found := strings.Cut(value, "=")
+		if found && allowed[name] {
+			result = append(result, value)
+		}
+	}
+	return append(result, additions...)
+}
 
 const (
 	maxHarnessStdout = 4 * 1024 * 1024

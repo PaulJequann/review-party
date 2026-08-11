@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reviewparty/internal/model"
+	"strings"
 	"sync"
 	"time"
 
@@ -27,9 +28,37 @@ type RecordStore interface {
 }
 
 type HistoryEntry struct {
-	ID        model.ReviewID  `json:"id"`
-	Lifecycle model.Lifecycle `json:"lifecycle"`
-	CreatedAt time.Time       `json:"created_at"`
+	ID              model.ReviewID            `json:"id"`
+	Lifecycle       model.Lifecycle           `json:"lifecycle"`
+	Repository      string                    `json:"repository"`
+	Subject         string                    `json:"subject"`
+	Profile         string                    `json:"profile"`
+	Reviewer        string                    `json:"reviewer"`
+	Termination     model.TerminationCategory `json:"termination,omitempty"`
+	ReplaysReviewID *model.ReviewID           `json:"replays_review_id,omitempty"`
+	CreatedAt       time.Time                 `json:"created_at"`
+}
+
+const (
+	DefaultHistoryLimit = 20
+	MaxHistoryLimit     = 200
+)
+
+type HistoryQuery struct {
+	Repository  string
+	Reviewer    string
+	Profile     string
+	Lifecycle   model.Lifecycle
+	Termination model.TerminationCategory
+	Subject     string
+	Since       *time.Time
+	Limit       int
+}
+
+type HistoryPage struct {
+	Entries []HistoryEntry `json:"entries"`
+	Limit   int            `json:"limit"`
+	HasMore bool           `json:"has_more"`
 }
 
 type LedgerRecordStore struct {
@@ -105,12 +134,12 @@ func (s *DeferredLedgerRecordStore) Load(id model.ReviewID) (model.ReviewRecord,
 	return ledger.Load(id)
 }
 
-func (s *DeferredLedgerRecordStore) History(limit int) ([]HistoryEntry, error) {
+func (s *DeferredLedgerRecordStore) History(query HistoryQuery) (HistoryPage, error) {
 	ledger, err := s.openExisting()
 	if err != nil {
-		return nil, err
+		return HistoryPage{}, err
 	}
-	return ledger.History(limit)
+	return ledger.History(query)
 }
 
 func (s *DeferredLedgerRecordStore) openExisting() (*LedgerRecordStore, error) {
@@ -195,7 +224,7 @@ func (s *LedgerRecordStore) requirePreparedSchema() error {
 	if err := s.db.QueryRow("SELECT COALESCE(MAX(version), 0) FROM schema_migrations").Scan(&version); err != nil {
 		return fmt.Errorf("read review ledger schema: %w", err)
 	}
-	const current = 1
+	const current = 3
 	if version > current {
 		return fmt.Errorf("review ledger schema %d is newer than supported schema %d", version, current)
 	}
@@ -233,7 +262,7 @@ func (s *LedgerRecordStore) migrate() error {
 	if _, err := s.db.Exec("CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY)"); err != nil {
 		return fmt.Errorf("create migration table: %w", err)
 	}
-	const current = 1
+	const current = 3
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
@@ -246,13 +275,22 @@ func (s *LedgerRecordStore) migrate() error {
 	if version > current {
 		return fmt.Errorf("review ledger schema %d is newer than supported schema %d", version, current)
 	}
-	if version == current {
-		return tx.Commit()
-	}
-	if err := applyInitialMigration(tx); err != nil {
-		return err
+	for version < current {
+		if err := applyKnownMigration(tx, version+1); err != nil {
+			return err
+		}
+		version++
 	}
 	return tx.Commit()
+}
+
+func applyKnownMigration(tx *sql.Tx, version int) error {
+	paths := map[int]string{1: "migrations/001_initial.sql", 2: "migrations/002_history_indexes.sql", 3: "migrations/003_replay_lineage.sql"}
+	path, exists := paths[version]
+	if !exists {
+		return fmt.Errorf("no migration for review ledger schema %d", version)
+	}
+	return applyMigration(tx, version, path)
 }
 
 func currentMigrationVersion(tx *sql.Tx) (int, error) {
@@ -263,8 +301,8 @@ func currentMigrationVersion(tx *sql.Tx) (int, error) {
 	return version, nil
 }
 
-func applyInitialMigration(tx *sql.Tx) error {
-	result, err := tx.Exec("INSERT OR IGNORE INTO schema_migrations(version) VALUES(1)")
+func applyMigration(tx *sql.Tx, version int, path string) error {
+	result, err := tx.Exec("INSERT OR IGNORE INTO schema_migrations(version) VALUES(?)", version)
 	if err != nil {
 		return err
 	}
@@ -275,12 +313,12 @@ func applyInitialMigration(tx *sql.Tx) error {
 	if inserted == 0 {
 		return nil
 	}
-	payload, err := migrationFiles.ReadFile("migrations/001_initial.sql")
+	payload, err := migrationFiles.ReadFile(path)
 	if err != nil {
 		return err
 	}
 	if _, err := tx.Exec(string(payload)); err != nil {
-		return fmt.Errorf("apply review ledger migration 1: %w", err)
+		return fmt.Errorf("apply review ledger migration %d: %w", version, err)
 	}
 	return nil
 }
@@ -293,22 +331,85 @@ func (s *LedgerRecordStore) Load(id model.ReviewID) (model.ReviewRecord, error) 
 	return s.projection.load(id)
 }
 
-func (s *LedgerRecordStore) History(limit int) ([]HistoryEntry, error) {
-	if limit <= 0 {
-		limit = 20
-	}
-	rows, err := s.db.Query("SELECT id,lifecycle,created_at FROM reviews ORDER BY created_at DESC,id DESC LIMIT ?", limit)
+func (s *LedgerRecordStore) History(query HistoryQuery) (HistoryPage, error) {
+	statement, arguments, limit, err := buildHistoryQuery(query)
 	if err != nil {
-		return nil, err
+		return HistoryPage{}, err
+	}
+	rows, err := s.db.Query(statement, arguments...)
+	if err != nil {
+		return HistoryPage{}, err
 	}
 	defer rows.Close()
-	var entries []HistoryEntry
+	return scanHistoryPage(rows, limit)
+}
+
+func buildHistoryQuery(query HistoryQuery) (string, []any, int, error) {
+	limit := query.Limit
+	if limit == 0 {
+		limit = DefaultHistoryLimit
+	}
+	if limit < 1 || limit > MaxHistoryLimit {
+		return "", nil, 0, fmt.Errorf("history limit must be between 1 and %d", MaxHistoryLimit)
+	}
+	statement := `SELECT id,lifecycle,
+		json_extract(subject,'$.repository'),json_extract(subject,'$.identity'),
+		json_extract(profile_revision,'$.name'),json_extract(profile_revision,'$.reviewer_id'),
+		COALESCE(json_extract(termination,'$.category'),''),created_at,replays_review_id FROM reviews`
+	var predicates []string
+	var arguments []any
+	filters := historyFilters(query)
+	for _, filter := range filters {
+		if filter.enabled {
+			predicates = append(predicates, filter.predicate)
+			arguments = append(arguments, filter.value)
+		}
+	}
+	if len(predicates) > 0 {
+		statement += " WHERE " + strings.Join(predicates, " AND ")
+	}
+	statement += " ORDER BY created_at DESC,id DESC LIMIT ?"
+	arguments = append(arguments, limit+1)
+	return statement, arguments, limit, nil
+}
+
+type historyFilter struct {
+	predicate string
+	value     any
+	enabled   bool
+}
+
+func historyFilters(query HistoryQuery) []historyFilter {
+	var since any
+	if query.Since != nil {
+		since = query.Since.UTC()
+	}
+	return []historyFilter{
+		{"json_extract(subject,'$.repository') = ?", query.Repository, query.Repository != ""},
+		{"json_extract(profile_revision,'$.reviewer_id') = ?", query.Reviewer, query.Reviewer != ""},
+		{"json_extract(profile_revision,'$.name') = ?", query.Profile, query.Profile != ""},
+		{"lifecycle = ?", query.Lifecycle, query.Lifecycle != ""},
+		{"json_extract(termination,'$.category') = ?", query.Termination, query.Termination != ""},
+		{"json_extract(subject,'$.identity') = ?", query.Subject, query.Subject != ""},
+		{"created_at >= ?", since, query.Since != nil},
+	}
+}
+
+func scanHistoryPage(rows *sql.Rows, limit int) (HistoryPage, error) {
+	page := HistoryPage{Entries: []HistoryEntry{}, Limit: limit}
 	for rows.Next() {
 		var entry HistoryEntry
-		if err := rows.Scan(&entry.ID, &entry.Lifecycle, &entry.CreatedAt); err != nil {
-			return nil, err
+		if err := rows.Scan(&entry.ID, &entry.Lifecycle, &entry.Repository, &entry.Subject, &entry.Profile, &entry.Reviewer, &entry.Termination, &entry.CreatedAt, &entry.ReplaysReviewID); err != nil {
+			return HistoryPage{}, err
 		}
-		entries = append(entries, entry)
+		page.Entries = append(page.Entries, entry)
 	}
-	return entries, rows.Err()
+	if err := rows.Err(); err != nil {
+		return HistoryPage{}, err
+	}
+	if len(page.Entries) > limit {
+		page.HasMore = true
+		page.Entries = page.Entries[:limit]
+	}
+	return page, nil
 }

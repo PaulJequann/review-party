@@ -10,6 +10,7 @@ type Lifecycle = model.Lifecycle
 type SubjectKind = model.SubjectKind
 type SubjectReference = model.SubjectReference
 type ReviewSelection = model.ReviewSelection
+type ReplaySelection = model.ReplaySelection
 type ProfileSelection = model.ProfileSelection
 type ReviewSubject = model.ReviewSubject
 type SubjectFacts = model.SubjectFacts
@@ -44,6 +45,7 @@ const (
 	LifecycleIncomplete = model.LifecycleIncomplete
 
 	SubjectWorkingChanges = model.SubjectWorkingChanges
+	SubjectCommittedRange = model.SubjectCommittedRange
 
 	CapabilityRepositoryRead           = model.CapabilityRepositoryRead
 	CapabilityRepositorySearch         = model.CapabilityRepositorySearch
@@ -84,6 +86,7 @@ const currentReviewRecordSchemaVersion = model.CurrentReviewRecordSchemaVersion
 
 // Functions / vars that were in model
 var WorkingChanges = model.WorkingChanges
+var CommittedRange = model.CommittedRange
 
 // Store aliases (model constants already covered, but also need store types)
 // These will be defined in store_aliases.go

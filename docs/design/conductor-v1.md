@@ -43,7 +43,11 @@ represents real variation rather than speculative indirection.
 
 ## First dogfooded slice
 
-- Working-changes Review Subject, frozen before execution.
+- Working-changes and committed-range Review Subjects, frozen before execution.
+- Committed ranges resolve full base/head commit IDs and run repository access
+  in a detached, Review Party-owned worktree at the recorded head. One Subject
+  execution Interface hides preparation, ownership validation, cleanup after
+  process exit, and bounded inactive-leftover reconciliation.
 - One packaged Markdown `bugs` Profile plus repository/global Markdown Profile
   libraries, each compiling to one required Review Pass.
 - Direct Grok, OpenCode, and Copilot Reviewer candidates selected explicitly;

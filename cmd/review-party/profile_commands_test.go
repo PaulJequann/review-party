@@ -94,12 +94,9 @@ func TestInitRemembersAdvancedStateSelection(t *testing.T) {
 
 func assertEmptyHistory(t *testing.T, history string) {
 	t.Helper()
-	if strings.TrimSpace(history) != "[]" {
-		t.Fatalf("empty history JSON = %q, want []", history)
-	}
-	var entries []store.HistoryEntry
-	if err := json.Unmarshal([]byte(history), &entries); err != nil || len(entries) != 0 {
-		t.Fatalf("history = %q, entries = %#v, error = %v", history, entries, err)
+	var page store.HistoryPage
+	if err := json.Unmarshal([]byte(history), &page); err != nil || len(page.Entries) != 0 {
+		t.Fatalf("history = %q, page = %#v, error = %v", history, page, err)
 	}
 }
 

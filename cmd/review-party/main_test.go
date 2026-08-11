@@ -126,6 +126,50 @@ func TestHistoryRejectsRemovedRecordsFlag(t *testing.T) {
 	}
 }
 
+func TestReviewRequiresCompleteCommittedRange(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if exit := run(context.Background(), []string{"review", "bugs", "--base", "HEAD~1"}, &stdout, &stderr); exit != 2 {
+		t.Fatalf("exit = %d, stderr = %q", exit, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "--base and --head must be provided together") {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func TestHistoryParsesFiltersAndRendersEquivalentSummaries(t *testing.T) {
+	stateHome := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", stateHome)
+	repository := testGitRepository(t)
+	ledger, err := store.NewLedgerRecordStore(filepath.Join(stateHome, "review-party"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 8, 11, 12, 0, 0, 0, time.UTC)
+	record := model.ReviewRecord{SchemaVersion: model.CurrentReviewRecordSchemaVersion, ID: "rp_1723200000000_0123456789abcdef", Lifecycle: model.LifecycleIncomplete, Subject: model.ReviewSubject{Repository: repository, Identity: "subject-one"}, ProfileRevision: model.ProfileRevision{Name: "bugs", ReviewerID: "opencode"}, Termination: &model.ReviewTermination{Category: model.TerminationDeadlineExceeded}, CreatedAt: now, UpdatedAt: now}
+	if err := ledger.Save(record); err != nil {
+		t.Fatal(err)
+	}
+	if err := ledger.Close(); err != nil {
+		t.Fatal(err)
+	}
+	arguments := []string{"history", "--repo", filepath.Join(repository, "."), "--reviewer", "opencode", "--profile", "bugs", "--lifecycle", "incomplete", "--termination", "deadline_exceeded", "--subject", "subject-one", "--since", now.Add(-time.Second).Format(time.RFC3339)}
+	human := runMainCommand(t, arguments)
+	jsonOutput := runMainCommand(t, append(arguments, "--format", "json"))
+	var page store.HistoryPage
+	if err := json.Unmarshal([]byte(jsonOutput), &page); err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Entries) != 1 {
+		t.Fatalf("JSON = %s", jsonOutput)
+	}
+	entry := page.Entries[0]
+	for _, value := range []string{string(entry.ID), entry.Reviewer, string(entry.Termination)} {
+		if !strings.Contains(human, value) {
+			t.Fatalf("human = %q, missing %q", human, value)
+		}
+	}
+}
+
 func TestUsageListsEverySupportedReviewer(t *testing.T) {
 	var output bytes.Buffer
 	printUsage(&output)

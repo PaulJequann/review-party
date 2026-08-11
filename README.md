@@ -64,6 +64,21 @@ as the model variant and records it in the effective Profile Revision and
 Review Record. Copilot's `auto` model cannot be combined with an explicit
 effort; Review Party reports that unsupported choice instead of dropping it.
 
+Query the local Review history using facts recorded at execution time:
+
+```sh
+review-party history --reviewer opencode --profile bugs
+review-party history --repo . --lifecycle incomplete \
+  --termination deadline_exceeded --since 2026-08-01T00:00:00Z
+review-party history --subject SUBJECT_ID --format json
+```
+
+Filters combine conjunctively. Repository paths resolve to their canonical Git
+root, timestamps use RFC3339, and results are ordered newest-first by creation
+time and then Review ID. The default limit is 20 and the maximum is 200. JSON
+output contains `entries`, the applied `limit`, and `has_more`. History selects
+existing Reviews; it does not rerun or replay them.
+
 ## User configuration
 
 Review Party loads user policy from
@@ -101,9 +116,45 @@ launch. A missing file preserves the built-in zero-configuration behavior.
 Review Party currently invokes all three harnesses directly. ACPX remains a
 future transport option rather than part of the current execution path.
 
+Review an exact committed range with full object provenance and an isolated
+repository view:
+
+```sh
+review-party review bugs --repo . --base HEAD~1 --head HEAD
+```
+
+Both revisions must resolve to commits already present in the local repository.
+The Review Record stores their full object IDs, the binary-capable diff,
+changed paths, Subject identity, and size facts. The Reviewer runs in a
+short-lived detached worktree at the recorded head, so later caller changes do
+not affect repository reads. Review Party does not copy ignored files,
+dependencies, or untracked `.env` files and does not install packages. Reviewer
+adapters receive explicit environment allowlists. The owned worktree is removed
+after the Reviewer process exits on successful and incomplete outcomes; bounded
+reconciliation handles verified inactive leftovers without touching unrelated
+worktrees.
+
+Replay one recorded committed Review's frozen inputs as a new ordinary Review:
+
+```sh
+review-party replay rp_...
+review-party replay rp_... --reviewer opencode \
+  --model meta/muse-spark-1.2-contributor --effort high
+```
+
+Default replay reuses the exact recorded committed Subject, Profile Revision,
+Profile Snapshot, Reviewer/model/effort, capability contract, and execution
+deadline. It first proves that the recorded commits still reconstruct the same
+Subject identity. Explicit Reviewer/model/effort flags create a newly identified
+effective Profile Revision and recorded provenance; Review Party never silently
+substitutes an unavailable original choice. Working-changes Reviews are not
+replayable. The new record has its own lifecycle, result, attempts, timestamps,
+and runtime provenance plus `replays_review_id` linkage to its source. Replay
+reproduces experiment inputs, not non-deterministic model output.
+
 ## Operational Review Records
 
-New Review Records use schema version 2 and retain machine-readable operational
+New Review Records use schema version 3 and retain machine-readable operational
 facts alongside the canonical result. Canonical-v2 results expose an ordered
 `findings` collection with each Reviewer claim's severity, category, validated
 location string, failure, evidence, smallest safe correction, and regression

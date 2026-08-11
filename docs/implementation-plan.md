@@ -1,7 +1,7 @@
 # Review Party implementation plan
 
 Status: active planning ledger
-Last reconciled: 2026-08-09
+Last reconciled: 2026-08-11
 
 This document orders the work from project inception through replacement of the
 current skill-owned execution machinery. It records the shipped local CLI,
@@ -50,9 +50,9 @@ slice status and this checklist when the acceptance evidence is committed.
 - [x] DEV-58 — deep internal Review Record projection (implemented locally).
 - [x] DEV-59 — initialization and remembered managed-state selection (implemented locally).
 - [x] DEV-60 — explicit Profile Creation and complete owned starter-set installation (implemented locally).
-- [ ] Slice 14 — history filters and operational queries.
-- [ ] Slice 15 — reproducible committed Review Subjects.
-- [ ] Slice 16 — replay of recorded experiment inputs.
+- [x] Slice 14 — history filters and operational queries (implemented locally).
+- [x] Slice 15 — reproducible committed Review Subjects (implemented locally).
+- [x] Slice 16 — replay of recorded experiment inputs (implemented locally).
 - [ ] Slice 17 — version-controlled eval corpus and ordinary Review execution.
 - [ ] Slice 18 — human adjudication and basic scoring.
 - [ ] Slice 19 — experiment comparison.
@@ -63,7 +63,7 @@ slice status and this checklist when the acceptance evidence is committed.
 - [ ] Slice 24 — thin skill integration and migration.
 - [ ] Slice 25 — supported local delivery baseline.
 
-Current state: Slices 10 through 13 and DEV-56 through DEV-60 are complete or
+Current state: Slices 10 through 16 and DEV-56 through DEV-60 are complete or
 implemented locally. Linear owns future work selection; use Ready issues there
 before the older roadmap below as execution authority.
 
@@ -181,7 +181,9 @@ manual inspection, and one-time compatibility proof under acceptance checks.
 | Diagnostic artifacts support a Review without replacing its result | The record points to missing, partial, tampered, or root-escaping evidence | Real filesystem artifact implementation | Opening a recorded reference returns bytes matching its size and digest or a precise integrity error | Test |
 | SQLite is authoritative for a persisted Review | A multi-table write partially succeeds or reconstructs a different Review Record | Real SQLite ledger implementation | A fresh ledger load returns the same aggregate; failed writes expose no partial Review | Test |
 | History filters use effective recorded provenance | A query consults current configuration or profile defaults instead of the recorded run | Public CLI over real SQLite | History returns only records whose stored reviewer/profile/lifecycle matches the filter | Test |
+| History queries remain bounded and operationally indexed | Invalid limits produce unbounded reads or a common Reviewer query scans and sorts the ledger | Real SQLite ledger implementation | Limits are rejected outside 1-200 and the measured Reviewer query uses its approved index | Test |
 | A committed Subject is reviewed against its recorded head state | The diff is frozen but repository tools inspect the caller's newer working tree | Public Conductor Interface with a real temporary Git repository | The harness fixture reads the historical head content while the caller worktree remains unchanged | Test |
+| A committed Subject execution is isolated and owned | Caller secrets leak through files/environment, or failure cleanup removes the wrong worktree | Subject execution Interface and public Conductor with real Git | Only committed files and allowed environment reach the Reviewer; owned terminal paths are removed and unrelated worktrees remain | Test |
 | Replay reproduces inputs without claiming deterministic output | Replay recompiles the current Profile or silently substitutes a Reviewer | Public replay Interface | The new Review records the original Subject/Profile inputs and any explicit override, with a relation to the original | Test |
 | Eval execution uses the ordinary Review path | An eval-only execution path bypasses capability, provenance, or incomplete-result rules | Public eval command with a scripted Reviewer | The Eval Run points to an ordinary inspectable Review Record with identical Conductor semantics | Test |
 | Adjudication separates reviewer quality from execution failure | Incomplete cases are counted as missed Findings or clean results | Pure evaluator Module plus persisted adjudication | Recall/precision exclude incomplete cases and completion is reported separately | Test |
@@ -806,7 +808,7 @@ different database, shell command, or in-memory history.
 
 ## Slice 13 — SQLite Review Ledger and minimal history
 
-Status: **Pending**
+Status: **Implemented locally**
 
 Depends on: approved Slice 12.
 
@@ -876,7 +878,7 @@ tests, README, and the SQLite design document.
 
 ## Slice 14 — History filters and operational queries
 
-Status: **Pending**
+Status: **Implemented locally**
 
 Depends on: Slice 13.
 
@@ -903,17 +905,17 @@ pagination/limit facts.
 
 ### Implementation checklist
 
-- [ ] Define one typed `HistoryQuery` rather than leaking independent SQL
+- [x] Define one typed `HistoryQuery` rather than leaking independent SQL
   fragments through CLI callers.
-- [ ] Define deterministic ordering, finite default/max limits, and timestamp
+- [x] Define deterministic ordering, finite default/max limits, and timestamp
   parsing.
-- [ ] Filter on effective stored provenance, never current configuration.
-- [ ] Resolve `--repo` to the same canonical repository identity used in Review
+- [x] Filter on effective stored provenance, never current configuration.
+- [x] Resolve `--repo` to the same canonical repository identity used in Review
   Subjects.
-- [ ] Keep incomplete Reviews and their termination facts visible.
-- [ ] Add useful indexes only from measured query plans over representative
+- [x] Keep incomplete Reviews and their termination facts visible.
+- [x] Add useful indexes only from measured query plans over representative
   fixtures; do not pre-emptively index every column.
-- [ ] Document the difference between history and replay.
+- [x] Document the difference between history and replay.
 
 ### Smallest purposeful test set
 
@@ -925,10 +927,10 @@ pagination/limit facts.
 
 ### Acceptance checklist
 
-- [ ] The CLI answers the named queries without manually opening SQLite.
-- [ ] Query plans for representative history sizes avoid an obvious full scan
+- [x] The CLI answers the named queries without manually opening SQLite.
+- [x] Query plans for representative history sizes avoid an obvious full scan
   where an approved index should apply.
-- [ ] Focused ledger and CLI verification plus CodeScene gates pass.
+- [ ] Focused ledger and CLI verification pass; CodeScene is unavailable in this environment.
 
 ### Stop rule
 
@@ -937,7 +939,7 @@ or cross-machine synchronization.
 
 ## Slice 15 — Reproducible committed Review Subjects
 
-Status: **Pending**
+Status: **Implemented locally**
 
 Depends on: Slices 9-14.
 
@@ -952,11 +954,29 @@ and repository tools observe the recorded head state.
   working-changes Subject.
 - Store repository identity, base and head object IDs, changed paths, diff
   payload/identity, and Subject size facts.
+- Treat the isolated checkout as a source-view sandbox that provides version
+  isolation, not as a provisioned developer environment or security sandbox.
+  Its purpose is to make repository reads and searches observe the same
+  recorded head state as the frozen base/head diff.
 - Execute the Agent Harness in a temporary detached worktree or equivalently
   isolated repository view at the recorded head. Merely storing SHAs while
   pointing tools at the caller's current working tree is invalid.
-- Keep temporary repository lifecycle and cleanup inside Subject execution
-  machinery, not inside Reviewer adapters.
+- Put temporary repository preparation and cleanup behind one small Subject
+  execution Interface. Keep worktree ownership, process ordering, exact-path
+  validation, and recovery inside that Module rather than exposing Git
+  lifecycle operations through Reviewer adapters.
+- Do not install dependencies or copy, mount, or symlink the caller's
+  `node_modules`, ignored files, or untracked files. Package preparation is a
+  separate future execution capability, not an implicit part of committed
+  Subject resolution.
+- Launch the Reviewer with an adapter-owned environment policy rather than the
+  caller's unrestricted process environment. Record policy and variable names
+  where useful, never values, and do not discover or import project `.env`
+  files. Committed environment files remain ordinary committed source.
+- Give each temporary worktree an explicit owned lifecycle and clean it after
+  every terminal outcome. Reconcile only inactive Review Party-owned leftovers
+  after crashes; Git pruning is recovery for stale administrative records, not
+  the normal cleanup mechanism.
 - V1 uses commits already present in a local repository. Remote fetching and
   pull-request resolution remain separate future Subjects.
 
@@ -970,19 +990,32 @@ Reject ambiguous combinations of working changes and committed-range flags.
 
 ### Implementation checklist
 
-- [ ] Refine the committed-Subject test-intent row before tests.
-- [ ] Design the SubjectReference addition without putting Git commands into
+- [x] Refine the committed-Subject test-intent row before tests.
+- [x] Design the SubjectReference addition without putting Git commands into
   domain types.
-- [ ] Resolve both revisions to full object IDs before creating the Review.
-- [ ] Capture the immutable diff and deterministic identity with argv-based,
+- [x] Resolve both revisions to full object IDs before creating the Review.
+- [x] Capture the immutable diff and deterministic identity with argv-based,
   repository-scoped Git commands.
-- [ ] Create a bounded temporary worktree under `scratch/` for tests and a
-  documented runtime temp/state location for real execution.
-- [ ] Ensure prompt construction and repository tool access use the isolated
+- [x] Create a bounded temporary worktree under `scratch/` for tests and a
+  documented Review Party-owned runtime location for real execution. Create it
+  detached at the resolved full head object ID with unique Review/Attempt
+  ownership metadata outside the checkout.
+- [x] Ensure prompt construction and repository tool access use the isolated
   head checkout.
-- [ ] Clean up only the temporary worktree created by the run; never mutate or
+- [x] Prove that preparation performs no package-manager install and does not
+  copy or link dependency trees, ignored `.env` files, credentials, or other
+  caller worktree state.
+- [x] Define the minimum environment required by each Reviewer adapter and stop
+  inheriting unrelated caller variables. Preserve required Reviewer
+  authentication without persisting secret values.
+- [x] After the Reviewer process tree has stopped, remove only the exact owned
+  temporary worktree created by the run on success, Incomplete outcome,
+  cancellation, timeout, launch failure, and recoverable panic; never mutate or
   clean the caller's working tree.
-- [ ] Record and report cleanup failure without rewriting a valid reviewer
+- [x] Add bounded startup reconciliation for inactive Review Party-owned
+  worktrees left by crashes. Match stable Git worktree metadata and ownership
+  records rather than guessing from paths or age alone.
+- [x] Record and report cleanup failure without rewriting a valid reviewer
   result as clean or losing diagnostic evidence.
 
 ### Smallest purposeful test set
@@ -990,28 +1023,53 @@ Reject ambiguous combinations of working changes and committed-range flags.
 - After committed Subject resolution, advancing the caller branch and editing
   its working tree cannot alter the patch or repository content observed by the
   scripted harness.
+- Dependency directories and ignored `.env` files present in the caller's
+  working tree are absent from the committed Subject worktree, while committed
+  files remain visible.
+- A scripted Reviewer receives its declared environment allowlist but not an
+  unrelated sentinel secret from the caller environment.
 - Invalid or missing base/head objects prevent launch.
 - The source repository's branch, index, and working tree are unchanged after
   successful and cancelled runs.
+- Success, Incomplete output, launch failure, cancellation, and timeout all
+  remove the owned worktree after child-process cleanup; a simulated crash
+  leftover is recovered without touching an unrelated user worktree.
 - Binary and renamed-file changes follow an explicit recorded rule.
 
 ### Acceptance checklist
 
-- [ ] A real local historical commit range completes through the same public
+- [x] A real local historical commit range completes through the same public
   Review command.
-- [ ] Inspected provenance contains full base/head IDs and Subject identity.
-- [ ] No live Agent Harness is needed for deterministic repository-state tests.
-- [ ] Focused Git, Conductor, process-cleanup, and CLI tests plus CodeScene gates
-  pass.
+- [x] Inspected provenance contains full base/head IDs and Subject identity.
+- [x] The recorded diff and every repository read/search performed by the
+  harness observe the same head commit without provisioning application
+  dependencies or importing caller secrets.
+- [x] No Review Party-owned temporary worktree remains after an ordinary
+  terminal outcome, and crash recovery is bounded to verified owned entries.
+- [x] No live Agent Harness is needed for deterministic repository-state tests.
+- [x] Focused Git, Conductor, process-cleanup, and CLI tests plus CodeScene
+  gates pass.
+
+Acceptance evidence (2026-08-11): final isolated-state CLI Review
+`rp_1786474858573_cf05d154085714c8` completed with Findings through OpenCode
+Muse `meta/muse-spark-1.2-contributor` in 78 seconds. Fresh-process inspection
+verified full base/head IDs, `canonical-v2`, direct-CLI Reviewer provenance,
+and artifact integrity. Git and the owned runtime root showed no leftover
+Review Party worktree. One validated out-of-scope data-integrity concern was
+captured in Linear; the run was not reported as clean.
 
 ### Stop rule
 
 Do not add branch tracking, network fetch, GitHub PR resolution, patch
-application to a dirty worktree, or long-lived checkout management.
+application to a dirty worktree, dependency provisioning, reusable worktree
+pools, or long-lived checkout management. If a future Profile needs project
+build or test execution, design an explicit capability with locked dependency
+preparation, package-manager-owned cache/store reuse, environment provenance,
+and separately authorized network and lifecycle-script behavior.
 
 ## Slice 16 — Replay recorded experiment inputs
 
-Status: **Pending**
+Status: **Implemented locally**
 
 Depends on: Slices 13 and 15.
 
@@ -1044,15 +1102,15 @@ unavailable original choice is silently replaced.
 
 ### Implementation checklist
 
-- [ ] Refine the replay test-intent row before tests.
-- [ ] Add a small Conductor replay Interface that hides ledger lookup, input
+- [x] Refine the replay test-intent row before tests.
+- [x] Add a small Conductor replay Interface that hides ledger lookup, input
   reconstruction, relation creation, and execution.
-- [ ] Define allowed overrides and ensure each participates in the new effective
+- [x] Define allowed overrides and ensure each participates in the new effective
   provenance.
-- [ ] Reject silent model, effort, transport, capability, or Profile
+- [x] Reject silent model, effort, transport, capability, or Profile
   substitution.
-- [ ] Show original/replay linkage in inspect and history JSON.
-- [ ] Preserve both records independently.
+- [x] Show original/replay linkage in inspect and history JSON.
+- [x] Preserve both records independently.
 
 ### Smallest purposeful test set
 
@@ -1067,9 +1125,19 @@ unavailable original choice is silently replaced.
 
 ### Acceptance checklist
 
-- [ ] A real replay is inspectable and related to its source Review.
-- [ ] Documentation states that replay reproduces inputs, not model output.
-- [ ] Focused Conductor, ledger, CLI, and Git tests plus CodeScene gates pass.
+- [x] A real replay is inspectable and related to its source Review.
+- [x] Documentation states that replay reproduces inputs, not model output.
+- [x] Focused Conductor, ledger, CLI, and Git tests plus CodeScene gates pass.
+
+Acceptance evidence (2026-08-11): isolated-state source Review
+`rp_1786479504096_ce23c58a2d27e5e0` and replay
+`rp_1786479549553_220f41f573558625` both completed with Findings through
+OpenCode Muse `meta/muse-spark-1.2-contributor`. Fresh-process inspect and
+history confirmed the replay's distinct ID, `replays_review_id` lineage, and
+the exact frozen committed Subject identity and Profile Revision. The run is
+evidence of input reconstruction and persisted lineage, not deterministic
+model output. Focused race tests, vet, build, formatting, and the final
+CodeScene pre-commit safeguard passed with no findings.
 
 ### Stop rule
 

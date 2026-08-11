@@ -85,7 +85,11 @@ func (conductor *Conductor) Review(ctx context.Context, selection ReviewSelectio
 	if err != nil {
 		return ReviewRecord{}, err
 	}
-	record, err := conductor.pendingRecord(prepared.subject, prepared.profile, prepared.timings)
+	return conductor.runPreparedReview(ctx, prepared, nil, reviewStarted)
+}
+
+func (conductor *Conductor) runPreparedReview(ctx context.Context, prepared preparedReview, replaysReviewID *ReviewID, reviewStarted time.Time) (ReviewRecord, error) {
+	record, err := conductor.pendingRecord(prepared.subject, prepared.profile, prepared.timings, replaysReviewID)
 	if err != nil {
 		return ReviewRecord{}, err
 	}
@@ -112,7 +116,31 @@ func (conductor *Conductor) Review(ctx context.Context, selection ReviewSelectio
 		profile:       prepared.profile,
 		executor:      executor,
 		reviewStarted: reviewStarted,
+		deadline:      prepared.deadline,
 	})
+}
+
+func (conductor *Conductor) Replay(ctx context.Context, selection ReplaySelection) (ReviewRecord, error) {
+	if err := ctx.Err(); err != nil {
+		return ReviewRecord{}, err
+	}
+	if !validReviewID(selection.SourceReviewID) {
+		return ReviewRecord{}, fmt.Errorf("invalid source review id %q", selection.SourceReviewID)
+	}
+	if err := conductor.requirePreparedState("."); err != nil {
+		return ReviewRecord{}, err
+	}
+	source, err := conductor.store.Load(selection.SourceReviewID)
+	if err != nil {
+		return ReviewRecord{}, fmt.Errorf("load replay source %q: %w", selection.SourceReviewID, err)
+	}
+	reviewStarted := conductor.now().UTC()
+	prepared, err := conductor.prepareReplay(source, selection)
+	if err != nil {
+		return ReviewRecord{}, err
+	}
+	sourceID := source.ID
+	return conductor.runPreparedReview(ctx, prepared, &sourceID, reviewStarted)
 }
 
 type InitializationRequiredError struct {
@@ -137,9 +165,10 @@ func (conductor *Conductor) requirePreparedState(repository string) error {
 }
 
 type preparedReview struct {
-	subject ReviewSubject
-	profile compiledProfile
-	timings ReviewTimings
+	subject  ReviewSubject
+	profile  compiledProfile
+	timings  ReviewTimings
+	deadline time.Duration
 }
 
 func (conductor *Conductor) prepareReview(selection ReviewSelection) (preparedReview, error) {
@@ -166,7 +195,7 @@ func (conductor *Conductor) prepareReview(selection ReviewSelection) (preparedRe
 	if err != nil {
 		return preparedReview{}, err
 	}
-	return preparedReview{subject: subject, profile: profile, timings: timings}, nil
+	return preparedReview{subject: subject, profile: profile, timings: timings, deadline: conductor.attemptDeadline}, nil
 }
 
 func (conductor *Conductor) Profiles(ctx context.Context) ([]ProfileSummary, error) {
@@ -242,21 +271,21 @@ func (conductor *Conductor) Inspect(_ context.Context, id ReviewID) (ReviewRecor
 	return record, err
 }
 
-func (conductor *Conductor) History(_ context.Context, limit int) ([]store.HistoryEntry, error) {
+func (conductor *Conductor) History(_ context.Context, query store.HistoryQuery) (store.HistoryPage, error) {
 	ledger, ok := conductor.store.(interface {
-		History(int) ([]store.HistoryEntry, error)
+		History(store.HistoryQuery) (store.HistoryPage, error)
 	})
 	if !ok {
-		return nil, fmt.Errorf("review history requires the SQLite ledger")
+		return store.HistoryPage{}, fmt.Errorf("review history requires the SQLite ledger")
 	}
-	entries, err := ledger.History(limit)
+	page, err := ledger.History(query)
 	if errors.Is(err, store.ErrReviewRecordStateNotInitialized) {
-		return nil, InitializationRequiredError{Repository: "."}
+		return store.HistoryPage{}, InitializationRequiredError{Repository: "."}
 	}
-	return entries, err
+	return page, err
 }
 
-func (conductor *Conductor) pendingRecord(subject ReviewSubject, profile compiledProfile, timings ReviewTimings) (ReviewRecord, error) {
+func (conductor *Conductor) pendingRecord(subject ReviewSubject, profile compiledProfile, timings ReviewTimings, replaysReviewID *ReviewID) (ReviewRecord, error) {
 	id, err := newReviewID(conductor.now())
 	if err != nil {
 		return ReviewRecord{}, err
@@ -270,6 +299,7 @@ func (conductor *Conductor) pendingRecord(subject ReviewSubject, profile compile
 	return ReviewRecord{
 		SchemaVersion:   currentReviewRecordSchemaVersion,
 		ID:              id,
+		ReplaysReviewID: replaysReviewID,
 		Lifecycle:       LifecyclePending,
 		Subject:         subject,
 		ProfileRevision: profile.revision,
@@ -287,39 +317,23 @@ type passExecution struct {
 	profile       compiledProfile
 	executor      attemptExecutor
 	reviewStarted time.Time
+	deadline      time.Duration
 }
 
 func (conductor *Conductor) executePass(ctx context.Context, pass passExecution) (ReviewRecord, error) {
 	record := pass.record
 	started := conductor.now().UTC()
-	attemptContext, cancel := context.WithTimeout(ctx, conductor.attemptDeadline)
+	attemptContext, cancel := context.WithTimeout(ctx, pass.deadline)
 	defer cancel()
 	prompt := pass.profile.prompt(record.Subject)
-	execution := pass.executor.Execute(attemptContext, attemptSpec{
-		Repository: record.Subject.Repository,
-		Prompt:     prompt,
-		Candidate:  pass.profile.reviewer.candidate,
-	})
+	execution, cleanupErr := conductor.executeAttempt(attemptContext, record, pass, prompt)
 	completed := conductor.now().UTC()
 	record.Timings.AttemptExecutionMS = elapsedMilliseconds(started, completed)
 
 	validationStarted := conductor.now().UTC()
 	result, parseErr := canonicalReviewResultContract.Parse(execution.AssistantText)
 	record.Timings.ResultValidationMS = elapsedMilliseconds(validationStarted, conductor.now().UTC())
-	outcome := execution.Outcome
-	if outcome == AttemptCompleted && parseErr == nil {
-		record.Result = &result
-		record.Lifecycle = LifecycleCompleted
-	} else {
-		if outcome == AttemptCompleted {
-			outcome = AttemptInvalidResult
-		} else if outcome == "" {
-			outcome = AttemptUnknownFailure
-		}
-		record.Lifecycle = LifecycleIncomplete
-		termination := terminationForAttempt(execution, outcome, parseErr)
-		record.Termination = &termination
-	}
+	outcome := applyAttemptResult(&record, result, execution, parseErr)
 	attempt, artifactErr := conductor.buildAttempt(record.ID, prompt, pass.profile.reviewer.candidate, execution, outcome, started, completed)
 	if artifactErr != nil {
 		return record, artifactErr
@@ -330,7 +344,38 @@ func (conductor *Conductor) executePass(ctx context.Context, pass passExecution)
 		conductor.removeArtifacts(attempt.Artifacts)
 		return record, err
 	}
+	if cleanupErr != nil {
+		return record, fmt.Errorf("Review %s was persisted but its Subject execution checkout could not be cleaned: %w", record.ID, cleanupErr)
+	}
 	return record, nil
+}
+
+func applyAttemptResult(record *ReviewRecord, result ReviewResult, execution attemptExecution, parseErr error) AttemptOutcome {
+	outcome := execution.Outcome
+	if outcome == AttemptCompleted && parseErr == nil {
+		record.Result = &result
+		record.Lifecycle = LifecycleCompleted
+		return outcome
+	}
+	if outcome == AttemptCompleted {
+		outcome = AttemptInvalidResult
+	} else if outcome == "" {
+		outcome = AttemptUnknownFailure
+	}
+	record.Lifecycle = LifecycleIncomplete
+	termination := terminationForAttempt(execution, outcome, parseErr)
+	record.Termination = &termination
+	return outcome
+}
+
+func (conductor *Conductor) executeAttempt(ctx context.Context, record ReviewRecord, pass passExecution, prompt string) (attemptExecution, error) {
+	checkout, err := prepareSubjectExecution(record.Subject, string(record.ID)+"-1")
+	if err != nil {
+		return failedExecution(AttemptUnknownFailure, TerminationTransportFailure, PhaseHarnessLaunch, err.Error()), nil
+	}
+	defer checkout.Close()
+	execution := pass.executor.Execute(ctx, attemptSpec{Repository: checkout.Repository, Prompt: prompt, Candidate: pass.profile.reviewer.candidate})
+	return execution, checkout.Close()
 }
 
 func boundedAttemptOutput(output string) string {

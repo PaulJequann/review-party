@@ -196,3 +196,13 @@ func TestBoundedBufferReportsOverflowWithoutGrowing(t *testing.T) {
 		t.Fatalf("buffer = %q", buffer.Bytes())
 	}
 }
+
+func TestReviewerEnvironmentExcludesUnrelatedCallerSecret(t *testing.T) {
+	t.Setenv("REVIEW_PARTY_UNRELATED_SECRET", "must-not-leak")
+	t.Setenv("GITHUB_TOKEN", "allowed-token")
+	command := exec.Command("sh", "-c", `test "$GITHUB_TOKEN" = allowed-token && test -z "$REVIEW_PARTY_UNRELATED_SECRET"`)
+	command.Env = reviewerEnvironment("copilot")
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("environment policy: %v\n%s", err, output)
+	}
+}

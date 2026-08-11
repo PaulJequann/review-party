@@ -28,6 +28,13 @@ use `Save`, `Load`, and a small `History` query; neither it nor the CLI sees
 rows or transactions. Construction is deferred so `profiles` and other
 read-only commands do not create state.
 
+`HistoryQuery` is the typed operational-query boundary. It filters the stored
+Subject repository/identity, effective Profile/Reviewer, lifecycle,
+termination category, and creation time without consulting current user
+configuration. Results are deterministic and bounded, and `HistoryPage`
+reports the applied limit and whether another page exists. This is selection
+and summarization only; replay remains a separate Conductor behavior.
+
 Review Party owns one state root at `$XDG_STATE_HOME/review-party`, falling
 back to `$HOME/.local/state/review-party` when `XDG_STATE_HOME` is unset. The
 ledger is `ledger.sqlite` and filesystem artifacts are rooted beneath
@@ -74,3 +81,14 @@ initialization of new or supported existing state is idempotent. Review and
 read-only operations require an existing ledger and do not create a missing
 state root. Corrupt or inaccessible
 state produces a precise diagnostic without a JSON fallback or repair path.
+
+Migration 2 adds the two indexes justified by the first operational queries:
+one for deterministic newest-first traversal and one for effective Reviewer
+filtering in that same order. Other filters remain unindexed until measured
+fixtures demonstrate a useful access path rather than accumulating speculative
+indexes.
+
+Migration 3 adds nullable `replays_review_id` lineage with a foreign key to the
+source Review and a source/time/ID index. The relationship is part of the public
+aggregate projection rather than an event log; source and replay remain
+independent durable Review Records.

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -15,6 +16,7 @@ import (
 	"reviewparty/internal/engine"
 	"reviewparty/internal/model"
 	"reviewparty/internal/store"
+	"reviewparty/internal/subject"
 )
 
 func main() {
@@ -44,6 +46,7 @@ func commandHandlers(ctx context.Context, stdout, stderr io.Writer) map[string]f
 	}
 	return map[string]func([]string) int{
 		"review":   func(arguments []string) int { return runReview(ctx, arguments, stdout, stderr) },
+		"replay":   func(arguments []string) int { return runReplay(ctx, arguments, stdout, stderr) },
 		"profiles": func(arguments []string) int { return runProfiles(ctx, arguments, stdout, stderr) },
 		"explain":  func(arguments []string) int { return runExplain(ctx, arguments, stdout, stderr) },
 		"config":   func(arguments []string) int { return runConfig(arguments, stdout, stderr) },
@@ -67,16 +70,24 @@ func runHistory(ctx context.Context, arguments []string, stdout, stderr io.Write
 		fmt.Fprintf(stderr, "review-party: %v\n", err)
 		return 1
 	}
-	entries, err := conductor.History(ctx, options.limit)
+	query := options.query
+	if query.Repository != "" {
+		query.Repository, err = subject.ResolveRepositoryRoot(query.Repository)
+		if err != nil {
+			fmt.Fprintf(stderr, "review-party: %v\n", err)
+			return 1
+		}
+	}
+	page, err := conductor.History(ctx, query)
 	if err != nil {
 		fmt.Fprintf(stderr, "review-party: %v\n", err)
 		return 1
 	}
-	return printHistory(entries, options.format, stdout, stderr)
+	return printHistory(page, options.format, stdout, stderr)
 }
 
 type historyOptions struct {
-	limit         int
+	query         store.HistoryQuery
 	format        string
 	configuration string
 }
@@ -87,6 +98,13 @@ func parseHistoryOptions(arguments []string, stderr io.Writer) (historyOptions, 
 	limit := flags.Int("limit", 20, "Maximum Reviews to show")
 	format := flags.String("format", "human", "Output format: human or json")
 	configuration := flags.String("config", defaultUserConfigurationPath(), "User configuration path")
+	repository := flags.String("repo", "", "Git repository identity to match")
+	reviewer := flags.String("reviewer", "", "Recorded Reviewer to match")
+	profile := flags.String("profile", "", "Recorded Profile to match")
+	lifecycle := flags.String("lifecycle", "", "Lifecycle to match")
+	termination := flags.String("termination", "", "Termination category to match")
+	subjectIdentity := flags.String("subject", "", "Subject identity to match")
+	sinceText := flags.String("since", "", "Include Reviews created at or after this RFC3339 timestamp")
 	if err := flags.Parse(arguments); err != nil {
 		fmt.Fprintln(stderr, "review-party: history accepts --limit N and --format human|json")
 		return historyOptions{}, false
@@ -95,19 +113,28 @@ func parseHistoryOptions(arguments []string, stderr io.Writer) (historyOptions, 
 		fmt.Fprintln(stderr, "review-party: history accepts --limit N and --format human|json")
 		return historyOptions{}, false
 	}
-	if *limit < 1 {
+	if *limit < 1 || *limit > store.MaxHistoryLimit {
 		fmt.Fprintln(stderr, "review-party: history accepts --limit N and --format human|json")
 		return historyOptions{}, false
 	}
-	return historyOptions{limit: *limit, format: *format, configuration: *configuration}, true
+	query := store.HistoryQuery{Repository: *repository, Reviewer: *reviewer, Profile: *profile, Lifecycle: model.Lifecycle(*lifecycle), Termination: model.TerminationCategory(*termination), Subject: *subjectIdentity, Limit: *limit}
+	if *sinceText != "" {
+		since, err := time.Parse(time.RFC3339, *sinceText)
+		if err != nil {
+			fmt.Fprintln(stderr, "review-party: --since must be an RFC3339 timestamp")
+			return historyOptions{}, false
+		}
+		query.Since = &since
+	}
+	return historyOptions{query: query, format: *format, configuration: *configuration}, true
 }
 
-func printHistory(entries []store.HistoryEntry, format string, stdout, stderr io.Writer) int {
+func printHistory(page store.HistoryPage, format string, stdout, stderr io.Writer) int {
 	if format == "json" {
-		if entries == nil {
-			entries = []store.HistoryEntry{}
+		if page.Entries == nil {
+			page.Entries = []store.HistoryEntry{}
 		}
-		if err := json.NewEncoder(stdout).Encode(entries); err != nil {
+		if err := json.NewEncoder(stdout).Encode(page); err != nil {
 			fmt.Fprintf(stderr, "review-party: %v\n", err)
 			return 1
 		}
@@ -117,8 +144,60 @@ func printHistory(entries []store.HistoryEntry, format string, stdout, stderr io
 		fmt.Fprintf(stderr, "review-party: unknown output format %q\n", format)
 		return 1
 	}
-	for _, entry := range entries {
-		fmt.Fprintf(stdout, "%s · %s · %s\n", entry.ID, entry.Lifecycle, entry.CreatedAt.UTC().Format(time.RFC3339))
+	for _, entry := range page.Entries {
+		fmt.Fprintln(stdout, formatHistoryEntry(entry))
+	}
+	return 0
+}
+
+func formatHistoryEntry(entry store.HistoryEntry) string {
+	parts := []string{string(entry.ID), string(entry.Lifecycle), entry.Profile, entry.Reviewer, entry.Subject}
+	if entry.ReplaysReviewID != nil {
+		parts = append(parts, "replays "+string(*entry.ReplaysReviewID))
+	}
+	if entry.Termination != "" {
+		parts = append(parts, string(entry.Termination))
+	}
+	parts = append(parts, entry.CreatedAt.UTC().Format(time.RFC3339))
+	return strings.Join(parts, " · ")
+}
+
+func runReplay(ctx context.Context, arguments []string, stdout, stderr io.Writer) int {
+	idValue, remaining := takeLeadingValue(arguments)
+	if idValue == "" {
+		fmt.Fprintln(stderr, "review-party: replay requires a source review id")
+		return 2
+	}
+	flags := flag.NewFlagSet("replay", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	format := flags.String("format", "human", "Output format: human or json")
+	configuration := flags.String("config", defaultUserConfigurationPath(), "User configuration path")
+	reviewer := flags.String("reviewer", "", "Explicit Reviewer override")
+	modelName := flags.String("model", "", "Explicit model override")
+	effort := flags.String("effort", "", "Explicit reasoning effort override")
+	if err := flags.Parse(remaining); err != nil {
+		return 2
+	}
+	if flags.NArg() != 0 {
+		fmt.Fprintln(stderr, "review-party: replay accepts one source review id")
+		return 2
+	}
+	conductor, err := engine.New(engine.Config{UserConfigurationPath: *configuration})
+	if err != nil {
+		fmt.Fprintf(stderr, "review-party: %v\n", err)
+		return 1
+	}
+	record, err := conductor.Replay(ctx, model.ReplaySelection{SourceReviewID: model.ReviewID(idValue), Reviewer: *reviewer, Model: *modelName, Effort: *effort})
+	if err != nil {
+		fmt.Fprintf(stderr, "review-party: %v\n", err)
+		return 1
+	}
+	if err := printRecordWithConfiguration(stdout, record, *format, *configuration); err != nil {
+		fmt.Fprintf(stderr, "review-party: %v\n", err)
+		return 1
+	}
+	if record.Lifecycle == model.LifecycleIncomplete {
+		return 2
 	}
 	return 0
 }
@@ -134,11 +213,18 @@ func runReview(ctx context.Context, arguments []string, stdout, stderr io.Writer
 	reviewer := flags.String("reviewer", "", "Reviewer adapter: "+strings.Join(engine.SupportedReviewers(), ", ")+"; empty uses configured/Profile default")
 	modelName := flags.String("model", "", "Explicit model for the selected Reviewer")
 	effort := flags.String("effort", "", "Explicit reasoning effort for the selected Reviewer")
+	base := flags.String("base", "", "Committed-range base revision")
+	head := flags.String("head", "", "Committed-range head revision")
 	if err := flags.Parse(arguments); err != nil {
 		return 2
 	}
 	if flags.NArg() != 0 {
 		fmt.Fprintln(stderr, "review-party: review accepts one optional profile name")
+		return 2
+	}
+	subjectReference, err := reviewSubjectReference(*base, *head)
+	if err != nil {
+		fmt.Fprintf(stderr, "review-party: %v\n", err)
 		return 2
 	}
 
@@ -152,7 +238,7 @@ func runReview(ctx context.Context, arguments []string, stdout, stderr io.Writer
 	}
 	record, err := conductor.Review(ctx, model.ReviewSelection{
 		Repository: *repository,
-		Subject:    model.WorkingChanges(),
+		Subject:    subjectReference,
 		Profile:    profile,
 		Reviewer:   *reviewer,
 		Model:      *modelName,
@@ -170,6 +256,16 @@ func runReview(ctx context.Context, arguments []string, stdout, stderr io.Writer
 		return 2
 	}
 	return 0
+}
+
+func reviewSubjectReference(base, head string) (model.SubjectReference, error) {
+	if (base == "") != (head == "") {
+		return model.SubjectReference{}, errors.New("--base and --head must be provided together")
+	}
+	if base != "" {
+		return model.CommittedRange(base, head), nil
+	}
+	return model.WorkingChanges(), nil
 }
 
 func runInspect(ctx context.Context, arguments []string, stdout, stderr io.Writer) int {
@@ -238,6 +334,7 @@ func printHumanRecord(output io.Writer, record model.ReviewRecord, configuration
 		findings = record.Result.FindingCount()
 	}
 	fmt.Fprintf(output, "review %s\n", record.ID)
+	printReplayLineage(output, record.ReplaysReviewID)
 	provenance := latestProvenance(record)
 	fmt.Fprintf(output, "%s · %d finding(s) · %s/%s (%s)\n", record.Lifecycle, findings, provenance.ReviewerID, provenance.Model, provenance.Effort)
 	if record.ProfileRevision.Source != "" {
@@ -257,6 +354,12 @@ func printHumanRecord(output io.Writer, record model.ReviewRecord, configuration
 		fmt.Fprintf(output, " --config %s", shellQuoteArgument(configuration))
 	}
 	fmt.Fprintln(output)
+}
+
+func printReplayLineage(output io.Writer, source *model.ReviewID) {
+	if source != nil {
+		fmt.Fprintf(output, "replays: %s\n", *source)
+	}
 }
 
 func shellQuoteArgument(value string) string {
@@ -297,8 +400,9 @@ func printUsage(output io.Writer) {
 	fmt.Fprintln(output, "  review-party profile install-defaults [--repo PATH|--global]")
 	fmt.Fprintln(output, "  review-party config path|show [--config PATH]")
 	fmt.Fprintf(output, "  review-party explain PROFILE [--repo PATH] [--reviewer %s] [--model MODEL] [--effort EFFORT] [--format human|json]\n", strings.Join(engine.SupportedReviewers(), "|"))
-	fmt.Fprintf(output, "  review-party review [PROFILE] [--reviewer %s] [--model MODEL] [--effort EFFORT] [--config PATH] [--repo PATH] [--format human|json]\n", strings.Join(engine.SupportedReviewers(), "|"))
+	fmt.Fprintf(output, "  review-party review [PROFILE] [--reviewer %s] [--model MODEL] [--effort EFFORT] [--config PATH] [--repo PATH] [--base COMMIT --head COMMIT] [--format human|json]\n", strings.Join(engine.SupportedReviewers(), "|"))
+	fmt.Fprintln(output, "  review-party replay REVIEW_ID [--reviewer ID] [--model MODEL] [--effort EFFORT] [--format human|json] [--config PATH]")
 	fmt.Fprintln(output, "  review-party inspect REVIEW_ID [--format human|json] [--verify-artifacts] [--config PATH]")
-	fmt.Fprintln(output, "  review-party history [--limit N] [--format human|json] [--config PATH]")
+	fmt.Fprintln(output, "  review-party history [--repo PATH] [--reviewer ID] [--profile NAME] [--lifecycle STATE] [--termination CATEGORY] [--subject ID] [--since RFC3339] [--limit N] [--format human|json] [--config PATH]")
 	fmt.Fprintln(output, "  review-party init [--repo PATH] [--state-dir PATH] [--config PATH]")
 }

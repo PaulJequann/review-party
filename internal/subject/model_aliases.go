@@ -9,3 +9,4 @@ type SubjectReference = model.SubjectReference
 type SubjectKind = model.SubjectKind
 
 const SubjectWorkingChanges = model.SubjectWorkingChanges
+const SubjectCommittedRange = model.SubjectCommittedRange
