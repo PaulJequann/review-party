@@ -59,10 +59,44 @@ func TestInitializeProfilesCreatesGlobalStarterInMissingDirectory(t *testing.T) 
 		t.Fatal(err)
 	}
 	assertInitializationCounts(t, result, 2, 0)
-	for _, path := range []string{filepath.Join(directory, "config.json"), filepath.Join(directory, "profiles", "bugs.md")} {
+	for _, path := range []string{filepath.Join(directory, "profiles", "bugs.md"), filepath.Join(directory, "profiles", "documentation.md")} {
 		if info, statErr := os.Stat(path); statErr != nil || !info.Mode().IsRegular() {
 			t.Fatalf("starter file %q: info = %v, error = %v", path, info, statErr)
 		}
+	}
+}
+
+func TestCreateProfileRequiresExplicitStartingPointAndCopiesPackagedBytes(t *testing.T) {
+	repository := testRepository(t)
+	if _, err := CreateProfile(ProfileCreation{Name: "security", Repository: repository}); err == nil || !strings.Contains(err.Error(), "exactly one") {
+		t.Fatalf("missing starting point error = %v", err)
+	}
+	result, err := CreateProfile(ProfileCreation{Name: "security", Repository: repository, PackagedProfile: "documentation"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := packagedProfileFiles.ReadFile("profiles/documentation.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(result.Created[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("created Profile does not match packaged source")
+	}
+}
+
+func TestInitializeProfilesInstallsCompleteStarterSetWithoutConfiguration(t *testing.T) {
+	repository := testRepository(t)
+	result, err := InitializeProfiles(ProfileInitialization{Repository: repository})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertInitializationCounts(t, result, 2, 0)
+	if _, err := os.Stat(filepath.Join(repository, ".reviewparty", "config.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("starter installation changed default selection: %v", err)
 	}
 }
 

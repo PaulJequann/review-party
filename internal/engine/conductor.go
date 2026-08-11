@@ -4,15 +4,16 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"reviewparty/internal/artifact"
+	"reviewparty/internal/store"
 	"time"
 )
 
 type Config struct {
-	RecordDirectory        string
 	GlobalProfileDirectory string
 	AttemptDeadline        time.Duration
 	UserConfigurationPath  string
@@ -29,17 +30,15 @@ type Conductor struct {
 }
 
 func New(config Config) (*Conductor, error) {
-	if config.RecordDirectory == "" {
-		config.RecordDirectory = defaultRecordDirectory()
-	}
 	if config.AttemptDeadline <= 0 {
 		config.AttemptDeadline = 10 * time.Minute
 	}
-	store, err := newFileRecordStore(config.RecordDirectory)
+	userConfiguration, err := loadUserConfiguration(config.UserConfigurationPath)
 	if err != nil {
 		return nil, err
 	}
-	userConfiguration, err := loadUserConfiguration(config.UserConfigurationPath)
+	stateDirectory := firstNonempty(userConfiguration.StateDirectory, defaultStateDirectory())
+	store, err := newDeferredLedgerRecordStore(stateDirectory)
 	if err != nil {
 		return nil, err
 	}
@@ -48,7 +47,7 @@ func New(config Config) (*Conductor, error) {
 		return nil, err
 	}
 	conductor := newConductorWithProfiles(store, reviewers, newProfileLibrary(config.GlobalProfileDirectory), config.AttemptDeadline)
-	conductor.artifacts, err = artifact.NewStore(filepath.Dir(config.RecordDirectory))
+	conductor.artifacts, err = artifact.NewStore(stateDirectory)
 	if err != nil {
 		return nil, err
 	}
@@ -76,6 +75,9 @@ func newConductorWithProfiles(store recordStore, reviewers reviewerCatalog, prof
 
 func (conductor *Conductor) Review(ctx context.Context, selection ReviewSelection) (ReviewRecord, error) {
 	if err := ctx.Err(); err != nil {
+		return ReviewRecord{}, err
+	}
+	if err := conductor.requirePreparedState(selection.Repository); err != nil {
 		return ReviewRecord{}, err
 	}
 	reviewStarted := conductor.now().UTC()
@@ -111,6 +113,27 @@ func (conductor *Conductor) Review(ctx context.Context, selection ReviewSelectio
 		executor:      executor,
 		reviewStarted: reviewStarted,
 	})
+}
+
+type InitializationRequiredError struct {
+	Repository string
+}
+
+func (failure InitializationRequiredError) Error() string {
+	repository := firstNonempty(failure.Repository, ".")
+	return fmt.Sprintf("Review Party is not initialized; run review-party init --repo %q", repository)
+}
+
+func (conductor *Conductor) requirePreparedState(repository string) error {
+	requirement, ok := conductor.store.(interface{ RequirePrepared() error })
+	if !ok {
+		return nil
+	}
+	err := requirement.RequirePrepared()
+	if errors.Is(err, store.ErrReviewRecordStateNotInitialized) {
+		return InitializationRequiredError{Repository: repository}
+	}
+	return err
 }
 
 type preparedReview struct {
@@ -212,7 +235,25 @@ func (conductor *Conductor) Inspect(_ context.Context, id ReviewID) (ReviewRecor
 	if !validReviewID(id) {
 		return ReviewRecord{}, fmt.Errorf("invalid review id %q", id)
 	}
-	return conductor.store.Load(id)
+	record, err := conductor.store.Load(id)
+	if errors.Is(err, store.ErrReviewRecordStateNotInitialized) {
+		return ReviewRecord{}, InitializationRequiredError{Repository: "."}
+	}
+	return record, err
+}
+
+func (conductor *Conductor) History(_ context.Context, limit int) ([]store.HistoryEntry, error) {
+	ledger, ok := conductor.store.(interface {
+		History(int) ([]store.HistoryEntry, error)
+	})
+	if !ok {
+		return nil, fmt.Errorf("review history requires the SQLite ledger")
+	}
+	entries, err := ledger.History(limit)
+	if errors.Is(err, store.ErrReviewRecordStateNotInitialized) {
+		return nil, InitializationRequiredError{Repository: "."}
+	}
+	return entries, err
 }
 
 func (conductor *Conductor) pendingRecord(subject ReviewSubject, profile compiledProfile, timings ReviewTimings) (ReviewRecord, error) {
@@ -405,13 +446,13 @@ func validReviewIDCharacter(character rune) bool {
 	return character >= '0' && character <= '9'
 }
 
-func defaultRecordDirectory() string {
+func defaultStateDirectory() string {
 	if stateHome := os.Getenv("XDG_STATE_HOME"); stateHome != "" {
-		return filepath.Join(stateHome, "review-party", "records")
+		return filepath.Join(stateHome, "review-party")
 	}
 	home, err := os.UserHomeDir()
 	if err == nil {
-		return filepath.Join(home, ".local", "state", "review-party", "records")
+		return filepath.Join(home, ".local", "state", "review-party")
 	}
-	return filepath.Join(os.TempDir(), "review-party-records")
+	return filepath.Join(os.TempDir(), "review-party")
 }

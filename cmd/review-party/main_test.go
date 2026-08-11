@@ -2,12 +2,18 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"reviewparty/internal/engine"
 	"reviewparty/internal/model"
+	"reviewparty/internal/store"
 )
 
 func TestPrintRecordUsesActualAttemptProvenance(t *testing.T) {
@@ -24,6 +30,99 @@ func TestPrintRecordUsesActualAttemptProvenance(t *testing.T) {
 	}
 	if !strings.Contains(output.String(), "copilot/gpt-5-mini (high)") {
 		t.Fatalf("output = %q", output.String())
+	}
+}
+
+func TestHistoryUsesManagedXDGState(t *testing.T) {
+	stateHome := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", stateHome)
+	ledger, err := store.NewLedgerRecordStore(filepath.Join(stateHome, "review-party"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 8, 11, 12, 0, 0, 0, time.UTC)
+	record := model.ReviewRecord{
+		SchemaVersion: model.CurrentReviewRecordSchemaVersion,
+		ID:            "rp_1723200000000_0123456789abcdef",
+		Lifecycle:     model.LifecycleCompleted,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+	if err := ledger.Save(record); err != nil {
+		t.Fatal(err)
+	}
+	if err := ledger.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if exit := run(context.Background(), []string{"history", "--format", "json"}, &stdout, &stderr); exit != 0 {
+		t.Fatalf("exit = %d, stderr = %q", exit, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), string(record.ID)) {
+		t.Fatalf("history = %q", stdout.String())
+	}
+	if _, err := os.Stat(filepath.Join(stateHome, "review-party", "ledger.sqlite")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestInspectAndHistoryUseExplicitConfigurationState(t *testing.T) {
+	stateDirectory := t.TempDir()
+	configurationPath := filepath.Join(t.TempDir(), "review party.json")
+	runMainCommand(t, []string{"init", "--repo", testGitRepository(t), "--state-dir", stateDirectory, "--config", configurationPath})
+	ledger, err := store.NewLedgerRecordStore(stateDirectory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	record := model.ReviewRecord{SchemaVersion: model.CurrentReviewRecordSchemaVersion, ID: "rp_1723200000000_0123456789abcdef", Lifecycle: model.LifecycleCompleted, CreatedAt: now, UpdatedAt: now}
+	if err := ledger.Save(record); err != nil {
+		t.Fatal(err)
+	}
+	if err := ledger.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	history := runMainCommand(t, []string{"history", "--format", "json", "--config", configurationPath})
+	if !strings.Contains(history, string(record.ID)) {
+		t.Fatalf("history = %q", history)
+	}
+	inspection := runMainCommand(t, []string{"inspect", string(record.ID), "--config", configurationPath})
+	if !strings.Contains(inspection, "--config "+shellQuoteArgument(configurationPath)) {
+		t.Fatalf("inspection = %q", inspection)
+	}
+}
+
+func testGitRepository(t *testing.T) string {
+	t.Helper()
+	repository := t.TempDir()
+	command := exec.Command("git", "-C", repository, "init", "--quiet")
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, output)
+	}
+	return repository
+}
+
+func runMainCommand(t *testing.T, arguments []string) string {
+	t.Helper()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if exit := run(context.Background(), arguments, &stdout, &stderr); exit != 0 {
+		t.Fatalf("run(%v) exit = %d, stderr = %q", arguments, exit, stderr.String())
+	}
+	return stdout.String()
+}
+
+func TestHistoryRejectsRemovedRecordsFlag(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if exit := run(context.Background(), []string{"history", "--records", t.TempDir()}, &stdout, &stderr); exit != 2 {
+		t.Fatalf("exit = %d, stderr = %q", exit, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "flag provided but not defined: -records") {
+		t.Fatalf("stderr = %q", stderr.String())
 	}
 }
 

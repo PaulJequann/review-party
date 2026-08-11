@@ -32,17 +32,23 @@ OpenCode Muse selection. It is the accepted fast feedback path; do not silently
 replace it with Grok or another model:
 
 ```sh
-go run ./cmd/review-party review bugs --repo . --reviewer opencode \
+XDG_STATE_HOME="$PWD/scratch/dogfood-state" \
+XDG_CONFIG_HOME="$PWD/scratch/dogfood-config" \
+  go run ./cmd/review-party init --repo .
+XDG_STATE_HOME="$PWD/scratch/dogfood-state" \
+XDG_CONFIG_HOME="$PWD/scratch/dogfood-config" \
+  go run ./cmd/review-party review bugs --repo . --reviewer opencode \
   --model meta/muse-spark-1.2-contributor --deadline 3m \
-  --records scratch/dogfood-records --format json
+  --format json
 ```
 
-- Inspect the persisted record with the same `--records` directory and
+- Inspect the persisted record with the same isolated `XDG_STATE_HOME` and
+  `XDG_CONFIG_HOME` and
   `--format json`; verify the recorded Reviewer/model provenance and result
   contract revision.
 - Treat an unavailable, malformed, or timed-out Muse run as Incomplete. A
   different Reviewer or model requires explicit caller authorization.
-- Keep dogfood records and temporary builds under `scratch/`; they are evidence
+- Keep dogfood state and temporary builds under `scratch/`; they are evidence
   for the current session, not durable repository records.
 
 ## No Deletions (Absolute)

@@ -47,7 +47,7 @@ func TestGlobalDefaultsSelectProfileAndReviewer(t *testing.T) {
 		},
 	}
 	copilot := successfulExecutor(cleanReview)
-	store, err := newFileRecordStore(t.TempDir())
+	store, err := newLedgerRecordStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,7 @@ func TestInvalidRepositoryProfileFailsBeforeLaunchWithoutFallback(t *testing.T) 
 	writeProfileFixture(t, filepath.Join(repository, ".reviewparty", "profiles", "security.md"), "   \n")
 	writeProfileFixture(t, filepath.Join(globalDirectory, "profiles", "security.md"), "VALID GLOBAL FALLBACK THAT MUST NOT RUN")
 	executor := successfulExecutor(cleanReview)
-	store, err := newFileRecordStore(t.TempDir())
+	store, err := newLedgerRecordStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

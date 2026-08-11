@@ -70,9 +70,14 @@ remain profile-neutral Review Party constraints and result framing.
 
 ## Operations
 
-- `review-party init [--repo PATH]` creates repository starter files without
-  overwriting existing paths.
-- `review-party init --global` creates the global starter library.
+- `review-party init [--repo PATH] [--state-dir PATH] [--config PATH]` prepares
+  managed Review Record state selected by that configuration and does not
+  create Profile material.
+- `review-party profile create NAME (--blank|--from-packaged PROFILE)` creates
+  exactly one owned Profile at repository or global scope without overwriting.
+- `review-party profile install-defaults [--repo PATH|--global]` creates owned
+  copies of every packaged starter Profile, retains existing files, and does not
+  change default Profile selection.
 - `review-party profiles [--repo PATH]` lists effective named Profiles and
   their winning sources; invalid peer files are included with validation errors
   without hiding valid Profiles.

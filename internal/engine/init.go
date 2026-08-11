@@ -1,7 +1,6 @@
 package engine
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -20,6 +19,15 @@ type ProfileInitializationResult struct {
 	Directory string
 	Created   []string
 	Existing  []string
+}
+
+type ProfileCreation struct {
+	Name            string
+	Repository      string
+	Global          bool
+	GlobalDirectory string
+	Blank           bool
+	PackagedProfile string
 }
 
 type starterProfileFile struct {
@@ -53,6 +61,52 @@ func InitializeProfiles(initialization ProfileInitialization) (ProfileInitializa
 		appendProfileInitializationResult(&result, file.path, created)
 	}
 	return result, nil
+}
+
+func CreateProfile(creation ProfileCreation) (ProfileInitializationResult, error) {
+	if err := validateProfileName(creation.Name); err != nil {
+		return ProfileInitializationResult{}, fmt.Errorf("invalid Profile name %q: %w", creation.Name, err)
+	}
+	if creation.Blank == (creation.PackagedProfile != "") {
+		return ProfileInitializationResult{}, errors.New("choose exactly one starting point: blank or packaged Profile")
+	}
+	directory, permissions, err := initializationDirectory(ProfileInitialization{
+		Repository: creation.Repository, Global: creation.Global, GlobalDirectory: creation.GlobalDirectory,
+	})
+	if err != nil {
+		return ProfileInitializationResult{}, err
+	}
+	profileRoot, err := prepareProfileDirectory(directory, permissions)
+	if err != nil {
+		return ProfileInitializationResult{}, err
+	}
+	defer profileRoot.Close()
+	payload, err := profileCreationPayload(creation)
+	if err != nil {
+		return ProfileInitializationResult{}, err
+	}
+	path := filepath.Join(directory, "profiles", creation.Name+".md")
+	created, err := writeProfileFile(profileRoot, starterProfileFile{path: path, payload: payload}, profileInitializationFilePermissions(creation.Global))
+	if err != nil {
+		return ProfileInitializationResult{}, err
+	}
+	result := ProfileInitializationResult{Directory: directory}
+	appendProfileInitializationResult(&result, path, created)
+	return result, nil
+}
+
+func profileCreationPayload(creation ProfileCreation) ([]byte, error) {
+	if creation.Blank {
+		return []byte("Describe the Reviewer Judgment for this Profile.\n"), nil
+	}
+	if err := validateProfileName(creation.PackagedProfile); err != nil {
+		return nil, fmt.Errorf("invalid packaged Profile name %q: %w", creation.PackagedProfile, err)
+	}
+	payload, err := packagedProfileFiles.ReadFile("profiles/" + creation.PackagedProfile + ".md")
+	if err != nil {
+		return nil, fmt.Errorf("packaged Profile %q is unavailable", creation.PackagedProfile)
+	}
+	return payload, nil
 }
 
 func prepareProfileDirectory(directory string, permissions fs.FileMode) (*os.Root, error) {
@@ -137,24 +191,17 @@ func writeProfileFile(profileRoot *os.Root, file starterProfileFile, permissions
 	return writeNewProfileFileUsing(file.path, file.payload, operations, writeProfilePayload)
 }
 
-func starterProfileFiles(directory, profilesDirectory string) ([]starterProfileFile, error) {
-	configPayload, err := json.MarshalIndent(profileConfig{
-		Schema:          profileConfigSchema,
-		DefaultProfile:  "bugs",
-		DefaultReviewer: defaultReviewer,
-	}, "", "  ")
-	if err != nil {
-		return nil, fmt.Errorf("encode starter profile config: %w", err)
+func starterProfileFiles(_ string, profilesDirectory string) ([]starterProfileFile, error) {
+	names := []string{"bugs", "documentation"}
+	files := make([]starterProfileFile, 0, len(names))
+	for _, name := range names {
+		payload, err := packagedProfileFiles.ReadFile("profiles/" + name + ".md")
+		if err != nil {
+			return nil, fmt.Errorf("read packaged %s Profile: %w", name, err)
+		}
+		files = append(files, starterProfileFile{path: filepath.Join(profilesDirectory, name+".md"), payload: payload})
 	}
-	configPayload = append(configPayload, '\n')
-	bugsPayload, err := packagedProfileFiles.ReadFile("profiles/bugs.md")
-	if err != nil {
-		return nil, fmt.Errorf("read packaged bugs profile: %w", err)
-	}
-	return []starterProfileFile{
-		{path: filepath.Join(directory, "config.json"), payload: configPayload},
-		{path: filepath.Join(profilesDirectory, "bugs.md"), payload: bugsPayload},
-	}, nil
+	return files, nil
 }
 
 func profileInitializationFilePermissions(global bool) fs.FileMode {

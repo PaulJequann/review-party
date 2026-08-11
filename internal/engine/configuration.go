@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sort"
 )
 
 type userConfiguration struct {
 	Version         int                           `json:"version"`
+	StateDirectory  string                        `json:"state_directory,omitempty"`
 	DefaultReviewer string                        `json:"default_reviewer,omitempty"`
 	Reviewers       map[string]userReviewerPolicy `json:"reviewers,omitempty"`
 }
@@ -19,7 +21,7 @@ type userConfiguration struct {
 func (configuration *userConfiguration) UnmarshalJSON(payload []byte) error {
 	type plainConfiguration userConfiguration
 	var decoded plainConfiguration
-	if err := decodeStrictObject(payload, &decoded, "user configuration", "default_reviewer", "reviewers"); err != nil {
+	if err := decodeStrictObject(payload, &decoded, "user configuration", "state_directory", "default_reviewer", "reviewers"); err != nil {
 		return err
 	}
 	*configuration = userConfiguration(decoded)
@@ -146,10 +148,20 @@ func loadUserConfiguration(path string) (userConfiguration, error) {
 	if err := rejectTrailingJSON(decoder); err != nil {
 		return userConfiguration{}, InvalidUserConfigurationError{Path: path, Reason: err.Error()}
 	}
-	if configuration.Version != 1 {
-		return userConfiguration{}, InvalidUserConfigurationError{Path: path, Reason: fmt.Sprintf("unsupported version %d", configuration.Version)}
+	if err := validateUserConfiguration(configuration); err != nil {
+		return userConfiguration{}, InvalidUserConfigurationError{Path: path, Reason: err.Error()}
 	}
 	return configuration, nil
+}
+
+func validateUserConfiguration(configuration userConfiguration) error {
+	if configuration.Version != 1 {
+		return fmt.Errorf("unsupported version %d", configuration.Version)
+	}
+	if configuration.StateDirectory != "" && !filepath.IsAbs(configuration.StateDirectory) {
+		return errors.New("state_directory must be an absolute path")
+	}
+	return nil
 }
 
 func rejectTrailingJSON(decoder *json.Decoder) error {
