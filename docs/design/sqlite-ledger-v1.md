@@ -92,3 +92,13 @@ Migration 3 adds nullable `replays_review_id` lineage with a foreign key to the
 source Review and a source/time/ID index. The relationship is part of the public
 aggregate projection rather than an event log; source and replay remain
 independent durable Review Records.
+
+Migration 4 adds Eval Suite Run and Eval Run relations. An Eval Run freezes its
+Eval Case Revision and points to one ordinary Review Record. Its parent retains
+the suite revision/digest, effective Experiment Configuration, ordered Eval Run
+IDs, completion counts, and timing; adjudication and scores remain separate.
+
+Migration 5 adds immutable Adjudication Revisions. Each row transactionally
+stores the human decision document and pure derived score under a unique suite
+revision number. Publishing a correction inserts another row; it never updates
+an earlier adjudication or its source Review Results.

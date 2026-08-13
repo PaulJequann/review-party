@@ -10,3 +10,4 @@ type SubjectKind = model.SubjectKind
 
 const SubjectWorkingChanges = model.SubjectWorkingChanges
 const SubjectCommittedRange = model.SubjectCommittedRange
+const SubjectCapturedChange = model.SubjectCapturedChange

@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "id": "cancelled-thumbnail-job-is-acknowledged",
+  "mode": "change",
+  "classification": "defect",
+  "base": "base",
+  "head": "head",
+  "expected_findings": [{
+    "id": "cancellation-converted-to-success",
+    "behavior": "The thumbnail handler converts context cancellation to nil, which the consumer interprets as successful completion and acknowledges.",
+    "impact": "A lease cancellation after work starts can permanently drop a thumbnail job without saving its output or retrying it.",
+    "evidence": [
+      "The consumer acknowledges every nil handler result and retries non-nil results.",
+      "The changed handler returns nil for context cancellation before the output is stored.",
+      "The worker contract says lease cancellation must remain retryable."
+    ],
+    "locations": ["internal/jobs/thumbnail.go", "internal/jobs/consumer.go", "README.md"]
+  }]
+}

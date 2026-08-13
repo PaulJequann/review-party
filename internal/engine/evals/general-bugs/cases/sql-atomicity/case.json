@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "id": "transfer-loses-atomicity",
+  "mode": "change",
+  "classification": "defect",
+  "base": "base",
+  "head": "head",
+  "expected_findings": [{
+    "id": "partial-transfer-commit",
+    "behavior": "The debit and credit execute outside one transaction.",
+    "impact": "A failure after the debit can permanently remove funds without crediting the recipient.",
+    "evidence": ["The transaction wrapper was removed while both writes remain independently fallible."],
+    "locations": ["transfer.sql"]
+  }]
+}

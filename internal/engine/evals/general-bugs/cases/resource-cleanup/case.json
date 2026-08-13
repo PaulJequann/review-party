@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "id": "response-body-leak",
+  "mode": "change",
+  "classification": "defect",
+  "base": "base",
+  "head": "head",
+  "expected_findings": [{
+    "id": "response-body-not-closed",
+    "behavior": "A successful HTTP response body is returned without being closed.",
+    "impact": "Repeated calls can prevent connection reuse and exhaust network resources.",
+    "evidence": ["The only response-body Close call was removed."],
+    "locations": ["client.go"]
+  }]
+}

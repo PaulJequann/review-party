@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "id": "streaming-response-transfers-body-ownership",
+  "mode": "change",
+  "classification": "known_clean",
+  "base": "base",
+  "head": "head",
+  "expected_findings": [],
+  "clean_evidence": "The client intentionally changes from returning buffered bytes to returning an io.ReadCloser, documents caller ownership, closes error responses internally, and every production caller closes the successful body. Removing the old internal defer is necessary because closing before return would make the stream unusable."
+}

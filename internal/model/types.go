@@ -26,12 +26,15 @@ type SubjectKind string
 const (
 	SubjectWorkingChanges SubjectKind = "working-changes"
 	SubjectCommittedRange SubjectKind = "committed-range"
+	SubjectCapturedChange SubjectKind = "captured-change"
 )
 
 type SubjectReference struct {
-	Kind SubjectKind
-	Base string
-	Head string
+	Kind         SubjectKind
+	Base         string
+	Head         string
+	CapturedBase string
+	CapturedHead string
 }
 
 func WorkingChanges() SubjectReference {
@@ -40,6 +43,10 @@ func WorkingChanges() SubjectReference {
 
 func CommittedRange(base, head string) SubjectReference {
 	return SubjectReference{Kind: SubjectCommittedRange, Base: base, Head: head}
+}
+
+func CapturedChange(baseDirectory, headDirectory string) SubjectReference {
+	return SubjectReference{Kind: SubjectCapturedChange, CapturedBase: baseDirectory, CapturedHead: headDirectory}
 }
 
 type ReviewSelection struct {
@@ -56,6 +63,195 @@ type ReplaySelection struct {
 	Reviewer       string
 	Model          string
 	Effort         string
+}
+
+type EvalRunID string
+type EvalSuiteRunID string
+
+type EvalExecutionState string
+
+const (
+	EvalCompletedClean    EvalExecutionState = "completed_clean"
+	EvalCompletedFindings EvalExecutionState = "completed_findings"
+	EvalIncomplete        EvalExecutionState = "incomplete"
+)
+
+type ExpectedFinding struct {
+	ID        string   `json:"id"`
+	Behavior  string   `json:"behavior"`
+	Impact    string   `json:"impact"`
+	Evidence  []string `json:"evidence"`
+	Locations []string `json:"locations,omitempty"`
+}
+
+type EvalCaseRevision struct {
+	ID               string            `json:"id"`
+	SchemaVersion    int               `json:"schema_version"`
+	Digest           string            `json:"digest"`
+	Mode             string            `json:"mode"`
+	Classification   string            `json:"classification"`
+	ExpectedFindings []ExpectedFinding `json:"expected_findings"`
+	CleanEvidence    string            `json:"clean_evidence,omitempty"`
+}
+
+type ExperimentConfiguration struct {
+	Profile  string `json:"profile"`
+	Reviewer string `json:"reviewer"`
+	Model    string `json:"model"`
+	Effort   string `json:"effort"`
+	Deadline string `json:"deadline"`
+}
+
+type EvalSuiteSelection struct {
+	Suite      string                  `json:"suite"`
+	Experiment ExperimentConfiguration `json:"experiment"`
+}
+
+type EvalRun struct {
+	ID                EvalRunID          `json:"id"`
+	SuiteRunID        EvalSuiteRunID     `json:"suite_run_id"`
+	Case              EvalCaseRevision   `json:"case_revision"`
+	ReviewID          ReviewID           `json:"review_id"`
+	ExecutionState    EvalExecutionState `json:"execution_state"`
+	AdjudicationState string             `json:"adjudication_state"`
+	CreatedAt         time.Time          `json:"created_at"`
+}
+
+type EvalSuiteRun struct {
+	ID                    EvalSuiteRunID          `json:"id"`
+	Suite                 string                  `json:"suite"`
+	SuiteRevision         string                  `json:"suite_revision"`
+	SuiteDigest           string                  `json:"suite_digest"`
+	Experiment            ExperimentConfiguration `json:"experiment"`
+	EvalRunIDs            []EvalRunID             `json:"eval_run_ids"`
+	CompletedCleanCount   int                     `json:"completed_clean_count"`
+	CompletedFindingCount int                     `json:"completed_findings_count"`
+	IncompleteCount       int                     `json:"incomplete_count"`
+	StartedAt             time.Time               `json:"started_at"`
+	CompletedAt           time.Time               `json:"completed_at"`
+}
+
+type AdjudicationRevisionID string
+
+type ExpectedDisposition string
+type ReportedDisposition string
+
+const (
+	ExpectedMatched   ExpectedDisposition = "matched"
+	ExpectedMissed    ExpectedDisposition = "missed"
+	ExpectedUncertain ExpectedDisposition = "uncertain"
+
+	ReportedMatchedExpected ReportedDisposition = "matched_expected"
+	ReportedNovelValid      ReportedDisposition = "novel_valid"
+	ReportedFalsePositive   ReportedDisposition = "false_positive"
+	ReportedUncertain       ReportedDisposition = "uncertain"
+)
+
+type ExpectedFindingAdjudication struct {
+	Finding         ExpectedFinding     `json:"finding"`
+	Disposition     ExpectedDisposition `json:"disposition"`
+	ReportedOrdinal int                 `json:"reported_ordinal,omitempty"`
+	Notes           string              `json:"notes,omitempty"`
+}
+
+type ReportedFindingAdjudication struct {
+	Finding           Finding             `json:"finding"`
+	Disposition       ReportedDisposition `json:"disposition"`
+	ExpectedFindingID string              `json:"expected_finding_id,omitempty"`
+	Notes             string              `json:"notes,omitempty"`
+}
+
+type EvalCaseAdjudication struct {
+	EvalRunID        EvalRunID                     `json:"eval_run_id"`
+	CaseID           string                        `json:"case_id"`
+	ExecutionState   EvalExecutionState            `json:"execution_state"`
+	Termination      *ReviewTermination            `json:"termination,omitempty"`
+	ExpectedFindings []ExpectedFindingAdjudication `json:"expected_findings"`
+	ReportedFindings []ReportedFindingAdjudication `json:"reported_findings"`
+}
+
+type AdjudicationDocument struct {
+	SchemaVersion int                    `json:"schema_version"`
+	SuiteRunID    EvalSuiteRunID         `json:"suite_run_id"`
+	Cases         []EvalCaseAdjudication `json:"cases"`
+}
+
+type RatioMetric struct {
+	Numerator   int      `json:"numerator"`
+	Denominator int      `json:"denominator"`
+	Value       *float64 `json:"value,omitempty"`
+}
+
+type EvalScore struct {
+	DefectRecall           RatioMetric                 `json:"defect_recall"`
+	FindingPrecision       RatioMetric                 `json:"finding_precision"`
+	CleanCaseAccuracy      RatioMetric                 `json:"clean_case_accuracy"`
+	CleanFalsePositiveRate RatioMetric                 `json:"clean_false_positive_rate"`
+	CompletionRate         RatioMetric                 `json:"completion_rate"`
+	UncertainExpected      int                         `json:"uncertain_expected"`
+	UncertainReported      int                         `json:"uncertain_reported"`
+	IncompleteCases        int                         `json:"incomplete_cases"`
+	TerminationCounts      map[TerminationCategory]int `json:"termination_counts"`
+}
+
+type ComparisonMetric struct {
+	Baseline  RatioMetric `json:"baseline"`
+	Candidate RatioMetric `json:"candidate"`
+	Delta     *float64    `json:"delta,omitempty"`
+}
+
+type ComparisonRuntime struct {
+	TotalMS       int64 `json:"total_ms"`
+	AverageMS     int64 `json:"average_ms"`
+	ComparedCases int   `json:"compared_cases"`
+}
+
+type ComparisonIdentity struct {
+	Suite                 string                  `json:"suite"`
+	SuiteRevision         string                  `json:"suite_revision"`
+	SuiteDigest           string                  `json:"suite_digest"`
+	Experiment            ExperimentConfiguration `json:"experiment"`
+	ProfileRevisionDigest string                  `json:"profile_revision_digest"`
+	Reviewer              ReviewerProvenance      `json:"reviewer"`
+	Runtime               RuntimeProvenance       `json:"runtime"`
+}
+
+type ComparisonCoverage struct {
+	BaselineCases       int      `json:"baseline_cases"`
+	CandidateCases      int      `json:"candidate_cases"`
+	ComparedCases       int      `json:"compared_cases"`
+	ComparedCaseIDs     []string `json:"compared_case_ids"`
+	OmittedBaselineIDs  []string `json:"omitted_baseline_case_ids"`
+	OmittedCandidateIDs []string `json:"omitted_candidate_case_ids"`
+	MismatchedCaseIDs   []string `json:"mismatched_case_ids"`
+}
+
+type EvalComparison struct {
+	SchemaVersion          int                         `json:"schema_version"`
+	BaselineAdjudication   AdjudicationRevisionID      `json:"baseline_adjudication"`
+	CandidateAdjudication  AdjudicationRevisionID      `json:"candidate_adjudication"`
+	BaselineIdentity       ComparisonIdentity          `json:"baseline_identity"`
+	CandidateIdentity      ComparisonIdentity          `json:"candidate_identity"`
+	Coverage               ComparisonCoverage          `json:"coverage"`
+	DefectRecall           ComparisonMetric            `json:"defect_recall"`
+	FindingPrecision       ComparisonMetric            `json:"finding_precision"`
+	CleanCaseAccuracy      ComparisonMetric            `json:"clean_case_accuracy"`
+	CleanFalsePositiveRate ComparisonMetric            `json:"clean_false_positive_rate"`
+	CompletionRate         ComparisonMetric            `json:"completion_rate"`
+	BaselineTerminations   map[TerminationCategory]int `json:"baseline_terminations"`
+	CandidateTerminations  map[TerminationCategory]int `json:"candidate_terminations"`
+	BaselineRuntime        ComparisonRuntime           `json:"baseline_runtime"`
+	CandidateRuntime       ComparisonRuntime           `json:"candidate_runtime"`
+	RuntimeDeltaMS         int64                       `json:"runtime_delta_ms"`
+}
+
+type AdjudicationRevision struct {
+	ID             AdjudicationRevisionID `json:"id"`
+	SuiteRunID     EvalSuiteRunID         `json:"suite_run_id"`
+	RevisionNumber int                    `json:"revision_number"`
+	Document       AdjudicationDocument   `json:"document"`
+	Score          EvalScore              `json:"score"`
+	CreatedAt      time.Time              `json:"created_at"`
 }
 
 type ProfileSelection struct {
@@ -79,14 +275,15 @@ func (selection ReviewSelection) ProfileSelection() ProfileSelection {
 }
 
 type ReviewSubject struct {
-	Kind         SubjectKind   `json:"kind"`
-	Repository   string        `json:"repository"`
-	Identity     string        `json:"identity"`
-	BaseObject   string        `json:"base_object,omitempty"`
-	HeadObject   string        `json:"head_object,omitempty"`
-	ChangedPaths []string      `json:"changed_paths"`
-	Patch        string        `json:"patch"`
-	Facts        *SubjectFacts `json:"facts,omitempty"`
+	Kind                SubjectKind   `json:"kind"`
+	Repository          string        `json:"repository"`
+	Identity            string        `json:"identity"`
+	BaseObject          string        `json:"base_object,omitempty"`
+	HeadObject          string        `json:"head_object,omitempty"`
+	ChangedPaths        []string      `json:"changed_paths"`
+	Patch               string        `json:"patch"`
+	Facts               *SubjectFacts `json:"facts,omitempty"`
+	ExecutionRepository string        `json:"-"`
 }
 
 type SubjectFacts struct {

@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "name": "global:canary-bugs",
+  "revision": "canary-bugs-v1",
+  "cases": [
+    "cases/auth-classification/case.json",
+    "cases/lock-race/case.json",
+    "cases/sql-atomicity/case.json",
+    "cases/resource-cleanup/case.json",
+    "cases/known-clean/case.json"
+  ]
+}

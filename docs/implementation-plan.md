@@ -1,7 +1,7 @@
 # Review Party implementation plan
 
 Status: active planning ledger
-Last reconciled: 2026-08-11
+Last reconciled: 2026-08-13
 
 This document orders the work from project inception through replacement of the
 current skill-owned execution machinery. It records the shipped local CLI,
@@ -53,9 +53,12 @@ slice status and this checklist when the acceptance evidence is committed.
 - [x] Slice 14 — history filters and operational queries (implemented locally).
 - [x] Slice 15 — reproducible committed Review Subjects (implemented locally).
 - [x] Slice 16 — replay of recorded experiment inputs (implemented locally).
-- [ ] Slice 17 — version-controlled eval corpus and ordinary Review execution.
-- [ ] Slice 18 — human adjudication and basic scoring.
-- [ ] Slice 19 — experiment comparison.
+- [x] Slice 17 — version-controlled eval corpus and ordinary Review execution (implemented locally).
+- [x] Slice 17a — separate atomic canaries from the realistic general benchmark (implemented locally).
+- [x] Slice 18 — human adjudication and basic scoring (implemented locally).
+- [x] Slice 19 — experiment comparison (implemented locally).
+- [ ] DEV-66 — retry-aware Eval Suite execution hardening: DEV-67 lifecycle and
+  checkpointing, then DEV-69 retries, then DEV-68 bounded concurrency.
 - [ ] Slice 20 — seeded controlled defects.
 - [ ] Slice 21 — ACPX transport adapter.
 - [ ] Slice 22 — native-versus-ACP adapter experiments.
@@ -63,7 +66,7 @@ slice status and this checklist when the acceptance evidence is committed.
 - [ ] Slice 24 — thin skill integration and migration.
 - [ ] Slice 25 — supported local delivery baseline.
 
-Current state: Slices 10 through 16 and DEV-56 through DEV-60 are complete or
+Current state: Slices 10 through 19, Slice 17a, and DEV-56 through DEV-60 are complete or
 implemented locally. Linear owns future work selection; use Ready issues there
 before the older roadmap below as execution authority.
 
@@ -89,6 +92,11 @@ Slice 16 replay                 Slice 17 eval execution
                               Slice 19 comparison
                                       │
                                       v
+                    DEV-66 Eval execution hardening
+                                      │
+                    DEV-67 → DEV-69 → DEV-68
+                                      │
+                                      v
                               Slice 20 seeded cases
 ```
 
@@ -111,6 +119,12 @@ and quality evidence as ordinary Reviews.
   instructions rather than embedding it in the CLI.
 - Prefer vertical slices that produce one executable behavior and observable
   evidence. Do not build every abstraction before the first end-to-end run.
+- An Eval Suite Run freezes its effective Retry Policy and per-run Concurrency
+  Limit. A limit of one is the sequential default; higher values bound active
+  Eval Cases without automatic resource sizing or a process-wide scheduler.
+- Retries reuse the same Eval Run and ordinary Review identity. Retry is not
+  fallback, Reviewer substitution, or additional evaluation coverage; an
+  exhausted case remains Incomplete and visibly affects suite completion.
 
 ## Slice execution protocol
 
@@ -186,6 +200,8 @@ manual inspection, and one-time compatibility proof under acceptance checks.
 | A committed Subject execution is isolated and owned | Caller secrets leak through files/environment, or failure cleanup removes the wrong worktree | Subject execution Interface and public Conductor with real Git | Only committed files and allowed environment reach the Reviewer; owned terminal paths are removed and unrelated worktrees remain | Test |
 | Replay reproduces inputs without claiming deterministic output | Replay recompiles the current Profile or silently substitutes a Reviewer | Public replay Interface | The new Review records the original Subject/Profile inputs and any explicit override, with a relation to the original | Test |
 | Eval execution uses the ordinary Review path | An eval-only execution path bypasses capability, provenance, or incomplete-result rules | Public eval command with a scripted Reviewer | The Eval Run points to an ordinary inspectable Review Record with identical Conductor semantics | Test |
+| Retry remains within one Eval Run | A failed Attempt creates a second Eval Run or its evidence is counted as independent coverage | Eval execution and ledger checkpoint boundary | Retry history remains attached to one Eval Run, only the final terminal result is adjudicated, and exhaustion produces one Incomplete case | Test |
+| Eval concurrency is bounded per suite run | A user setting becomes a global worker pool, silently auto-sizes, or changes manifest identity | Public Eval Suite Run command with scripted Reviewers | The effective integer limit is persisted, one is sequential, higher values cap active cases, and completed records remain manifest-ordered | Test |
 | Adjudication separates reviewer quality from execution failure | Incomplete cases are counted as missed Findings or clean results | Pure evaluator Module plus persisted adjudication | Recall/precision exclude incomplete cases and completion is reported separately | Test |
 | Experiment comparison groups exact identities | Runs with different case revisions, builds, or Profile Revisions are silently pooled | Pure comparison Module over ledger fixtures | Incompatible groups are rejected or shown separately | Test |
 | Seeded cases apply only the declared mutation | Fixture setup alters unrelated code or evaluates an unmutated checkout | Real temporary Git repository | The evaluated Subject identity contains the exact declared mutation and cleanup restores the source repository | Test |
@@ -1146,7 +1162,7 @@ cross-machine repository recovery.
 
 ## Slice 17 — Version-controlled eval corpus and ordinary Review execution
 
-Status: **Pending**
+Status: **Implemented locally**
 
 Depends on: Slices 10, 13, and 15. Slice 16 is useful but not required by the
 implementation.
@@ -1158,24 +1174,29 @@ ordinary callers and persist an Eval Run related to an ordinary Review Record.
 
 ### Corpus contract
 
-- Keep case definitions in version control under one documented repository
-  location selected during this slice.
-- Each case has a stable ID, schema version, case revision/digest, local
-  repository reference, committed base/head Subject, classification, and
-  expected Findings.
+- Ship an immutable `global:general-bugs` baseline and accept explicit
+  Caller-owned suite paths without treating either corpus as product policy.
+- Each case has a stable ID, schema version, case revision/digest, change/state
+  mode, classification, fixture content, and expected Findings.
 - Expected Findings include human-readable defect identity, material behavior,
   supporting evidence, and expected file/location where reliable.
+- Keep Reviewer/model/effort/deadline, Retry Policy, and Concurrency Limit in a
+  separate Experiment Configuration. Freeze the effective values into the Eval
+  Suite Run rather than consulting mutable caller configuration later.
+- Materialize a Git-free Synthetic Review Subject without corpus answers,
+  source paths, commit identities, or fixing commits.
 - Include both defect-containing and known-clean cases from the first usable
-  corpus.
+  anonymous, independently authored corpus.
 - Another model's Findings may help discover candidates but never become the
   gold set without human validation.
 
 ### Relationship
 
 ```text
-Eval Run
-├── Eval Case Revision
-└── ordinary Review Record
+Eval Suite Run
+└── Eval Run
+    ├── Eval Case Revision
+    └── ordinary Review Record
 ```
 
 There is no `EvalReview`. The Eval runner calls the public Conductor Interface
@@ -1194,20 +1215,27 @@ facts.
 
 ### Implementation checklist
 
-- [ ] Refine the eval-execution test-intent row before tests.
-- [ ] Design the case schema and validate unknown fields, duplicate IDs,
+- [x] Refine the eval-execution test-intent row before tests.
+- [x] Design the case schema and validate unknown fields, duplicate IDs,
   unsupported versions, missing commits, and contradictory clean/expected
   Finding declarations before launching a Reviewer.
-- [ ] Start with roughly five real defect-containing cases and two or three
-  known-clean cases; a smaller seed is allowed if each case is undeniable and
-  documented.
-- [ ] Freeze the case revision/digest into every Eval Run.
-- [ ] Execute each case through `Conductor.Review` with explicit Profile,
+- [x] Start with four independently authored defect cases and one realistic
+  known-clean case; expand language and defect coverage through versioned suite
+  revisions.
+- [x] Reclassify the original one-file cases as `global:canary-bugs` after
+  post-run adjudication showed they were useful plumbing checks but produced a
+  model-capability ceiling effect.
+- [x] Publish `global:general-bugs@general-bugs-v2` with multi-file context,
+  cross-file or lifecycle reasoning, four defect cases, and two adversarial
+  known-clean ownership changes.
+- [x] Freeze the case revision/digest into every Eval Run.
+- [x] Execute each case through `Conductor.Review` with explicit Profile,
   Reviewer, model, and effort selection.
-- [ ] Persist Eval Run execution state and its ordinary Review ID in SQLite.
-- [ ] Keep completion statistics separate from adjudication and quality scores.
-- [ ] Bound suite concurrency at one initially unless measurements justify a
-  separate concurrency design.
+- [x] Persist Eval Run execution state and its ordinary Review ID in SQLite.
+- [x] Keep completion statistics separate from adjudication and quality scores.
+- [x] Establish sequential, manifest-ordered execution as the initial baseline.
+  Configurable bounded concurrency and retry-aware lifecycle handling are the
+  approved DEV-66 follow-up rather than an implicit Slice 17 behavior.
 
 ### Smallest purposeful test set
 
@@ -1220,26 +1248,87 @@ facts.
 
 ### Acceptance checklist
 
-- [ ] One command runs the initial local suite and every case has an inspectable
+- [x] One command runs the initial local suite and every case has an inspectable
   ordinary Review Record.
-- [ ] Rerunning a case creates a new Eval Run rather than overwriting history.
-- [ ] No scoring requires terminal-output scraping.
-- [ ] Focused case-schema, Conductor, ledger, and CLI tests plus CodeScene gates
+- [x] Rerunning a case creates a new Eval Run rather than overwriting history.
+- [x] No scoring requires terminal-output scraping.
+- [x] Focused case-schema, Conductor, ledger, and CLI tests plus CodeScene gates
   pass.
-- [ ] A dated dogfood run records completion categories and runtime before any
+- [x] A dated dogfood run records completion categories and runtime before any
   prompt comparison is claimed.
+
+Acceptance evidence (2026-08-11): Eval Suite Run
+`esr_1786488281874_5ab628f00728dcbf` executed the immutable
+`global:general-bugs@general-bugs-v1` suite through OpenCode Muse
+`meta/muse-spark-1.2-contributor` at high effort. Its five sequential ordinary
+Reviews completed in 99 seconds: all four defect fixtures returned Findings,
+the known-clean fixture returned clean, and none were Incomplete. Each Eval Run
+remains `awaiting_adjudication`; this is execution evidence, not a score.
+Fresh-process inspection verified `captured-change` Subjects with synthetic
+`eval://` identities, no Git objects or source paths, exact Profile/Reviewer
+provenance, `canonical-v2`, and valid artifacts. Focused race tests, vet, build,
+formatting, and CodeScene gates passed.
+
+Post-adjudication correction (2026-08-12): the v1 fixtures are now packaged as
+`global:canary-bugs@canary-bugs-v1`; their historical Eval Suite Run remains
+immutable under its originally recorded name. They are explicitly unsuitable
+for broad capability claims because every repository was a one-file micro-case
+and the full `bugs` Profile strongly cued each risk category. The replacement
+`global:general-bugs@general-bugs-v2` uses six anonymous multi-file cases: four
+defects that require persistence, tenant, or worker-contract reasoning and two
+known-clean ownership transfers designed to punish superficial pattern
+matching. Semantic scoring remains limited to validated Review Results;
+result-contract failures stay separately visible as Incomplete operational
+facts.
+
+Acceptance evidence (2026-08-12): both exact experiments executed immutable
+suite digest `1b0e585fbfe01d7387dd4c6270fa6b5d44d74be10778376297ddce7e5c0ff545`.
+Muse Eval Suite Run `esr_1786548083898_fc7ce7fa4a119434` completed all six
+cases in 158 seconds; Adjudication Revision
+`ar_1786548279989_348d317c395f5693` recorded 4/4 recall, 4/6 precision after
+two duplicate test-gap Findings were rejected, 2/2 clean accuracy, and 6/6
+completion. DeepSeek V4 Flash Eval Suite Run
+`esr_1786548288441_1633f2e80772ddca` completed in 267 seconds; Adjudication
+Revision `ar_1786548583824_61615d51e31a6e0e` recorded 4/4 recall, 4/4
+precision, 1/1 scored clean accuracy, and 5/6 completion. Its remaining clean
+case reasoned correctly in the raw artifact but failed the exact clean-result
+contract, so it remains an unscored `result_validation_failure`. These are
+paired experiment inputs, not a winner declaration; formal comparison remains
+Slice 19.
+
+### Approved execution-hardening follow-up
+
+DEV-66 extends this baseline without creating an Eval-only execution path:
+
+- DEV-67 creates the complete Eval Suite Run and Eval Run manifest before the
+  first Reviewer launch, persists explicit parent and case lifecycle facts, and
+  checkpoints each case atomically with its parent progress.
+- DEV-69 adds a finite Retry Policy. A retry uses the same Eval Case, synthetic
+  Subject, Experiment Configuration, Eval Run, and ordinary Review identity;
+  only the final terminal Review Result is eligible for adjudication.
+- DEV-68 adds a caller-selected integer Concurrency Limit scoped to one Eval
+  Suite Run. The default is one, higher values bound active cases, backoff does
+  not occupy a slot, and completion/reporting remain manifest-ordered.
+- Suite cancellation, hard persistence failure, or the suite-wide deadline
+  stops new work while active cases terminate honestly. Exhausted cases remain
+  Incomplete; completed cases and their evidence are retained.
+
+Slices 18-25 must consume this contract rather than reimplementing retry,
+concurrency, or parent lifecycle behavior in their own modules.
 
 ### Stop rule
 
 Do not add LLM judges, generated repositories, giant benchmark imports,
-statistical-significance machinery, hosted eval platforms, or parallel suite
-execution.
+statistical-significance machinery, hosted eval platforms, automatic resource
+sizing, provider-capacity prediction, or a process-wide Eval scheduler.
 
 ## Slice 18 — Human adjudication and basic scoring
 
-Status: **Pending**
+Status: **Implemented locally**
 
-Depends on: Slice 17.
+Depends on: Slice 17. New adjudication revisions must consume the finalized
+DEV-66 retry and lifecycle contract; the existing local revision evidence
+remains immutable.
 
 ### Goal
 
@@ -1258,6 +1347,9 @@ Reviewer quality.
 - Completion rate and termination categories are reported separately.
 - Incomplete cases are not silently counted as clean or ordinary misses. Show
   them as unscored incomplete executions.
+- Retry Attempts remain one Eval Run and do not create additional adjudication
+  coverage. Only the final terminal result is scored; exhausted retries remain
+  unscored Incomplete executions with their termination category.
 
 ### Human interface checkpoint
 
@@ -1269,17 +1361,20 @@ keys.
 
 ### Implementation checklist
 
-- [ ] Refine the adjudication test-intent row before tests.
-- [ ] Define immutable adjudication revisions so corrections are auditable and
+- [x] Refine the adjudication test-intent row before tests.
+- [x] Define immutable adjudication revisions so corrections are auditable and
   do not rewrite original Review Results.
-- [ ] Require every reported Finding to receive exactly one disposition before
+- [x] Require every reported Finding to receive exactly one disposition before
   a run is fully scored.
-- [ ] Permit explicit unscored/uncertain adjudication without guessing.
-- [ ] Calculate metrics in a pure evaluator Module and persist inputs plus
+- [x] Permit explicit unscored/uncertain adjudication without guessing.
+- [x] Calculate metrics in a pure evaluator Module and persist inputs plus
   outputs transactionally.
-- [ ] Render per-case evidence before suite aggregates.
-- [ ] Add `review-party eval score` or the selected equivalent without adding a
+- [x] Render per-case evidence before suite aggregates.
+- [x] Add `review-party eval score` or the selected equivalent without adding a
   dashboard.
+- [ ] Reconcile adjudication import/export and persistence with DEV-66 so retry
+  Attempts, exhausted cases, parent termination, and retained completed cases
+  remain visible without double-counting coverage.
 
 ### Smallest purposeful test set
 
@@ -1295,10 +1390,21 @@ keys.
 
 ### Acceptance checklist
 
-- [ ] A human can adjudicate the seed corpus without opening the database.
-- [ ] The stored decisions explain every numerator and denominator.
-- [ ] JSON output is sufficient for automation and later comparison.
-- [ ] Focused evaluator, ledger, and CLI tests plus CodeScene gates pass.
+- [x] A human can adjudicate the seed corpus without opening the database.
+- [x] The stored decisions explain every numerator and denominator.
+- [x] JSON output is sufficient for automation and later comparison.
+- [x] Focused evaluator, ledger, and CLI tests plus CodeScene gates pass.
+
+Acceptance evidence (2026-08-11): the exported seed-corpus documents were
+human-adjudicated and published as immutable revisions for both the configured
+Muse run and the exact OpenCode Go DeepSeek V4 Flash run. Each stored score
+retains case-level decisions, explicit numerator/denominator pairs, uncertain
+judgments, incomplete cases, and termination-category counts. Muse revision
+`ar_1786505887255_bcbcc11d58bcc11b` scored 3/3 recall, 4/4 precision, and 5/5
+completion. DeepSeek revision `ar_1786505887347_8f3b9d55275ef3a8` scored 2/2
+recall, 3/3 precision, and 4/5 completion, with one
+`result_validation_failure`. Both retained one uncertain expected claim rather
+than forcing a judgment. Focused race, vet, build, and CodeScene checks pass.
 
 ### Stop rule
 
@@ -1307,9 +1413,9 @@ loop is deterministic except for explicit human judgment.
 
 ## Slice 19 — Experiment comparison
 
-Status: **Pending**
+Status: **Implemented locally**
 
-Depends on: Slice 18.
+Depends on: Slice 18 and the finalized DEV-66 execution provenance contract.
 
 ### Goal
 
@@ -1329,15 +1435,18 @@ than declaring a universal winner or delivery gate.
 
 ### Implementation checklist
 
-- [ ] Refine the comparison test-intent row before tests.
-- [ ] Define experiment identity from case revisions, effective Profile
+- [x] Refine the comparison test-intent row before tests.
+- [x] Define experiment identity from case revisions, effective Profile
   Revisions, Reviewer/model/effort, harness/transport, and Review Party build.
-- [ ] Reject or clearly partition mismatched case revisions and missing
+- [ ] Include effective Retry Policy and Concurrency Limit in experiment
+  provenance. Different Retry Policies are rejected or partitioned; different
+  Concurrency Limits remain visible as runtime context.
+- [x] Reject or clearly partition mismatched case revisions and missing
   adjudication.
-- [ ] Compare the intersection and report omitted cases; never silently change
+- [x] Compare the intersection and report omitted cases; never silently change
   denominators.
-- [ ] Show absolute values and deltas for quality, completion, and runtime.
-- [ ] Keep project governance outside the comparison result.
+- [x] Show absolute values and deltas for quality, completion, and runtime.
+- [x] Keep project governance outside the comparison result.
 
 ### Smallest purposeful test set
 
@@ -1346,13 +1455,24 @@ than declaring a universal winner or delivery gate.
 - A candidate with better recall but worse precision displays both changes.
 - Infrastructure failures change completion/termination evidence but do not
   masquerade as Reviewer misses.
+- Different Retry Policies cannot be presented as one direct quality
+  comparison; concurrency-related runtime deltas remain explicit.
 
 ### Acceptance checklist
 
-- [ ] A real baseline/candidate Profile Revision comparison is reproducible from
+- [x] A real baseline/candidate Profile Revision comparison is reproducible from
   stored records and adjudications.
-- [ ] Every displayed aggregate can be traced to case-level evidence.
-- [ ] Focused comparison, ledger, and CLI tests plus CodeScene gates pass.
+- [x] Every displayed aggregate can be traced to case-level evidence.
+- [x] Focused comparison, ledger, and CLI tests plus CodeScene gates pass.
+
+Acceptance evidence (2026-08-12): `eval compare` loads two immutable
+Adjudication Revisions, partitions exact case-ID/digest intersections and
+omissions, rescored shared case decisions deterministically, and reports
+baseline/candidate values plus deltas for quality, completion, termination, and
+runtime. Focused engine and CLI tests cover compatible deltas, mismatched
+revisions, incomplete-result termination, JSON round-trip, and provenance.
+The comparison deliberately has no universal score, promotion behavior, or
+delivery gate.
 
 ### Stop rule
 
@@ -1363,7 +1483,8 @@ statistical significance claims, or model leaderboards.
 
 Status: **Pending**
 
-Depends on: Slice 19 and evidence that the historical/clean corpus is usable.
+Depends on: Slice 19, completed DEV-66 execution semantics, and evidence that
+the historical/clean corpus is usable.
 
 ### Goal
 
@@ -1378,6 +1499,8 @@ while keeping real defects and clean cases as the core benchmark.
 - [ ] Apply the mutation only inside a temporary committed-Subject worktree.
 - [ ] Prove the mutation applied cleanly and changed exactly the declared files.
 - [ ] Record the resulting Subject identity in the Eval Run.
+- [ ] Exercise seeded cases through the same retry, concurrency, lifecycle, and
+  adjudication path as historical cases; do not create a seeded-only runner.
 - [ ] Start with a small set such as ignored errors, inverted authorization, and
   missing resource cleanup only where the fixture language makes the defect
   undeniable.
@@ -1410,7 +1533,8 @@ Reviewer to generate its own gold cases during scoring.
 
 Status: **Pending**
 
-Depends on: Slices 9-19. Seeded defects are optional.
+Depends on: Slices 9-19 and completed DEV-66 execution semantics. Seeded
+defects are optional.
 
 ### Goal
 
@@ -1432,6 +1556,8 @@ against direct execution.
 - [ ] Pin or verify compatible ACPX behavior at launch because ACPX is pre-1.0.
 - [ ] Reuse canonical result fixtures and eval cases rather than creating an
   ACPX-specific result path.
+- [ ] Prove that ACPX implements one Attempt while retry, backoff, suite
+  deadlines, cancellation, and Concurrency Limit remain Eval-engine behavior.
 
 ### Acceptance checklist
 
@@ -1455,7 +1581,8 @@ experiments remain gated on a named Profile demonstrating a concrete need.
 ### Implementation checklist
 
 - [ ] Use identical committed Subjects, Eval Case revisions, Profile Revisions,
-  model where possible, effort, capability contract, and result schema.
+  model where possible, effort, Retry Policy, Concurrency Limit, capability
+  contract, and result schema.
 - [ ] Compare native OpenCode with ACPX-to-OpenCode using stored quality,
   completion, termination, timing, artifact, and cleanup evidence.
 - [ ] Compare Pi RPC with ACPX-to-Pi only if a desired Profile benefits from Pi.
@@ -1493,6 +1620,8 @@ restarting an expensive broad audit or mutating the original Review.
 - [ ] Preserve Reviewer identity when required; any change is explicit
   provenance, never substitution.
 - [ ] Enforce a finite pass/Attempt budget and diagnosed transport retry rules.
+- [ ] Reuse the finite retry semantics without implicitly adopting Eval Suite
+  concurrency; a Verification Review remains its own ordinary Review.
 - [ ] Surface residual risk rather than chasing a clean result indefinitely.
 
 ### Acceptance checklist
@@ -1519,7 +1648,8 @@ governance responsibilities.
 
 - [ ] Add a Review Party invocation path without deleting the current runner.
 - [ ] Compare behavior on the version-controlled corpus for clean, findings,
-  incomplete, malformed, unavailable-agent, timeout, and verification cases.
+  incomplete, malformed, unavailable-agent, timeout, retry exhaustion,
+  cancellation, bounded-concurrency, and verification cases.
 - [ ] Keep local finding validation, authorization-sensitive remediation,
   project governance, and presentation in the skill.
 - [ ] Switch the skill default only after parity evidence is reviewed.
@@ -1552,6 +1682,9 @@ migration without claiming hosted or distributed capabilities.
 - [ ] Rehearse a fresh local install, configuration, Profile discovery, Review,
   inspect, history, committed Subject, replay, eval, adjudication, comparison,
   and supported Verification Review.
+- [ ] Rehearse the sequential default plus a caller-selected higher
+  Concurrency Limit, retry exhaustion, suite cancellation, and suite deadline;
+  verify inspect/history expose the effective execution configuration.
 - [ ] Run focused verification, final CodeScene safeguard, dependency/license
   audit, and the repository's CI gate.
 - [ ] Document state layout, migration/rollback, artifact sensitivity, required
@@ -1590,6 +1723,8 @@ migration without claiming hosted or distributed capabilities.
 
 ## Immediate next action
 
-Begin Slice 12's design and dependency decision only. Do not implement SQLite
-source changes, history, replay, evals, ACPX, Verification Review, or skill
-migration without the required explicit approval.
+Complete DEV-67, then DEV-69, then DEV-68. Do not advance to Slice 20 until the
+DEV-66 acceptance evidence, the Slice 17-19 contract reconciliation, and the
+README/design/CLI documentation updates agree with the landed behavior. DEV-63
+and DEV-64 remain separate investigation tracks and are not prerequisites unless
+implementation reveals a concrete ownership collision.

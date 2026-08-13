@@ -50,9 +50,17 @@ type repositoryPath string
 type checkoutPath string
 
 func PrepareExecution(subject model.ReviewSubject, owner string) (*ExecutionCheckout, error) {
-	if subject.Kind != model.SubjectCommittedRange {
+	switch subject.Kind {
+	case model.SubjectCapturedChange:
+		return prepareCapturedExecution(subject, owner)
+	case model.SubjectCommittedRange:
+		return prepareCommittedExecution(subject, owner)
+	default:
 		return &ExecutionCheckout{Repository: subject.Repository}, nil
 	}
+}
+
+func prepareCommittedExecution(subject model.ReviewSubject, owner string) (*ExecutionCheckout, error) {
 	root := executionRoot(filepath.Join(os.TempDir(), executionRootName))
 	if err := os.MkdirAll(string(root), 0o700); err != nil {
 		return nil, fmt.Errorf("create Subject execution root: %w", err)
@@ -78,6 +86,52 @@ func PrepareExecution(subject model.ReviewSubject, owner string) (*ExecutionChec
 	}
 	checkout := ownedCheckout{root: root, metadata: metadata, owner: owned}
 	return &ExecutionCheckout{Repository: path, close: func() error { return removeOwnedCheckout(checkout) }}, nil
+}
+
+func prepareCapturedExecution(subject model.ReviewSubject, owner string) (*ExecutionCheckout, error) {
+	if subject.ExecutionRepository == "" {
+		return nil, errors.New("captured Subject execution source is unavailable")
+	}
+	root := filepath.Join(os.TempDir(), executionRootName)
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		return nil, err
+	}
+	destination, err := os.MkdirTemp(root, safeOwner(ownerLabel(owner))+"-captured-")
+	if err != nil {
+		return nil, err
+	}
+	if err := copyCapturedTree(subject.ExecutionRepository, destination); err != nil {
+		_ = os.RemoveAll(destination)
+		return nil, err
+	}
+	return &ExecutionCheckout{Repository: destination, close: func() error { return os.RemoveAll(destination) }}, nil
+}
+
+func copyCapturedTree(source, destination string) error {
+	return filepath.WalkDir(source, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		relative, err := filepath.Rel(source, path)
+		if err != nil {
+			return err
+		}
+		if relative == "." {
+			return nil
+		}
+		if entry.Type()&os.ModeSymlink != 0 || entry.Name() == ".git" {
+			return fmt.Errorf("captured Subject contains forbidden entry %q", path)
+		}
+		target := filepath.Join(destination, relative)
+		if entry.IsDir() {
+			return os.Mkdir(target, 0o700)
+		}
+		payload, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(target, payload, 0o600)
+	})
 }
 
 func safeOwner(value ownerLabel) string {

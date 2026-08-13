@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "id": "lock-timeout-tail-race",
+  "mode": "change",
+  "classification": "defect",
+  "base": "base",
+  "head": "head",
+  "expected_findings": [{
+    "id": "waiter-clears-live-tail",
+    "behavior": "A timed-out waiter clears the shared lock tail while the holder still runs.",
+    "impact": "A later caller can enter the protected operation concurrently with the active holder.",
+    "evidence": ["The timeout branch writes nil to the shared tail without owning it."],
+    "locations": ["lock.go"]
+  }]
+}

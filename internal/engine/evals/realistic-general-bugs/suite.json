@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "name": "global:general-bugs",
+  "revision": "general-bugs-v2",
+  "cases": [
+    "cases/persisted-role-reordering/case.json",
+    "cases/notification-default-roundtrip/case.json",
+    "cases/tenant-cache-scope/case.json",
+    "cases/cancelled-job-ack/case.json",
+    "cases/stream-body-ownership/case.json",
+    "cases/caller-owned-transaction/case.json"
+  ]
+}

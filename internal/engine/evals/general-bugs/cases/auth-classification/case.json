@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "id": "auth-invalid-token-classification",
+  "mode": "change",
+  "classification": "defect",
+  "base": "base",
+  "head": "head",
+  "expected_findings": [{
+    "id": "invalid-token-remains-retryable",
+    "behavior": "An invalid credential is classified as retryable instead of unauthorized.",
+    "impact": "The caller repeatedly uses a credential that cannot succeed instead of requesting authentication.",
+    "evidence": ["The invalid-token response was removed from the unauthorized classification set."],
+    "locations": ["auth.ts"]
+  }]
+}

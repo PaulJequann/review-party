@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "id": "transfer-transaction-moves-to-repository",
+  "mode": "change",
+  "classification": "known_clean",
+  "base": "base",
+  "head": "head",
+  "expected_findings": [],
+  "clean_evidence": "The SQL file drops its transaction statements only after its sole unexported caller begins a transaction, executes both statements through that transaction, rolls back on every pre-commit return, and commits only after success. Atomic ownership moves to the repository without opening an autocommit path."
+}

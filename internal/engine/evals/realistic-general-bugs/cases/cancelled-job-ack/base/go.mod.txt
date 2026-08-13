@@ -1,0 +1,3 @@
+module example.com/media-worker
+
+go 1.24

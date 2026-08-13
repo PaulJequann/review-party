@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "id": "known-clean-expired-token",
+  "mode": "change",
+  "classification": "known_clean",
+  "base": "base",
+  "head": "head",
+  "expected_findings": [],
+  "clean_evidence": "The change adds an expired-token code to an existing unauthorized classification without changing other control flow; focused classification checks cover both codes."
+}

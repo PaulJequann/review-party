@@ -1,0 +1,3 @@
+module example.com/reporting
+
+go 1.24

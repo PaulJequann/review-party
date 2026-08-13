@@ -46,6 +46,7 @@ const (
 
 	SubjectWorkingChanges = model.SubjectWorkingChanges
 	SubjectCommittedRange = model.SubjectCommittedRange
+	SubjectCapturedChange = model.SubjectCapturedChange
 
 	CapabilityRepositoryRead           = model.CapabilityRepositoryRead
 	CapabilityRepositorySearch         = model.CapabilityRepositorySearch
@@ -87,6 +88,7 @@ const currentReviewRecordSchemaVersion = model.CurrentReviewRecordSchemaVersion
 // Functions / vars that were in model
 var WorkingChanges = model.WorkingChanges
 var CommittedRange = model.CommittedRange
+var CapturedChange = model.CapturedChange
 
 // Store aliases (model constants already covered, but also need store types)
 // These will be defined in store_aliases.go

@@ -180,6 +180,243 @@ func TestUsageListsEverySupportedReviewer(t *testing.T) {
 	}
 }
 
+func TestEvalInspectReadsSuiteAndCaseRecords(t *testing.T) {
+	stateDirectory := t.TempDir()
+	configurationPath := filepath.Join(t.TempDir(), "review-party.json")
+	runMainCommand(t, []string{"init", "--repo", testGitRepository(t), "--state-dir", stateDirectory, "--config", configurationPath})
+	ledger, err := store.NewLedgerRecordStore(stateDirectory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	review := model.ReviewRecord{SchemaVersion: model.CurrentReviewRecordSchemaVersion, ID: "rp_1723200000000_0123456789abcdef", Lifecycle: model.LifecycleCompleted, CreatedAt: now, UpdatedAt: now}
+	if err := ledger.Save(review); err != nil {
+		t.Fatal(err)
+	}
+	suite := model.EvalSuiteRun{ID: "esr_1723200000000_0123456789abcdef", Suite: "global:general-bugs", SuiteRevision: "v1", SuiteDigest: "digest", Experiment: model.ExperimentConfiguration{Profile: "bugs", Reviewer: "opencode", Model: "model", Deadline: "1m"}, EvalRunIDs: []model.EvalRunID{"er_1723200000000_0123456789abcdef"}, StartedAt: now}
+	if err := ledger.SaveEvalSuiteRun(suite); err != nil {
+		t.Fatal(err)
+	}
+	evalRun := model.EvalRun{ID: suite.EvalRunIDs[0], SuiteRunID: suite.ID, Case: model.EvalCaseRevision{ID: "case-one", SchemaVersion: 1, Digest: "case-digest"}, ReviewID: review.ID, ExecutionState: model.EvalCompletedClean, AdjudicationState: "awaiting_adjudication", CreatedAt: now}
+	if err := ledger.SaveEvalRun(evalRun); err != nil {
+		t.Fatal(err)
+	}
+	if err := ledger.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{string(suite.ID), string(evalRun.ID)} {
+		output := runMainCommand(t, []string{"eval", "inspect", id, "--config", configurationPath, "--format", "json"})
+		if !strings.Contains(output, id) {
+			t.Fatalf("inspection = %s", output)
+		}
+	}
+}
+
+func TestEvalAdjudicationExportAndScoreRoundTrip(t *testing.T) {
+	configurationPath, suite := prepareAdjudicationCommandTest(t)
+	document := exportAdjudicationForTest(t, configurationPath, suite.ID)
+	markFirstFindingMatched(&document)
+	path := writeAdjudicationForTest(t, document)
+	scored := runMainCommand(t, []string{"eval", "score", string(suite.ID), "--adjudication", path, "--config", configurationPath, "--format", "json"})
+	var revision model.AdjudicationRevision
+	if err := json.Unmarshal([]byte(scored), &revision); err != nil {
+		t.Fatal(err)
+	}
+	if revision.Score.DefectRecall.Numerator != 1 || revision.Score.FindingPrecision.Numerator != 1 {
+		t.Fatalf("revision = %#v", revision)
+	}
+	inspected := runMainCommand(t, []string{"eval", "inspect", string(revision.ID), "--config", configurationPath, "--format", "json"})
+	if !strings.Contains(inspected, string(revision.ID)) {
+		t.Fatalf("inspection = %s", inspected)
+	}
+}
+
+func TestEvalCompareJSONRoundTrip(t *testing.T) {
+	configurationPath, baseline, candidate := setupComparisonCommand(t)
+	output := runMainCommand(t, []string{"eval", "compare", "--baseline", string(baseline.ID), "--candidate", string(candidate.ID), "--config", configurationPath, "--format", "json"})
+	var comparison model.EvalComparison
+	if err := json.Unmarshal([]byte(output), &comparison); err != nil {
+		t.Fatal(err)
+	}
+	if comparison.Coverage.ComparedCases != 1 {
+		t.Fatalf("comparison coverage = %#v", comparison.Coverage)
+	}
+	if comparison.BaselineAdjudication != baseline.ID || comparison.CandidateAdjudication != candidate.ID {
+		t.Fatalf("comparison = %#v", comparison)
+	}
+}
+
+func setupComparisonCommand(t *testing.T) (string, model.AdjudicationRevision, model.AdjudicationRevision) {
+	t.Helper()
+	stateDirectory := t.TempDir()
+	configurationPath := filepath.Join(t.TempDir(), "review-party.json")
+	runMainCommand(t, []string{"init", "--repo", testGitRepository(t), "--state-dir", stateDirectory, "--config", configurationPath})
+	ledger := mustComparisonLedger(t, stateDirectory)
+	now := time.Now().UTC()
+	baselineSuite := comparisonCommandSuite("esr_1723200000000_0123456789abcdef", "er_1723200000000_0123456789abcdef", now)
+	candidateSuite := comparisonCommandSuite("esr_1723200000001_0123456789abcdef", "er_1723200000001_0123456789abcdef", now.Add(time.Second))
+	mustSaveComparisonData(t, comparisonCommandData{ledger: ledger, baselineSuite: baselineSuite, candidateSuite: candidateSuite, now: now})
+	baseline := mustPublishComparison(t, ledger, model.AdjudicationRevision{ID: "ar_1723200000000_0123456789abcdef", SuiteRunID: baselineSuite.ID, Document: comparisonCommandDocument(baselineSuite, true), CreatedAt: now})
+	candidate := mustPublishComparison(t, ledger, model.AdjudicationRevision{ID: "ar_1723200000001_0123456789abcdef", SuiteRunID: candidateSuite.ID, Document: comparisonCommandDocument(candidateSuite, false), CreatedAt: now.Add(time.Second)})
+	mustCloseComparison(t, ledger)
+	return configurationPath, baseline, candidate
+}
+
+func mustComparisonLedger(t *testing.T, stateDirectory string) *store.LedgerRecordStore {
+	t.Helper()
+	ledger, err := store.NewLedgerRecordStore(stateDirectory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ledger
+}
+
+type comparisonCommandData struct {
+	ledger                        *store.LedgerRecordStore
+	baselineSuite, candidateSuite model.EvalSuiteRun
+	now                           time.Time
+}
+
+func mustSaveComparisonData(t *testing.T, data comparisonCommandData) {
+	t.Helper()
+	for _, review := range []model.ReviewRecord{comparisonCommandReview("rp_1723200000000_0123456789abcdef", data.now, 100), comparisonCommandReview("rp_1723200000001_0123456789abcdef", data.now.Add(time.Second), 120)} {
+		mustSaveComparisonReview(t, data.ledger, review)
+	}
+	for _, suite := range []model.EvalSuiteRun{data.baselineSuite, data.candidateSuite} {
+		mustSaveComparisonSuite(t, data.ledger, suite)
+	}
+	mustSaveComparisonEvalRun(t, data.ledger, comparisonCommandEvalRun(data.baselineSuite, "rp_1723200000000_0123456789abcdef", data.now))
+	mustSaveComparisonEvalRun(t, data.ledger, comparisonCommandEvalRun(data.candidateSuite, "rp_1723200000001_0123456789abcdef", data.now.Add(time.Second)))
+}
+
+func mustSaveComparisonReview(t *testing.T, ledger *store.LedgerRecordStore, review model.ReviewRecord) {
+	t.Helper()
+	if err := ledger.Save(review); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func mustSaveComparisonSuite(t *testing.T, ledger *store.LedgerRecordStore, suite model.EvalSuiteRun) {
+	t.Helper()
+	if err := ledger.SaveEvalSuiteRun(suite); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func mustSaveComparisonEvalRun(t *testing.T, ledger *store.LedgerRecordStore, run model.EvalRun) {
+	t.Helper()
+	if err := ledger.SaveEvalRun(run); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func mustPublishComparison(t *testing.T, ledger *store.LedgerRecordStore, revision model.AdjudicationRevision) model.AdjudicationRevision {
+	t.Helper()
+	published, err := ledger.PublishAdjudication(revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return published
+}
+
+func mustCloseComparison(t *testing.T, ledger *store.LedgerRecordStore) {
+	t.Helper()
+	if err := ledger.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func comparisonCommandReview(id string, created time.Time, totalMS int64) model.ReviewRecord {
+	return model.ReviewRecord{SchemaVersion: model.CurrentReviewRecordSchemaVersion, ID: model.ReviewID(id), Lifecycle: model.LifecycleCompleted, Subject: model.ReviewSubject{Kind: model.SubjectCapturedChange, Identity: id}, ProfileRevision: model.ProfileRevision{Name: "bugs", Revision: "v1", ReviewerID: "opencode", Model: "model", Effort: "high", Reviewer: model.ReviewerProvenance{ReviewerID: "opencode", Model: "model", Effort: "high", Harness: "opencode-cli", Transport: "direct-cli"}}, ProfileSnapshot: model.ProfileSnapshot{Name: "bugs"}, Runtime: &model.RuntimeProvenance{Version: "v1", VCSRevision: "build", VCSModified: boolPointer(false)}, Timings: &model.ReviewTimings{TotalMS: totalMS}, Result: &model.ReviewResult{Status: model.ResultFindings, Findings: []model.Finding{}}, CreatedAt: created, UpdatedAt: created}
+}
+
+func boolPointer(value bool) *bool {
+	return &value
+}
+
+func comparisonCommandSuite(id string, evalID model.EvalRunID, started time.Time) model.EvalSuiteRun {
+	return model.EvalSuiteRun{ID: model.EvalSuiteRunID(id), Suite: "suite", SuiteRevision: "v1", SuiteDigest: "digest", Experiment: model.ExperimentConfiguration{Profile: "bugs", Reviewer: "opencode", Model: "model", Effort: "high", Deadline: "1m"}, EvalRunIDs: []model.EvalRunID{evalID}, StartedAt: started, CompletedAt: started.Add(time.Second)}
+}
+
+func comparisonCommandEvalRun(suite model.EvalSuiteRun, reviewID model.ReviewID, created time.Time) model.EvalRun {
+	return model.EvalRun{ID: suite.EvalRunIDs[0], SuiteRunID: suite.ID, Case: model.EvalCaseRevision{ID: "shared-case", SchemaVersion: 1, Digest: "shared-digest", Classification: "defect", ExpectedFindings: []model.ExpectedFinding{{ID: "bug", Behavior: "behavior", Impact: "impact", Evidence: []string{"evidence"}}}}, ReviewID: reviewID, ExecutionState: model.EvalCompletedFindings, AdjudicationState: "scored", CreatedAt: created}
+}
+
+func comparisonCommandDocument(suite model.EvalSuiteRun, matched bool) model.AdjudicationDocument {
+	disposition := model.ExpectedMissed
+	if matched {
+		disposition = model.ExpectedMatched
+	}
+	reported := []model.ReportedFindingAdjudication{}
+	if matched {
+		reported = append(reported, model.ReportedFindingAdjudication{Finding: model.Finding{Ordinal: 1}, Disposition: model.ReportedMatchedExpected, ExpectedFindingID: "bug"})
+	}
+	return model.AdjudicationDocument{SchemaVersion: 1, SuiteRunID: suite.ID, Cases: []model.EvalCaseAdjudication{{EvalRunID: suite.EvalRunIDs[0], CaseID: "shared-case", ExecutionState: model.EvalCompletedFindings, ExpectedFindings: []model.ExpectedFindingAdjudication{{Finding: model.ExpectedFinding{ID: "bug", Behavior: "behavior", Impact: "impact", Evidence: []string{"evidence"}}, Disposition: disposition, ReportedOrdinal: func() int {
+		if matched {
+			return 1
+		}
+		return 0
+	}()}}, ReportedFindings: reported}}}
+}
+
+func prepareAdjudicationCommandTest(t *testing.T) (string, model.EvalSuiteRun) {
+	t.Helper()
+	stateDirectory := t.TempDir()
+	configurationPath := filepath.Join(t.TempDir(), "review-party.json")
+	runMainCommand(t, []string{"init", "--repo", testGitRepository(t), "--state-dir", stateDirectory, "--config", configurationPath})
+	ledger, err := store.NewLedgerRecordStore(stateDirectory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	review := model.ReviewRecord{SchemaVersion: model.CurrentReviewRecordSchemaVersion, ID: "rp_1723200000000_0123456789abcdef", Lifecycle: model.LifecycleCompleted, Result: &model.ReviewResult{Status: model.ResultFindings, Findings: []model.Finding{{Ordinal: 1, Failure: "failure"}}}, CreatedAt: now, UpdatedAt: now}
+	if err := ledger.Save(review); err != nil {
+		t.Fatal(err)
+	}
+	suite := model.EvalSuiteRun{ID: "esr_1723200000000_0123456789abcdef", Suite: "suite", SuiteRevision: "v1", SuiteDigest: "digest", EvalRunIDs: []model.EvalRunID{"er_1723200000000_0123456789abcdef"}, StartedAt: now}
+	if err := ledger.SaveEvalSuiteRun(suite); err != nil {
+		t.Fatal(err)
+	}
+	evalRun := model.EvalRun{ID: suite.EvalRunIDs[0], SuiteRunID: suite.ID, Case: model.EvalCaseRevision{ID: "case", SchemaVersion: 1, Digest: "digest", ExpectedFindings: []model.ExpectedFinding{{ID: "bug", Behavior: "behavior", Impact: "impact", Evidence: []string{"evidence"}}}}, ReviewID: review.ID, ExecutionState: model.EvalCompletedFindings, AdjudicationState: "awaiting_adjudication", CreatedAt: now}
+	if err := ledger.SaveEvalRun(evalRun); err != nil {
+		t.Fatal(err)
+	}
+	if err := ledger.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return configurationPath, suite
+}
+
+func exportAdjudicationForTest(t *testing.T, configurationPath string, suiteID model.EvalSuiteRunID) model.AdjudicationDocument {
+	t.Helper()
+	exported := runMainCommand(t, []string{"eval", "adjudication", "export", string(suiteID), "--config", configurationPath})
+	var document model.AdjudicationDocument
+	if err := json.Unmarshal([]byte(exported), &document); err != nil {
+		t.Fatal(err)
+	}
+	return document
+}
+
+func markFirstFindingMatched(document *model.AdjudicationDocument) {
+	document.Cases[0].ExpectedFindings[0].Disposition = model.ExpectedMatched
+	document.Cases[0].ExpectedFindings[0].ReportedOrdinal = 1
+	document.Cases[0].ReportedFindings[0].Disposition = model.ReportedMatchedExpected
+	document.Cases[0].ReportedFindings[0].ExpectedFindingID = "bug"
+}
+
+func writeAdjudicationForTest(t *testing.T, document model.AdjudicationDocument) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "adjudication.json")
+	payload, err := json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, payload, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
 func TestPrintRecordJSONIncludesStructuredFindings(t *testing.T) {
 	record := model.ReviewRecord{Result: &model.ReviewResult{
 		Status: model.ResultFindings,

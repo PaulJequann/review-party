@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "id": "profile-cache-drops-tenant-scope",
+  "mode": "change",
+  "classification": "defect",
+  "base": "base",
+  "head": "head",
+  "expected_findings": [{
+    "id": "tenant-local-user-ids-collide",
+    "behavior": "The profile cache key no longer includes the tenant even though user IDs are only unique inside one tenant.",
+    "impact": "A profile cached for one tenant can be returned to a user with the same local ID in another tenant, disclosing cross-tenant data.",
+    "evidence": [
+      "The project contract states that user IDs are tenant-local and every data lookup must retain tenant scope.",
+      "The changed cache key and its caller now use only userID.",
+      "The cache test exercises only one tenant and cannot detect a collision."
+    ],
+    "locations": ["internal/cache/key.go", "internal/profile/service.go", "CONTEXT.md"]
+  }]
+}

@@ -74,8 +74,11 @@ func validateConfigurationPath(path string) error {
 
 func prepareInitializationState(configurationPath string, selection initializationStateSelection) (bool, error) {
 	alreadyReady, err := store.ReviewRecordStatePrepared(selection.directory)
-	if err != nil {
+	if err != nil && !errors.Is(err, store.ErrReviewRecordStateRequiresPreparation) {
 		return false, err
+	}
+	if errors.Is(err, store.ErrReviewRecordStateRequiresPreparation) {
+		alreadyReady = false
 	}
 	if err := store.PrepareReviewRecordState(selection.directory); err != nil {
 		return false, err

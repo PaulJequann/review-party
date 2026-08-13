@@ -152,6 +152,76 @@ replayable. The new record has its own lifecycle, result, attempts, timestamps,
 and runtime provenance plus `replays_review_id` linkage to its source. Replay
 reproduces experiment inputs, not non-deterministic model output.
 
+Run the packaged general evaluation suite against one explicit Experiment
+Configuration without installing Review Party into the shell:
+
+```sh
+go run ./cmd/review-party eval run global:general-bugs \
+  --reviewer opencode \
+  --model meta/muse-spark-1.2-contributor \
+  --effort high \
+  --deadline 3m \
+  --format json
+```
+
+The general suite uses multi-file repositories, cross-file contracts, and
+adversarial known-clean changes. For a fast plumbing and result-contract check,
+run the intentionally elementary `global:canary-bugs` suite instead. Canary
+scores must not be presented as representative Reviewer quality.
+
+Use a suite directory path for Caller-owned global or project cases. Pass
+`--experiment PATH` to load a version-controlled configuration containing
+`schema_version`, `name`, and an `experiment` object with the Profile,
+Reviewer, model, effort, and deadline. Explicit command flags override that
+configuration. Inspect either durable record type afterward:
+
+```sh
+go run ./cmd/review-party eval inspect esr_... --format json
+go run ./cmd/review-party eval inspect er_... --format json
+```
+
+Every Eval Case runs as an ordinary Review over a Git-free Synthetic Review
+Subject. Expected Findings and source Git provenance never enter the Review
+prompt or execution checkout. Eval execution records completion categories and
+leaves semantic adjudication, scoring, and comparison for separate operations.
+Invalid result contracts remain Incomplete operational outcomes even if their
+raw assistant artifact discusses a plausible bug; semantic scores never infer a
+Finding from malformed output.
+See [`docs/design/evals-v1.md`](docs/design/evals-v1.md).
+
+Human adjudication maps the structured Review Findings to the stored expected
+Findings and then publishes an immutable basic score:
+
+```sh
+go run ./cmd/review-party eval adjudication export esr_... > decisions.json
+# Edit the explicit expected and reported dispositions and add notes.
+go run ./cmd/review-party eval score esr_... \
+  --adjudication decisions.json --format json
+go run ./cmd/review-party eval inspect ar_... --format json
+```
+
+Incomplete cases remain unscored. Recall, precision, clean-case behavior, and
+completion each retain explicit numerators and denominators; uncertain decisions
+and termination categories remain separate. See
+[`docs/design/adjudication-v1.md`](docs/design/adjudication-v1.md).
+
+Compare two stored adjudicated experiments over their exact shared case
+revisions. The report shows baseline/candidate values and candidate-minus-
+baseline deltas for quality, completion, termination, and runtime, while
+listing omitted or mismatched cases. It preserves each side's Profile,
+Reviewer/model/effort, transport, harness, and build provenance and never
+declares a universal winner:
+
+```sh
+go run ./cmd/review-party eval compare \
+  --baseline ar_... \
+  --candidate ar_... \
+  --format json
+```
+
+See [`docs/design/comparison-v1.md`](docs/design/comparison-v1.md) for the
+matching and interpretation contract.
+
 ## Operational Review Records
 
 New Review Records use schema version 3 and retain machine-readable operational

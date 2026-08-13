@@ -1,0 +1,307 @@
+package engine
+
+import (
+	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"reviewparty/internal/artifact"
+	"reviewparty/internal/model"
+	"reviewparty/internal/store"
+)
+
+func TestEvalPreflightRejectsInvalidCaseBeforeHarnessLaunch(t *testing.T) {
+	suite := writeEvalTestSuite(t, []testEvalCase{{id: "invalid", unknownField: true}})
+	executor := successfulExecutor(cleanReview)
+	conductor := testEvalConductor(t, executor)
+	_, err := conductor.RunEvalSuite(context.Background(), evalSelection(suite))
+	if err == nil || !strings.Contains(err.Error(), "unknown field") {
+		t.Fatalf("error = %v", err)
+	}
+	if executor.attemptCount() != 0 {
+		t.Fatalf("attempts = %d", executor.attemptCount())
+	}
+}
+
+func TestEvalRecordsOrdinaryReviewsForEachExecutionCategory(t *testing.T) {
+	suite := writeEvalTestSuite(t, []testEvalCase{{id: "clean"}, {id: "findings"}, {id: "incomplete"}})
+	executor := &evalSequenceExecutor{outputs: []string{cleanReview, findingsReview, "not a result contract"}}
+	conductor := testEvalConductor(t, executor)
+	run, err := conductor.RunEvalSuite(context.Background(), evalSelection(suite))
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertEvalExecutionCounts(t, run)
+	for index, id := range run.EvalRunIDs {
+		assertPersistedEvalRun(t, persistedEvalAssertion{conductor: conductor, suite: suite, index: index, id: id})
+	}
+	if executor.sawGit || executor.sawExpected {
+		t.Fatalf("reviewer view leaked corpus authority: %#v", executor)
+	}
+}
+
+func assertEvalExecutionCounts(t *testing.T, run model.EvalSuiteRun) {
+	t.Helper()
+	if run.CompletedCleanCount != 1 {
+		t.Fatalf("clean count = %d", run.CompletedCleanCount)
+	}
+	if run.CompletedFindingCount != 1 {
+		t.Fatalf("finding count = %d", run.CompletedFindingCount)
+	}
+	if run.IncompleteCount != 1 {
+		t.Fatalf("incomplete count = %d", run.IncompleteCount)
+	}
+}
+
+type persistedEvalAssertion struct {
+	conductor *Conductor
+	suite     string
+	index     int
+	id        model.EvalRunID
+}
+
+func assertPersistedEvalRun(t *testing.T, assertion persistedEvalAssertion) {
+	t.Helper()
+	evalRun, err := assertion.conductor.InspectEvalRun(context.Background(), assertion.id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	review, err := assertion.conductor.Inspect(context.Background(), evalRun.ReviewID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertSyntheticSubject(t, assertion.suite, assertion.index, review.Subject)
+	if evalRun.AdjudicationState != "awaiting_adjudication" {
+		t.Fatalf("adjudication = %s", evalRun.AdjudicationState)
+	}
+	if evalRun.Case.Digest == "" {
+		t.Fatal("case digest is empty")
+	}
+}
+
+func assertSyntheticSubject(t *testing.T, suite string, index int, subject ReviewSubject) {
+	t.Helper()
+	if subject.Kind != SubjectCapturedChange {
+		t.Fatalf("case %d kind = %s", index, subject.Kind)
+	}
+	if subject.Repository != "eval://"+subject.Identity {
+		t.Fatalf("case %d repository = %s", index, subject.Repository)
+	}
+	if subject.ExecutionRepository != "" {
+		t.Fatalf("case %d leaked execution source", index)
+	}
+	if strings.Contains(subject.Patch, filepath.Dir(suite)) {
+		t.Fatalf("case %d patch leaked suite path: %s", index, subject.Patch)
+	}
+}
+
+func TestEvalRerunPreservesIndependentSuiteHistory(t *testing.T) {
+	suite := writeEvalTestSuite(t, []testEvalCase{{id: "case-one"}})
+	conductor := testEvalConductor(t, successfulExecutor(cleanReview))
+	first, err := conductor.RunEvalSuite(context.Background(), evalSelection(suite))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := conductor.RunEvalSuite(context.Background(), evalSelection(suite))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.ID == second.ID || first.EvalRunIDs[0] == second.EvalRunIDs[0] {
+		t.Fatal("rerun overwrote Eval history")
+	}
+	if _, err := conductor.InspectEvalSuiteRun(context.Background(), first.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conductor.InspectEvalSuiteRun(context.Background(), second.ID); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPackagedEvalSuitesSelectDistinctCorpora(t *testing.T) {
+	canary := runPackagedEval(t, "global:canary-bugs", successfulExecutor(cleanReview))
+	general := runPackagedEval(t, "global:general-bugs", successfulExecutor(cleanReview))
+	if canary.Suite != "global:canary-bugs" || canary.SuiteRevision != "canary-bugs-v1" {
+		t.Fatalf("canary suite = %s@%s", canary.Suite, canary.SuiteRevision)
+	}
+	if general.Suite != "global:general-bugs" || general.SuiteRevision != "general-bugs-v2" {
+		t.Fatalf("general suite = %s@%s", general.Suite, general.SuiteRevision)
+	}
+	if len(canary.EvalRunIDs) == len(general.EvalRunIDs) || canary.SuiteDigest == general.SuiteDigest {
+		t.Fatal("packaged suite selection resolved the same corpus")
+	}
+}
+
+func TestGeneralEvalReviewerReceivesMultiFileRepositoryWithoutAuthority(t *testing.T) {
+	executor := &evalSequenceExecutor{outputs: []string{cleanReview, cleanReview, cleanReview, cleanReview, cleanReview, cleanReview}}
+	conductor := testEvalConductor(t, executor)
+	run, err := conductor.RunEvalSuite(context.Background(), evalSelection("global:general-bugs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(executor.fileCounts) == 0 || executor.fileCounts[0] < 5 {
+		t.Fatalf("reviewer file counts = %#v", executor.fileCounts)
+	}
+	if executor.sawAuthority {
+		t.Fatal("reviewer view leaked suite or case authority")
+	}
+	if !executor.sawGoModule {
+		t.Fatal("reviewer view did not materialize the packaged Go module")
+	}
+	assertFirstGeneralSubject(t, conductor, run)
+}
+
+func runPackagedEval(t *testing.T, suite string, executor attemptExecutor) model.EvalSuiteRun {
+	t.Helper()
+	conductor := testEvalConductor(t, executor)
+	run, err := conductor.RunEvalSuite(context.Background(), evalSelection(suite))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return run
+}
+
+func assertFirstGeneralSubject(t *testing.T, conductor *Conductor, run model.EvalSuiteRun) {
+	t.Helper()
+	evalRun, err := conductor.InspectEvalRun(context.Background(), run.EvalRunIDs[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	review, err := conductor.Inspect(context.Background(), evalRun.ReviewID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(review.Subject.ChangedPaths) < 2 {
+		t.Fatalf("changed paths = %#v", review.Subject.ChangedPaths)
+	}
+	if strings.Contains(review.Subject.Patch, "persisted-zero-role-becomes-administrator") {
+		t.Fatal("expected Finding leaked into Review Subject")
+	}
+}
+
+type evalSequenceExecutor struct {
+	mu           sync.Mutex
+	outputs      []string
+	sawGit       bool
+	sawExpected  bool
+	sawAuthority bool
+	sawGoModule  bool
+	fileCounts   []int
+}
+
+func (executor *evalSequenceExecutor) Check(context.Context, reviewerCandidate) availability {
+	return availability{Available: true}
+}
+
+func (executor *evalSequenceExecutor) Execute(_ context.Context, spec attemptSpec) attemptExecution {
+	executor.mu.Lock()
+	defer executor.mu.Unlock()
+	if _, err := os.Stat(filepath.Join(spec.Repository, ".git")); err == nil {
+		executor.sawGit = true
+	}
+	if _, err := os.Stat(filepath.Join(spec.Repository, "expected.json")); err == nil {
+		executor.sawExpected = true
+	}
+	count, authority, goModule := inspectReviewerRepository(spec.Repository)
+	executor.fileCounts = append(executor.fileCounts, count)
+	executor.sawAuthority = executor.sawAuthority || authority
+	executor.sawGoModule = executor.sawGoModule || goModule
+	output := executor.outputs[0]
+	executor.outputs = executor.outputs[1:]
+	return attemptExecution{AssistantText: output, Outcome: AttemptCompleted}
+}
+
+func inspectReviewerRepository(repository string) (int, bool, bool) {
+	count := 0
+	authority := false
+	goModule := false
+	_ = filepath.WalkDir(repository, func(path string, entry os.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return err
+		}
+		count++
+		name := entry.Name()
+		if evalAuthorityFile(name) {
+			authority = true
+		}
+		if name == "go.mod" {
+			goModule = true
+		}
+		return nil
+	})
+	return count, authority, goModule
+}
+
+func evalAuthorityFile(name string) bool {
+	switch name {
+	case "case.json", "suite.json", "expected.json":
+		return true
+	default:
+		return false
+	}
+}
+
+func testEvalConductor(t *testing.T, executor attemptExecutor) *Conductor {
+	t.Helper()
+	ledger, err := store.NewLedgerRecordStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ledger.Close() })
+	conductor := newConductor(ledger, map[string]attemptExecutor{defaultReviewer: executor}, time.Second)
+	conductor.artifacts, err = artifact.NewStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return conductor
+}
+
+func evalSelection(suite string) model.EvalSuiteSelection {
+	return model.EvalSuiteSelection{Suite: suite, Experiment: model.ExperimentConfiguration{Profile: "bugs", Reviewer: defaultReviewer, Model: "grok-code-fast-1", Effort: "high", Deadline: time.Second.String()}}
+}
+
+type testEvalCase struct {
+	id           string
+	unknownField bool
+}
+
+func writeEvalTestSuite(t *testing.T, cases []testEvalCase) string {
+	t.Helper()
+	root := t.TempDir()
+	casePaths := make([]string, 0, len(cases))
+	for _, evalCase := range cases {
+		caseDirectory := filepath.Join(root, "cases", evalCase.id)
+		writeEvalFile(t, filepath.Join(caseDirectory, "base", "value.go"), "package fixture\n\nconst Value = 1\n")
+		writeEvalFile(t, filepath.Join(caseDirectory, "head", "value.go"), "package fixture\n\nconst Value = 2\n")
+		definition := map[string]any{"schema_version": 1, "id": evalCase.id, "mode": "change", "classification": "defect", "base": "base", "head": "head", "expected_findings": []map[string]any{{"id": "changed-value", "behavior": "The value changed.", "impact": "A caller observes another value.", "evidence": []string{"The constant differs."}}}}
+		if evalCase.unknownField {
+			definition["surprise"] = true
+		}
+		payload, err := json.Marshal(definition)
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeEvalFile(t, filepath.Join(caseDirectory, "case.json"), string(payload))
+		casePaths = append(casePaths, filepath.ToSlash(filepath.Join("cases", evalCase.id, "case.json")))
+	}
+	manifest, err := json.Marshal(map[string]any{"schema_version": 1, "name": "test-suite", "revision": "v1", "cases": casePaths})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeEvalFile(t, filepath.Join(root, "suite.json"), string(manifest))
+	return root
+}
+
+func writeEvalFile(t *testing.T, path, payload string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(payload), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}

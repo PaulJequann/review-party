@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -47,6 +48,7 @@ func commandHandlers(ctx context.Context, stdout, stderr io.Writer) map[string]f
 	return map[string]func([]string) int{
 		"review":   func(arguments []string) int { return runReview(ctx, arguments, stdout, stderr) },
 		"replay":   func(arguments []string) int { return runReplay(ctx, arguments, stdout, stderr) },
+		"eval":     func(arguments []string) int { return runEval(ctx, arguments, stdout, stderr) },
 		"profiles": func(arguments []string) int { return runProfiles(ctx, arguments, stdout, stderr) },
 		"explain":  func(arguments []string) int { return runExplain(ctx, arguments, stdout, stderr) },
 		"config":   func(arguments []string) int { return runConfig(arguments, stdout, stderr) },
@@ -58,6 +60,478 @@ func commandHandlers(ctx context.Context, stdout, stderr io.Writer) map[string]f
 		"-h":       help,
 		"--help":   help,
 	}
+}
+
+type experimentFile struct {
+	SchemaVersion int                           `json:"schema_version"`
+	Name          string                        `json:"name"`
+	Experiment    model.ExperimentConfiguration `json:"experiment"`
+}
+
+func runEval(ctx context.Context, arguments []string, stdout, stderr io.Writer) int {
+	subcommand, remaining := takeLeadingValue(arguments)
+	switch subcommand {
+	case "run":
+		return runEvalSuite(ctx, remaining, stdout, stderr)
+	case "inspect":
+		return runEvalInspect(ctx, remaining, stdout, stderr)
+	case "adjudication":
+		return runEvalAdjudication(ctx, remaining, stdout, stderr)
+	case "score":
+		return runEvalScore(ctx, remaining, stdout, stderr)
+	case "compare":
+		return runEvalCompare(ctx, remaining, stdout, stderr)
+	default:
+		fmt.Fprintln(stderr, "review-party: eval requires run, inspect, adjudication, score, or compare")
+		return 2
+	}
+}
+
+type evalCompareOptions struct {
+	baseline      string
+	candidate     string
+	format        string
+	configuration string
+}
+
+func runEvalCompare(ctx context.Context, arguments []string, stdout, stderr io.Writer) int {
+	options, ok := parseEvalCompareOptions(arguments, stderr)
+	if !ok {
+		return 2
+	}
+	conductor, err := engine.New(engine.Config{UserConfigurationPath: options.configuration})
+	if err != nil {
+		fmt.Fprintf(stderr, "review-party: %v\n", err)
+		return 1
+	}
+	comparison, err := conductor.CompareAdjudications(ctx, model.AdjudicationRevisionID(options.baseline), model.AdjudicationRevisionID(options.candidate))
+	if err != nil {
+		fmt.Fprintf(stderr, "review-party: %v\n", err)
+		return 1
+	}
+	return printEvalComparison(comparison, options.format, stdout, stderr)
+}
+
+func parseEvalCompareOptions(arguments []string, stderr io.Writer) (evalCompareOptions, bool) {
+	flags := flag.NewFlagSet("eval compare", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	baseline := flags.String("baseline", "", "Baseline adjudication revision id")
+	candidate := flags.String("candidate", "", "Candidate adjudication revision id")
+	format := flags.String("format", "human", "Output format: human or json")
+	configuration := flags.String("config", defaultUserConfigurationPath(), "User configuration path")
+	if flags.Parse(arguments) != nil {
+		return evalCompareOptions{}, false
+	}
+	if flags.NArg() != 0 {
+		fmt.Fprintln(stderr, "review-party: eval compare requires --baseline AR_ID and --candidate AR_ID")
+		return evalCompareOptions{}, false
+	}
+	if *baseline == "" {
+		fmt.Fprintln(stderr, "review-party: eval compare requires --baseline AR_ID and --candidate AR_ID")
+		return evalCompareOptions{}, false
+	}
+	if *candidate == "" {
+		fmt.Fprintln(stderr, "review-party: eval compare requires --baseline AR_ID and --candidate AR_ID")
+		return evalCompareOptions{}, false
+	}
+	if !strings.HasPrefix(*baseline, "ar_") || !strings.HasPrefix(*candidate, "ar_") {
+		fmt.Fprintln(stderr, "review-party: eval compare requires adjudication revision ids beginning with ar_")
+		return evalCompareOptions{}, false
+	}
+	return evalCompareOptions{baseline: *baseline, candidate: *candidate, format: *format, configuration: *configuration}, true
+}
+
+func printEvalComparison(comparison model.EvalComparison, format string, stdout, stderr io.Writer) int {
+	if format == "json" {
+		if err := json.NewEncoder(stdout).Encode(comparison); err != nil {
+			return 1
+		}
+		return 0
+	}
+	if format != "human" {
+		fmt.Fprintf(stderr, "review-party: unknown output format %q\n", format)
+		return 1
+	}
+	fmt.Fprintf(stdout, "comparison %s vs %s · %d/%d shared cases\n", comparison.BaselineAdjudication, comparison.CandidateAdjudication, comparison.Coverage.ComparedCases, comparison.Coverage.BaselineCases)
+	fmt.Fprintf(stdout, "baseline: %s %s · %s · %s\n", comparison.BaselineIdentity.Experiment.Reviewer, comparison.BaselineIdentity.Experiment.Model, comparison.BaselineIdentity.Experiment.Effort, comparison.BaselineIdentity.Runtime.VCSRevision)
+	fmt.Fprintf(stdout, "candidate: %s %s · %s · %s\n", comparison.CandidateIdentity.Experiment.Reviewer, comparison.CandidateIdentity.Experiment.Model, comparison.CandidateIdentity.Experiment.Effort, comparison.CandidateIdentity.Runtime.VCSRevision)
+	fmt.Fprintf(stdout, "recall %s → %s · precision %s → %s · clean accuracy %s → %s · completion %s → %s\n", formatRatio(comparison.DefectRecall.Baseline), formatRatio(comparison.DefectRecall.Candidate), formatRatio(comparison.FindingPrecision.Baseline), formatRatio(comparison.FindingPrecision.Candidate), formatRatio(comparison.CleanCaseAccuracy.Baseline), formatRatio(comparison.CleanCaseAccuracy.Candidate), formatRatio(comparison.CompletionRate.Baseline), formatRatio(comparison.CompletionRate.Candidate))
+	fmt.Fprintf(stdout, "runtime %dms → %dms (%+dms)\n", comparison.BaselineRuntime.TotalMS, comparison.CandidateRuntime.TotalMS, comparison.RuntimeDeltaMS)
+	if comparisonHasCoverageGaps(comparison) {
+		fmt.Fprintf(stdout, "omitted baseline=%v candidate=%v mismatched=%v\n", comparison.Coverage.OmittedBaselineIDs, comparison.Coverage.OmittedCandidateIDs, comparison.Coverage.MismatchedCaseIDs)
+	}
+	return 0
+}
+
+func comparisonHasCoverageGaps(comparison model.EvalComparison) bool {
+	coverage := comparison.Coverage
+	return len(coverage.OmittedBaselineIDs) > 0 || len(coverage.OmittedCandidateIDs) > 0 || len(coverage.MismatchedCaseIDs) > 0
+}
+
+func runEvalSuite(ctx context.Context, arguments []string, stdout, stderr io.Writer) int {
+	suite, remaining := takeLeadingValue(arguments)
+	if suite == "" {
+		fmt.Fprintln(stderr, "review-party: eval run requires a suite")
+		return 2
+	}
+	options, ok := parseEvalRunOptions(remaining, stderr)
+	if !ok {
+		return 2
+	}
+	experiment, effectiveDeadline, err := resolveEvalExperiment(options)
+	if err != nil {
+		fmt.Fprintf(stderr, "review-party: %v\n", err)
+		return 2
+	}
+	conductor, err := engine.New(engine.Config{AttemptDeadline: effectiveDeadline, UserConfigurationPath: options.configuration})
+	if err != nil {
+		fmt.Fprintf(stderr, "review-party: %v\n", err)
+		return 1
+	}
+	run, err := conductor.RunEvalSuite(ctx, model.EvalSuiteSelection{Suite: suite, Experiment: experiment})
+	if err != nil {
+		fmt.Fprintf(stderr, "review-party: %v\n", err)
+		return 1
+	}
+	return printEvalSuiteRun(run, options.format, stdout, stderr)
+}
+
+type evalRunOptions struct {
+	experimentPath string
+	profile        string
+	reviewer       string
+	model          string
+	effort         string
+	deadline       time.Duration
+	format         string
+	configuration  string
+	overrides      map[string]bool
+}
+
+func parseEvalRunOptions(arguments []string, stderr io.Writer) (evalRunOptions, bool) {
+	flags := flag.NewFlagSet("eval run", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	experimentPath := flags.String("experiment", "", "Named Experiment Configuration JSON")
+	profile := flags.String("profile", "", "Review Profile override")
+	reviewer := flags.String("reviewer", "", "Explicit Reviewer")
+	modelName := flags.String("model", "", "Explicit model")
+	effort := flags.String("effort", "", "Explicit reasoning effort")
+	deadline := flags.Duration("deadline", 0, "Execution deadline")
+	format := flags.String("format", "human", "Output format: human or json")
+	configuration := flags.String("config", defaultUserConfigurationPath(), "User configuration path")
+	if err := flags.Parse(arguments); err != nil {
+		return evalRunOptions{}, false
+	}
+	if flags.NArg() != 0 {
+		fmt.Fprintln(stderr, "review-party: eval run accepts one suite")
+		return evalRunOptions{}, false
+	}
+	overrides := map[string]bool{}
+	flags.Visit(func(value *flag.Flag) { overrides[value.Name] = true })
+	return evalRunOptions{experimentPath: *experimentPath, profile: *profile, reviewer: *reviewer, model: *modelName, effort: *effort, deadline: *deadline, format: *format, configuration: *configuration, overrides: overrides}, true
+}
+
+func resolveEvalExperiment(options evalRunOptions) (model.ExperimentConfiguration, time.Duration, error) {
+	experiment, err := loadExperimentFile(options.experimentPath)
+	if err != nil {
+		return model.ExperimentConfiguration{}, 0, err
+	}
+	applyExperimentOverrides(&experiment, options)
+	applyExperimentDefaults(&experiment)
+	effectiveDeadline, err := time.ParseDuration(experiment.Deadline)
+	if err != nil || effectiveDeadline <= 0 {
+		return model.ExperimentConfiguration{}, 0, errors.New("eval deadline must be positive")
+	}
+	return experiment, effectiveDeadline, nil
+}
+
+func applyExperimentOverrides(experiment *model.ExperimentConfiguration, options evalRunOptions) {
+	if options.overrides["profile"] {
+		experiment.Profile = options.profile
+	}
+	if options.overrides["reviewer"] {
+		experiment.Reviewer = options.reviewer
+	}
+	if options.overrides["model"] {
+		experiment.Model = options.model
+	}
+	if options.overrides["effort"] {
+		experiment.Effort = options.effort
+	}
+	if options.overrides["deadline"] {
+		experiment.Deadline = options.deadline.String()
+	}
+}
+
+func applyExperimentDefaults(experiment *model.ExperimentConfiguration) {
+	if experiment.Profile == "" {
+		experiment.Profile = "bugs"
+	}
+	if experiment.Deadline == "" {
+		experiment.Deadline = (3 * time.Minute).String()
+	}
+}
+
+func loadExperimentFile(path string) (model.ExperimentConfiguration, error) {
+	if path == "" {
+		return model.ExperimentConfiguration{}, nil
+	}
+	payload, err := os.ReadFile(path)
+	if err != nil {
+		return model.ExperimentConfiguration{}, err
+	}
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	decoder.DisallowUnknownFields()
+	var definition experimentFile
+	if err := decoder.Decode(&definition); err != nil {
+		return model.ExperimentConfiguration{}, err
+	}
+	if definition.SchemaVersion != 1 || definition.Name == "" {
+		return model.ExperimentConfiguration{}, errors.New("experiment requires schema version 1 and a name")
+	}
+	return definition.Experiment, nil
+}
+
+func runEvalInspect(ctx context.Context, arguments []string, stdout, stderr io.Writer) int {
+	id, format, configuration, ok := parseEvalInspectOptions(arguments, stderr)
+	if !ok {
+		return 2
+	}
+	conductor, err := engine.New(engine.Config{UserConfigurationPath: configuration})
+	if err != nil {
+		fmt.Fprintf(stderr, "review-party: %v\n", err)
+		return 1
+	}
+	if strings.HasPrefix(id, "esr_") {
+		return inspectEvalSuiteRun(evalInspectCommand{ctx: ctx, conductor: conductor, id: id, format: format, stdout: stdout, stderr: stderr})
+	}
+	if strings.HasPrefix(id, "ar_") {
+		return inspectAdjudication(evalInspectCommand{ctx: ctx, conductor: conductor, id: id, format: format, stdout: stdout, stderr: stderr})
+	}
+	return inspectEvalRun(evalInspectCommand{ctx: ctx, conductor: conductor, id: id, format: format, stdout: stdout, stderr: stderr})
+}
+
+func runEvalAdjudication(ctx context.Context, arguments []string, stdout, stderr io.Writer) int {
+	id, configuration, ok := parseAdjudicationExportOptions(arguments, stderr)
+	if !ok {
+		return 2
+	}
+	conductor, err := engine.New(engine.Config{UserConfigurationPath: configuration})
+	if err != nil {
+		fmt.Fprintf(stderr, "review-party: %v\n", err)
+		return 1
+	}
+	document, err := conductor.ExportAdjudication(ctx, model.EvalSuiteRunID(id))
+	if err != nil {
+		fmt.Fprintf(stderr, "review-party: %v\n", err)
+		return 1
+	}
+	encoder := json.NewEncoder(stdout)
+	encoder.SetIndent("", "  ")
+	if err := encoder.Encode(document); err != nil {
+		return 1
+	}
+	return 0
+}
+
+func parseAdjudicationExportOptions(arguments []string, stderr io.Writer) (string, string, bool) {
+	subcommand, remaining := takeLeadingValue(arguments)
+	id, remaining := takeLeadingValue(remaining)
+	flags := flag.NewFlagSet("eval adjudication export", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	configuration := flags.String("config", defaultUserConfigurationPath(), "User configuration path")
+	if flags.Parse(remaining) != nil {
+		return "", "", false
+	}
+	if subcommand != "export" {
+		fmt.Fprintln(stderr, "review-party: eval adjudication export requires one Eval Suite Run id")
+		return "", "", false
+	}
+	if id == "" || flags.NArg() != 0 {
+		fmt.Fprintln(stderr, "review-party: eval adjudication export requires one Eval Suite Run id")
+		return "", "", false
+	}
+	return id, *configuration, true
+}
+
+func runEvalScore(ctx context.Context, arguments []string, stdout, stderr io.Writer) int {
+	id, adjudicationPath, format, configuration, ok := parseEvalScoreOptions(arguments, stderr)
+	if !ok {
+		return 2
+	}
+	document, err := loadAdjudication(id, adjudicationPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "review-party: %v\n", err)
+		return 2
+	}
+	conductor, err := engine.New(engine.Config{UserConfigurationPath: configuration})
+	if err != nil {
+		fmt.Fprintf(stderr, "review-party: %v\n", err)
+		return 1
+	}
+	revision, err := conductor.PublishAdjudication(ctx, document)
+	if err != nil {
+		fmt.Fprintf(stderr, "review-party: %v\n", err)
+		return 1
+	}
+	return printAdjudication(revision, format, stdout, stderr)
+}
+
+func parseEvalScoreOptions(arguments []string, stderr io.Writer) (string, string, string, string, bool) {
+	id, remaining := takeLeadingValue(arguments)
+	flags := flag.NewFlagSet("eval score", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	adjudicationPath := flags.String("adjudication", "", "Adjudication JSON document")
+	format := flags.String("format", "human", "Output format: human or json")
+	configuration := flags.String("config", defaultUserConfigurationPath(), "User configuration path")
+	if flags.Parse(remaining) != nil {
+		return "", "", "", "", false
+	}
+	if id == "" {
+		fmt.Fprintln(stderr, "review-party: eval score requires one Eval Suite Run id and --adjudication PATH")
+		return "", "", "", "", false
+	}
+	if *adjudicationPath == "" || flags.NArg() != 0 {
+		fmt.Fprintln(stderr, "review-party: eval score requires one Eval Suite Run id and --adjudication PATH")
+		return "", "", "", "", false
+	}
+	return id, *adjudicationPath, *format, *configuration, true
+}
+
+func loadAdjudication(id, path string) (model.AdjudicationDocument, error) {
+	var document model.AdjudicationDocument
+	if err := decodeJSONFile(path, &document); err != nil {
+		return document, err
+	}
+	if document.SuiteRunID != model.EvalSuiteRunID(id) {
+		return document, errors.New("adjudication suite_run_id does not match command")
+	}
+	return document, nil
+}
+
+func decodeJSONFile(path string, destination any) error {
+	payload, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(destination); err != nil {
+		return err
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		return errors.New("adjudication file must contain one JSON document")
+	}
+	return nil
+}
+
+func inspectAdjudication(command evalInspectCommand) int {
+	revision, err := command.conductor.InspectAdjudication(command.ctx, model.AdjudicationRevisionID(command.id))
+	if err != nil {
+		fmt.Fprintf(command.stderr, "review-party: %v\n", err)
+		return 1
+	}
+	return printAdjudication(revision, command.format, command.stdout, command.stderr)
+}
+
+func printAdjudication(revision model.AdjudicationRevision, format string, stdout, stderr io.Writer) int {
+	if format == "json" {
+		if err := json.NewEncoder(stdout).Encode(revision); err != nil {
+			return 1
+		}
+		return 0
+	}
+	if format != "human" {
+		fmt.Fprintf(stderr, "review-party: unknown output format %q\n", format)
+		return 1
+	}
+	fmt.Fprintf(stdout, "adjudication %s · suite %s · revision %d\n", revision.ID, revision.SuiteRunID, revision.RevisionNumber)
+	for _, adjudication := range revision.Document.Cases {
+		fmt.Fprintf(stdout, "case %s · %s · %d expected · %d reported\n", adjudication.CaseID, adjudication.ExecutionState, len(adjudication.ExpectedFindings), len(adjudication.ReportedFindings))
+	}
+	fmt.Fprintf(stdout, "recall %s · precision %s · clean accuracy %s · completion %s\n", formatRatio(revision.Score.DefectRecall), formatRatio(revision.Score.FindingPrecision), formatRatio(revision.Score.CleanCaseAccuracy), formatRatio(revision.Score.CompletionRate))
+	return 0
+}
+
+func formatRatio(metric model.RatioMetric) string {
+	if metric.Value == nil {
+		return fmt.Sprintf("%d/%d", metric.Numerator, metric.Denominator)
+	}
+	return fmt.Sprintf("%d/%d (%.1f%%)", metric.Numerator, metric.Denominator, *metric.Value*100)
+}
+
+type evalInspectCommand struct {
+	ctx       context.Context
+	conductor *engine.Conductor
+	id        string
+	format    string
+	stdout    io.Writer
+	stderr    io.Writer
+}
+
+func parseEvalInspectOptions(arguments []string, stderr io.Writer) (string, string, string, bool) {
+	id, remaining := takeLeadingValue(arguments)
+	flags := flag.NewFlagSet("eval inspect", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	format := flags.String("format", "human", "Output format: human or json")
+	configuration := flags.String("config", defaultUserConfigurationPath(), "User configuration path")
+	if id == "" {
+		fmt.Fprintln(stderr, "review-party: eval inspect requires one Eval Run or Eval Suite Run id")
+		return "", "", "", false
+	}
+	if flags.Parse(remaining) != nil || flags.NArg() != 0 {
+		fmt.Fprintln(stderr, "review-party: eval inspect requires one Eval Run or Eval Suite Run id")
+		return "", "", "", false
+	}
+	return id, *format, *configuration, true
+}
+
+func inspectEvalSuiteRun(command evalInspectCommand) int {
+	run, err := command.conductor.InspectEvalSuiteRun(command.ctx, model.EvalSuiteRunID(command.id))
+	if err != nil {
+		fmt.Fprintf(command.stderr, "review-party: %v\n", err)
+		return 1
+	}
+	return printEvalSuiteRun(run, command.format, command.stdout, command.stderr)
+}
+
+func inspectEvalRun(command evalInspectCommand) int {
+	run, err := command.conductor.InspectEvalRun(command.ctx, model.EvalRunID(command.id))
+	if err != nil {
+		fmt.Fprintf(command.stderr, "review-party: %v\n", err)
+		return 1
+	}
+	if command.format == "json" {
+		if err := json.NewEncoder(command.stdout).Encode(run); err != nil {
+			return 1
+		}
+		return 0
+	}
+	if command.format != "human" {
+		fmt.Fprintf(command.stderr, "review-party: unknown output format %q\n", command.format)
+		return 1
+	}
+	fmt.Fprintf(command.stdout, "eval %s · case %s · %s · review %s · %s\n", run.ID, run.Case.ID, run.ExecutionState, run.ReviewID, run.AdjudicationState)
+	return 0
+}
+
+func printEvalSuiteRun(run model.EvalSuiteRun, format string, stdout, stderr io.Writer) int {
+	if format == "json" {
+		if err := json.NewEncoder(stdout).Encode(run); err != nil {
+			return 1
+		}
+		return 0
+	}
+	if format != "human" {
+		fmt.Fprintf(stderr, "review-party: unknown output format %q\n", format)
+		return 1
+	}
+	fmt.Fprintf(stdout, "eval suite %s · %s@%s · %d clean · %d findings · %d incomplete\n", run.ID, run.Suite, run.SuiteRevision, run.CompletedCleanCount, run.CompletedFindingCount, run.IncompleteCount)
+	for _, id := range run.EvalRunIDs {
+		fmt.Fprintf(stdout, "eval: review-party eval inspect %s\n", id)
+	}
+	return 0
 }
 
 func runHistory(ctx context.Context, arguments []string, stdout, stderr io.Writer) int {
@@ -269,46 +743,60 @@ func reviewSubjectReference(base, head string) (model.SubjectReference, error) {
 }
 
 func runInspect(ctx context.Context, arguments []string, stdout, stderr io.Writer) int {
+	options, ok := parseInspectOptions(arguments, stderr)
+	if !ok {
+		return 2
+	}
+
+	conductor, err := engine.New(engine.Config{UserConfigurationPath: options.configuration})
+	if err != nil {
+		fmt.Fprintf(stderr, "review-party: %v\n", err)
+		return 1
+	}
+	record, err := conductor.Inspect(ctx, options.id)
+	if err != nil {
+		fmt.Fprintf(stderr, "review-party: %v\n", err)
+		return 1
+	}
+	if options.verifyArtifacts {
+		if err := conductor.VerifyArtifacts(record); err != nil {
+			fmt.Fprintf(stderr, "review-party: verify artifacts: %v\n", err)
+			return 1
+		}
+	}
+	if err := printRecordWithConfiguration(stdout, record, options.format, options.configuration); err != nil {
+		fmt.Fprintf(stderr, "review-party: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+type inspectOptions struct {
+	id              model.ReviewID
+	format          string
+	verifyArtifacts bool
+	configuration   string
+}
+
+func parseInspectOptions(arguments []string, stderr io.Writer) (inspectOptions, bool) {
 	idValue, remaining := takeLeadingValue(arguments)
 	if idValue == "" {
 		fmt.Fprintln(stderr, "review-party: inspect requires a review id")
-		return 2
+		return inspectOptions{}, false
 	}
-	id := model.ReviewID(idValue)
 	flags := flag.NewFlagSet("inspect", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	format := flags.String("format", "human", "Output format: human or json")
 	verifyArtifacts := flags.Bool("verify-artifacts", false, "Verify referenced artifact files")
 	configuration := flags.String("config", defaultUserConfigurationPath(), "User configuration path")
 	if err := flags.Parse(remaining); err != nil {
-		return 2
+		return inspectOptions{}, false
 	}
 	if flags.NArg() != 0 {
 		fmt.Fprintln(stderr, "review-party: inspect accepts one review id")
-		return 2
+		return inspectOptions{}, false
 	}
-
-	conductor, err := engine.New(engine.Config{UserConfigurationPath: *configuration})
-	if err != nil {
-		fmt.Fprintf(stderr, "review-party: %v\n", err)
-		return 1
-	}
-	record, err := conductor.Inspect(ctx, id)
-	if err != nil {
-		fmt.Fprintf(stderr, "review-party: %v\n", err)
-		return 1
-	}
-	if *verifyArtifacts {
-		if err := conductor.VerifyArtifacts(record); err != nil {
-			fmt.Fprintf(stderr, "review-party: verify artifacts: %v\n", err)
-			return 1
-		}
-	}
-	if err := printRecordWithConfiguration(stdout, record, *format, *configuration); err != nil {
-		fmt.Fprintf(stderr, "review-party: %v\n", err)
-		return 1
-	}
-	return 0
+	return inspectOptions{id: model.ReviewID(idValue), format: *format, verifyArtifacts: *verifyArtifacts, configuration: *configuration}, true
 }
 
 func printRecord(output io.Writer, record model.ReviewRecord, format string) error {
@@ -402,6 +890,11 @@ func printUsage(output io.Writer) {
 	fmt.Fprintf(output, "  review-party explain PROFILE [--repo PATH] [--reviewer %s] [--model MODEL] [--effort EFFORT] [--format human|json]\n", strings.Join(engine.SupportedReviewers(), "|"))
 	fmt.Fprintf(output, "  review-party review [PROFILE] [--reviewer %s] [--model MODEL] [--effort EFFORT] [--config PATH] [--repo PATH] [--base COMMIT --head COMMIT] [--format human|json]\n", strings.Join(engine.SupportedReviewers(), "|"))
 	fmt.Fprintln(output, "  review-party replay REVIEW_ID [--reviewer ID] [--model MODEL] [--effort EFFORT] [--format human|json] [--config PATH]")
+	fmt.Fprintln(output, "  review-party eval run SUITE [--experiment PATH] [--profile NAME] --reviewer ID --model MODEL [--effort EFFORT] [--deadline DURATION] [--format human|json]")
+	fmt.Fprintln(output, "  review-party eval compare --baseline AR_ID --candidate AR_ID [--format human|json]")
+	fmt.Fprintln(output, "  review-party eval inspect EVAL_ID [--format human|json] [--config PATH]")
+	fmt.Fprintln(output, "  review-party eval adjudication export EVAL_SUITE_RUN_ID [--config PATH]")
+	fmt.Fprintln(output, "  review-party eval score EVAL_SUITE_RUN_ID --adjudication PATH [--format human|json] [--config PATH]")
 	fmt.Fprintln(output, "  review-party inspect REVIEW_ID [--format human|json] [--verify-artifacts] [--config PATH]")
 	fmt.Fprintln(output, "  review-party history [--repo PATH] [--reviewer ID] [--profile NAME] [--lifecycle STATE] [--termination CATEGORY] [--subject ID] [--since RFC3339] [--limit N] [--format human|json] [--config PATH]")
 	fmt.Fprintln(output, "  review-party init [--repo PATH] [--state-dir PATH] [--config PATH]")

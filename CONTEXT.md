@@ -49,7 +49,7 @@ The recorded rules that bound retries, fallback, deadlines, and stopping behavio
 _Avoid_: Invocation flags, retry forever, hidden defaults
 
 **Concurrency Limit**:
-The maximum number of independent ready work items a Party may execute simultaneously. Review Dependencies impose ordering, while Attempts for the same Pass remain sequential.
+The maximum number of independent ready work items a Party or Eval Suite Run may execute simultaneously. A value of one means sequential execution; higher values allow that many work items to run in parallel. Review Dependencies impose ordering, while Attempts for the same Pass remain sequential. The Caller may configure the limit, and the default is sequential execution.
 _Avoid_: Pass count, fallback race
 
 **Fallback Chain**:
@@ -83,6 +83,46 @@ _Avoid_: Mode, Review Subject, Review Profile
 **Profile Revision**:
 One exact version of a Review Profile and its effective review recipe. Every effective change, including an experimental override, produces a distinct revision retained by the review that used it.
 _Avoid_: Profile name, mutable configuration
+
+**Eval Case**:
+One versioned, known Review problem used to evaluate Reviewer Judgment. It fixes the code state supplied as a Review Subject and declares human-confirmed expected Findings or known-clean evidence, but it does not select a Reviewer, model, or effort.
+_Avoid_: Model configuration, Review, generated reviewer answer
+
+**Eval Suite**:
+A versioned collection of Eval Cases that share one evaluation purpose. A packaged global suite provides a general baseline, while Caller-owned global or project suites may extend it without changing packaged content.
+_Avoid_: Review Profile, Experiment Configuration, hard-coded product policy
+
+**Canary Eval Suite**:
+A small Eval Suite of intentionally obvious cases used to prove evaluation plumbing, isolation, result-contract compatibility, adjudication, and scoring. Its results are not evidence of broad Reviewer capability.
+_Avoid_: General benchmark, model leaderboard, representative recall
+
+**Experiment Configuration**:
+The explicit Review Profile, Reviewer, model, effort, Execution Deadline, Retry Policy, Concurrency Limit, and other permitted execution choices tested against an Eval Suite. It may be named in version-controlled material or supplied by the Caller, and its effective choices are frozen into the resulting records.
+_Avoid_: Eval Case, expected Finding, implicit default Reviewer
+
+**Eval Run**:
+The durable execution record for one Eval Case under one Experiment Configuration. It is created before execution, retains Pending, Running, and terminal execution state, relates the frozen Eval Case Revision to one ordinary Review Record, and records execution facts separately from later adjudication or scoring.
+_Avoid_: Eval Case, Eval Suite Run, EvalReview
+
+**Eval Suite Run**:
+The durable parent record for one execution of an Eval Suite under one Experiment Configuration. It retains the Suite revision, ordered Eval Runs, effective Concurrency Limit, completion categories, and timing without overwriting earlier runs or claiming a quality score. Its Eval Cases may execute sequentially or in parallel according to that limit.
+_Avoid_: Review Bundle, score, comparison
+
+**Adjudication Revision**:
+One immutable, human-published mapping between the expected Findings and reported Findings of an Eval Suite Run. It preserves matched, missed, novel-valid, false-positive, uncertain, and unscored-incomplete decisions with their evidence; a correction creates another revision.
+_Avoid_: Review Result rewrite, automated judge output, mutable score
+
+**Eval Score**:
+The deterministic metrics calculated from one Adjudication Revision. It reports defect recall, Finding precision, clean-case behavior, completion, and termination facts with explicit numerators and denominators; uncertain and Incomplete executions remain visible rather than being guessed.
+_Avoid_: Reviewer verdict, delivery decision, terminal-output summary
+
+**Eval Comparison**:
+A deterministic side-by-side report over two immutable Adjudication Revisions. It compares exact shared Eval Case revisions, lists omitted and mismatched cases, preserves each experiment's Profile, Reviewer/model/effort, transport, harness, and build provenance, and reports quality, completion, termination, and runtime deltas without declaring a winner.
+_Avoid_: Universal score, leaderboard, promotion gate, delivery decision
+
+**Synthetic Review Subject**:
+The isolated Review Subject materialized for an Eval Run. It contains the code state and bounded change needed by the Reviewer, but excludes source Git history, public commit identities, fixing commits, and expected Findings.
+_Avoid_: Mutable fixture checkout, corpus authority view, generated repository
 
 **Review Record**:
 The retrievable history of one review, containing its Review Result, provenance, Passes, Attempts, and available diagnostics. It supports inspection without making diagnostic detail the primary result.

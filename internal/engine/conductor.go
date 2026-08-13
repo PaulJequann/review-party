@@ -178,7 +178,7 @@ func (conductor *Conductor) prepareReview(selection ReviewSelection) (preparedRe
 	}
 	timings := ReviewTimings{}
 	subjectStarted := conductor.now().UTC()
-	repository, err := resolveRepositoryRoot(selection.Repository)
+	repository, err := resolveReviewRepository(selection)
 	timings.SubjectResolutionMS += elapsedMilliseconds(subjectStarted, conductor.now().UTC())
 	if err != nil {
 		return preparedReview{}, err
@@ -196,6 +196,13 @@ func (conductor *Conductor) prepareReview(selection ReviewSelection) (preparedRe
 		return preparedReview{}, err
 	}
 	return preparedReview{subject: subject, profile: profile, timings: timings, deadline: conductor.attemptDeadline}, nil
+}
+
+func resolveReviewRepository(selection ReviewSelection) (string, error) {
+	if selection.Subject.Kind == SubjectCapturedChange {
+		return "", nil
+	}
+	return resolveRepositoryRoot(selection.Repository)
 }
 
 func (conductor *Conductor) Profiles(ctx context.Context) ([]ProfileSummary, error) {

@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "id": "disabled-notifications-reenabled-after-load",
+  "mode": "change",
+  "classification": "defect",
+  "base": "base",
+  "head": "head",
+  "expected_findings": [{
+    "id": "explicit-false-omitted-from-durable-settings",
+    "behavior": "Saving disabled email notifications omits the false value, so the next load restores the default value of true.",
+    "impact": "Users who disabled email notifications begin receiving them again after settings are reloaded or the process restarts.",
+    "evidence": [
+      "Load decodes persisted JSON over Defaults, where EmailNotifications is true.",
+      "The new omitempty tag removes an explicitly false EmailNotifications value from saved JSON.",
+      "The added test checks the default and enabled values but not a disabled save/load round trip."
+    ],
+    "locations": ["internal/settings/settings.go", "internal/settings/settings_test.go"]
+  }]
+}

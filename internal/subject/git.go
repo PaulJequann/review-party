@@ -6,9 +6,11 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"reviewparty/internal/model"
+	"sort"
 	"strings"
 )
 
@@ -21,9 +23,132 @@ func ResolveSubject(repository string, reference model.SubjectReference) (model.
 		return resolveWorkingChangesAtRoot(root)
 	case model.SubjectCommittedRange:
 		return resolveCommittedRange(root, reference)
+	case model.SubjectCapturedChange:
+		return resolveCapturedChange(reference)
 	default:
 		return model.ReviewSubject{}, fmt.Errorf("unsupported review subject %q", reference.Kind)
 	}
+}
+
+func resolveCapturedChange(reference model.SubjectReference) (model.ReviewSubject, error) {
+	baseValue, err := filepath.Abs(reference.CapturedBase)
+	if err != nil {
+		return model.ReviewSubject{}, err
+	}
+	headValue, err := filepath.Abs(reference.CapturedHead)
+	if err != nil {
+		return model.ReviewSubject{}, err
+	}
+	base := capturedDirectory(baseValue)
+	head := capturedDirectory(headValue)
+	if err := validateCapturedDirectory(base); err != nil {
+		return model.ReviewSubject{}, fmt.Errorf("validate captured base: %w", err)
+	}
+	if err := validateCapturedDirectory(head); err != nil {
+		return model.ReviewSubject{}, fmt.Errorf("validate captured head: %w", err)
+	}
+	patch, err := capturedDirectoryPatch(base, head)
+	if err != nil {
+		return model.ReviewSubject{}, err
+	}
+	if len(patch) == 0 {
+		return model.ReviewSubject{}, errors.New("captured change is empty")
+	}
+	paths, err := changedCapturedPaths(base, head)
+	if err != nil {
+		return model.ReviewSubject{}, err
+	}
+	identity := sha256.Sum256(append([]byte(strings.Join(paths, "\x00")+"\x00"), patch...))
+	facts := model.SubjectFacts{ChangedFiles: len(paths)}
+	return model.ReviewSubject{Kind: model.SubjectCapturedChange, Repository: "eval://" + hex.EncodeToString(identity[:]), Identity: hex.EncodeToString(identity[:]), ChangedPaths: paths, Patch: string(patch), Facts: &facts, ExecutionRepository: string(head)}, nil
+}
+
+type capturedDirectory string
+type capturedFile string
+
+func validateCapturedDirectory(directory capturedDirectory) error {
+	info, err := os.Stat(string(directory))
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("%q is not a directory", string(directory))
+	}
+	return filepath.WalkDir(string(directory), func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			return fmt.Errorf("captured Subject contains symlink %q", path)
+		}
+		if entry.Name() == ".git" {
+			return fmt.Errorf("captured Subject contains forbidden Git metadata %q", path)
+		}
+		return nil
+	})
+}
+
+func capturedDirectoryPatch(base, head capturedDirectory) ([]byte, error) {
+	command := exec.Command("git", "diff", "--no-index", "--binary", "--", string(base), string(head))
+	output, err := command.Output()
+	if err != nil {
+		var exitError *exec.ExitError
+		if !errors.As(err, &exitError) || exitError.ExitCode() != 1 {
+			return nil, fmt.Errorf("capture synthetic change: %w", err)
+		}
+	}
+	patch := string(output)
+	patch = strings.ReplaceAll(patch, "a"+string(base)+"/", "a/")
+	patch = strings.ReplaceAll(patch, "b"+string(head)+"/", "b/")
+	patch = strings.ReplaceAll(patch, string(base)+"/", "a/")
+	patch = strings.ReplaceAll(patch, string(head)+"/", "b/")
+	return []byte(patch), nil
+}
+
+func changedCapturedPaths(base, head capturedDirectory) ([]string, error) {
+	files := map[string]string{}
+	for _, directory := range []capturedDirectory{base, head} {
+		if err := collectCapturedFiles(directory, files); err != nil {
+			return nil, err
+		}
+	}
+	paths := make([]string, 0, len(files))
+	for path := range files {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	return paths, nil
+}
+
+func collectCapturedFiles(directory capturedDirectory, files map[string]string) error {
+	return filepath.WalkDir(string(directory), func(path string, entry os.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return err
+		}
+		key, digest, err := capturedFileIdentity(directory, capturedFile(path))
+		if err != nil {
+			return err
+		}
+		if files[key] == digest {
+			delete(files, key)
+		} else {
+			files[key] = digest
+		}
+		return nil
+	})
+}
+
+func capturedFileIdentity(directory capturedDirectory, path capturedFile) (string, string, error) {
+	relative, err := filepath.Rel(string(directory), string(path))
+	if err != nil {
+		return "", "", err
+	}
+	payload, err := os.ReadFile(string(path))
+	if err != nil {
+		return "", "", err
+	}
+	digest := sha256.Sum256(payload)
+	return filepath.ToSlash(relative), hex.EncodeToString(digest[:]), nil
 }
 
 type repositoryRoot string

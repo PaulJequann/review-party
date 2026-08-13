@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "id": "persisted-session-role-reordering",
+  "mode": "change",
+  "classification": "defect",
+  "base": "base",
+  "head": "head",
+  "expected_findings": [{
+    "id": "persisted-zero-role-becomes-administrator",
+    "behavior": "Sessions written before the deployment decode the old unknown role value as administrator after the enum is reordered.",
+    "impact": "A session without a recognized role can pass the administrator-only export check after deployment.",
+    "evidence": [
+      "Session records encode Role as a durable JSON number.",
+      "The change assigns numeric value zero to RoleAdministrator even though existing records use zero for RoleUnknown.",
+      "The round-trip test uses current constants and therefore cannot detect compatibility with an old numeric record."
+    ],
+    "locations": ["internal/auth/role.go", "internal/session/record.go", "internal/httpapi/export.go"]
+  }]
+}

@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"embed"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -18,6 +19,7 @@ import (
 const ledgerFilename = "ledger.sqlite"
 
 var ErrReviewRecordStateNotInitialized = errors.New("Review Party is not initialized")
+var ErrReviewRecordStateRequiresPreparation = errors.New("Review Party state requires preparation")
 
 //go:embed migrations/*.sql
 var migrationFiles embed.FS
@@ -25,6 +27,18 @@ var migrationFiles embed.FS
 type RecordStore interface {
 	Save(model.ReviewRecord) error
 	Load(model.ReviewID) (model.ReviewRecord, error)
+}
+
+type EvalRunStore interface {
+	SaveEvalSuiteRun(model.EvalSuiteRun) error
+	LoadEvalSuiteRun(model.EvalSuiteRunID) (model.EvalSuiteRun, error)
+	SaveEvalRun(model.EvalRun) error
+	LoadEvalRun(model.EvalRunID) (model.EvalRun, error)
+}
+
+type AdjudicationStore interface {
+	PublishAdjudication(model.AdjudicationRevision) (model.AdjudicationRevision, error)
+	LoadAdjudication(model.AdjudicationRevisionID) (model.AdjudicationRevision, error)
 }
 
 type HistoryEntry struct {
@@ -142,6 +156,54 @@ func (s *DeferredLedgerRecordStore) History(query HistoryQuery) (HistoryPage, er
 	return ledger.History(query)
 }
 
+func (s *DeferredLedgerRecordStore) SaveEvalRun(run model.EvalRun) error {
+	ledger, err := s.openExisting()
+	if err != nil {
+		return err
+	}
+	return ledger.SaveEvalRun(run)
+}
+
+func (s *DeferredLedgerRecordStore) LoadEvalRun(id model.EvalRunID) (model.EvalRun, error) {
+	ledger, err := s.openExisting()
+	if err != nil {
+		return model.EvalRun{}, err
+	}
+	return ledger.LoadEvalRun(id)
+}
+
+func (s *DeferredLedgerRecordStore) SaveEvalSuiteRun(run model.EvalSuiteRun) error {
+	ledger, err := s.openExisting()
+	if err != nil {
+		return err
+	}
+	return ledger.SaveEvalSuiteRun(run)
+}
+
+func (s *DeferredLedgerRecordStore) LoadEvalSuiteRun(id model.EvalSuiteRunID) (model.EvalSuiteRun, error) {
+	ledger, err := s.openExisting()
+	if err != nil {
+		return model.EvalSuiteRun{}, err
+	}
+	return ledger.LoadEvalSuiteRun(id)
+}
+
+func (s *DeferredLedgerRecordStore) PublishAdjudication(revision model.AdjudicationRevision) (model.AdjudicationRevision, error) {
+	ledger, err := s.openExisting()
+	if err != nil {
+		return model.AdjudicationRevision{}, err
+	}
+	return ledger.PublishAdjudication(revision)
+}
+
+func (s *DeferredLedgerRecordStore) LoadAdjudication(id model.AdjudicationRevisionID) (model.AdjudicationRevision, error) {
+	ledger, err := s.openExisting()
+	if err != nil {
+		return model.AdjudicationRevision{}, err
+	}
+	return ledger.LoadAdjudication(id)
+}
+
 func (s *DeferredLedgerRecordStore) openExisting() (*LedgerRecordStore, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -224,12 +286,12 @@ func (s *LedgerRecordStore) requirePreparedSchema() error {
 	if err := s.db.QueryRow("SELECT COALESCE(MAX(version), 0) FROM schema_migrations").Scan(&version); err != nil {
 		return fmt.Errorf("read review ledger schema: %w", err)
 	}
-	const current = 3
+	const current = 5
 	if version > current {
 		return fmt.Errorf("review ledger schema %d is newer than supported schema %d", version, current)
 	}
 	if version < current {
-		return fmt.Errorf("review ledger schema %d requires state preparation for schema %d", version, current)
+		return fmt.Errorf("%w: review ledger schema %d requires state preparation for schema %d", ErrReviewRecordStateRequiresPreparation, version, current)
 	}
 	return nil
 }
@@ -262,7 +324,7 @@ func (s *LedgerRecordStore) migrate() error {
 	if _, err := s.db.Exec("CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY)"); err != nil {
 		return fmt.Errorf("create migration table: %w", err)
 	}
-	const current = 3
+	const current = 5
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
@@ -285,7 +347,7 @@ func (s *LedgerRecordStore) migrate() error {
 }
 
 func applyKnownMigration(tx *sql.Tx, version int) error {
-	paths := map[int]string{1: "migrations/001_initial.sql", 2: "migrations/002_history_indexes.sql", 3: "migrations/003_replay_lineage.sql"}
+	paths := map[int]string{1: "migrations/001_initial.sql", 2: "migrations/002_history_indexes.sql", 3: "migrations/003_replay_lineage.sql", 4: "migrations/004_eval_runs.sql", 5: "migrations/005_adjudication_revisions.sql"}
 	path, exists := paths[version]
 	if !exists {
 		return fmt.Errorf("no migration for review ledger schema %d", version)
@@ -329,6 +391,109 @@ func (s *LedgerRecordStore) Save(record model.ReviewRecord) error {
 
 func (s *LedgerRecordStore) Load(id model.ReviewID) (model.ReviewRecord, error) {
 	return s.projection.load(id)
+}
+
+func (s *LedgerRecordStore) SaveEvalRun(run model.EvalRun) error {
+	casePayload, err := json.Marshal(run.Case)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec(`INSERT INTO eval_runs(id,suite_run_id,case_id,case_schema_version,case_digest,case_revision,review_id,execution_state,adjudication_state,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)`, run.ID, run.SuiteRunID, run.Case.ID, run.Case.SchemaVersion, run.Case.Digest, casePayload, run.ReviewID, run.ExecutionState, run.AdjudicationState, run.CreatedAt.UTC())
+	return err
+}
+
+func (s *LedgerRecordStore) LoadEvalRun(id model.EvalRunID) (model.EvalRun, error) {
+	var run model.EvalRun
+	var casePayload []byte
+	err := s.db.QueryRow(`SELECT id,suite_run_id,case_revision,review_id,execution_state,adjudication_state,created_at FROM eval_runs WHERE id=?`, id).Scan(&run.ID, &run.SuiteRunID, &casePayload, &run.ReviewID, &run.ExecutionState, &run.AdjudicationState, &run.CreatedAt)
+	if err != nil {
+		return model.EvalRun{}, err
+	}
+	if err := json.Unmarshal(casePayload, &run.Case); err != nil {
+		return model.EvalRun{}, err
+	}
+	return run, nil
+}
+
+func (s *LedgerRecordStore) SaveEvalSuiteRun(run model.EvalSuiteRun) error {
+	experiment, err := json.Marshal(run.Experiment)
+	if err != nil {
+		return err
+	}
+	runIDs, err := json.Marshal(run.EvalRunIDs)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec(`INSERT INTO eval_suite_runs(id,suite,suite_revision,suite_digest,experiment,eval_run_ids,completed_clean_count,completed_findings_count,incomplete_count,started_at,completed_at) VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET eval_run_ids=excluded.eval_run_ids,completed_clean_count=excluded.completed_clean_count,completed_findings_count=excluded.completed_findings_count,incomplete_count=excluded.incomplete_count,completed_at=excluded.completed_at`, run.ID, run.Suite, run.SuiteRevision, run.SuiteDigest, experiment, runIDs, run.CompletedCleanCount, run.CompletedFindingCount, run.IncompleteCount, run.StartedAt.UTC(), nullableTime(run.CompletedAt))
+	return err
+}
+
+func (s *LedgerRecordStore) LoadEvalSuiteRun(id model.EvalSuiteRunID) (model.EvalSuiteRun, error) {
+	var run model.EvalSuiteRun
+	var experiment, runIDs []byte
+	var completedAt sql.NullTime
+	err := s.db.QueryRow(`SELECT id,suite,suite_revision,suite_digest,experiment,eval_run_ids,completed_clean_count,completed_findings_count,incomplete_count,started_at,completed_at FROM eval_suite_runs WHERE id=?`, id).Scan(&run.ID, &run.Suite, &run.SuiteRevision, &run.SuiteDigest, &experiment, &runIDs, &run.CompletedCleanCount, &run.CompletedFindingCount, &run.IncompleteCount, &run.StartedAt, &completedAt)
+	if err != nil {
+		return model.EvalSuiteRun{}, err
+	}
+	if err := json.Unmarshal(experiment, &run.Experiment); err != nil {
+		return model.EvalSuiteRun{}, err
+	}
+	if err := json.Unmarshal(runIDs, &run.EvalRunIDs); err != nil {
+		return model.EvalSuiteRun{}, err
+	}
+	if completedAt.Valid {
+		run.CompletedAt = completedAt.Time
+	}
+	return run, nil
+}
+
+func nullableTime(value time.Time) any {
+	if value.IsZero() {
+		return nil
+	}
+	return value.UTC()
+}
+
+func (s *LedgerRecordStore) PublishAdjudication(revision model.AdjudicationRevision) (model.AdjudicationRevision, error) {
+	document, err := json.Marshal(revision.Document)
+	if err != nil {
+		return model.AdjudicationRevision{}, err
+	}
+	score, err := json.Marshal(revision.Score)
+	if err != nil {
+		return model.AdjudicationRevision{}, err
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return model.AdjudicationRevision{}, err
+	}
+	defer tx.Rollback()
+	if err := tx.QueryRow(`SELECT COALESCE(MAX(revision_number),0)+1 FROM adjudication_revisions WHERE suite_run_id=?`, revision.SuiteRunID).Scan(&revision.RevisionNumber); err != nil {
+		return model.AdjudicationRevision{}, err
+	}
+	if _, err := tx.Exec(`INSERT INTO adjudication_revisions(id,suite_run_id,revision_number,document,score,created_at) VALUES(?,?,?,?,?,?)`, revision.ID, revision.SuiteRunID, revision.RevisionNumber, document, score, revision.CreatedAt.UTC()); err != nil {
+		return model.AdjudicationRevision{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return model.AdjudicationRevision{}, err
+	}
+	return revision, nil
+}
+
+func (s *LedgerRecordStore) LoadAdjudication(id model.AdjudicationRevisionID) (model.AdjudicationRevision, error) {
+	var revision model.AdjudicationRevision
+	var document, score []byte
+	if err := s.db.QueryRow(`SELECT id,suite_run_id,revision_number,document,score,created_at FROM adjudication_revisions WHERE id=?`, id).Scan(&revision.ID, &revision.SuiteRunID, &revision.RevisionNumber, &document, &score, &revision.CreatedAt); err != nil {
+		return model.AdjudicationRevision{}, err
+	}
+	if err := json.Unmarshal(document, &revision.Document); err != nil {
+		return model.AdjudicationRevision{}, err
+	}
+	if err := json.Unmarshal(score, &revision.Score); err != nil {
+		return model.AdjudicationRevision{}, err
+	}
+	return revision, nil
 }
 
 func (s *LedgerRecordStore) History(query HistoryQuery) (HistoryPage, error) {

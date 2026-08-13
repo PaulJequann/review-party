@@ -324,7 +324,7 @@ func TestLedgerPreparationMigratesVersionOneHistoryState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec("DROP INDEX reviews_replay_source; ALTER TABLE reviews DROP COLUMN replays_review_id; DROP INDEX reviews_history_order; DROP INDEX reviews_history_reviewer; DELETE FROM schema_migrations WHERE version>=2"); err != nil {
+	if _, err := db.Exec("DROP TABLE adjudication_revisions; DROP TABLE eval_runs; DROP TABLE eval_suite_runs; DROP INDEX reviews_replay_source; ALTER TABLE reviews DROP COLUMN replays_review_id; DROP INDEX reviews_history_order; DROP INDEX reviews_history_reviewer; DELETE FROM schema_migrations WHERE version>=2"); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Close(); err != nil {
@@ -339,6 +339,80 @@ func TestLedgerPreparationMigratesVersionOneHistoryState(t *testing.T) {
 	if count != 2 {
 		t.Fatalf("history index count = %d, want 2", count)
 	}
+}
+
+func TestOutdatedLedgerReportsPreparationRequirement(t *testing.T) {
+	directory := t.TempDir()
+	ledger := newTestLedger(t, directory)
+	if err := ledger.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", filepath.Join(directory, ledgerFilename))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("DROP TABLE adjudication_revisions; DELETE FROM schema_migrations WHERE version=5"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	_, err = ReviewRecordStatePrepared(directory)
+	if !errors.Is(err, ErrReviewRecordStateRequiresPreparation) {
+		t.Fatalf("error = %v", err)
+	}
+	if err := PrepareReviewRecordState(directory); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAdjudicationCorrectionsPreserveImmutableRevisions(t *testing.T) {
+	ledger := newTestLedger(t, t.TempDir())
+	defer ledger.Close()
+	now := time.Now().UTC()
+	review := ledgerFixture(model.LifecycleCompleted)
+	if err := ledger.Save(review); err != nil {
+		t.Fatal(err)
+	}
+	suite := model.EvalSuiteRun{ID: "esr_1723200000000_0123456789abcdef", Suite: "suite", SuiteRevision: "v1", SuiteDigest: "digest", Experiment: model.ExperimentConfiguration{}, EvalRunIDs: []model.EvalRunID{}, StartedAt: now}
+	if err := ledger.SaveEvalSuiteRun(suite); err != nil {
+		t.Fatal(err)
+	}
+	first := publishTestAdjudication(t, ledger, adjudicationFixture{"ar_1723200000000_0123456789abcdef", suite.ID, 1, now})
+	second := publishTestAdjudication(t, ledger, adjudicationFixture{"ar_1723200000001_0123456789abcdef", suite.ID, 0, now.Add(time.Second)})
+	if first.RevisionNumber != 1 || second.RevisionNumber != 2 {
+		t.Fatalf("revisions = %d, %d", first.RevisionNumber, second.RevisionNumber)
+	}
+	loadedFirst := loadTestAdjudication(t, ledger, first.ID)
+	loadedSecond := loadTestAdjudication(t, ledger, second.ID)
+	if loadedFirst.Score.IncompleteCases != 1 || loadedSecond.Score.IncompleteCases != 0 {
+		t.Fatal("correction overwrote adjudication history")
+	}
+}
+
+type adjudicationFixture struct {
+	id         model.AdjudicationRevisionID
+	suiteID    model.EvalSuiteRunID
+	incomplete int
+	createdAt  time.Time
+}
+
+func publishTestAdjudication(t *testing.T, ledger *LedgerRecordStore, fixture adjudicationFixture) model.AdjudicationRevision {
+	t.Helper()
+	revision, err := ledger.PublishAdjudication(model.AdjudicationRevision{ID: fixture.id, SuiteRunID: fixture.suiteID, Document: model.AdjudicationDocument{SuiteRunID: fixture.suiteID}, Score: model.EvalScore{IncompleteCases: fixture.incomplete}, CreatedAt: fixture.createdAt})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return revision
+}
+
+func loadTestAdjudication(t *testing.T, ledger *LedgerRecordStore, id model.AdjudicationRevisionID) model.AdjudicationRevision {
+	t.Helper()
+	revision, err := ledger.LoadAdjudication(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return revision
 }
 
 func newTestLedger(t *testing.T, directory string) *LedgerRecordStore {
