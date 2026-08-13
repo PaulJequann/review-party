@@ -153,6 +153,19 @@ func TestPackagedCodeQualityEvalSuiteLoadsDeclaredCases(t *testing.T) {
 	}
 }
 
+func TestCodeQualityEvalRejectsMismatchedProfileBeforeLaunch(t *testing.T) {
+	executor := successfulExecutor(cleanReview)
+	conductor := testEvalConductor(t, executor)
+	selection := evalSelection("global:code-quality")
+	selection.Experiment.Profile = "bugs"
+	if _, err := conductor.RunEvalSuite(context.Background(), selection); err == nil || !strings.Contains(err.Error(), "requires the code-quality Profile") {
+		t.Fatalf("error = %v", err)
+	}
+	if executor.attemptCount() != 0 {
+		t.Fatalf("attempts = %d, want 0", executor.attemptCount())
+	}
+}
+
 func TestGeneralEvalReviewerReceivesMultiFileRepositoryWithoutAuthority(t *testing.T) {
 	executor := &evalSequenceExecutor{outputs: []string{cleanReview, cleanReview, cleanReview, cleanReview, cleanReview, cleanReview}}
 	conductor := testEvalConductor(t, executor)
