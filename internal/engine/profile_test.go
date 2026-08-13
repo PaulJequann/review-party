@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"reflect"
 	"strings"
 	"testing"
@@ -29,12 +30,29 @@ func TestProfilesReturnsBuiltInsInStableOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	names := []string{profiles[0].Name, profiles[1].Name}
-	if !reflect.DeepEqual(names, []string{"bugs", "documentation"}) {
+	names := []string{profiles[0].Name, profiles[1].Name, profiles[2].Name}
+	if !reflect.DeepEqual(names, SupportedProfiles()) {
 		t.Fatalf("profiles = %#v", names)
 	}
-	if profiles[0].DefaultReviewer.ReviewerID != defaultReviewer || profiles[1].DefaultReviewer.ReviewerID != defaultReviewer {
-		t.Fatalf("default Reviewers = %#v, %#v", profiles[0].DefaultReviewer, profiles[1].DefaultReviewer)
+	for _, profile := range profiles {
+		if profile.DefaultReviewer.ReviewerID != defaultReviewer {
+			t.Fatalf("default Reviewer = %#v", profile.DefaultReviewer)
+		}
+	}
+}
+
+func TestPackagedProfilesMatchBuiltInDefinitions(t *testing.T) {
+	paths, err := fs.Glob(packagedProfileFiles, "profiles/*.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := make([]string, 0, len(paths))
+	for _, profilePath := range paths {
+		name := strings.TrimPrefix(profilePath, "profiles/")
+		names = append(names, strings.TrimSuffix(name, ".md"))
+	}
+	if !reflect.DeepEqual(names, SupportedProfiles()) {
+		t.Fatalf("packaged profiles = %#v, definitions = %#v", names, SupportedProfiles())
 	}
 }
 
@@ -76,6 +94,28 @@ func TestDocumentationReviewUsesDistinctRecipeAndPrompt(t *testing.T) {
 	prompt := documentation.prompt(ReviewSubject{Identity: "subject", Patch: "patch"})
 	if !strings.Contains(prompt, "Perform a Documentation Review") || strings.Contains(prompt, "Review for material bugs") {
 		t.Fatalf("documentation prompt is not distinct:\n%s", prompt)
+	}
+}
+
+func TestCodeQualityReviewUsesDistinctRecipeAndPrompt(t *testing.T) {
+	catalog := defaultReviewerCatalog()
+	bugs, err := compileSelectedTestProfile(catalog, ProfileSelection{Profile: "bugs", Reviewer: "grok"}, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	quality, err := compileSelectedTestProfile(catalog, ProfileSelection{Profile: "code-quality", Reviewer: "grok"}, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bugs.revision.Revision == quality.revision.Revision {
+		t.Fatal("bugs and code-quality produced the same Profile Revision")
+	}
+	if quality.revision.Passes[0].Name != "code-quality-review" {
+		t.Fatalf("pass = %#v", quality.revision.Passes[0])
+	}
+	prompt := quality.prompt(ReviewSubject{Identity: "subject", Patch: "patch"})
+	if !strings.Contains(prompt, "code-quality reviewer") || strings.Contains(prompt, "material bugs") {
+		t.Fatalf("code-quality prompt is not distinct:\n%s", prompt)
 	}
 }
 

@@ -136,6 +136,23 @@ func TestPackagedEvalSuitesSelectDistinctCorpora(t *testing.T) {
 	}
 }
 
+func TestPackagedCodeQualityEvalSuiteLoadsDeclaredCases(t *testing.T) {
+	suite, err := loadEvalSuite("global:code-quality")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(suite.cleanup)
+	if suite.name != "global:code-quality" || suite.revision != "code-quality-v1" {
+		t.Fatalf("suite identity = %q@%q", suite.name, suite.revision)
+	}
+	if len(suite.cases) != 6 {
+		t.Fatalf("case count = %d, want 6", len(suite.cases))
+	}
+	if suite.cases[0].revision.ID != "dispatcher-grows-feature-branch" || suite.cases[4].revision.Classification != "known_clean" {
+		t.Fatalf("case revisions = %#v", suite.cases)
+	}
+}
+
 func TestGeneralEvalReviewerReceivesMultiFileRepositoryWithoutAuthority(t *testing.T) {
 	executor := &evalSequenceExecutor{outputs: []string{cleanReview, cleanReview, cleanReview, cleanReview, cleanReview, cleanReview}}
 	conductor := testEvalConductor(t, executor)

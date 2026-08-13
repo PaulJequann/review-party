@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "id": "dispatcher-grows-feature-branch",
+  "mode": "change",
+  "classification": "defect",
+  "base": "base",
+  "head": "head",
+  "expected_findings": [{
+    "id": "legacy-policy-leaks-into-dispatcher",
+    "behavior": "The shared dispatcher now contains a legacy-event special case instead of routing event policy through the handler registry.",
+    "impact": "Each future event-specific exception must edit the canonical dispatch path, increasing coupling and making the dispatcher harder to reason about and test.",
+    "evidence": ["The head adds a legacy branch before the handler lookup and imports a feature-specific handler into the shared dispatcher.", "The existing handler registry already provides the extension point for event-specific behavior."],
+    "locations": ["internal/dispatch/dispatch.go", "internal/dispatch/legacy.go"]
+  }]
+}

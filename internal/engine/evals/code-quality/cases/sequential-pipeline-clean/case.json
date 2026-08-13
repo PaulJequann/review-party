@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "id": "pipeline-sequential-dependency-is-valid",
+  "mode": "change",
+  "classification": "known_clean",
+  "base": "base",
+  "head": "head",
+  "expected_findings": [],
+  "clean_evidence": "The pipeline remains sequential because validation consumes normalized output and persistence consumes the validated record. The change makes those stages explicit without adding independent work or avoidable orchestration."
+}

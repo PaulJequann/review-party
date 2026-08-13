@@ -31,7 +31,7 @@ func TestInitializeProfilesCreatesStarterWithoutOverwriting(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertInitializationCounts(t, first, 2, 0)
+	assertInitializationCounts(t, first, len(SupportedProfiles()), 0)
 	promptPath := filepath.Join(repository, ".reviewparty", "profiles", "bugs.md")
 	custom := []byte("MY CUSTOM BUG REVIEW\n")
 	if err := os.WriteFile(promptPath, custom, 0o600); err != nil {
@@ -42,7 +42,7 @@ func TestInitializeProfilesCreatesStarterWithoutOverwriting(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertInitializationCounts(t, second, 0, 2)
+	assertInitializationCounts(t, second, 0, len(SupportedProfiles()))
 	payload, err := os.ReadFile(promptPath)
 	if err != nil {
 		t.Fatal(err)
@@ -58,8 +58,9 @@ func TestInitializeProfilesCreatesGlobalStarterInMissingDirectory(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertInitializationCounts(t, result, 2, 0)
-	for _, path := range []string{filepath.Join(directory, "profiles", "bugs.md"), filepath.Join(directory, "profiles", "documentation.md")} {
+	assertInitializationCounts(t, result, len(SupportedProfiles()), 0)
+	for _, name := range SupportedProfiles() {
+		path := filepath.Join(directory, "profiles", name+".md")
 		if info, statErr := os.Stat(path); statErr != nil || !info.Mode().IsRegular() {
 			t.Fatalf("starter file %q: info = %v, error = %v", path, info, statErr)
 		}
@@ -94,7 +95,7 @@ func TestInitializeProfilesInstallsCompleteStarterSetWithoutConfiguration(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertInitializationCounts(t, result, 2, 0)
+	assertInitializationCounts(t, result, len(SupportedProfiles()), 0)
 	if _, err := os.Stat(filepath.Join(repository, ".reviewparty", "config.json")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("starter installation changed default selection: %v", err)
 	}

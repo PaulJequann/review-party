@@ -10,6 +10,12 @@ named `go.mod.txt` are an embedding-only representation; packaged fixture
 materialization presents them to the Reviewer as ordinary `go.mod` files. This
 conversion does not apply to Caller-owned filesystem suites.
 
+`code-quality/` contains `global:code-quality@code-quality-v1`. Its six cases
+cover structural simplification, special-case growth, duplicate helpers,
+weakened contracts, and adversarial clean abstractions or sequential flows.
+The suite is evaluated with the `code-quality` Profile rather than the bug
+taxonomy.
+
 Case authority (`case.json`, expected Findings, and clean evidence) stays
 outside each `base/` and `head/` tree and must never enter a Synthetic Review
 Subject.

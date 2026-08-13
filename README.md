@@ -38,17 +38,21 @@ review-party config path
 review-party config show
 ```
 
-Run a bug or Documentation Review with an explicitly selected direct adapter:
+Run a bug, code-quality, or Documentation Review with an explicitly selected
+direct adapter:
 
 ```sh
 review-party review bugs --reviewer grok
+review-party review code-quality --reviewer opencode \
+  --model meta/muse-spark-1.2-contributor --effort high
 review-party review documentation --reviewer opencode \
   --model opencode-go/deepseek-v4-flash \
   --effort high
 ```
 
-`bugs` remains the default Profile, and Grok is the default Reviewer. Both
-Profiles require the same repository read/search capability contract with
+`bugs` remains the default Profile, and Grok is the default Reviewer. The
+packaged `bugs`, `code-quality`, and `documentation` Profiles require the same
+repository read/search capability contract with
 explicit repository-mutation, shell, and web denials, but compile distinct
 purposes, materiality thresholds, Passes, prompts, and Profile Revisions.
 Review Party rejects an incompatible Reviewer before launch and does not
@@ -164,6 +168,18 @@ go run ./cmd/review-party eval run global:general-bugs \
   --format json
 ```
 
+Run the maintainability benchmark with the actual `code-quality` Profile:
+
+```sh
+go run ./cmd/review-party eval run global:code-quality \
+  --profile code-quality \
+  --reviewer opencode \
+  --model meta/muse-spark-1.2-contributor \
+  --effort high \
+  --deadline 3m \
+  --format json
+```
+
 The general suite uses multi-file repositories, cross-file contracts, and
 adversarial known-clean changes. For a fast plumbing and result-contract check,
 run the intentionally elementary `global:canary-bugs` suite instead. Canary
@@ -256,7 +272,8 @@ as integrity failures. Treat artifacts as sensitive review context.
 
 ## Review Profiles
 
-Review Party ships a zero-configuration `bugs` Profile and can load ordinary
+Review Party ships zero-configuration `bugs`, `code-quality`, and
+`documentation` Profiles and can load ordinary
 Markdown Profiles from a repository or a user-wide library. Packaged Profiles
 need no installation and are not copied by `review-party init`. Advanced
 callers can create one owned Profile from an explicit starting point:

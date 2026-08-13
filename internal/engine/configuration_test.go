@@ -274,11 +274,11 @@ func TestProfilesUsesConfiguredDefaultWhenBuiltInDefaultIsDisabled(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(profiles) != 2 {
+	if len(profiles) != 3 {
 		t.Fatalf("profiles = %#v", profiles)
 	}
-	names := []string{profiles[0].Name, profiles[1].Name}
-	if !reflect.DeepEqual(names, []string{"bugs", "documentation"}) {
+	names := []string{profiles[0].Name, profiles[1].Name, profiles[2].Name}
+	if !reflect.DeepEqual(names, SupportedProfiles()) {
 		t.Fatalf("profile names = %#v", names)
 	}
 	for _, profile := range profiles {

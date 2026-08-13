@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "id": "exporter-duplicates-date-parser",
+  "mode": "change",
+  "classification": "defect",
+  "base": "base",
+  "head": "head",
+  "expected_findings": [{
+    "id": "date-parser-duplicated-in-exporter",
+    "behavior": "The report exporter introduces a second timestamp parser instead of using the canonical date parser.",
+    "impact": "Timestamp rules can diverge between report and API paths, so a future format change requires coordinated edits and can produce inconsistent output.",
+    "evidence": ["The repository already exposes dates.Parse, while the changed exporter adds parseExportDate with overlapping parsing behavior."],
+    "locations": ["internal/dates/parse.go", "internal/report/export.go"]
+  }]
+}

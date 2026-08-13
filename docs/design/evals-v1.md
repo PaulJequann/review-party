@@ -25,8 +25,11 @@ Runs remain `awaiting_adjudication`. Scoring and comparison are later concerns.
 ## Suite sources
 
 `global:canary-bugs` selects elementary cases for fast plumbing and
-result-contract checks. `global:general-bugs` selects the broader benchmark
-embedded in the installed Review Party version. A filesystem path selects a Caller-owned suite whose
+result-contract checks. `global:general-bugs` selects the broader bug benchmark
+embedded in the installed Review Party version. `global:code-quality` selects
+the packaged maintainability benchmark and is intended to be evaluated with the
+`code-quality` Profile; other Profile selections are not scored against its
+expected Findings. A filesystem path selects a Caller-owned suite whose
 relative case and fixture paths are anchored at `suite.json`. Unknown fields,
 unsupported versions, duplicate case IDs, contradictory classifications,
 missing fixtures, Git metadata, and symlinks fail full-suite preflight before

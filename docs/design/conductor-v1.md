@@ -48,8 +48,9 @@ represents real variation rather than speculative indirection.
   in a detached, Review Party-owned worktree at the recorded head. One Subject
   execution Interface hides preparation, ownership validation, cleanup after
   process exit, and bounded inactive-leftover reconciliation.
-- One packaged Markdown `bugs` Profile plus repository/global Markdown Profile
-  libraries, each compiling to one required Review Pass.
+- Packaged Markdown `bugs`, `code-quality`, and `documentation` Profiles plus
+  repository/global Markdown Profile libraries, each compiling to one required
+  Review Pass.
 - Direct Grok, OpenCode, and Copilot Reviewer candidates selected explicitly;
   Grok is the default.
 - Attempt Limit one and a finite deadline; retry and fallback remain modeled but
@@ -66,9 +67,11 @@ represents real variation rather than speculative indirection.
 ## Deferred
 
 Party execution, Review Dependencies, concurrency, retries, fallback, remote
-pull-request resolution, Documentation Review, Verification Review, Synthesis
-Review, hosted workers, and native ACP hosting are not part of this slice.
-Their domain semantics remain captured in [`../product-model.md`](../product-model.md).
+pull-request resolution, Verification Review, Synthesis Review, hosted workers,
+and native ACP hosting are not part of this slice. Documentation and Code
+Quality Reviews are packaged Profiles in the current slice; the remaining
+deferred review types and Party semantics remain captured in
+[`../product-model.md`](../product-model.md).
 
 ## Acceptance evidence
 

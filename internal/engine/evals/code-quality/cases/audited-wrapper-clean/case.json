@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "id": "audited-store-wrapper-earns-boundary",
+  "mode": "change",
+  "classification": "known_clean",
+  "base": "base",
+  "head": "head",
+  "expected_findings": [],
+  "clean_evidence": "The wrapper adds an audit-log contract at the storage boundary, preserves the Store interface, and keeps auditing out of each caller. It is not an identity wrapper or duplicated business logic."
+}

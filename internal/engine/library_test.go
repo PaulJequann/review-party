@@ -135,7 +135,7 @@ func TestMissingProfileExplainsSearchAndAvailableNames(t *testing.T) {
 		"repository:.reviewparty/profiles/architecture.md",
 		"global:profiles/architecture.md",
 		"packaged:profiles/architecture.md",
-		"available: bugs, documentation, security",
+		"available: bugs, code-quality, documentation, security",
 	} {
 		if !strings.Contains(err.Error(), expected) {
 			t.Fatalf("error %q does not contain %q", err, expected)

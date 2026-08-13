@@ -1,0 +1,3 @@
+module example.com/quality/profile
+
+go 1.23

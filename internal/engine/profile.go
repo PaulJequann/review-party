@@ -158,6 +158,15 @@ func builtInProfileDefinitions() []profileDefinition {
 			requiredCapabilities: capabilities,
 		},
 		{
+			name:                 "code-quality",
+			description:          "Maintainability and structural quality review",
+			purpose:              "Find material maintainability regressions and concrete opportunities to simplify the implementation.",
+			materialityThreshold: "A concrete structural regression or high-conviction simplification that materially affects maintainability, change safety, or local architecture.",
+			defaultReviewer:      defaultReviewer,
+			pass:                 ReviewPassRevision{Name: "code-quality-review", Required: true, Purpose: "Evaluate material structural and maintainability defects.", PromptRevision: "code-quality-v1"},
+			requiredCapabilities: capabilities,
+		},
+		{
 			name:                 "documentation",
 			description:          "Documentation accuracy review",
 			purpose:              "Evaluate documentation accuracy, omissions, consistency, and project language.",

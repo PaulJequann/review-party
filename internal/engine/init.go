@@ -192,7 +192,7 @@ func writeProfileFile(profileRoot *os.Root, file starterProfileFile, permissions
 }
 
 func starterProfileFiles(_ string, profilesDirectory string) ([]starterProfileFile, error) {
-	names := []string{"bugs", "documentation"}
+	names := SupportedProfiles()
 	files := make([]starterProfileFile, 0, len(names))
 	for _, name := range names {
 		payload, err := packagedProfileFiles.ReadFile("profiles/" + name + ".md")

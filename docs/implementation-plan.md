@@ -444,7 +444,9 @@ Reviewer, model, Agent Harness, Transport, or caller policy.
 
 ### Completed checklist
 
-- [x] Added the domain-backed `documentation` Profile beside `bugs`.
+- [x] Added the domain-backed `documentation` and `code-quality` Profiles
+  beside `bugs`, including the maintainability eval corpus and multi-Profile
+  Muse dogfood path.
 - [x] Added packaged, repository, and global Markdown Profile libraries with
   deterministic precedence, complete-definition shadowing, and no inheritance.
 - [x] Added `profiles`, `explain`, `profile explain`, and repository/global
