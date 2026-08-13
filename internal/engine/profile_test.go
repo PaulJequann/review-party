@@ -75,47 +75,38 @@ func TestExplainCompilesWithoutStartingReview(t *testing.T) {
 	assertNoReviewActivity(t, store, executor)
 }
 
-func TestDocumentationReviewUsesDistinctRecipeAndPrompt(t *testing.T) {
+func TestProfilesUseDistinctRecipesAndPrompts(t *testing.T) {
 	catalog := defaultReviewerCatalog()
 	bugs, err := compileSelectedTestProfile(catalog, ProfileSelection{Profile: "bugs", Reviewer: "grok"}, time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
-	documentation, err := compileSelectedTestProfile(catalog, ProfileSelection{Profile: "documentation", Reviewer: "grok"}, time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if bugs.revision.Revision == documentation.revision.Revision {
-		t.Fatal("bugs and documentation produced the same Profile Revision")
-	}
-	if documentation.revision.Passes[0].Name != "documentation-review" {
-		t.Fatalf("pass = %#v", documentation.revision.Passes[0])
-	}
-	prompt := documentation.prompt(ReviewSubject{Identity: "subject", Patch: "patch"})
-	if !strings.Contains(prompt, "Perform a Documentation Review") || strings.Contains(prompt, "Review for material bugs") {
-		t.Fatalf("documentation prompt is not distinct:\n%s", prompt)
-	}
-}
-
-func TestCodeQualityReviewUsesDistinctRecipeAndPrompt(t *testing.T) {
-	catalog := defaultReviewerCatalog()
-	bugs, err := compileSelectedTestProfile(catalog, ProfileSelection{Profile: "bugs", Reviewer: "grok"}, time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
-	quality, err := compileSelectedTestProfile(catalog, ProfileSelection{Profile: "code-quality", Reviewer: "grok"}, time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if bugs.revision.Revision == quality.revision.Revision {
-		t.Fatal("bugs and code-quality produced the same Profile Revision")
-	}
-	if quality.revision.Passes[0].Name != "code-quality-review" {
-		t.Fatalf("pass = %#v", quality.revision.Passes[0])
-	}
-	prompt := quality.prompt(ReviewSubject{Identity: "subject", Patch: "patch"})
-	if !strings.Contains(prompt, "code-quality reviewer") || strings.Contains(prompt, "material bugs") {
-		t.Fatalf("code-quality prompt is not distinct:\n%s", prompt)
+	for _, test := range []struct {
+		name          string
+		profile       string
+		pass          string
+		promptNeedle  string
+		promptAbsence string
+	}{
+		{name: "documentation", profile: "documentation", pass: "documentation-review", promptNeedle: "Perform a Documentation Review", promptAbsence: "Review for material bugs"},
+		{name: "code-quality", profile: "code-quality", pass: "code-quality-review", promptNeedle: "code-quality reviewer", promptAbsence: "material bugs"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			profile, err := compileSelectedTestProfile(catalog, ProfileSelection{Profile: test.profile, Reviewer: "grok"}, time.Minute)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if bugs.revision.Revision == profile.revision.Revision {
+				t.Fatalf("bugs and %s produced the same Profile Revision", test.profile)
+			}
+			if profile.revision.Passes[0].Name != test.pass {
+				t.Fatalf("pass = %#v", profile.revision.Passes[0])
+			}
+			prompt := profile.prompt(ReviewSubject{Identity: "subject", Patch: "patch"})
+			if !strings.Contains(prompt, test.promptNeedle) || strings.Contains(prompt, test.promptAbsence) {
+				t.Fatalf("%s prompt is not distinct:\n%s", test.profile, prompt)
+			}
+		})
 	}
 }
 
