@@ -42,6 +42,21 @@ XDG_CONFIG_HOME="$PWD/scratch/dogfood-config" \
   --format json
 ```
 
+Treat dogfooding as a small multi-Profile review exercise, not a formal Party or
+Review Bundle: after initialization, run the `bugs` and `code-quality` Profiles
+against the same unchanged Subject using the same isolated state and
+configuration. Add `documentation` when the change touches documentation. Each
+Profile produces its own ordinary Review Record; compare their findings and
+provenance rather than merging raw Reviewer text.
+
+```sh
+XDG_STATE_HOME="$PWD/scratch/dogfood-state" \
+XDG_CONFIG_HOME="$PWD/scratch/dogfood-config" \
+  go run ./cmd/review-party review code-quality --repo . --reviewer opencode \
+  --model meta/muse-spark-1.2-contributor --deadline 3m \
+  --format json
+```
+
 - Inspect the persisted record with the same isolated `XDG_STATE_HOME` and
   `XDG_CONFIG_HOME` and
   `--format json`; verify the recorded Reviewer/model provenance and result

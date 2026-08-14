@@ -76,6 +76,8 @@ func loadEvalSuite(reference string) (loadedEvalSuite, error) {
 		return loadPackagedEvalSuite("evals/general-bugs")
 	case "global:general-bugs":
 		return loadPackagedEvalSuite("evals/realistic-general-bugs")
+	case "global:code-quality":
+		return loadPackagedEvalSuite("evals/code-quality")
 	}
 	if reservedEvalSuiteName(reference) {
 		return loadedEvalSuite{}, fmt.Errorf("unknown eval suite %q", reference)

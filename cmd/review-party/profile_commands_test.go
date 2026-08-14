@@ -7,9 +7,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
+	"reviewparty/internal/engine"
 	"reviewparty/internal/store"
 )
 
@@ -57,8 +59,9 @@ func TestProfileInstallDefaultsCreatesCompleteOwnedSetWithoutSelectingDefault(t 
 	repository := t.TempDir()
 	runProfileTestCommand(t, exec.Command("git", "-C", repository, "init", "--quiet"))
 	output := runProfileCommand(t, []string{"profile", "install-defaults", "--repo", repository})
-	assertOutputContains(t, output, "Installed 2", "Default Profile selection was not changed")
-	for _, name := range []string{"bugs.md", "documentation.md"} {
+	assertOutputContains(t, output, "Installed "+strconv.Itoa(len(engine.SupportedProfiles())), "Default Profile selection was not changed")
+	for _, name := range engine.SupportedProfiles() {
+		name += ".md"
 		if _, err := os.Stat(filepath.Join(repository, ".reviewparty", "profiles", name)); err != nil {
 			t.Fatal(err)
 		}

@@ -1,0 +1,3 @@
+module example.com/quality/importer
+
+go 1.23

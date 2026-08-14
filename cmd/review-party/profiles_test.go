@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"reviewparty/internal/engine"
 	"reviewparty/internal/model"
 )
 
@@ -29,7 +30,7 @@ func TestProfilesCommandEmitsJSONCatalog(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &profiles); err != nil {
 		t.Fatal(err)
 	}
-	if len(profiles) != 2 || profiles[1].Name != "documentation" {
+	if !reflect.DeepEqual(profileNames(profiles), engine.SupportedProfiles()) {
 		t.Fatalf("profiles = %#v", profiles)
 	}
 }
@@ -77,11 +78,10 @@ func TestProfilesCommandUsesConfiguredDefault(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertProfileNames(t, profiles)
-	if profiles[0].DefaultReviewer.ReviewerID != "opencode" {
-		t.Fatalf("profile = %#v", profiles[0])
-	}
-	if profiles[1].DefaultReviewer.ReviewerID != "opencode" {
-		t.Fatalf("profile = %#v", profiles[1])
+	for _, profile := range profiles {
+		if profile.DefaultReviewer.ReviewerID != "opencode" {
+			t.Fatalf("profile = %#v", profile)
+		}
 	}
 }
 
@@ -104,7 +104,7 @@ func TestProfilesDoesNotRequireUsableRecordStorage(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &profiles); err != nil {
 		t.Fatal(err)
 	}
-	if len(profiles) != 2 {
+	if len(profiles) != len(engine.SupportedProfiles()) {
 		t.Fatalf("profiles = %#v", profiles)
 	}
 }
@@ -122,12 +122,20 @@ func isolatedProfilesRepository(t *testing.T) string {
 
 func assertProfileNames(t *testing.T, profiles []model.ProfileSummary) {
 	t.Helper()
-	if len(profiles) != 2 {
+	if len(profiles) != len(engine.SupportedProfiles()) {
 		t.Fatalf("profiles = %#v", profiles)
 	}
-	got := []string{profiles[0].Name, profiles[1].Name}
-	want := []string{"bugs", "documentation"}
+	got := profileNames(profiles)
+	want := engine.SupportedProfiles()
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("profile names = %#v, want %#v", got, want)
 	}
+}
+
+func profileNames(profiles []model.ProfileSummary) []string {
+	names := make([]string, 0, len(profiles))
+	for _, profile := range profiles {
+		names = append(names, profile.Name)
+	}
+	return names
 }

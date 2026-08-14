@@ -25,6 +25,9 @@ func (conductor *Conductor) prepareEvalSuiteRun(selection model.EvalSuiteSelecti
 	if err := conductor.validateEvalSelection(selection.Experiment); err != nil {
 		return loadedEvalSuite{}, nil, model.EvalSuiteRun{}, err
 	}
+	if err := validateEvalSuiteProfile(selection.Suite, selection.Experiment.Profile); err != nil {
+		return loadedEvalSuite{}, nil, model.EvalSuiteRun{}, err
+	}
 	suite, err := loadEvalSuite(selection.Suite)
 	if err != nil {
 		return loadedEvalSuite{}, nil, model.EvalSuiteRun{}, err
@@ -46,6 +49,13 @@ func (conductor *Conductor) prepareEvalSuiteRun(selection model.EvalSuiteSelecti
 		return loadedEvalSuite{}, nil, model.EvalSuiteRun{}, err
 	}
 	return suite, ledger, run, nil
+}
+
+func validateEvalSuiteProfile(suite, profile string) error {
+	if suite == "global:code-quality" && profile != "code-quality" {
+		return fmt.Errorf("eval suite %q requires the code-quality Profile, got %q", suite, profile)
+	}
+	return nil
 }
 
 func (conductor *Conductor) validateEvalSelection(experiment model.ExperimentConfiguration) error {

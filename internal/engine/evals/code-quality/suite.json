@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "name": "global:code-quality",
+  "revision": "code-quality-v1",
+  "cases": [
+    "cases/special-case-branching/case.json",
+    "cases/duplicate-helper/case.json",
+    "cases/flag-state-model/case.json",
+    "cases/weak-contract/case.json",
+    "cases/audited-wrapper-clean/case.json",
+    "cases/sequential-pipeline-clean/case.json"
+  ]
+}

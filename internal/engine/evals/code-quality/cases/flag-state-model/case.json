@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "id": "runner-accumulates-independent-flags",
+  "mode": "change",
+  "classification": "defect",
+  "base": "base",
+  "head": "head",
+  "expected_findings": [{
+    "id": "runner-flags-obscure-state-model",
+    "behavior": "The runner adds independent continue-on-error and dry-run flags with overlapping branches instead of modeling the execution mode explicitly.",
+    "impact": "New modes can create unreviewed flag combinations with contradictory behavior, forcing every caller and test to reason about a growing boolean state space.",
+    "evidence": ["The head adds two booleans and branches on their combinations inside Run.", "The existing runner has one execution path and no mode contract for callers to preserve."],
+    "locations": ["internal/jobs/runner.go"]
+  }]
+}

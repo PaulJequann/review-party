@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "id": "cache-weakens-typed-boundary",
+  "mode": "change",
+  "classification": "defect",
+  "base": "base",
+  "head": "head",
+  "expected_findings": [{
+    "id": "cache-any-contract-leaks-casts",
+    "behavior": "The cache API changes from a typed key and entry contract to any-valued input and output with caller-side casts.",
+    "impact": "Invalid key and value combinations become runtime failures scattered across callers, so the shared module no longer protects its ownership invariant.",
+    "evidence": ["The head replaces Key and Entry with any in the cache interface.", "The profile service now casts the result instead of receiving the typed contract."],
+    "locations": ["internal/cache/cache.go", "internal/profile/service.go"]
+  }]
+}
