@@ -30,9 +30,10 @@ type RecordStore interface {
 }
 
 type EvalRunStore interface {
-	SaveEvalSuiteRun(model.EvalSuiteRun) error
+	CreateEvalSuiteRun(model.EvalSuiteRun, []model.EvalRun) error
+	CheckpointEvalRun(model.EvalSuiteRun, model.EvalRun) error
+	TerminateEvalSuiteRun(model.EvalSuiteRun) error
 	LoadEvalSuiteRun(model.EvalSuiteRunID) (model.EvalSuiteRun, error)
-	SaveEvalRun(model.EvalRun) error
 	LoadEvalRun(model.EvalRunID) (model.EvalRun, error)
 }
 
@@ -156,12 +157,28 @@ func (s *DeferredLedgerRecordStore) History(query HistoryQuery) (HistoryPage, er
 	return ledger.History(query)
 }
 
-func (s *DeferredLedgerRecordStore) SaveEvalRun(run model.EvalRun) error {
+func (s *DeferredLedgerRecordStore) CreateEvalSuiteRun(run model.EvalSuiteRun, evalRuns []model.EvalRun) error {
 	ledger, err := s.openExisting()
 	if err != nil {
 		return err
 	}
-	return ledger.SaveEvalRun(run)
+	return ledger.CreateEvalSuiteRun(run, evalRuns)
+}
+
+func (s *DeferredLedgerRecordStore) CheckpointEvalRun(run model.EvalSuiteRun, evalRun model.EvalRun) error {
+	ledger, err := s.openExisting()
+	if err != nil {
+		return err
+	}
+	return ledger.CheckpointEvalRun(run, evalRun)
+}
+
+func (s *DeferredLedgerRecordStore) TerminateEvalSuiteRun(run model.EvalSuiteRun) error {
+	ledger, err := s.openExisting()
+	if err != nil {
+		return err
+	}
+	return ledger.TerminateEvalSuiteRun(run)
 }
 
 func (s *DeferredLedgerRecordStore) LoadEvalRun(id model.EvalRunID) (model.EvalRun, error) {
@@ -170,14 +187,6 @@ func (s *DeferredLedgerRecordStore) LoadEvalRun(id model.EvalRunID) (model.EvalR
 		return model.EvalRun{}, err
 	}
 	return ledger.LoadEvalRun(id)
-}
-
-func (s *DeferredLedgerRecordStore) SaveEvalSuiteRun(run model.EvalSuiteRun) error {
-	ledger, err := s.openExisting()
-	if err != nil {
-		return err
-	}
-	return ledger.SaveEvalSuiteRun(run)
 }
 
 func (s *DeferredLedgerRecordStore) LoadEvalSuiteRun(id model.EvalSuiteRunID) (model.EvalSuiteRun, error) {
@@ -286,7 +295,7 @@ func (s *LedgerRecordStore) requirePreparedSchema() error {
 	if err := s.db.QueryRow("SELECT COALESCE(MAX(version), 0) FROM schema_migrations").Scan(&version); err != nil {
 		return fmt.Errorf("read review ledger schema: %w", err)
 	}
-	const current = 5
+	const current = 7
 	if version > current {
 		return fmt.Errorf("review ledger schema %d is newer than supported schema %d", version, current)
 	}
@@ -324,7 +333,7 @@ func (s *LedgerRecordStore) migrate() error {
 	if _, err := s.db.Exec("CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY)"); err != nil {
 		return fmt.Errorf("create migration table: %w", err)
 	}
-	const current = 5
+	const current = 7
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
@@ -347,7 +356,7 @@ func (s *LedgerRecordStore) migrate() error {
 }
 
 func applyKnownMigration(tx *sql.Tx, version int) error {
-	paths := map[int]string{1: "migrations/001_initial.sql", 2: "migrations/002_history_indexes.sql", 3: "migrations/003_replay_lineage.sql", 4: "migrations/004_eval_runs.sql", 5: "migrations/005_adjudication_revisions.sql"}
+	paths := map[int]string{1: "migrations/001_initial.sql", 2: "migrations/002_history_indexes.sql", 3: "migrations/003_replay_lineage.sql", 4: "migrations/004_eval_runs.sql", 5: "migrations/005_adjudication_revisions.sql", 6: "migrations/006_eval_lifecycle.sql", 7: "migrations/007_attempt_retry_delay.sql"}
 	path, exists := paths[version]
 	if !exists {
 		return fmt.Errorf("no migration for review ledger schema %d", version)
@@ -393,19 +402,10 @@ func (s *LedgerRecordStore) Load(id model.ReviewID) (model.ReviewRecord, error) 
 	return s.projection.load(id)
 }
 
-func (s *LedgerRecordStore) SaveEvalRun(run model.EvalRun) error {
-	casePayload, err := json.Marshal(run.Case)
-	if err != nil {
-		return err
-	}
-	_, err = s.db.Exec(`INSERT INTO eval_runs(id,suite_run_id,case_id,case_schema_version,case_digest,case_revision,review_id,execution_state,adjudication_state,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)`, run.ID, run.SuiteRunID, run.Case.ID, run.Case.SchemaVersion, run.Case.Digest, casePayload, run.ReviewID, run.ExecutionState, run.AdjudicationState, run.CreatedAt.UTC())
-	return err
-}
-
 func (s *LedgerRecordStore) LoadEvalRun(id model.EvalRunID) (model.EvalRun, error) {
 	var run model.EvalRun
 	var casePayload []byte
-	err := s.db.QueryRow(`SELECT id,suite_run_id,case_revision,review_id,execution_state,adjudication_state,created_at FROM eval_runs WHERE id=?`, id).Scan(&run.ID, &run.SuiteRunID, &casePayload, &run.ReviewID, &run.ExecutionState, &run.AdjudicationState, &run.CreatedAt)
+	err := s.db.QueryRow(`SELECT id,suite_run_id,case_revision,COALESCE(review_id,''),execution_state,adjudication_state,created_at,updated_at FROM eval_runs WHERE id=?`, id).Scan(&run.ID, &run.SuiteRunID, &casePayload, &run.ReviewID, &run.ExecutionState, &run.AdjudicationState, &run.CreatedAt, &run.UpdatedAt)
 	if err != nil {
 		return model.EvalRun{}, err
 	}
@@ -415,7 +415,24 @@ func (s *LedgerRecordStore) LoadEvalRun(id model.EvalRunID) (model.EvalRun, erro
 	return run, nil
 }
 
-func (s *LedgerRecordStore) SaveEvalSuiteRun(run model.EvalSuiteRun) error {
+type statementExecutor interface {
+	Exec(string, ...any) (sql.Result, error)
+}
+
+func insertEvalRun(executor statementExecutor, run model.EvalRun) error {
+	casePayload, err := json.Marshal(run.Case)
+	if err != nil {
+		return err
+	}
+	var reviewID any
+	if run.ReviewID != "" {
+		reviewID = run.ReviewID
+	}
+	_, err = executor.Exec(`INSERT INTO eval_runs(id,suite_run_id,case_id,case_schema_version,case_digest,case_revision,review_id,execution_state,adjudication_state,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, run.ID, run.SuiteRunID, run.Case.ID, run.Case.SchemaVersion, run.Case.Digest, casePayload, reviewID, run.ExecutionState, run.AdjudicationState, run.CreatedAt.UTC(), run.UpdatedAt.UTC())
+	return err
+}
+
+func saveEvalSuiteRun(executor statementExecutor, run model.EvalSuiteRun) error {
 	experiment, err := json.Marshal(run.Experiment)
 	if err != nil {
 		return err
@@ -424,15 +441,76 @@ func (s *LedgerRecordStore) SaveEvalSuiteRun(run model.EvalSuiteRun) error {
 	if err != nil {
 		return err
 	}
-	_, err = s.db.Exec(`INSERT INTO eval_suite_runs(id,suite,suite_revision,suite_digest,experiment,eval_run_ids,completed_clean_count,completed_findings_count,incomplete_count,started_at,completed_at) VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET eval_run_ids=excluded.eval_run_ids,completed_clean_count=excluded.completed_clean_count,completed_findings_count=excluded.completed_findings_count,incomplete_count=excluded.incomplete_count,completed_at=excluded.completed_at`, run.ID, run.Suite, run.SuiteRevision, run.SuiteDigest, experiment, runIDs, run.CompletedCleanCount, run.CompletedFindingCount, run.IncompleteCount, run.StartedAt.UTC(), nullableTime(run.CompletedAt))
+	termination, err := json.Marshal(run.Termination)
+	if err != nil {
+		return err
+	}
+	_, err = executor.Exec(`INSERT INTO eval_suite_runs(id,suite,suite_revision,suite_digest,experiment,eval_run_ids,lifecycle,termination,completed_clean_count,completed_findings_count,incomplete_count,started_at,completed_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET eval_run_ids=excluded.eval_run_ids,lifecycle=excluded.lifecycle,termination=excluded.termination,completed_clean_count=excluded.completed_clean_count,completed_findings_count=excluded.completed_findings_count,incomplete_count=excluded.incomplete_count,completed_at=excluded.completed_at`, run.ID, run.Suite, run.SuiteRevision, run.SuiteDigest, experiment, runIDs, run.Lifecycle, termination, run.CompletedCleanCount, run.CompletedFindingCount, run.IncompleteCount, run.StartedAt.UTC(), nullableTime(run.CompletedAt))
 	return err
+}
+
+func (s *LedgerRecordStore) CreateEvalSuiteRun(run model.EvalSuiteRun, evalRuns []model.EvalRun) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := saveEvalSuiteRun(tx, run); err != nil {
+		return err
+	}
+	for _, evalRun := range evalRuns {
+		if err := insertEvalRun(tx, evalRun); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (s *LedgerRecordStore) CheckpointEvalRun(run model.EvalSuiteRun, evalRun model.EvalRun) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var reviewID any
+	if evalRun.ReviewID != "" {
+		reviewID = evalRun.ReviewID
+	}
+	result, err := tx.Exec(`UPDATE eval_runs SET review_id=?,execution_state=?,adjudication_state=?,updated_at=? WHERE id=? AND suite_run_id=?`, reviewID, evalRun.ExecutionState, evalRun.AdjudicationState, evalRun.UpdatedAt.UTC(), evalRun.ID, run.ID)
+	if err != nil {
+		return err
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if updated != 1 {
+		return fmt.Errorf("checkpoint Eval Run %q: expected one row, updated %d", evalRun.ID, updated)
+	}
+	if err := saveEvalSuiteRun(tx, run); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *LedgerRecordStore) TerminateEvalSuiteRun(run model.EvalSuiteRun) error {
+	if run.Lifecycle != model.LifecycleIncomplete {
+		return fmt.Errorf("terminate Eval Suite Run %q: lifecycle must be incomplete", run.ID)
+	}
+	if run.Termination == nil {
+		return fmt.Errorf("terminate Eval Suite Run %q: termination is required", run.ID)
+	}
+	if run.CompletedAt.IsZero() {
+		return fmt.Errorf("terminate Eval Suite Run %q: completion time is required", run.ID)
+	}
+	return saveEvalSuiteRun(s.db, run)
 }
 
 func (s *LedgerRecordStore) LoadEvalSuiteRun(id model.EvalSuiteRunID) (model.EvalSuiteRun, error) {
 	var run model.EvalSuiteRun
-	var experiment, runIDs []byte
+	var experiment, runIDs, termination []byte
 	var completedAt sql.NullTime
-	err := s.db.QueryRow(`SELECT id,suite,suite_revision,suite_digest,experiment,eval_run_ids,completed_clean_count,completed_findings_count,incomplete_count,started_at,completed_at FROM eval_suite_runs WHERE id=?`, id).Scan(&run.ID, &run.Suite, &run.SuiteRevision, &run.SuiteDigest, &experiment, &runIDs, &run.CompletedCleanCount, &run.CompletedFindingCount, &run.IncompleteCount, &run.StartedAt, &completedAt)
+	err := s.db.QueryRow(`SELECT id,suite,suite_revision,suite_digest,experiment,eval_run_ids,lifecycle,termination,completed_clean_count,completed_findings_count,incomplete_count,started_at,completed_at FROM eval_suite_runs WHERE id=?`, id).Scan(&run.ID, &run.Suite, &run.SuiteRevision, &run.SuiteDigest, &experiment, &runIDs, &run.Lifecycle, &termination, &run.CompletedCleanCount, &run.CompletedFindingCount, &run.IncompleteCount, &run.StartedAt, &completedAt)
 	if err != nil {
 		return model.EvalSuiteRun{}, err
 	}
@@ -441,6 +519,11 @@ func (s *LedgerRecordStore) LoadEvalSuiteRun(id model.EvalSuiteRunID) (model.Eva
 	}
 	if err := json.Unmarshal(runIDs, &run.EvalRunIDs); err != nil {
 		return model.EvalSuiteRun{}, err
+	}
+	if len(termination) > 0 && string(termination) != "null" {
+		if err := json.Unmarshal(termination, &run.Termination); err != nil {
+			return model.EvalSuiteRun{}, err
+		}
 	}
 	if completedAt.Valid {
 		run.CompletedAt = completedAt.Time

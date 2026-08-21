@@ -16,12 +16,13 @@ type userConfiguration struct {
 	StateDirectory  string                        `json:"state_directory,omitempty"`
 	DefaultReviewer string                        `json:"default_reviewer,omitempty"`
 	Reviewers       map[string]userReviewerPolicy `json:"reviewers,omitempty"`
+	Eval            userEvalPolicy                `json:"eval,omitempty"`
 }
 
 func (configuration *userConfiguration) UnmarshalJSON(payload []byte) error {
 	type plainConfiguration userConfiguration
 	var decoded plainConfiguration
-	if err := decodeStrictObject(payload, &decoded, "user configuration", "state_directory", "default_reviewer", "reviewers"); err != nil {
+	if err := decodeStrictObject(payload, &decoded, "user configuration", "state_directory", "default_reviewer", "reviewers", "eval"); err != nil {
 		return err
 	}
 	*configuration = userConfiguration(decoded)
@@ -160,6 +161,12 @@ func validateUserConfiguration(configuration userConfiguration) error {
 	}
 	if configuration.StateDirectory != "" && !filepath.IsAbs(configuration.StateDirectory) {
 		return errors.New("state_directory must be an absolute path")
+	}
+	if configuration.Eval.ConcurrencyLimit < 0 {
+		return errors.New("eval concurrency_limit must be positive")
+	}
+	if configuration.Eval.RetryPolicy.MaxAttempts < 0 {
+		return errors.New("eval retry_policy max_attempts must be positive")
 	}
 	return nil
 }

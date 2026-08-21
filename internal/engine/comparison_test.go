@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"errors"
 	"testing"
 
 	"reviewparty/internal/model"
@@ -80,6 +81,16 @@ func TestCompareEvalExperimentsKeepsIncompleteOutOfQualityMetrics(t *testing.T) 
 	}
 }
 
+func TestCompareEvalExperimentsRejectsDifferentRetryPolicies(t *testing.T) {
+	baseline := comparisonFixture(comparisonCaseFixture{"case-a", "digest-a", model.EvalCompletedClean, false, false, 10})
+	candidate := comparisonFixture(comparisonCaseFixture{"case-a", "digest-a", model.EvalCompletedClean, false, false, 10})
+	baseline.Identity.Experiment.RetryPolicy.MaxAttempts = 1
+	candidate.Identity.Experiment.RetryPolicy.MaxAttempts = 3
+	if _, err := CompareEvalExperiments(baseline, candidate); !errors.Is(err, ErrIncompatibleComparison) {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 type comparisonCaseFixture struct {
 	id, digest             string
 	state                  model.EvalExecutionState
@@ -95,7 +106,7 @@ func comparisonFixture(fixtures ...comparisonCaseFixture) comparisonSide {
 		cases[fixture.id] = comparisonCase{ID: fixture.id, Digest: fixture.digest, Adjudication: adjudication, RuntimeMS: fixture.runtimeMS}
 		documentCases = append(documentCases, adjudication)
 	}
-	return comparisonSide{Cases: cases, Revision: model.AdjudicationRevision{Document: model.AdjudicationDocument{SchemaVersion: 1, Cases: documentCases}}, Identity: model.ComparisonIdentity{Suite: "suite", SuiteRevision: "v1", SuiteDigest: "digest", Experiment: model.ExperimentConfiguration{Profile: "bugs", Reviewer: "opencode", Model: "model", Effort: "high", Deadline: "1m"}}}
+	return comparisonSide{Cases: cases, Revision: model.AdjudicationRevision{Document: model.AdjudicationDocument{SchemaVersion: 1, Cases: documentCases}}, Identity: model.ComparisonIdentity{Suite: "suite", SuiteRevision: "v1", SuiteDigest: "digest", Experiment: model.ExperimentConfiguration{Profile: "bugs", Reviewer: "opencode", Model: "model", Effort: "high", Deadline: "1m", RetryPolicy: model.RetryPolicy{MaxAttempts: 1, InitialBackoff: "1s", MaxBackoff: "1s"}, ConcurrencyLimit: 1}}}
 }
 
 func comparisonAdjudication(fixture comparisonCaseFixture) model.EvalCaseAdjudication {

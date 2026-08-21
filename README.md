@@ -107,6 +107,14 @@ manage it:
       ]
     },
     "copilot": {"enabled": true, "model": "auto"}
+  },
+  "eval": {
+    "retry_policy": {
+      "max_attempts": 3,
+      "initial_backoff": "1s",
+      "max_backoff": "30s"
+    },
+    "concurrency_limit": 1
   }
 }
 ```
@@ -116,6 +124,10 @@ An explicit `--reviewer` never bypasses `enabled: false`, and an explicit
 fields, unsupported versions, unknown Reviewers, disabled defaults, and
 disallowed models fail before Review Subject resolution or Agent Harness
 launch. A missing file preserves the built-in zero-configuration behavior.
+Eval defaults are three total Attempts with finite jittered backoff and one
+active Reviewer execution. A named Experiment Configuration or explicit
+`--attempts` and `--concurrency` flags can override those user defaults for one
+durably identified Eval Suite Run.
 
 Review Party currently invokes all three harnesses directly. ACPX remains a
 future transport option rather than part of the current execution path.
@@ -188,13 +200,31 @@ scores must not be presented as representative Reviewer quality.
 Use a suite directory path for Caller-owned global or project cases. Pass
 `--experiment PATH` to load a version-controlled configuration containing
 `schema_version`, `name`, and an `experiment` object with the Profile,
-Reviewer, model, effort, and deadline. Explicit command flags override that
-configuration. Inspect either durable record type afterward:
+Reviewer, model, effort, deadline, Retry Policy, and Concurrency Limit. Explicit
+command flags override that configuration. The effective `retry_policy` and
+numeric `concurrency_limit` are frozen with the Suite Run. Retries retain one
+Eval Run and ordinary Review, preserve every Attempt, never substitute a
+Reviewer or model, and finish Incomplete when exhausted. Backoff releases
+Reviewer capacity. Inspect suite, case, or
+adjudication revision records afterward; `eval inspect` dispatches by the
+`esr_`, `er_`, or `ar_` ID prefix:
 
 ```sh
 go run ./cmd/review-party eval inspect esr_... --format json
 go run ./cmd/review-party eval inspect er_... --format json
+go run ./cmd/review-party eval inspect ar_... --format json
 ```
+
+Suite inspection reports an explicit `pending`, `running`, `completed`, or
+`incomplete` lifecycle. All Eval Runs are created in manifest order before the
+first Reviewer launch, so inspection can distinguish planned `pending` work,
+the active `running` case, and terminal case outcomes without inferring state
+from timestamps. A completed suite may retain Incomplete case outcomes; a suite
+is itself Incomplete only when cancellation or a hard error stops planned work.
+Eval Run JSON includes `updated_at`; Eval Suite Run JSON includes `lifecycle`
+and optional `termination` details. Human inspection prints `review not started`
+whenever `review_id` is empty, including Pending, Running, or Incomplete cases
+that failed before ordinary Review creation.
 
 Every Eval Case runs as an ordinary Review over a Git-free Synthetic Review
 Subject. Expected Findings and source Git provenance never enter the Review
@@ -203,6 +233,13 @@ leaves semantic adjudication, scoring, and comparison for separate operations.
 Invalid result contracts remain Incomplete operational outcomes even if their
 raw assistant artifact discusses a plausible bug; semantic scores never infer a
 Finding from malformed output.
+
+`global:seeded-bugs` contains deterministic controlled-defect cases. Each seed
+pins a full source commit, a reviewed patch digest, and the exact paths it may
+change. Preflight creates an isolated temporary Git worktree, verifies and
+applies the patch, removes Git authority from the resulting Synthetic Review
+Subject, and then uses the same ordinary Review, retry, lifecycle,
+adjudication, and scoring path as historical and known-clean cases.
 See [`docs/design/evals-v1.md`](docs/design/evals-v1.md).
 
 Human adjudication maps the structured Review Findings to the stored expected

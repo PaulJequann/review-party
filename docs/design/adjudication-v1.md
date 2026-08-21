@@ -19,6 +19,11 @@ Eval Run ID, Eval Case ID, expected Finding ID, and reported Finding ordinal.
 It includes complete expected and reported evidence. SQLite keys and SQL are not
 part of the interface.
 
+Export requires every planned Eval Run to link an ordinary Review Record. It
+fails explicitly for a Pending, Running, or no-Review Incomplete case; the
+Caller must first obtain a review-linked terminal run for every case rather
+than silently scoring partial coverage.
+
 For every completed case, each expected Finding must be exactly one of
 `matched`, `missed`, or `uncertain`. Each reported Finding must be exactly one
 of `matched_expected`, `novel_valid`, `false_positive`, or `uncertain`. A match

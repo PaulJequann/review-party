@@ -4,13 +4,14 @@ import "time"
 
 func (conductor *Conductor) buildAttempt(id ReviewID, prompt string, candidate reviewerCandidate, execution attemptExecution, outcome AttemptOutcome, started, completed time.Time) (AttemptRecord, error) {
 	attempt := AttemptRecord{
-		Number:      1,
-		Outcome:     outcome,
-		Provenance:  resolvedProvenance(candidate, execution),
-		Diagnostic:  execution.Diagnostic,
-		RawOutput:   boundedAttemptOutput(execution.AssistantText),
-		StartedAt:   started,
-		CompletedAt: completed,
+		Number:       1,
+		Outcome:      outcome,
+		Provenance:   resolvedProvenance(candidate, execution),
+		Diagnostic:   execution.Diagnostic,
+		RawOutput:    boundedAttemptOutput(execution.AssistantText),
+		RetryAfterMS: execution.RetryAfter.Milliseconds(),
+		StartedAt:    started,
+		CompletedAt:  completed,
 	}
 	if conductor.artifacts == nil {
 		return attempt, nil

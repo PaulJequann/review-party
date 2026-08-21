@@ -72,6 +72,7 @@ type attemptExecution struct {
 	ResolvedEffort    string
 	FailureCategory   TerminationCategory
 	FailurePhase      ExecutionPhase
+	RetryAfter        time.Duration
 }
 
 type attemptExecutor interface {

@@ -36,6 +36,14 @@ type evalCaseFile struct {
 	CleanEvidence    string                  `json:"clean_evidence,omitempty"`
 	Base             string                  `json:"base,omitempty"`
 	Head             string                  `json:"head"`
+	Seed             *evalSeedFile           `json:"seed,omitempty"`
+}
+
+type evalSeedFile struct {
+	ID            string   `json:"id"`
+	SourceCommit  string   `json:"source_commit"`
+	Patch         string   `json:"patch"`
+	ExpectedFiles []string `json:"expected_files"`
 }
 
 type preparedEvalCase struct {
@@ -78,6 +86,8 @@ func loadEvalSuite(reference string) (loadedEvalSuite, error) {
 		return loadPackagedEvalSuite("evals/realistic-general-bugs")
 	case "global:code-quality":
 		return loadPackagedEvalSuite("evals/code-quality")
+	case "global:seeded-bugs":
+		return loadPackagedEvalSuite("evals/seeded-bugs")
 	}
 	if reservedEvalSuiteName(reference) {
 		return loadedEvalSuite{}, fmt.Errorf("unknown eval suite %q", reference)
@@ -227,25 +237,47 @@ type evalFixtureCopy struct {
 }
 
 func copyEvalCaseFixtures(request evalFixtureCopy) ([][]byte, error) {
-	var payloads [][]byte
-	if request.definition.Mode == "change" {
-		copied, err := copyFixtureDirectory(request.source, filepath.ToSlash(filepath.Join(request.caseRoot, request.definition.Base)), request.base, request.packaged)
-		if err != nil {
-			return nil, err
-		}
-		payloads = append(payloads, copied...)
-	}
-	copied, err := copyFixtureDirectory(request.source, filepath.ToSlash(filepath.Join(request.caseRoot, request.definition.Head)), request.head, request.packaged)
+	payloads, err := copyEvalBaseFixture(request)
 	if err != nil {
 		return nil, err
 	}
-	return append(payloads, copied...), nil
+	if request.definition.Mode == "seeded" {
+		return materializeSeedFixture(request, payloads)
+	}
+	headPayloads, err := copyFixtureDirectory(request.source, filepath.ToSlash(filepath.Join(request.caseRoot, request.definition.Head)), request.head, request.packaged)
+	if err != nil {
+		return nil, err
+	}
+	return append(payloads, headPayloads...), nil
+}
+
+func copyEvalBaseFixture(request evalFixtureCopy) ([][]byte, error) {
+	if request.definition.Mode == "state" {
+		return nil, nil
+	}
+	return copyFixtureDirectory(request.source, filepath.ToSlash(filepath.Join(request.caseRoot, request.definition.Base)), request.base, request.packaged)
+}
+
+func materializeSeedFixture(request evalFixtureCopy, payloads [][]byte) ([][]byte, error) {
+	seedPayload, err := fs.ReadFile(request.source, filepath.ToSlash(filepath.Join(request.caseRoot, request.definition.Seed.Patch)))
+	if err != nil {
+		return nil, fmt.Errorf("read seed patch: %w", err)
+	}
+	if err := materializeSeededDefect(request.base, request.head, *request.definition.Seed, seedPayload); err != nil {
+		return nil, err
+	}
+	return append(payloads, seedPayload), nil
 }
 
 func evalCaseRevision(definition evalCaseFile, payloads [][]byte) model.EvalCaseRevision {
 	hash := sha256.New()
 	writeDigestPayloads(hash, payloads)
-	return model.EvalCaseRevision{ID: definition.ID, SchemaVersion: definition.SchemaVersion, Digest: hex.EncodeToString(hash.Sum(nil)), Mode: definition.Mode, Classification: definition.Classification, ExpectedFindings: definition.ExpectedFindings, CleanEvidence: definition.CleanEvidence}
+	revision := model.EvalCaseRevision{ID: definition.ID, SchemaVersion: definition.SchemaVersion, Digest: hex.EncodeToString(hash.Sum(nil)), Mode: definition.Mode, Classification: definition.Classification, ExpectedFindings: definition.ExpectedFindings, CleanEvidence: definition.CleanEvidence}
+	if definition.Seed != nil {
+		patchDigest := sha256.Sum256(payloads[len(payloads)-1])
+		revision.Seed = &model.SeedRevision{ID: definition.Seed.ID, SourceCommit: definition.Seed.SourceCommit, PatchDigest: hex.EncodeToString(patchDigest[:]), ExpectedFiles: append([]string(nil), definition.Seed.ExpectedFiles...)}
+	}
+	return revision
 }
 
 func writeDigestPayloads(destination io.Writer, payloads [][]byte) {
@@ -275,16 +307,75 @@ func validateEvalCaseIdentity(definition evalCaseFile) error {
 }
 
 func validateEvalCaseFixture(definition evalCaseFile) error {
-	if definition.Mode != "change" && definition.Mode != "state" {
-		return errors.New("mode must be change or state")
+	if !validEvalMode(definition.Mode) {
+		return errors.New("mode must be change, state, or seeded")
 	}
-	if definition.Head == "" {
+	if err := validateEvalFixtureLocations(definition); err != nil {
+		return err
+	}
+	return validateEvalSeed(definition)
+}
+
+func validEvalMode(mode string) bool {
+	return mode == "change" || mode == "state" || mode == "seeded"
+}
+
+func validateEvalFixtureLocations(definition evalCaseFile) error {
+	if definition.Mode != "seeded" && definition.Head == "" {
 		return errors.New("head fixture is required")
 	}
-	if definition.Mode == "change" && definition.Base == "" {
-		return errors.New("change case requires a base fixture")
+	if definition.Mode != "state" && definition.Base == "" {
+		return errors.New("change and seeded cases require a base fixture")
+	}
+	if definition.Mode == "seeded" && definition.Head != "" {
+		return errors.New("seeded case derives head from its patch")
 	}
 	return nil
+}
+
+func validateEvalSeed(definition evalCaseFile) error {
+	if definition.Mode != "seeded" {
+		return rejectUnexpectedSeed(definition.Seed)
+	}
+	if !completeSeedDefinition(definition.Seed) {
+		return errors.New("seeded case requires seed id, source_commit, patch, and expected_files")
+	}
+	if !validSeedPath(definition.Seed.Patch) {
+		return errors.New("seed patch must be a safe relative path")
+	}
+	if len(definition.Seed.SourceCommit) != 40 {
+		return errors.New("seed source_commit must be a full Git commit")
+	}
+	if _, err := hex.DecodeString(definition.Seed.SourceCommit); err != nil {
+		return errors.New("seed source_commit must be hexadecimal")
+	}
+	return validateSeedExpectedFiles(definition.Seed.ExpectedFiles)
+}
+
+func rejectUnexpectedSeed(seed *evalSeedFile) error {
+	if seed != nil {
+		return errors.New("seed is only valid for seeded cases")
+	}
+	return nil
+}
+
+func completeSeedDefinition(seed *evalSeedFile) bool {
+	return seed != nil && seed.ID != "" && seed.SourceCommit != "" && seed.Patch != "" && len(seed.ExpectedFiles) > 0
+}
+
+func validateSeedExpectedFiles(paths []string) error {
+	seen := map[string]bool{}
+	for _, path := range paths {
+		if !validSeedPath(path) || seen[path] {
+			return errors.New("seed expected_files must contain unique safe relative paths")
+		}
+		seen[path] = true
+	}
+	return nil
+}
+
+func validSeedPath(path string) bool {
+	return path != "" && path != "." && fs.ValidPath(filepath.ToSlash(path)) && !filepath.IsAbs(path)
 }
 
 func validateEvalCaseClassification(definition evalCaseFile) error {

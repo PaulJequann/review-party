@@ -1,0 +1,3 @@
+module example.com/seeded-store
+
+go 1.25

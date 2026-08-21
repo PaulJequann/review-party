@@ -139,7 +139,7 @@ func insertAttempt(tx *sql.Tx, identity attemptIdentity, attempt model.AttemptRe
 	if err != nil {
 		return fmt.Errorf("encode reviewer provenance: %w", err)
 	}
-	if _, err := tx.Exec("INSERT INTO attempts(review_id,pass_ordinal,ordinal,number,outcome,provenance,diagnostic,raw_output,started_at,completed_at) VALUES(?,?,?,?,?,?,?,?,?,?)", identity.reviewID, identity.passOrdinal, identity.attemptOrdinal, attempt.Number, attempt.Outcome, provenance, attempt.Diagnostic, attempt.RawOutput, attempt.StartedAt, attempt.CompletedAt); err != nil {
+	if _, err := tx.Exec("INSERT INTO attempts(review_id,pass_ordinal,ordinal,number,outcome,provenance,diagnostic,raw_output,retry_after_ms,started_at,completed_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)", identity.reviewID, identity.passOrdinal, identity.attemptOrdinal, attempt.Number, attempt.Outcome, provenance, attempt.Diagnostic, attempt.RawOutput, attempt.RetryAfterMS, attempt.StartedAt, attempt.CompletedAt); err != nil {
 		return err
 	}
 	for artifactOrdinal, reference := range attempt.Artifacts {
@@ -259,7 +259,7 @@ func (p reviewRecordProjection) loadPasses(record *model.ReviewRecord) error {
 }
 
 func (p reviewRecordProjection) loadAttempts(id model.ReviewID, passOrdinal int) ([]model.AttemptRecord, error) {
-	rows, err := p.db.Query("SELECT ordinal,number,outcome,provenance,diagnostic,raw_output,started_at,completed_at FROM attempts WHERE review_id=? AND pass_ordinal=? ORDER BY ordinal", id, passOrdinal)
+	rows, err := p.db.Query("SELECT ordinal,number,outcome,provenance,diagnostic,raw_output,retry_after_ms,started_at,completed_at FROM attempts WHERE review_id=? AND pass_ordinal=? ORDER BY ordinal", id, passOrdinal)
 	if err != nil {
 		return nil, err
 	}
@@ -269,7 +269,7 @@ func (p reviewRecordProjection) loadAttempts(id model.ReviewID, passOrdinal int)
 		var ordinal int
 		var attempt model.AttemptRecord
 		var provenance []byte
-		if err := rows.Scan(&ordinal, &attempt.Number, &attempt.Outcome, &provenance, &attempt.Diagnostic, &attempt.RawOutput, &attempt.StartedAt, &attempt.CompletedAt); err != nil {
+		if err := rows.Scan(&ordinal, &attempt.Number, &attempt.Outcome, &provenance, &attempt.Diagnostic, &attempt.RawOutput, &attempt.RetryAfterMS, &attempt.StartedAt, &attempt.CompletedAt); err != nil {
 			return nil, err
 		}
 		if err := decodeProjectionValue(provenance, &attempt.Provenance); err != nil {

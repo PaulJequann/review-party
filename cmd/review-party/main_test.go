@@ -180,7 +180,46 @@ func TestUsageListsEverySupportedReviewer(t *testing.T) {
 	}
 }
 
+func TestEvalUserConfigurationControlsRuntimeDefaultsAndFlagsOverride(t *testing.T) {
+	configuration := filepath.Join(t.TempDir(), "review-party.json")
+	if err := os.WriteFile(configuration, []byte(`{"version":1,"default_reviewer":"opencode","reviewers":{"opencode":{"model":"configured-model"}},"eval":{"retry_policy":{"max_attempts":4,"initial_backoff":"2s","max_backoff":"20s"},"concurrency_limit":3}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	experiment, _, err := resolveEvalExperiment(evalRunOptions{configuration: configuration, attempts: 2, overrides: map[string]bool{"attempts": true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertEvalSelectionDefaults(t, experiment)
+}
+
+func assertEvalSelectionDefaults(t *testing.T, experiment model.ExperimentConfiguration) {
+	t.Helper()
+	checks := map[string]bool{
+		"reviewer": experiment.Reviewer == "opencode", "model": experiment.Model == "configured-model",
+		"attempts": experiment.RetryPolicy.MaxAttempts == 2, "backoff": experiment.RetryPolicy.InitialBackoff == "2s",
+		"concurrency": experiment.ConcurrencyLimit == 3,
+	}
+	for name, valid := range checks {
+		if !valid {
+			t.Fatalf("%s missing from experiment %#v", name, experiment)
+		}
+	}
+}
+
 func TestEvalInspectReadsSuiteAndCaseRecords(t *testing.T) {
+	configurationPath, suite, evalRun := preparePendingEvalInspection(t)
+	for _, id := range []string{string(suite.ID), string(evalRun.ID)} {
+		output := runMainCommand(t, []string{"eval", "inspect", id, "--config", configurationPath, "--format", "json"})
+		if !strings.Contains(output, id) {
+			t.Fatalf("inspection = %s", output)
+		}
+	}
+	assertPendingEvalHumanInspection(t, configurationPath, evalRun.ID)
+	assertEvalUpdatedAtInspection(t, configurationPath, evalRun.ID)
+}
+
+func preparePendingEvalInspection(t *testing.T) (string, model.EvalSuiteRun, model.EvalRun) {
+	t.Helper()
 	stateDirectory := t.TempDir()
 	configurationPath := filepath.Join(t.TempDir(), "review-party.json")
 	runMainCommand(t, []string{"init", "--repo", testGitRepository(t), "--state-dir", stateDirectory, "--config", configurationPath})
@@ -193,22 +232,34 @@ func TestEvalInspectReadsSuiteAndCaseRecords(t *testing.T) {
 	if err := ledger.Save(review); err != nil {
 		t.Fatal(err)
 	}
-	suite := model.EvalSuiteRun{ID: "esr_1723200000000_0123456789abcdef", Suite: "global:general-bugs", SuiteRevision: "v1", SuiteDigest: "digest", Experiment: model.ExperimentConfiguration{Profile: "bugs", Reviewer: "opencode", Model: "model", Deadline: "1m"}, EvalRunIDs: []model.EvalRunID{"er_1723200000000_0123456789abcdef"}, StartedAt: now}
-	if err := ledger.SaveEvalSuiteRun(suite); err != nil {
-		t.Fatal(err)
-	}
-	evalRun := model.EvalRun{ID: suite.EvalRunIDs[0], SuiteRunID: suite.ID, Case: model.EvalCaseRevision{ID: "case-one", SchemaVersion: 1, Digest: "case-digest"}, ReviewID: review.ID, ExecutionState: model.EvalCompletedClean, AdjudicationState: "awaiting_adjudication", CreatedAt: now}
-	if err := ledger.SaveEvalRun(evalRun); err != nil {
+	suite := model.EvalSuiteRun{ID: "esr_1723200000000_0123456789abcdef", Suite: "global:general-bugs", SuiteRevision: "v1", SuiteDigest: "digest", Experiment: model.ExperimentConfiguration{Profile: "bugs", Reviewer: "opencode", Model: "model", Deadline: "1m"}, Lifecycle: model.LifecyclePending, EvalRunIDs: []model.EvalRunID{"er_1723200000000_0123456789abcdef"}, StartedAt: now}
+	evalRun := model.EvalRun{ID: suite.EvalRunIDs[0], SuiteRunID: suite.ID, Case: model.EvalCaseRevision{ID: "case-one", SchemaVersion: 1, Digest: "case-digest"}, ExecutionState: model.EvalPending, AdjudicationState: model.EvalAdjudicationNotReady, CreatedAt: now, UpdatedAt: now}
+	if err := ledger.CreateEvalSuiteRun(suite, []model.EvalRun{evalRun}); err != nil {
 		t.Fatal(err)
 	}
 	if err := ledger.Close(); err != nil {
 		t.Fatal(err)
 	}
-	for _, id := range []string{string(suite.ID), string(evalRun.ID)} {
-		output := runMainCommand(t, []string{"eval", "inspect", id, "--config", configurationPath, "--format", "json"})
-		if !strings.Contains(output, id) {
-			t.Fatalf("inspection = %s", output)
-		}
+	return configurationPath, suite, evalRun
+}
+
+func assertPendingEvalHumanInspection(t *testing.T, configurationPath string, id model.EvalRunID) {
+	t.Helper()
+	human := runMainCommand(t, []string{"eval", "inspect", string(id), "--config", configurationPath})
+	if !strings.Contains(human, "review not started") {
+		t.Fatalf("inspection = %s", human)
+	}
+}
+
+func assertEvalUpdatedAtInspection(t *testing.T, configurationPath string, id model.EvalRunID) {
+	t.Helper()
+	encoded := runMainCommand(t, []string{"eval", "inspect", string(id), "--config", configurationPath, "--format", "json"})
+	var inspected model.EvalRun
+	if err := json.Unmarshal([]byte(encoded), &inspected); err != nil {
+		t.Fatal(err)
+	}
+	if inspected.UpdatedAt.IsZero() {
+		t.Fatal("inspection omitted updated_at")
 	}
 }
 
@@ -282,11 +333,8 @@ func mustSaveComparisonData(t *testing.T, data comparisonCommandData) {
 	for _, review := range []model.ReviewRecord{comparisonCommandReview("rp_1723200000000_0123456789abcdef", data.now, 100), comparisonCommandReview("rp_1723200000001_0123456789abcdef", data.now.Add(time.Second), 120)} {
 		mustSaveComparisonReview(t, data.ledger, review)
 	}
-	for _, suite := range []model.EvalSuiteRun{data.baselineSuite, data.candidateSuite} {
-		mustSaveComparisonSuite(t, data.ledger, suite)
-	}
-	mustSaveComparisonEvalRun(t, data.ledger, comparisonCommandEvalRun(data.baselineSuite, "rp_1723200000000_0123456789abcdef", data.now))
-	mustSaveComparisonEvalRun(t, data.ledger, comparisonCommandEvalRun(data.candidateSuite, "rp_1723200000001_0123456789abcdef", data.now.Add(time.Second)))
+	mustSaveComparisonSuite(t, data.ledger, data.baselineSuite, comparisonCommandEvalRun(data.baselineSuite, "rp_1723200000000_0123456789abcdef", data.now))
+	mustSaveComparisonSuite(t, data.ledger, data.candidateSuite, comparisonCommandEvalRun(data.candidateSuite, "rp_1723200000001_0123456789abcdef", data.now.Add(time.Second)))
 }
 
 func mustSaveComparisonReview(t *testing.T, ledger *store.LedgerRecordStore, review model.ReviewRecord) {
@@ -296,16 +344,9 @@ func mustSaveComparisonReview(t *testing.T, ledger *store.LedgerRecordStore, rev
 	}
 }
 
-func mustSaveComparisonSuite(t *testing.T, ledger *store.LedgerRecordStore, suite model.EvalSuiteRun) {
+func mustSaveComparisonSuite(t *testing.T, ledger *store.LedgerRecordStore, suite model.EvalSuiteRun, run model.EvalRun) {
 	t.Helper()
-	if err := ledger.SaveEvalSuiteRun(suite); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func mustSaveComparisonEvalRun(t *testing.T, ledger *store.LedgerRecordStore, run model.EvalRun) {
-	t.Helper()
-	if err := ledger.SaveEvalRun(run); err != nil {
+	if err := ledger.CreateEvalSuiteRun(suite, []model.EvalRun{run}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -374,11 +415,8 @@ func prepareAdjudicationCommandTest(t *testing.T) (string, model.EvalSuiteRun) {
 		t.Fatal(err)
 	}
 	suite := model.EvalSuiteRun{ID: "esr_1723200000000_0123456789abcdef", Suite: "suite", SuiteRevision: "v1", SuiteDigest: "digest", EvalRunIDs: []model.EvalRunID{"er_1723200000000_0123456789abcdef"}, StartedAt: now}
-	if err := ledger.SaveEvalSuiteRun(suite); err != nil {
-		t.Fatal(err)
-	}
-	evalRun := model.EvalRun{ID: suite.EvalRunIDs[0], SuiteRunID: suite.ID, Case: model.EvalCaseRevision{ID: "case", SchemaVersion: 1, Digest: "digest", ExpectedFindings: []model.ExpectedFinding{{ID: "bug", Behavior: "behavior", Impact: "impact", Evidence: []string{"evidence"}}}}, ReviewID: review.ID, ExecutionState: model.EvalCompletedFindings, AdjudicationState: "awaiting_adjudication", CreatedAt: now}
-	if err := ledger.SaveEvalRun(evalRun); err != nil {
+	evalRun := model.EvalRun{ID: suite.EvalRunIDs[0], SuiteRunID: suite.ID, Case: model.EvalCaseRevision{ID: "case", SchemaVersion: 1, Digest: "digest", ExpectedFindings: []model.ExpectedFinding{{ID: "bug", Behavior: "behavior", Impact: "impact", Evidence: []string{"evidence"}}}}, ReviewID: review.ID, ExecutionState: model.EvalCompletedFindings, AdjudicationState: "awaiting_adjudication", CreatedAt: now, UpdatedAt: now}
+	if err := ledger.CreateEvalSuiteRun(suite, []model.EvalRun{evalRun}); err != nil {
 		t.Fatal(err)
 	}
 	if err := ledger.Close(); err != nil {

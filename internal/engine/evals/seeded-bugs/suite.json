@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "name": "global:seeded-bugs",
+  "revision": "seeded-bugs-v1",
+  "cases": [
+    "cases/ignored-save-error/case.json"
+  ]
+}

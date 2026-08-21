@@ -53,20 +53,33 @@ fails without moving, replacing, or abandoning existing state.
 The ledger has a `reviews` table for scalar Review facts and JSON values that
 are value objects (Subject, Profile revision/snapshot, termination, runtime,
 and timings). `passes`, `attempts`, `findings`, and `artifacts` are relational
-children with foreign keys. There is no serialized full Review Record in the
-database: the public record is reconstructed from this projection. Prompts,
-native output, and other large evidence remain filesystem artifacts.
+children with foreign keys. Eval state is a second aggregate hierarchy:
+`eval_suite_runs` owns ordered `eval_runs`, and `adjudication_revisions` stores
+immutable decisions derived from their ordinary Review Records. There is no
+serialized full Review or Eval aggregate in the database: public records are
+reconstructed from these projections. Each Eval Run freezes its full Eval Case
+Revision as `case_revision` JSON and carries an `updated_at` checkpoint time;
+these are ledger facts distinct from Review prompts, native output, and other
+large evidence that remain filesystem artifacts.
 
-The projection module has no exported Interface. `LedgerRecordStore.Save` and
-`Load` are the stable seam used by callers and real-ledger tests; SQL rows,
-transactions, traversal, and pooled-connection requirements remain private.
+The projection module has no exported projection Interface. Review callers use
+`LedgerRecordStore.Save` and `Load`. Eval callers use the stable
+`CreateEvalSuiteRun`, `CheckpointEvalRun`, `TerminateEvalSuiteRun`, and Eval
+Run/Suite Run load seams. SQL rows, transactions, traversal, and
+pooled-connection requirements remain private.
 
-Each `Save` uses one transaction: it replaces the aggregate projection and
-commits only after every child is written. Foreign keys are enabled per
-connection. The database enables WAL, `synchronous=FULL`, and a five-second
-busy timeout. Concurrent readers are supported; CLI writes serialize, and a
-writer that remains busy after the timeout returns the SQLite error rather
-than being retried or silently redirected.
+Each Review `Save` uses one transaction: it replaces the Review aggregate
+projection and commits only after every child is written. `CreateEvalSuiteRun`
+atomically creates a Suite Run and all planned child Eval Runs;
+`CheckpointEvalRun` atomically persists one child transition and its parent
+counts, lifecycle, termination, and timestamp, updating the child's
+`updated_at`. A stop before the first Running checkpoint uses the parent-only
+`TerminateEvalSuiteRun` and deliberately leaves planned children Pending.
+Foreign keys are enabled per connection for both hierarchies. The database enables WAL,
+`synchronous=FULL`, and a five-second busy timeout. Concurrent readers and
+bounded Eval Review workers share the connection pool; SQLite serializes their
+short write transactions, and a writer that remains busy after the timeout
+returns the SQLite error rather than being retried or silently redirected.
 
 Disk-full, corruption, and migration errors are returned to the caller with no
 fallback store. SQLite's atomic commit protects a prior committed aggregate.
@@ -94,11 +107,30 @@ aggregate projection rather than an event log; source and replay remain
 independent durable Review Records.
 
 Migration 4 adds Eval Suite Run and Eval Run relations. An Eval Run freezes its
-Eval Case Revision and points to one ordinary Review Record. Its parent retains
-the suite revision/digest, effective Experiment Configuration, ordered Eval Run
-IDs, completion counts, and timing; adjudication and scores remain separate.
+Eval Case Revision; that migration initially required every child to point to
+one ordinary Review Record. Migration 6 supersedes that constraint: Pending,
+Running, and no-Review Incomplete children have no Review link, while terminal
+successes and review-linked Incomplete children point to the ordinary Review
+they produced. The parent retains the suite revision/digest, effective
+Experiment Configuration, ordered Eval Run IDs, completion counts, and timing;
+adjudication and scores remain separate.
+
+Migration 7 adds `attempts.retry_after_ms`. A structured provider delay is
+durable reliability evidence and may lengthen retry backoff up to the frozen
+Retry Policy maximum; it is never an instruction to change Reviewer, model, or
+transport.
 
 Migration 5 adds immutable Adjudication Revisions. Each row transactionally
 stores the human decision document and pure derived score under a unique suite
 revision number. Publishing a correction inserts another row; it never updates
 an earlier adjudication or its source Review Results.
+
+Migration 6 adds explicit `lifecycle` and `termination` values to Eval Suite
+Runs, then rebuilds `eval_runs` so `review_id` is nullable and every child has
+an `updated_at` checkpoint timestamp. Existing child execution and
+adjudication states are preserved, and their initial `updated_at` is copied
+from `created_at`. Existing parent rows with `completed_at` are normalized to
+`completed`; parents without it become `incomplete`, because the older schema
+cannot prove that an interrupted suite is still pending or running. New writes
+use `CreateEvalSuiteRun` and `CheckpointEvalRun` so child state and parent
+progress cannot commit independently.

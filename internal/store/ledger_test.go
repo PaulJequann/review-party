@@ -324,7 +324,7 @@ func TestLedgerPreparationMigratesVersionOneHistoryState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec("DROP TABLE adjudication_revisions; DROP TABLE eval_runs; DROP TABLE eval_suite_runs; DROP INDEX reviews_replay_source; ALTER TABLE reviews DROP COLUMN replays_review_id; DROP INDEX reviews_history_order; DROP INDEX reviews_history_reviewer; DELETE FROM schema_migrations WHERE version>=2"); err != nil {
+	if _, err := db.Exec("DROP TABLE adjudication_revisions; DROP TABLE eval_runs; DROP TABLE eval_suite_runs; ALTER TABLE attempts DROP COLUMN retry_after_ms; DROP INDEX reviews_replay_source; ALTER TABLE reviews DROP COLUMN replays_review_id; DROP INDEX reviews_history_order; DROP INDEX reviews_history_reviewer; DELETE FROM schema_migrations WHERE version>=2"); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Close(); err != nil {
@@ -341,31 +341,6 @@ func TestLedgerPreparationMigratesVersionOneHistoryState(t *testing.T) {
 	}
 }
 
-func TestOutdatedLedgerReportsPreparationRequirement(t *testing.T) {
-	directory := t.TempDir()
-	ledger := newTestLedger(t, directory)
-	if err := ledger.Close(); err != nil {
-		t.Fatal(err)
-	}
-	db, err := sql.Open("sqlite", filepath.Join(directory, ledgerFilename))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec("DROP TABLE adjudication_revisions; DELETE FROM schema_migrations WHERE version=5"); err != nil {
-		t.Fatal(err)
-	}
-	if err := db.Close(); err != nil {
-		t.Fatal(err)
-	}
-	_, err = ReviewRecordStatePrepared(directory)
-	if !errors.Is(err, ErrReviewRecordStateRequiresPreparation) {
-		t.Fatalf("error = %v", err)
-	}
-	if err := PrepareReviewRecordState(directory); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestAdjudicationCorrectionsPreserveImmutableRevisions(t *testing.T) {
 	ledger := newTestLedger(t, t.TempDir())
 	defer ledger.Close()
@@ -375,7 +350,7 @@ func TestAdjudicationCorrectionsPreserveImmutableRevisions(t *testing.T) {
 		t.Fatal(err)
 	}
 	suite := model.EvalSuiteRun{ID: "esr_1723200000000_0123456789abcdef", Suite: "suite", SuiteRevision: "v1", SuiteDigest: "digest", Experiment: model.ExperimentConfiguration{}, EvalRunIDs: []model.EvalRunID{}, StartedAt: now}
-	if err := ledger.SaveEvalSuiteRun(suite); err != nil {
+	if err := ledger.CreateEvalSuiteRun(suite, nil); err != nil {
 		t.Fatal(err)
 	}
 	first := publishTestAdjudication(t, ledger, adjudicationFixture{"ar_1723200000000_0123456789abcdef", suite.ID, 1, now})
@@ -500,7 +475,7 @@ func readSchemaVersion(t *testing.T, directory string) int {
 
 func ledgerFixture(lifecycle model.Lifecycle) model.ReviewRecord {
 	now := time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC)
-	record := model.ReviewRecord{SchemaVersion: model.CurrentReviewRecordSchemaVersion, ID: "rp_1723200000000_0123456789abcdef", Lifecycle: lifecycle, Subject: model.ReviewSubject{Kind: model.SubjectWorkingChanges, Repository: "/repo", Identity: "subject", ChangedPaths: []string{"a.go"}, Patch: "diff"}, ProfileRevision: model.ProfileRevision{Name: "bugs"}, ProfileSnapshot: model.ProfileSnapshot{Name: "bugs"}, Runtime: &model.RuntimeProvenance{Version: "test"}, Timings: &model.ReviewTimings{TotalMS: 1}, CreatedAt: now, UpdatedAt: now, Passes: []model.PassRecord{{Name: "review", Required: true, Attempts: []model.AttemptRecord{{Number: 1, Outcome: model.AttemptCompleted, Provenance: model.ReviewerProvenance{ReviewerID: "opencode"}, Artifacts: []model.ArtifactReference{{Kind: "assistant-text", Path: "artifacts/a", Size: 1, Digest: "digest"}}, StartedAt: now, CompletedAt: now}}}}}
+	record := model.ReviewRecord{SchemaVersion: model.CurrentReviewRecordSchemaVersion, ID: "rp_1723200000000_0123456789abcdef", Lifecycle: lifecycle, Subject: model.ReviewSubject{Kind: model.SubjectWorkingChanges, Repository: "/repo", Identity: "subject", ChangedPaths: []string{"a.go"}, Patch: "diff"}, ProfileRevision: model.ProfileRevision{Name: "bugs"}, ProfileSnapshot: model.ProfileSnapshot{Name: "bugs"}, Runtime: &model.RuntimeProvenance{Version: "test"}, Timings: &model.ReviewTimings{TotalMS: 1}, CreatedAt: now, UpdatedAt: now, Passes: []model.PassRecord{{Name: "review", Required: true, Attempts: []model.AttemptRecord{{Number: 1, Outcome: model.AttemptCompleted, Provenance: model.ReviewerProvenance{ReviewerID: "opencode"}, RetryAfterMS: 750, Artifacts: []model.ArtifactReference{{Kind: "assistant-text", Path: "artifacts/a", Size: 1, Digest: "digest"}}, StartedAt: now, CompletedAt: now}}}}}
 	if lifecycle == model.LifecycleCompleted {
 		record.Result = &model.ReviewResult{Status: model.ResultFindings, Summary: "finding", Raw: "raw", Findings: []model.Finding{{Ordinal: 1, Severity: "high", Category: "correctness", Location: "a.go:1", Failure: "failure", Evidence: "evidence", Fix: "fix", Test: "test"}}}
 	} else {

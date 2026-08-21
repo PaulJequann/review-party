@@ -98,14 +98,15 @@ _Avoid_: General benchmark, model leaderboard, representative recall
 
 **Experiment Configuration**:
 The explicit Review Profile, Reviewer, model, effort, Execution Deadline, Retry Policy, Concurrency Limit, and other permitted execution choices tested against an Eval Suite. It may be named in version-controlled material or supplied by the Caller, and its effective choices are frozen into the resulting records.
+The effective Retry Policy and Concurrency Limit are persisted with the other Experiment choices. Retries remain Attempts within one ordinary Review and one Eval Run; bounded concurrency never changes manifest identity.
 _Avoid_: Eval Case, expected Finding, implicit default Reviewer
 
 **Eval Run**:
-The durable execution record for one Eval Case under one Experiment Configuration. It is created before execution, retains Pending, Running, and terminal execution state, relates the frozen Eval Case Revision to one ordinary Review Record, and records execution facts separately from later adjudication or scoring.
+The durable execution record for one Eval Case under one Experiment Configuration. It is created before execution, retains Pending, Running, and terminal execution state, and freezes the Eval Case Revision. It links the ordinary Review after Review creation; Pending, Running, and no-Review Incomplete runs have no link, remain not ready for adjudication, and render `review not started` in human inspection. Execution facts remain separate from later adjudication or scoring.
 _Avoid_: Eval Case, Eval Suite Run, EvalReview
 
 **Eval Suite Run**:
-The durable parent record for one execution of an Eval Suite under one Experiment Configuration. It retains the Suite revision, ordered Eval Runs, effective Concurrency Limit, completion categories, and timing without overwriting earlier runs or claiming a quality score. Its Eval Cases may execute sequentially or in parallel according to that limit.
+The durable parent record for one execution of an Eval Suite under one Experiment Configuration. It retains the Suite revision, ordered Eval Runs, explicit Pending, Running, Completed, or Incomplete lifecycle, optional hard-stop termination, completion categories, and timing without overwriting earlier runs or claiming a quality score. Completed means the full manifest was attempted and may include Incomplete cases; Incomplete means cancellation or a hard stop left planned work unattempted. The effective numeric Concurrency Limit bounds active Reviewer execution while preserving manifest order.
 _Avoid_: Review Bundle, score, comparison
 
 **Adjudication Revision**:

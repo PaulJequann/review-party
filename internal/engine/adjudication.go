@@ -32,6 +32,9 @@ func (conductor *Conductor) exportCaseAdjudication(ctx context.Context, evalRunI
 	if err != nil {
 		return model.EvalCaseAdjudication{}, err
 	}
+	if evalRun.ReviewID == "" {
+		return model.EvalCaseAdjudication{}, fmt.Errorf("Eval Run %q is %s and cannot be adjudicated before an ordinary Review exists", evalRun.ID, evalRun.ExecutionState)
+	}
 	review, err := conductor.Inspect(ctx, evalRun.ReviewID)
 	if err != nil {
 		return model.EvalCaseAdjudication{}, err

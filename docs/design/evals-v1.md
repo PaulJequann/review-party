@@ -8,9 +8,10 @@ changing product policy.
 ## Domain relationships
 
 An Eval Case fixes one known problem and its human-confirmed expected Findings
-or known-clean evidence. It never selects a Reviewer, model, or effort. An
+or known-clean evidence. It never selects a Reviewer, model, or effort. The
 Experiment Configuration selects the Review Profile, Reviewer, model, effort,
-and Execution Deadline tested against a suite.
+Execution Deadline, Retry Policy, and Concurrency Limit tested against a suite.
+All effective choices are frozen in the Suite Run.
 
 ```text
 Eval Suite x Experiment Configuration = Eval Suite Run
@@ -18,9 +19,34 @@ Eval Suite x Experiment Configuration = Eval Suite Run
                                            +-- Eval Run -- ordinary Review Record
 ```
 
-Every suite rerun creates new records. Execution categories (`completed_clean`,
-`completed_findings`, and `incomplete`) describe what happened; all initial Eval
-Runs remain `awaiting_adjudication`. Scoring and comparison are later concerns.
+Every suite rerun creates new records. Full-suite preflight materializes every
+Eval Run in manifest order before execution: each begins `pending`, becomes
+`running` immediately before its ordinary Review, and finishes as
+`completed_clean`, `completed_findings`, or `incomplete`. A terminal Eval Run
+becomes `awaiting_adjudication` only when it links an ordinary Review; planned,
+active, and no-Review Incomplete runs remain `not_ready`.
+
+The Eval Suite Run has its own explicit lifecycle. It is `pending` once its
+ordered children are durably created, `running` while bounded Reviewer
+executions are active, `completed` after every case reaches a terminal execution state,
+and `incomplete` when cancellation or a hard execution or persistence error
+stops remaining work. A completed suite can contain Incomplete Eval Runs; this
+means the suite attempted its full manifest, not that every Review succeeded.
+Cancellation or a hard persistence failure before the first successful
+Running checkpoint moves a suite directly from Pending to Incomplete.
+Each child transition and the corresponding parent progress are committed in
+one SQLite transaction. The pre-checkpoint Pending-to-Incomplete stop is the
+intentional exception: `TerminateEvalSuiteRun` commits only the parent and
+leaves every planned child Pending. Scoring and comparison remain later
+concerns.
+
+JSON inspection includes `updated_at` on every Eval Run and `lifecycle` plus an
+optional `termination {category,message}` on the Eval Suite Run. Before an
+ordinary Review Record exists, `review_id` is empty in JSON and human Eval Run
+inspection renders `review not started`, including an Incomplete case that
+failed before Review creation. Adjudication export requires every planned Eval
+Run to have an ordinary Review and explicitly rejects any Pending, Running, or
+no-Review Incomplete run.
 
 ## Suite sources
 
@@ -28,18 +54,43 @@ Runs remain `awaiting_adjudication`. Scoring and comparison are later concerns.
 result-contract checks. `global:general-bugs` selects the broader bug benchmark
 embedded in the installed Review Party version. `global:code-quality` selects
 the packaged maintainability benchmark and requires the `code-quality` Profile;
-the engine rejects other Profile selections before launching any cases. A
+the engine rejects other Profile selections before launching any cases.
+`global:seeded-bugs` selects reviewed controlled mutations pinned to a source
+commit and exact changed-file allowlist. A
 filesystem path selects a Caller-owned suite whose
 relative case and fixture paths are anchored at `suite.json`. Unknown fields,
 unsupported versions, duplicate case IDs, contradictory classifications,
 missing fixtures, Git metadata, and symlinks fail full-suite preflight before
 any Agent Harness launch.
 
-A suite manifest lists case files explicitly. Each case uses `change` or `state`
+A suite manifest lists case files explicitly. Each case uses `change`, `state`,
+or `seeded`
 mode, identifies `base` and `head` fixture directories as applicable, and
 declares either expected Findings or known-clean evidence. Expected Findings
 use semantic behavior and impact; paths are supporting evidence rather than
 exact-match scoring keys.
+
+A seeded case declares a stable seed ID, full deterministic source commit,
+version-controlled patch, and exact expected changed paths. Full preflight
+materializes a temporary committed source and detached Git worktree, checks the
+commit and patch, rejects path drift, and strips Git metadata before ordinary
+Subject resolution. Seed generation is never delegated to a live model.
+
+## Retry and concurrency
+
+The default Retry Policy permits three total Attempts with finite exponential
+backoff and jitter; one Attempt disables retry. Temporary transport,
+availability, deadline, and malformed-result outcomes are retryable.
+Authentication, invalid configuration or capability, cancellation, corpus, and
+ledger failures are terminal. Every Attempt remains attached to the same
+ordinary Review and Eval Run, and only its final terminal Review Result is
+eligible for adjudication.
+
+The default Concurrency Limit is one. A positive value N permits at most N
+active Reviewer executions for that Suite Run, without automatic sizing or a
+process-wide scheduler. Retry backoff does not occupy Reviewer capacity.
+Ordered Eval Run identity remains manifest-based even when Reviews finish in a
+different order.
 
 ## Reviewer isolation
 

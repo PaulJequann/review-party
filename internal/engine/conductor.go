@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reviewparty/internal/artifact"
+	"reviewparty/internal/model"
 	"reviewparty/internal/store"
 	"time"
 )
@@ -27,6 +28,8 @@ type Conductor struct {
 	now             func() time.Time
 	buildProvenance func() RuntimeProvenance
 	artifacts       *artifact.Store
+	retryDelay      func(model.RetryPolicy, int, time.Duration) time.Duration
+	wait            func(context.Context, time.Duration) error
 }
 
 func New(config Config) (*Conductor, error) {
@@ -70,6 +73,22 @@ func newConductorWithProfiles(store recordStore, reviewers reviewerCatalog, prof
 		attemptDeadline: deadline,
 		now:             time.Now,
 		buildProvenance: currentRuntimeProvenance,
+		retryDelay:      retryDelay,
+		wait:            waitForRetry,
+	}
+}
+
+func waitForRetry(ctx context.Context, delay time.Duration) error {
+	if delay <= 0 {
+		return ctx.Err()
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
 	}
 }
 
@@ -345,6 +364,7 @@ func (conductor *Conductor) executePass(ctx context.Context, pass passExecution)
 	if artifactErr != nil {
 		return record, artifactErr
 	}
+	attempt.Number = record.AttemptCount() + 1
 	record.Passes[0].Attempts = append(record.Passes[0].Attempts, attempt)
 	conductor.finalizeOperationalRecord(&record, pass.reviewStarted)
 	if err := conductor.store.Save(record); err != nil {
@@ -381,6 +401,14 @@ func (conductor *Conductor) executeAttempt(ctx context.Context, record ReviewRec
 		return failedExecution(AttemptUnknownFailure, TerminationTransportFailure, PhaseHarnessLaunch, err.Error()), nil
 	}
 	defer checkout.Close()
+	if gate := attemptGateFromContext(ctx); gate != nil {
+		select {
+		case gate <- struct{}{}:
+			defer func() { <-gate }()
+		case <-ctx.Done():
+			return contextExecution(ctx.Err()), checkout.Close()
+		}
+	}
 	execution := pass.executor.Execute(ctx, attemptSpec{Repository: checkout.Repository, Prompt: prompt, Candidate: pass.profile.reviewer.candidate})
 	return execution, checkout.Close()
 }

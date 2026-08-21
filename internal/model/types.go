@@ -69,11 +69,19 @@ type EvalRunID string
 type EvalSuiteRunID string
 
 type EvalExecutionState string
+type EvalAdjudicationState string
 
 const (
+	EvalPending           EvalExecutionState = "pending"
+	EvalRunning           EvalExecutionState = "running"
 	EvalCompletedClean    EvalExecutionState = "completed_clean"
 	EvalCompletedFindings EvalExecutionState = "completed_findings"
 	EvalIncomplete        EvalExecutionState = "incomplete"
+)
+
+const (
+	EvalAdjudicationNotReady EvalAdjudicationState = "not_ready"
+	EvalAwaitingAdjudication EvalAdjudicationState = "awaiting_adjudication"
 )
 
 type ExpectedFinding struct {
@@ -92,14 +100,30 @@ type EvalCaseRevision struct {
 	Classification   string            `json:"classification"`
 	ExpectedFindings []ExpectedFinding `json:"expected_findings"`
 	CleanEvidence    string            `json:"clean_evidence,omitempty"`
+	Seed             *SeedRevision     `json:"seed,omitempty"`
+}
+
+type SeedRevision struct {
+	ID            string   `json:"id"`
+	SourceCommit  string   `json:"source_commit"`
+	PatchDigest   string   `json:"patch_digest"`
+	ExpectedFiles []string `json:"expected_files"`
 }
 
 type ExperimentConfiguration struct {
-	Profile  string `json:"profile"`
-	Reviewer string `json:"reviewer"`
-	Model    string `json:"model"`
-	Effort   string `json:"effort"`
-	Deadline string `json:"deadline"`
+	Profile          string      `json:"profile"`
+	Reviewer         string      `json:"reviewer"`
+	Model            string      `json:"model"`
+	Effort           string      `json:"effort"`
+	Deadline         string      `json:"deadline"`
+	RetryPolicy      RetryPolicy `json:"retry_policy"`
+	ConcurrencyLimit int         `json:"concurrency_limit"`
+}
+
+type RetryPolicy struct {
+	MaxAttempts    int    `json:"max_attempts"`
+	InitialBackoff string `json:"initial_backoff"`
+	MaxBackoff     string `json:"max_backoff"`
 }
 
 type EvalSuiteSelection struct {
@@ -108,13 +132,14 @@ type EvalSuiteSelection struct {
 }
 
 type EvalRun struct {
-	ID                EvalRunID          `json:"id"`
-	SuiteRunID        EvalSuiteRunID     `json:"suite_run_id"`
-	Case              EvalCaseRevision   `json:"case_revision"`
-	ReviewID          ReviewID           `json:"review_id"`
-	ExecutionState    EvalExecutionState `json:"execution_state"`
-	AdjudicationState string             `json:"adjudication_state"`
-	CreatedAt         time.Time          `json:"created_at"`
+	ID                EvalRunID             `json:"id"`
+	SuiteRunID        EvalSuiteRunID        `json:"suite_run_id"`
+	Case              EvalCaseRevision      `json:"case_revision"`
+	ReviewID          ReviewID              `json:"review_id"`
+	ExecutionState    EvalExecutionState    `json:"execution_state"`
+	AdjudicationState EvalAdjudicationState `json:"adjudication_state"`
+	CreatedAt         time.Time             `json:"created_at"`
+	UpdatedAt         time.Time             `json:"updated_at"`
 }
 
 type EvalSuiteRun struct {
@@ -123,12 +148,19 @@ type EvalSuiteRun struct {
 	SuiteRevision         string                  `json:"suite_revision"`
 	SuiteDigest           string                  `json:"suite_digest"`
 	Experiment            ExperimentConfiguration `json:"experiment"`
+	Lifecycle             Lifecycle               `json:"lifecycle"`
+	Termination           *EvalSuiteTermination   `json:"termination,omitempty"`
 	EvalRunIDs            []EvalRunID             `json:"eval_run_ids"`
 	CompletedCleanCount   int                     `json:"completed_clean_count"`
 	CompletedFindingCount int                     `json:"completed_findings_count"`
 	IncompleteCount       int                     `json:"incomplete_count"`
 	StartedAt             time.Time               `json:"started_at"`
 	CompletedAt           time.Time               `json:"completed_at"`
+}
+
+type EvalSuiteTermination struct {
+	Category TerminationCategory `json:"category"`
+	Message  string              `json:"message"`
 }
 
 type AdjudicationRevisionID string
@@ -419,14 +451,15 @@ type ReviewerProvenance struct {
 }
 
 type AttemptRecord struct {
-	Number      int                 `json:"number"`
-	Outcome     AttemptOutcome      `json:"outcome"`
-	Provenance  ReviewerProvenance  `json:"provenance"`
-	Diagnostic  string              `json:"diagnostic,omitempty"`
-	RawOutput   string              `json:"raw_output,omitempty"`
-	Artifacts   []ArtifactReference `json:"artifacts,omitempty"`
-	StartedAt   time.Time           `json:"started_at"`
-	CompletedAt time.Time           `json:"completed_at"`
+	Number       int                 `json:"number"`
+	Outcome      AttemptOutcome      `json:"outcome"`
+	Provenance   ReviewerProvenance  `json:"provenance"`
+	Diagnostic   string              `json:"diagnostic,omitempty"`
+	RawOutput    string              `json:"raw_output,omitempty"`
+	RetryAfterMS int64               `json:"retry_after_ms,omitempty"`
+	Artifacts    []ArtifactReference `json:"artifacts,omitempty"`
+	StartedAt    time.Time           `json:"started_at"`
+	CompletedAt  time.Time           `json:"completed_at"`
 }
 
 type ArtifactReference struct {

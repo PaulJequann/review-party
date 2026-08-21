@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "id": "seeded-ignored-save-error",
+  "mode": "seeded",
+  "classification": "defect",
+  "base": "base",
+  "seed": {
+    "id": "ignored-save-error-v1",
+    "source_commit": "d8b458cf667f0b9d20d90d3a1b02efd2989017f3",
+    "patch": "seed.patch",
+    "expected_files": [
+      "service.go"
+    ]
+  },
+  "expected_findings": [
+    {
+      "id": "ignored-save-error",
+      "behavior": "Store reports success without propagating a persistence failure.",
+      "impact": "Callers can acknowledge data that was never persisted.",
+      "evidence": [
+        "Store calls save but unconditionally returns nil."
+      ],
+      "locations": [
+        "service.go:4"
+      ]
+    }
+  ]
+}

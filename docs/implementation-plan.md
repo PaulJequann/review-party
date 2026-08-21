@@ -1,7 +1,7 @@
 # Review Party implementation plan
 
 Status: active planning ledger
-Last reconciled: 2026-08-13
+Last reconciled: 2026-08-19
 
 This document orders the work from project inception through replacement of the
 current skill-owned execution machinery. It records the shipped local CLI,
@@ -57,18 +57,22 @@ slice status and this checklist when the acceptance evidence is committed.
 - [x] Slice 17a — separate atomic canaries from the realistic general benchmark (implemented locally).
 - [x] Slice 18 — human adjudication and basic scoring (implemented locally).
 - [x] Slice 19 — experiment comparison (implemented locally).
-- [ ] DEV-66 — retry-aware Eval Suite execution hardening: DEV-67 lifecycle and
+- [x] DEV-66 — retry-aware Eval Suite execution hardening: DEV-67 lifecycle and
   checkpointing, then DEV-69 retries, then DEV-68 bounded concurrency.
-- [ ] Slice 20 — seeded controlled defects.
+  - [x] DEV-67 — durable progress and lifecycle complete
+    (continue dogfood, do not reimplement).
+  - [x] DEV-69 — finite retries under a frozen Experiment Configuration.
+  - [x] DEV-68 — user-controlled bounded concurrency.
+- [x] Slice 20 — seeded controlled defects (implemented locally).
 - [ ] Slice 21 — ACPX transport adapter.
 - [ ] Slice 22 — native-versus-ACP adapter experiments.
 - [ ] Slice 23 — fix verification and bounded continuation.
 - [ ] Slice 24 — thin skill integration and migration.
 - [ ] Slice 25 — supported local delivery baseline.
 
-Current state: Slices 10 through 19, Slice 17a, and DEV-56 through DEV-60 are complete or
-implemented locally. Linear owns future work selection; use Ready issues there
-before the older roadmap below as execution authority.
+Current state: Slices 10 through 20, Slice 17a, DEV-56 through DEV-60, and
+DEV-66 through DEV-69 are complete or implemented locally. Linear owns future work selection;
+use Ready issues there before the older roadmap below as execution authority.
 
 ## Dependency order
 
@@ -119,9 +123,11 @@ and quality evidence as ordinary Reviews.
   instructions rather than embedding it in the CLI.
 - Prefer vertical slices that produce one executable behavior and observable
   evidence. Do not build every abstraction before the first end-to-end run.
-- An Eval Suite Run freezes its effective Retry Policy and per-run Concurrency
-  Limit. A limit of one is the sequential default; higher values bound active
-  Eval Cases without automatic resource sizing or a process-wide scheduler.
+- An Eval Suite Run freezes its effective Retry Policy and
+  per-run Concurrency Limit. A limit of one is the sequential default; higher
+  values bound active Eval Cases without automatic resource sizing or a
+  process-wide scheduler. Profile, Reviewer, model, effort, deadline, Retry
+  Policy, and Concurrency Limit are durable experiment provenance.
 - Retries reuse the same Eval Run and ordinary Review identity. Retry is not
   fallback, Reviewer substitution, or additional evaluation coverage; an
   exhausted case remains Incomplete and visibly affects suite completion.
@@ -1374,7 +1380,7 @@ keys.
 - [x] Render per-case evidence before suite aggregates.
 - [x] Add `review-party eval score` or the selected equivalent without adding a
   dashboard.
-- [ ] Reconcile adjudication import/export and persistence with DEV-66 so retry
+- [x] Reconcile adjudication import/export and persistence with DEV-66 so retry
   Attempts, exhausted cases, parent termination, and retained completed cases
   remain visible without double-counting coverage.
 
@@ -1440,7 +1446,7 @@ than declaring a universal winner or delivery gate.
 - [x] Refine the comparison test-intent row before tests.
 - [x] Define experiment identity from case revisions, effective Profile
   Revisions, Reviewer/model/effort, harness/transport, and Review Party build.
-- [ ] Include effective Retry Policy and Concurrency Limit in experiment
+- [x] Include effective Retry Policy and Concurrency Limit in experiment
   provenance. Different Retry Policies are rejected or partitioned; different
   Concurrency Limits remain visible as runtime context.
 - [x] Reject or clearly partition mismatched case revisions and missing
@@ -1481,9 +1487,88 @@ delivery gate.
 Do not add weighted universal scores, automatic promotion, CI delivery gates,
 statistical significance claims, or model leaderboards.
 
+## DEV-67 — Durable Eval Suite progress and lifecycle
+
+Status: **Complete**
+
+Depends on: Slice 19. This is the first child of DEV-66 and precedes DEV-69.
+
+### Completed behavior
+
+- [x] Full-suite preflight materializes every Eval Run in manifest order before
+  the first Reviewer launch.
+- [x] Eval Runs persist explicit Pending, Running, Completed Clean, Completed
+  Findings, and Incomplete execution states plus `updated_at`, with linked
+  Review IDs only after ordinary Review creation.
+- [x] Eval Suite Runs persist explicit Pending, Running, Completed, and
+  Incomplete lifecycle plus cancellation or hard-stop termination facts.
+- [x] Initial parent/child creation and every child/parent progress checkpoint
+  are atomic SQLite transactions.
+- [x] Cancellation and hard checkpoint failures stop new work, retain pending
+  cases, and persist the strongest honest parent state available.
+- [x] Ordinary Review execution, adjudication eligibility, immutable rerun
+  history, and inspection remain the existing shared paths.
+
+Acceptance evidence (2026-08-14): focused engine, store, and CLI tests cover
+preplanned manifest-order children, lifecycle categories, cancellation, hard
+checkpoint failure, transaction rollback, parent-count rollback, inspection,
+migration, and independent reruns. Focused race tests, `go vet`, CLI build/help,
+`git diff --check`, final CodeScene file scores, and the pre-commit Code Health
+safeguard pass. Isolated Muse/OpenCode dogfood on unchanged Subject
+`8d8b59d0d8f5d2c71c0a50136f041b833781351c9986c184d43ec3c50b95fe6e`
+completed with `canonical-v2` provenance: bugs
+`rp_1786722637752_d8e8b213f77635e2` and documentation
+`rp_1786722831154_4f2bd671a8a56e98` were clean; code-quality
+`rp_1786722730288_11a0384ad1dd3633` completed with reviewed architectural
+suggestions but no accepted in-scope runtime defect. This evidence-only ledger
+closeout follows that reviewed Subject. The implementation remains uncommitted
+pending explicit delivery authority.
+
+Schema-v6 migration note: pre-DEV-67 suite rows had no explicit lifecycle.
+Rows with `completed_at` migrate to Completed; rows without it migrate to
+Incomplete because an abandoned historical process cannot still be Pending or
+Running. This is an honest terminal normalization, not reconstructed runtime
+history.
+
+## DEV-69 — Finite retries under one Experiment Configuration
+
+Status: **Complete**
+
+- [x] Freeze max Attempts and finite jittered backoff in each Suite Run.
+- [x] Retain retry Attempts inside one ordinary Review and Eval Run.
+- [x] Retry temporary availability, transport, deadline, and malformed-result
+  outcomes without Fallback or Substitution.
+- [x] Persist and honor structured provider retry delays within the frozen
+  maximum backoff.
+- [x] Treat authentication, cancellation, configuration, corpus, and ledger
+  failures as terminal.
+- [x] Continue the suite after an exhausted case remains visibly Incomplete.
+- [x] Reject direct comparisons whose Retry Policies differ.
+
+Acceptance evidence (2026-08-19): focused engine and comparison tests prove
+retry-then-success, bounded provider delay, terminal authentication failure,
+suite deadline, exhaustion with later-case continuation, durable ordered
+Attempts, and incompatible-policy rejection.
+
+## DEV-68 — User-controlled bounded concurrency
+
+Status: **Complete**
+
+- [x] Default to one active Reviewer execution and accept a positive numeric
+  user, Experiment, or CLI override.
+- [x] Bound Reviewer execution independently per Suite Run without automatic
+  resource sizing or a process-wide scheduler.
+- [x] Release Reviewer capacity during retry backoff.
+- [x] Preserve manifest-ordered Eval Run identity under parallel completion.
+- [x] Retain existing cancellation, hard-stop, and atomic checkpoint behavior.
+
+Acceptance evidence (2026-08-19): focused race tests prove limit-one
+sequential behavior, exact bounded parallel activity, stable manifest order,
+and compatibility with retry/lifecycle persistence.
+
 ## Slice 20 — Seeded controlled defects
 
-Status: **Pending**
+Status: **Implemented locally**
 
 Depends on: Slice 19, completed DEV-66 execution semantics, and evidence that
 the historical/clean corpus is usable.
@@ -1495,18 +1580,18 @@ while keeping real defects and clean cases as the core benchmark.
 
 ### Implementation checklist
 
-- [ ] Refine the seeded-case test-intent row before tests.
-- [ ] Represent each mutation as a reviewed, version-controlled patch with a
+- [x] Refine the seeded-case test-intent row before tests.
+- [x] Represent each mutation as a reviewed, version-controlled patch with a
   stable ID, source commit, expected location, root cause, and expected behavior.
-- [ ] Apply the mutation only inside a temporary committed-Subject worktree.
-- [ ] Prove the mutation applied cleanly and changed exactly the declared files.
-- [ ] Record the resulting Subject identity in the Eval Run.
-- [ ] Exercise seeded cases through the same retry, concurrency, lifecycle, and
+- [x] Apply the mutation only inside a temporary committed-Subject worktree.
+- [x] Prove the mutation applied cleanly and changed exactly the declared files.
+- [x] Record seed provenance plus the resulting Subject identity in the Eval Run
+  and linked ordinary Review.
+- [x] Exercise seeded cases through the same retry, concurrency, lifecycle, and
   adjudication path as historical cases; do not create a seeded-only runner.
-- [ ] Start with a small set such as ignored errors, inverted authorization, and
-  missing resource cleanup only where the fixture language makes the defect
-  undeniable.
-- [ ] Keep the target corpus approximately balanced over time: real historical
+- [x] Start with one undeniable ignored-persistence-error seed; expand only with
+  separately reviewed patches.
+- [x] Keep the target corpus approximately balanced over time: real historical
   defects first, seeded controlled defects second, and known-clean changes
   always present.
 
@@ -1521,10 +1606,23 @@ while keeping real defects and clean cases as the core benchmark.
 
 ### Acceptance checklist
 
-- [ ] At least one seeded case runs end to end and is distinguishable from a
+- [x] At least one seeded case runs end to end and is distinguishable from a
   historical case in results.
-- [ ] The seed mechanism is deterministic without live model generation.
-- [ ] Focused Git, case, evaluator, and cleanup tests plus CodeScene gates pass.
+- [x] The seed mechanism is deterministic without live model generation.
+- [x] Focused Git, case, evaluator, cleanup, race, vet, build, and CodeScene
+  gates pass.
+
+Acceptance evidence (2026-08-19): `global:seeded-bugs@seeded-bugs-v1` pins a
+deterministic committed source and reviewed ignored-error patch. Real Git
+worktree tests prove commit mismatch and changed-path drift stop before launch,
+the authority fixture remains unchanged, seed provenance is durable, and the
+ordinary Review/adjudication path receives the Git-free Synthetic Subject. A
+real configured-default Muse/OpenCode run completed with Findings as Suite Run
+`esr_1787168794676_6fad4a05cf53be60`, Eval Run
+`er_1787168794676_506f0388fc649ebf`, and ordinary Review
+`rp_1787168794687_61a1aa3b91c5d242`; inspection retained the pinned commit,
+patch digest, exact path allowlist, configured Retry Policy and Concurrency
+Limit, and `canonical-v2` Review provenance.
 
 ### Stop rule
 
@@ -1725,8 +1823,6 @@ migration without claiming hosted or distributed capabilities.
 
 ## Immediate next action
 
-Complete DEV-67, then DEV-69, then DEV-68. Do not advance to Slice 20 until the
-DEV-66 acceptance evidence, the Slice 17-19 contract reconciliation, and the
-README/design/CLI documentation updates agree with the landed behavior. DEV-63
-and DEV-64 remain separate investigation tracks and are not prerequisites unless
-implementation reveals a concrete ownership collision.
+Proceed with Slice 21, the ACPX transport adapter. DEV-63 and DEV-64 remain
+separate investigation tracks and are not prerequisites unless implementation
+reveals a concrete ownership collision.

@@ -37,12 +37,187 @@ func TestEvalRecordsOrdinaryReviewsForEachExecutionCategory(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertEvalExecutionCounts(t, run)
+	if run.Lifecycle != model.LifecycleCompleted || run.Termination != nil {
+		t.Fatalf("suite lifecycle = %s, termination = %#v", run.Lifecycle, run.Termination)
+	}
 	for index, id := range run.EvalRunIDs {
 		assertPersistedEvalRun(t, persistedEvalAssertion{conductor: conductor, suite: suite, index: index, id: id})
 	}
 	if executor.sawGit || executor.sawExpected {
 		t.Fatalf("reviewer view leaked corpus authority: %#v", executor)
 	}
+}
+
+func TestEvalRetriesTransientFailureInsideSameReview(t *testing.T) {
+	suite := writeEvalTestSuite(t, []testEvalCase{{id: "retry"}})
+	executor := &scriptedEvalExecutor{executions: []attemptExecution{
+		{Outcome: AttemptTransientFailure, FailureCategory: TerminationTransportFailure, FailurePhase: PhaseReviewerExecution, Diagnostic: "temporary transport failure"},
+		{Outcome: AttemptCompleted, AssistantText: cleanReview},
+	}}
+	conductor := testEvalConductor(t, executor)
+	conductor.wait = func(context.Context, time.Duration) error { return nil }
+	selection := evalSelection(suite)
+	selection.Experiment.RetryPolicy.MaxAttempts = 3
+	run, err := conductor.RunEvalSuite(context.Background(), selection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	evalRun, err := conductor.InspectEvalRun(context.Background(), run.EvalRunIDs[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	review, err := conductor.Inspect(context.Background(), evalRun.ReviewID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertRetriedReview(t, review, evalRun)
+}
+
+func assertRetriedReview(t *testing.T, review ReviewRecord, evalRun model.EvalRun) {
+	t.Helper()
+	if review.Lifecycle != LifecycleCompleted {
+		t.Fatalf("review lifecycle = %s", review.Lifecycle)
+	}
+	if review.AttemptCount() != 2 {
+		t.Fatalf("attempts = %#v", review.Passes[0].Attempts)
+	}
+	if evalRun.ExecutionState != model.EvalCompletedClean {
+		t.Fatalf("Eval state = %s", evalRun.ExecutionState)
+	}
+	if review.Passes[0].Attempts[0].Outcome != AttemptTransientFailure {
+		t.Fatalf("first attempt = %#v", review.Passes[0].Attempts[0])
+	}
+	if review.Passes[0].Attempts[1].Outcome != AttemptCompleted {
+		t.Fatalf("second attempt = %#v", review.Passes[0].Attempts[1])
+	}
+}
+
+func TestEvalDoesNotRetryAuthenticationFailure(t *testing.T) {
+	suite := writeEvalTestSuite(t, []testEvalCase{{id: "authentication"}})
+	executor := &scriptedEvalExecutor{executions: []attemptExecution{{Outcome: AttemptUnknownFailure, FailureCategory: TerminationAuthenticationFailure, FailurePhase: PhaseReviewerExecution, Diagnostic: "invalid credential"}}}
+	conductor := testEvalConductor(t, executor)
+	conductor.wait = func(context.Context, time.Duration) error { return nil }
+	selection := evalSelection(suite)
+	selection.Experiment.RetryPolicy.MaxAttempts = 3
+	run, err := conductor.RunEvalSuite(context.Background(), selection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	evalRun, _ := conductor.InspectEvalRun(context.Background(), run.EvalRunIDs[0])
+	review, _ := conductor.Inspect(context.Background(), evalRun.ReviewID)
+	if review.AttemptCount() != 1 || evalRun.ExecutionState != model.EvalIncomplete {
+		t.Fatalf("attempts=%d eval=%s", review.AttemptCount(), evalRun.ExecutionState)
+	}
+}
+
+func TestEvalContinuesAfterRetryExhaustion(t *testing.T) {
+	suite := writeEvalTestSuite(t, []testEvalCase{{id: "exhausted"}, {id: "later"}})
+	executor := &scriptedEvalExecutor{executions: []attemptExecution{
+		{Outcome: AttemptTransientFailure, FailureCategory: TerminationTransportFailure, FailurePhase: PhaseReviewerExecution, Diagnostic: "temporary one"},
+		{Outcome: AttemptTransientFailure, FailureCategory: TerminationTransportFailure, FailurePhase: PhaseReviewerExecution, Diagnostic: "temporary two"},
+		{Outcome: AttemptCompleted, AssistantText: cleanReview},
+	}}
+	conductor := testEvalConductor(t, executor)
+	conductor.wait = func(context.Context, time.Duration) error { return nil }
+	selection := evalSelection(suite)
+	selection.Experiment.RetryPolicy.MaxAttempts = 2
+	run, err := conductor.RunEvalSuite(context.Background(), selection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, _ := conductor.InspectEvalRun(context.Background(), run.EvalRunIDs[0])
+	second, _ := conductor.InspectEvalRun(context.Background(), run.EvalRunIDs[1])
+	if first.ExecutionState != model.EvalIncomplete {
+		t.Fatalf("first = %s", first.ExecutionState)
+	}
+	if second.ExecutionState != model.EvalCompletedClean {
+		t.Fatalf("second = %s", second.ExecutionState)
+	}
+	if run.IncompleteCount != 1 || run.CompletedCleanCount != 1 {
+		t.Fatalf("counts=%d/%d", run.IncompleteCount, run.CompletedCleanCount)
+	}
+}
+
+func TestEvalConcurrencyLimitBoundsActiveReviewersAndPreservesManifestOrder(t *testing.T) {
+	suite := writeEvalTestSuite(t, []testEvalCase{{id: "first"}, {id: "second"}, {id: "third"}})
+	executor := &boundedEvalExecutor{delays: []time.Duration{40 * time.Millisecond, 5 * time.Millisecond, 5 * time.Millisecond}}
+	conductor := testEvalConductor(t, executor)
+	selection := evalSelection(suite)
+	selection.Experiment.ConcurrencyLimit = 2
+	run, err := conductor.RunEvalSuite(context.Background(), selection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if executor.peak != 2 {
+		t.Fatalf("peak active = %d, want 2", executor.peak)
+	}
+	for index, want := range []string{"first", "second", "third"} {
+		evalRun, err := conductor.InspectEvalRun(context.Background(), run.EvalRunIDs[index])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if evalRun.Case.ID != want {
+			t.Fatalf("run %d case = %q, want %q", index, evalRun.Case.ID, want)
+		}
+	}
+}
+
+func TestEvalConcurrencyLimitOneRemainsSequential(t *testing.T) {
+	suite := writeEvalTestSuite(t, []testEvalCase{{id: "first"}, {id: "second"}})
+	executor := &boundedEvalExecutor{delays: []time.Duration{5 * time.Millisecond, 5 * time.Millisecond}}
+	conductor := testEvalConductor(t, executor)
+	if _, err := conductor.RunEvalSuite(context.Background(), evalSelection(suite)); err != nil {
+		t.Fatal(err)
+	}
+	if executor.peak != 1 {
+		t.Fatalf("peak active = %d, want 1", executor.peak)
+	}
+}
+
+type boundedEvalExecutor struct {
+	mu     sync.Mutex
+	delays []time.Duration
+	next   int
+	active int
+	peak   int
+}
+
+func (executor *boundedEvalExecutor) Check(context.Context, reviewerCandidate) availability {
+	return availability{Available: true}
+}
+
+func (executor *boundedEvalExecutor) Execute(context.Context, attemptSpec) attemptExecution {
+	executor.mu.Lock()
+	index := executor.next
+	executor.next++
+	executor.active++
+	if executor.active > executor.peak {
+		executor.peak = executor.active
+	}
+	delay := executor.delays[index]
+	executor.mu.Unlock()
+	time.Sleep(delay)
+	executor.mu.Lock()
+	executor.active--
+	executor.mu.Unlock()
+	return attemptExecution{Outcome: AttemptCompleted, AssistantText: cleanReview}
+}
+
+type scriptedEvalExecutor struct {
+	mu         sync.Mutex
+	executions []attemptExecution
+}
+
+func (executor *scriptedEvalExecutor) Check(context.Context, reviewerCandidate) availability {
+	return availability{Available: true}
+}
+
+func (executor *scriptedEvalExecutor) Execute(context.Context, attemptSpec) attemptExecution {
+	executor.mu.Lock()
+	defer executor.mu.Unlock()
+	execution := executor.executions[0]
+	executor.executions = executor.executions[1:]
+	return execution
 }
 
 func assertEvalExecutionCounts(t *testing.T, run model.EvalSuiteRun) {
@@ -221,6 +396,7 @@ type evalSequenceExecutor struct {
 	sawAuthority bool
 	sawGoModule  bool
 	fileCounts   []int
+	onExecute    func()
 }
 
 func (executor *evalSequenceExecutor) Check(context.Context, reviewerCandidate) availability {
@@ -230,6 +406,9 @@ func (executor *evalSequenceExecutor) Check(context.Context, reviewerCandidate) 
 func (executor *evalSequenceExecutor) Execute(_ context.Context, spec attemptSpec) attemptExecution {
 	executor.mu.Lock()
 	defer executor.mu.Unlock()
+	if executor.onExecute != nil {
+		executor.onExecute()
+	}
 	if _, err := os.Stat(filepath.Join(spec.Repository, ".git")); err == nil {
 		executor.sawGit = true
 	}
@@ -291,7 +470,7 @@ func testEvalConductor(t *testing.T, executor attemptExecutor) *Conductor {
 }
 
 func evalSelection(suite string) model.EvalSuiteSelection {
-	return model.EvalSuiteSelection{Suite: suite, Experiment: model.ExperimentConfiguration{Profile: "bugs", Reviewer: defaultReviewer, Model: "grok-code-fast-1", Effort: "high", Deadline: time.Second.String()}}
+	return model.EvalSuiteSelection{Suite: suite, Experiment: model.ExperimentConfiguration{Profile: "bugs", Reviewer: defaultReviewer, Model: "grok-code-fast-1", Effort: "high", Deadline: time.Second.String(), RetryPolicy: model.RetryPolicy{MaxAttempts: 1, InitialBackoff: "1ms", MaxBackoff: "1ms"}, ConcurrencyLimit: 1}}
 }
 
 type testEvalCase struct {

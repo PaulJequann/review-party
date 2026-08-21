@@ -203,6 +203,8 @@ type evalRunOptions struct {
 	model          string
 	effort         string
 	deadline       time.Duration
+	attempts       int
+	concurrency    int
 	format         string
 	configuration  string
 	overrides      map[string]bool
@@ -217,6 +219,8 @@ func parseEvalRunOptions(arguments []string, stderr io.Writer) (evalRunOptions, 
 	modelName := flags.String("model", "", "Explicit model")
 	effort := flags.String("effort", "", "Explicit reasoning effort")
 	deadline := flags.Duration("deadline", 0, "Execution deadline")
+	attempts := flags.Int("attempts", 0, "Maximum attempts per Eval Case")
+	concurrency := flags.Int("concurrency", 0, "Maximum active Eval Cases")
 	format := flags.String("format", "human", "Output format: human or json")
 	configuration := flags.String("config", defaultUserConfigurationPath(), "User configuration path")
 	if err := flags.Parse(arguments); err != nil {
@@ -228,12 +232,15 @@ func parseEvalRunOptions(arguments []string, stderr io.Writer) (evalRunOptions, 
 	}
 	overrides := map[string]bool{}
 	flags.Visit(func(value *flag.Flag) { overrides[value.Name] = true })
-	return evalRunOptions{experimentPath: *experimentPath, profile: *profile, reviewer: *reviewer, model: *modelName, effort: *effort, deadline: *deadline, format: *format, configuration: *configuration, overrides: overrides}, true
+	return evalRunOptions{experimentPath: *experimentPath, profile: *profile, reviewer: *reviewer, model: *modelName, effort: *effort, deadline: *deadline, attempts: *attempts, concurrency: *concurrency, format: *format, configuration: *configuration, overrides: overrides}, true
 }
 
 func resolveEvalExperiment(options evalRunOptions) (model.ExperimentConfiguration, time.Duration, error) {
 	experiment, err := loadExperimentFile(options.experimentPath)
 	if err != nil {
+		return model.ExperimentConfiguration{}, 0, err
+	}
+	if err := engine.ApplyEvalConfigurationDefaults(options.configuration, &experiment); err != nil {
 		return model.ExperimentConfiguration{}, 0, err
 	}
 	applyExperimentOverrides(&experiment, options)
@@ -261,6 +268,12 @@ func applyExperimentOverrides(experiment *model.ExperimentConfiguration, options
 	if options.overrides["deadline"] {
 		experiment.Deadline = options.deadline.String()
 	}
+	if options.overrides["attempts"] {
+		experiment.RetryPolicy.MaxAttempts = options.attempts
+	}
+	if options.overrides["concurrency"] {
+		experiment.ConcurrencyLimit = options.concurrency
+	}
 }
 
 func applyExperimentDefaults(experiment *model.ExperimentConfiguration) {
@@ -269,6 +282,12 @@ func applyExperimentDefaults(experiment *model.ExperimentConfiguration) {
 	}
 	if experiment.Deadline == "" {
 		experiment.Deadline = (3 * time.Minute).String()
+	}
+	if experiment.RetryPolicy.MaxAttempts == 0 {
+		experiment.RetryPolicy = model.RetryPolicy{MaxAttempts: 3, InitialBackoff: "1s", MaxBackoff: "30s"}
+	}
+	if experiment.ConcurrencyLimit == 0 {
+		experiment.ConcurrencyLimit = 1
 	}
 }
 
@@ -512,7 +531,11 @@ func inspectEvalRun(command evalInspectCommand) int {
 		fmt.Fprintf(command.stderr, "review-party: unknown output format %q\n", command.format)
 		return 1
 	}
-	fmt.Fprintf(command.stdout, "eval %s · case %s · %s · review %s · %s\n", run.ID, run.Case.ID, run.ExecutionState, run.ReviewID, run.AdjudicationState)
+	review := "not started"
+	if run.ReviewID != "" {
+		review = string(run.ReviewID)
+	}
+	fmt.Fprintf(command.stdout, "eval %s · case %s · %s · review %s · %s\n", run.ID, run.Case.ID, run.ExecutionState, review, run.AdjudicationState)
 	return 0
 }
 
@@ -527,7 +550,7 @@ func printEvalSuiteRun(run model.EvalSuiteRun, format string, stdout, stderr io.
 		fmt.Fprintf(stderr, "review-party: unknown output format %q\n", format)
 		return 1
 	}
-	fmt.Fprintf(stdout, "eval suite %s · %s@%s · %d clean · %d findings · %d incomplete\n", run.ID, run.Suite, run.SuiteRevision, run.CompletedCleanCount, run.CompletedFindingCount, run.IncompleteCount)
+	fmt.Fprintf(stdout, "eval suite %s · %s · %s@%s · %d clean · %d findings · %d incomplete\n", run.ID, run.Lifecycle, run.Suite, run.SuiteRevision, run.CompletedCleanCount, run.CompletedFindingCount, run.IncompleteCount)
 	for _, id := range run.EvalRunIDs {
 		fmt.Fprintf(stdout, "eval: review-party eval inspect %s\n", id)
 	}

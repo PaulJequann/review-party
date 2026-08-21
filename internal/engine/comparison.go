@@ -155,6 +155,9 @@ func comparisonReviewProvenance(suite model.EvalSuiteRun, review model.ReviewRec
 }
 
 func CompareEvalExperiments(baseline, candidate comparisonSide) (model.EvalComparison, error) {
+	if baseline.Identity.Experiment.RetryPolicy != candidate.Identity.Experiment.RetryPolicy {
+		return model.EvalComparison{}, fmt.Errorf("%w: Retry Policies differ", ErrIncompatibleComparison)
+	}
 	coverage := compareCoverage(baseline.Cases, candidate.Cases)
 	if coverage.ComparedCases == 0 {
 		return model.EvalComparison{}, fmt.Errorf("%w: no shared case revisions", ErrIncompatibleComparison)
