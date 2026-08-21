@@ -60,7 +60,8 @@ silently fall back. An unavailable compatible Reviewer produces an inspectable
 Incomplete Review. Grok's built-in model is `grok-4.5`. OpenCode requires a
 model supplied by user configuration or explicit `--model`; the product does
 not compile a personal OpenCode model preference into its catalog. Copilot's
-built-in `auto` selection records the model it resolves.
+built-in `auto` selection records the model it resolves. Codex's built-in
+model is `gpt-5.6-luna` with high-effort reasoning by default.
 
 Callers may override the selected Reviewer's reasoning effort with
 `--effort`. For OpenCode, Review Party passes an explicit value such as `high`
@@ -129,8 +130,9 @@ active Reviewer execution. A named Experiment Configuration or explicit
 `--attempts` and `--concurrency` flags can override those user defaults for one
 durably identified Eval Suite Run.
 
-Review Party currently invokes all three harnesses directly. ACPX remains a
-future transport option rather than part of the current execution path.
+Review Party currently invokes all four harnesses directly (Grok, OpenCode,
+Copilot, Codex). ACPX remains a future transport option rather than part of
+the current execution path.
 
 Review an exact committed range with full object provenance and an isolated
 repository view:

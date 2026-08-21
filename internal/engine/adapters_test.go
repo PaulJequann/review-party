@@ -101,8 +101,9 @@ func TestCompiledBugProfileIncludesPromisedPass(t *testing.T) {
 
 func TestSupportedReviewersResolveToMatchingAdapters(t *testing.T) {
 	catalog := defaultReviewerCatalog()
-	want := []string{"copilot", "grok", "opencode"}
+	want := []string{"codex", "copilot", "grok", "opencode"}
 	wantCandidates := map[string]reviewerCandidate{
+		"codex":    {ID: "codex", Model: "gpt-5.6-luna", Effort: "high", Harness: "codex-cli", Transport: "direct-cli"},
 		"copilot":  {ID: "copilot", Model: "auto", Effort: "auto", Harness: "github-copilot-cli", Transport: "direct-cli"},
 		"grok":     {ID: "grok", Model: "grok-4.5", Effort: "high", Harness: "grok-build-cli", Transport: "direct-cli"},
 		"opencode": {ID: "opencode", Effort: "default", Harness: "opencode-cli", Transport: "direct-cli"},

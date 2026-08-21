@@ -15,6 +15,7 @@ func reviewerEnvironment(reviewer string, additions ...string) []string {
 		"grok":     {"GROK_API_KEY", "XAI_API_KEY"},
 		"opencode": {"OPENCODE_CONFIG", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY", "GROQ_API_KEY", "OPENROUTER_API_KEY", "MISTRAL_API_KEY", "DEEPSEEK_API_KEY"},
 		"copilot":  {"GH_TOKEN", "GITHUB_TOKEN"},
+		"codex":    {"OPENAI_API_KEY", "CODEX_API_KEY"},
 	}[reviewer] {
 		allowed[name] = true
 	}
