@@ -1,5 +1,4 @@
 # Review Party implementation plan
-
 Status: active planning ledger
 Last reconciled: 2026-08-19
 
@@ -64,15 +63,18 @@ slice status and this checklist when the acceptance evidence is committed.
   - [x] DEV-69 — finite retries under a frozen Experiment Configuration.
   - [x] DEV-68 — user-controlled bounded concurrency.
 - [x] Slice 20 — seeded controlled defects (implemented locally).
+- [x] Slice 26 — Party composition and Review Bundles (implemented locally;
+  user-directed out of order ahead of Slices 21-25).
 - [ ] Slice 21 — ACPX transport adapter.
 - [ ] Slice 22 — native-versus-ACP adapter experiments.
 - [ ] Slice 23 — fix verification and bounded continuation.
 - [ ] Slice 24 — thin skill integration and migration.
 - [ ] Slice 25 — supported local delivery baseline.
 
-Current state: Slices 10 through 20, Slice 17a, DEV-56 through DEV-60, and
-DEV-66 through DEV-69 are complete or implemented locally. Linear owns future work selection;
-use Ready issues there before the older roadmap below as execution authority.
+Current state: Slices 10 through 20, Slice 17a, Slice 26, DEV-56 through
+DEV-60, and DEV-66 through DEV-69 are complete or implemented locally. Linear
+owns future work selection; use Ready issues there before the older roadmap
+below as execution authority.
 
 ## Dependency order
 
@@ -211,6 +213,11 @@ manual inspection, and one-time compatibility proof under acceptance checks.
 | Adjudication separates reviewer quality from execution failure | Incomplete cases are counted as missed Findings or clean results | Pure evaluator Module plus persisted adjudication | Recall/precision exclude incomplete cases and completion is reported separately | Test |
 | Experiment comparison groups exact identities | Runs with different case revisions, builds, or Profile Revisions are silently pooled | Pure comparison Module over ledger fixtures | Incompatible groups are rejected or shown separately | Test |
 | Seeded cases apply only the declared mutation | Fixture setup alters unrelated code or evaluates an unmutated checkout | Real temporary Git repository | The evaluated Subject identity contains the exact declared mutation and cleanup restores the source repository | Test |
+| Party preflight fails closed before any launch | One invalid member lets earlier members launch then aborts mid-bundle | Public Conductor over real SQLite with scripted executors | Compilation failure returns an error, records zero attempts, and persists no Bundle row | Test |
+| Party members share one frozen Subject identity | Per-member re-resolution lets a mid-party working-tree mutation change later Subjects | Public Conductor over a real temporary Git repository | Every child Review and the Bundle row record one identical pre-launch Subject identity | Test |
+| Incomplete members stay visible in the Bundle | A completed member's findings are hidden or a partial Bundle claims clean | Public Conductor with one unavailable member | Bundle lifecycle is incomplete while the completed member keeps its review id and finding count | Test |
+| Bounded party concurrency and manifest order | Limit>1 runs unbounded, or completion-order results misalign profile-to-review mapping | Public Conductor with blocking scripted executors | Peak active executions equal the effective limit and bundle members keep manifest order | Test |
+| Bundles round-trip through SQLite | A partial multi-column write reconstructs a different aggregate | Real SQLite ledger implementation | A fresh load reproduces lifecycle, members, termination, and timestamps exactly | Test |
 
 ## Slice 1 — Repository foundation
 
@@ -1804,6 +1811,77 @@ migration without claiming hosted or distributed capabilities.
 - [ ] The old skill path is retired only with explicit approval and recovery
   evidence.
 
+## Slice 26 — Party composition and Review Bundles
+
+Status: **Implemented locally**
+
+Depends on: Slices 8a, 13-15 (profiles, ledger, committed Subjects), DEV-68
+bounded concurrency. User-directed out of order ahead of Slices 21-25.
+
+### Goal
+
+Let a Caller compose several packaged or authored Profiles over one frozen
+Review Subject, execute them through the ordinary Review path with bounded
+concurrency, and persist one inspectable Review Bundle that preserves each
+member Record's provenance and completeness.
+
+### Implementation checklist
+
+- [x] Refine the party test-intent rows before tests.
+- [x] Strict version-1 Party definitions in `.reviewparty/parties/` and the
+  global library with repository shadowing global shadowing packaged
+  `standard`; name must match file name; duplicates, unknown fields, and empty
+  member lists rejected.
+- [x] Per-member reviewer/model/effort pins; explicit caller flags narrow every
+  member and freeze a distinct Party Revision digest including compiled Profile
+  Revision hashes.
+- [x] Fail-closed preflight: one shared Subject resolution plus full member
+  compilation before any Bundle row or Agent Harness launch.
+- [x] Members execute through `runPreparedReview` (ordinary Reviews) with
+  bounded concurrency reusing the attempt gate; sequential default.
+- [x] Bundle lifecycle: pending → running → completed only when every required
+  member completed; coverage incompleteness records no bundle termination while
+  cancellation/hard-stop drains launched children and records a categorical
+  termination.
+- [x] SQLite migration 008 (`review_bundles`) plus create/save/load with exact
+  round-trip; `inspect rb_...` dispatch.
+- [x] CLI `parties` listing and `party run` with human and JSON output; exit 2
+  for an Incomplete Bundle.
+- [x] README section, this ledger entry, and the conductor-v1 dated update so
+  deferred-party prose no longer misleads.
+
+### Acceptance evidence
+
+- Focused engine, store, and CLI tests cover fail-closed preflight, one frozen
+  Subject identity across children, incomplete-bundle visibility of completed
+  members, manifest order under concurrency, definition-driven concurrency
+  limits, repository shadowing of packaged parties, and SQLite round-trip;
+  race tests pass on all affected packages.
+- CodeScene scores for new files after safeguard-driven refactoring:
+  engine/party.go 10.0, engine/party_library.go 10.0, cmd/review-party/
+  party.go 10.0; touched store.go and types.go remain 10.0; main.go 9.61 with
+  no regression. The pre-commit Code Health safeguard passes with zero
+  findings on the final change set.
+- Live dogfood (2026-08-21, isolated scratch state, codex/gpt-5.6-luna/high):
+  - Run 1, `--concurrency 2`: bundle rb_1787334540091_e6278fd17e616471 over the
+    party implementation's own working changes completed code-quality
+    (4 findings) and documentation (3 findings) while bugs honestly recorded
+    deadline_exceeded; the bundle stayed inspectably Incomplete with completed
+    members' findings preserved. The concurrency-selection defect exposed by
+    those findings was remediated in this change set.
+  - Run 2, `--concurrency 3`: bundle rb_1787335754270_9dc3d01cb0e5df93,
+    party revision cb8a7a1b..., subject c63823ce...: Completed 3/3 — bugs
+    (1 finding), code-quality (3), documentation (1).
+- Finding dispositions for run 2: the repeated HIGH claim that file-defined
+  Parties using `concurrency_limit` are rejected is false — disproven by the
+  passing TestPartyDefinitionConcurrencyLimitDrivesExecution regression test
+  and a live repository-party execution with that field set; the reviewer
+  misread decodeStrictObject's null-guard list as a field allowlist.
+  Repository-layer shadowing requiring `--repo` matches packaged Profile
+  behavior. The sequential/concurrent orchestration split remains two readable
+  loops sharing absorb/finalize/stop helpers rather than one conditional
+  machine; no test-visible defect.
+
 ## Deferred beyond the active roadmap
 
 - Finding lineage across Reviews (`first_seen`, `seen_again`, `resolved`, or
@@ -1818,8 +1896,9 @@ migration without claiming hosted or distributed capabilities.
   explain how they happened.
 - Hosted or remote database abstraction, cross-machine synchronization, and
   multi-user authorization.
-- Parties, Synthesis Reviews, hosted workers, and native ACP hosting until their
-  existing domain triggers are met.
+- Review Dependencies, Party-level Synthesis Reviews, hosted workers, and native
+  ACP hosting until their existing domain triggers are met; basic Party
+  composition now ships in Slice 26 while these extensions remain deferred.
 
 ## Immediate next action
 

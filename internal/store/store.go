@@ -42,6 +42,12 @@ type AdjudicationStore interface {
 	LoadAdjudication(model.AdjudicationRevisionID) (model.AdjudicationRevision, error)
 }
 
+type BundleStore interface {
+	CreateReviewBundle(bundle model.ReviewBundle) error
+	SaveReviewBundle(bundle model.ReviewBundle) error
+	LoadReviewBundle(id model.ReviewBundleID) (model.ReviewBundle, error)
+}
+
 type HistoryEntry struct {
 	ID              model.ReviewID            `json:"id"`
 	Lifecycle       model.Lifecycle           `json:"lifecycle"`
@@ -197,6 +203,30 @@ func (s *DeferredLedgerRecordStore) LoadEvalSuiteRun(id model.EvalSuiteRunID) (m
 	return ledger.LoadEvalSuiteRun(id)
 }
 
+func (s *DeferredLedgerRecordStore) CreateReviewBundle(bundle model.ReviewBundle) error {
+	ledger, err := s.openExisting()
+	if err != nil {
+		return err
+	}
+	return ledger.CreateReviewBundle(bundle)
+}
+
+func (s *DeferredLedgerRecordStore) SaveReviewBundle(bundle model.ReviewBundle) error {
+	ledger, err := s.openExisting()
+	if err != nil {
+		return err
+	}
+	return ledger.SaveReviewBundle(bundle)
+}
+
+func (s *DeferredLedgerRecordStore) LoadReviewBundle(id model.ReviewBundleID) (model.ReviewBundle, error) {
+	ledger, err := s.openExisting()
+	if err != nil {
+		return model.ReviewBundle{}, err
+	}
+	return ledger.LoadReviewBundle(id)
+}
+
 func (s *DeferredLedgerRecordStore) PublishAdjudication(revision model.AdjudicationRevision) (model.AdjudicationRevision, error) {
 	ledger, err := s.openExisting()
 	if err != nil {
@@ -295,7 +325,7 @@ func (s *LedgerRecordStore) requirePreparedSchema() error {
 	if err := s.db.QueryRow("SELECT COALESCE(MAX(version), 0) FROM schema_migrations").Scan(&version); err != nil {
 		return fmt.Errorf("read review ledger schema: %w", err)
 	}
-	const current = 7
+	const current = 8
 	if version > current {
 		return fmt.Errorf("review ledger schema %d is newer than supported schema %d", version, current)
 	}
@@ -333,7 +363,7 @@ func (s *LedgerRecordStore) migrate() error {
 	if _, err := s.db.Exec("CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY)"); err != nil {
 		return fmt.Errorf("create migration table: %w", err)
 	}
-	const current = 7
+	const current = 8
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
@@ -356,7 +386,7 @@ func (s *LedgerRecordStore) migrate() error {
 }
 
 func applyKnownMigration(tx *sql.Tx, version int) error {
-	paths := map[int]string{1: "migrations/001_initial.sql", 2: "migrations/002_history_indexes.sql", 3: "migrations/003_replay_lineage.sql", 4: "migrations/004_eval_runs.sql", 5: "migrations/005_adjudication_revisions.sql", 6: "migrations/006_eval_lifecycle.sql", 7: "migrations/007_attempt_retry_delay.sql"}
+	paths := map[int]string{1: "migrations/001_initial.sql", 2: "migrations/002_history_indexes.sql", 3: "migrations/003_replay_lineage.sql", 4: "migrations/004_eval_runs.sql", 5: "migrations/005_adjudication_revisions.sql", 6: "migrations/006_eval_lifecycle.sql", 7: "migrations/007_attempt_retry_delay.sql", 8: "migrations/008_review_bundles.sql"}
 	path, exists := paths[version]
 	if !exists {
 		return fmt.Errorf("no migration for review ledger schema %d", version)
@@ -536,6 +566,71 @@ func nullableTime(value time.Time) any {
 		return nil
 	}
 	return value.UTC()
+}
+
+func (s *LedgerRecordStore) CreateReviewBundle(bundle model.ReviewBundle) error {
+	members, termination, err := bundlePayloads(bundle)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec(`INSERT INTO review_bundles(id,party,description,party_revision,repository,subject_kind,subject_identity,lifecycle,termination,members,concurrency_limit,created_at,updated_at,completed_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		bundle.ID, bundle.Party, bundle.Description, bundle.PartyRevision, bundle.Repository, bundle.SubjectKind, bundle.SubjectIdentity, bundle.Lifecycle, termination, members, bundle.ConcurrencyLimit, bundle.CreatedAt.UTC(), bundle.UpdatedAt.UTC(), nullableTime(bundle.CompletedAt))
+	return err
+}
+
+func (s *LedgerRecordStore) SaveReviewBundle(bundle model.ReviewBundle) error {
+	members, termination, err := bundlePayloads(bundle)
+	if err != nil {
+		return err
+	}
+	result, err := s.db.Exec(`UPDATE review_bundles SET lifecycle=?,termination=?,members=?,updated_at=?,completed_at=? WHERE id=?`,
+		bundle.Lifecycle, termination, members, bundle.UpdatedAt.UTC(), nullableTime(bundle.CompletedAt), bundle.ID)
+	if err != nil {
+		return err
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if updated != 1 {
+		return fmt.Errorf("save Review Bundle %q: expected one row, updated %d", bundle.ID, updated)
+	}
+	return nil
+}
+
+func bundlePayloads(bundle model.ReviewBundle) ([]byte, []byte, error) {
+	members, err := json.Marshal(bundle.Members)
+	if err != nil {
+		return nil, nil, err
+	}
+	termination, err := json.Marshal(bundle.Termination)
+	if err != nil {
+		return nil, nil, err
+	}
+	return members, termination, nil
+}
+
+func (s *LedgerRecordStore) LoadReviewBundle(id model.ReviewBundleID) (model.ReviewBundle, error) {
+	var bundle model.ReviewBundle
+	var members, termination []byte
+	var completedAt sql.NullTime
+	err := s.db.QueryRow(`SELECT id,party,description,party_revision,repository,subject_kind,subject_identity,lifecycle,termination,members,concurrency_limit,created_at,updated_at,completed_at FROM review_bundles WHERE id=?`, id).Scan(
+		&bundle.ID, &bundle.Party, &bundle.Description, &bundle.PartyRevision, &bundle.Repository, &bundle.SubjectKind, &bundle.SubjectIdentity, &bundle.Lifecycle, &termination, &members, &bundle.ConcurrencyLimit, &bundle.CreatedAt, &bundle.UpdatedAt, &completedAt)
+	if err != nil {
+		return model.ReviewBundle{}, err
+	}
+	if err := json.Unmarshal(members, &bundle.Members); err != nil {
+		return model.ReviewBundle{}, err
+	}
+	if len(termination) > 0 && string(termination) != "null" {
+		if err := json.Unmarshal(termination, &bundle.Termination); err != nil {
+			return model.ReviewBundle{}, err
+		}
+	}
+	if completedAt.Valid {
+		bundle.CompletedAt = completedAt.Time
+	}
+	return bundle, nil
 }
 
 func (s *LedgerRecordStore) PublishAdjudication(revision model.AdjudicationRevision) (model.AdjudicationRevision, error) {

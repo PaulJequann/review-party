@@ -56,6 +56,8 @@ func commandHandlers(ctx context.Context, stdout, stderr io.Writer) map[string]f
 		"history":  func(arguments []string) int { return runHistory(ctx, arguments, stdout, stderr) },
 		"init":     func(arguments []string) int { return runInit(arguments, stdout, stderr) },
 		"profile":  func(arguments []string) int { return runProfile(ctx, arguments, stdout, stderr) },
+		"party":    func(arguments []string) int { return runParty(ctx, arguments, stdout, stderr) },
+		"parties":  func(arguments []string) int { return runParties(ctx, arguments, stdout, stderr) },
 		"help":     help,
 		"-h":       help,
 		"--help":   help,
@@ -770,7 +772,9 @@ func runInspect(ctx context.Context, arguments []string, stdout, stderr io.Write
 	if !ok {
 		return 2
 	}
-
+	if strings.HasPrefix(string(options.id), "rb_") {
+		return runInspectBundle(ctx, options, stdout, stderr)
+	}
 	conductor, err := engine.New(engine.Config{UserConfigurationPath: options.configuration})
 	if err != nil {
 		fmt.Fprintf(stderr, "review-party: %v\n", err)
@@ -799,6 +803,24 @@ type inspectOptions struct {
 	format          string
 	verifyArtifacts bool
 	configuration   string
+}
+
+func runInspectBundle(ctx context.Context, options inspectOptions, stdout, stderr io.Writer) int {
+	conductor, err := engine.New(engine.Config{UserConfigurationPath: options.configuration})
+	if err != nil {
+		fmt.Fprintf(stderr, "review-party: %v\n", err)
+		return 1
+	}
+	bundle, err := conductor.InspectBundle(ctx, model.ReviewBundleID(options.id))
+	if err != nil {
+		fmt.Fprintf(stderr, "review-party: %v\n", err)
+		return 1
+	}
+	if err := printBundle(stdout, bundle, options.format); err != nil {
+		fmt.Fprintf(stderr, "review-party: %v\n", err)
+		return 1
+	}
+	return 0
 }
 
 func parseInspectOptions(arguments []string, stderr io.Writer) (inspectOptions, bool) {
@@ -907,11 +929,13 @@ func takeLeadingValue(arguments []string) (string, []string) {
 func printUsage(output io.Writer) {
 	fmt.Fprintln(output, "usage:")
 	fmt.Fprintln(output, "  review-party profiles [--repo PATH] [--format human|json]")
+	fmt.Fprintln(output, "  review-party parties [--repo PATH] [--format human|json]")
 	fmt.Fprintln(output, "  review-party profile create NAME (--blank|--from-packaged PROFILE) [--repo PATH|--global]")
 	fmt.Fprintln(output, "  review-party profile install-defaults [--repo PATH|--global]")
 	fmt.Fprintln(output, "  review-party config path|show [--config PATH]")
 	fmt.Fprintf(output, "  review-party explain PROFILE [--repo PATH] [--reviewer %s] [--model MODEL] [--effort EFFORT] [--format human|json]\n", strings.Join(engine.SupportedReviewers(), "|"))
 	fmt.Fprintf(output, "  review-party review [PROFILE] [--reviewer %s] [--model MODEL] [--effort EFFORT] [--config PATH] [--repo PATH] [--base COMMIT --head COMMIT] [--format human|json]\n", strings.Join(engine.SupportedReviewers(), "|"))
+	fmt.Fprintf(output, "  review-party party run PARTY [--reviewer %s] [--model MODEL] [--effort EFFORT] [--concurrency N] [--config PATH] [--repo PATH] [--base COMMIT --head COMMIT] [--deadline DURATION] [--format human|json]\n", strings.Join(engine.SupportedReviewers(), "|"))
 	fmt.Fprintln(output, "  review-party replay REVIEW_ID [--reviewer ID] [--model MODEL] [--effort EFFORT] [--format human|json] [--config PATH]")
 	fmt.Fprintln(output, "  review-party eval run SUITE [--experiment PATH] [--profile NAME] --reviewer ID --model MODEL [--effort EFFORT] [--deadline DURATION] [--format human|json]")
 	fmt.Fprintln(output, "  review-party eval compare --baseline AR_ID --candidate AR_ID [--format human|json]")

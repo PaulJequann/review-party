@@ -277,6 +277,51 @@ go run ./cmd/review-party eval compare \
 See [`docs/design/comparison-v1.md`](docs/design/comparison-v1.md) for the
 matching and interpretation contract.
 
+## Review Parties
+
+A Party composes several Review Profiles over one frozen Review Subject. Every
+member executes through the ordinary Review path, and the resulting Review
+Bundle preserves each member's Review Record, provenance, and completeness:
+
+```sh
+review-party parties
+review-party party run standard --repo .
+review-party party run standard --repo . --base HEAD~1 --head HEAD --concurrency 2
+review-party inspect rb_... --format json
+```
+
+The packaged `standard` Party runs `bugs`, `code-quality`, and `documentation`
+over one shared Subject. Define reusable repository Parties in
+`.reviewparty/parties/<name>.json` or personal Parties under the global library:
+
+```json
+{
+  "schema_version": 1,
+  "name": "release-gate",
+  "description": "Pre-delivery sweep",
+  "concurrency_limit": 2,
+  "profiles": [
+    {"profile": "bugs"},
+    {"profile": "code-quality", "reviewer": "codex", "model": "gpt-5.6-luna", "effort": "high"},
+    {"profile": "documentation", "reviewer": "opencode", "model": "opencode-go/deepseek-v4-flash", "effort": "high"}
+  ]
+}
+```
+
+Repository files shadow global files with the same name, which shadow packaged
+definitions; a definition never inherits or concatenates another Party.
+Explicit `--reviewer`, `--model`, `--effort`, and `--concurrency` flags narrow
+every member to that choice and freeze a distinct recorded Party Revision into
+the Bundle. Members may pin their own Reviewer/model/effort instead.
+
+Preflight compiles every member Profile Revision before any Agent Harness
+launches, so one incompatible member fails the whole Party with zero attempts.
+Members execute with bounded concurrency (sequential by default) over the one
+Subject resolved before launch, so later working-tree changes cannot alter what
+later members review. A Bundle is Completed only when every required member
+completed; otherwise it stays honestly Incomplete while completed members keep
+their Findings visible. See [`docs/design/party-v1.md`](docs/design/party-v1.md).
+
 ## Operational Review Records
 
 New Review Records use schema version 3 and retain machine-readable operational

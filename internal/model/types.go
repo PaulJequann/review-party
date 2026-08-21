@@ -163,6 +163,71 @@ type EvalSuiteTermination struct {
 	Message  string              `json:"message"`
 }
 
+type ReviewBundleID string
+
+type PartyMember struct {
+	Profile  string `json:"profile"`
+	Reviewer string `json:"reviewer,omitempty"`
+	Model    string `json:"model,omitempty"`
+	Effort   string `json:"effort,omitempty"`
+}
+
+type PartyDefinition struct {
+	SchemaVersion    int           `json:"schema_version"`
+	Name             string        `json:"name"`
+	Description      string        `json:"description,omitempty"`
+	Profiles         []PartyMember `json:"profiles"`
+	ConcurrencyLimit int           `json:"concurrency_limit,omitempty"`
+}
+
+type PartySelection struct {
+	Name             string
+	Repository       string
+	Subject          SubjectReference
+	Reviewer         string
+	Model            string
+	Effort           string
+	ConcurrencyLimit int
+}
+
+type PartySummary struct {
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	Members     []string `json:"members"`
+	Source      string   `json:"source"`
+	Error       string   `json:"error,omitempty"`
+}
+
+type BundleMember struct {
+	Profile      string    `json:"profile"`
+	ReviewID     ReviewID  `json:"review_id,omitempty"`
+	Lifecycle    Lifecycle `json:"lifecycle"`
+	Status       string    `json:"status,omitempty"`
+	FindingCount int       `json:"finding_count,omitempty"`
+}
+
+type BundleTermination struct {
+	Category TerminationCategory `json:"category"`
+	Message  string              `json:"message"`
+}
+
+type ReviewBundle struct {
+	ID               ReviewBundleID     `json:"id"`
+	Party            string             `json:"party"`
+	Description      string             `json:"description,omitempty"`
+	PartyRevision    string             `json:"party_revision"`
+	Repository       string             `json:"repository"`
+	SubjectKind      SubjectKind        `json:"subject_kind"`
+	SubjectIdentity  string             `json:"subject_identity"`
+	Lifecycle        Lifecycle          `json:"lifecycle"`
+	Termination      *BundleTermination `json:"termination,omitempty"`
+	Members          []BundleMember     `json:"members"`
+	ConcurrencyLimit int                `json:"concurrency_limit"`
+	CreatedAt        time.Time          `json:"created_at"`
+	UpdatedAt        time.Time          `json:"updated_at"`
+	CompletedAt      time.Time          `json:"completed_at,omitempty"`
+}
+
 type AdjudicationRevisionID string
 
 type ExpectedDisposition string

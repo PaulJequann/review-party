@@ -324,7 +324,7 @@ func TestLedgerPreparationMigratesVersionOneHistoryState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec("DROP TABLE adjudication_revisions; DROP TABLE eval_runs; DROP TABLE eval_suite_runs; ALTER TABLE attempts DROP COLUMN retry_after_ms; DROP INDEX reviews_replay_source; ALTER TABLE reviews DROP COLUMN replays_review_id; DROP INDEX reviews_history_order; DROP INDEX reviews_history_reviewer; DELETE FROM schema_migrations WHERE version>=2"); err != nil {
+	if _, err := db.Exec("DROP TABLE adjudication_revisions; DROP TABLE eval_runs; DROP TABLE eval_suite_runs; DROP INDEX IF EXISTS review_bundles_party_history; DROP TABLE IF EXISTS review_bundles; ALTER TABLE attempts DROP COLUMN retry_after_ms; DROP INDEX reviews_replay_source; ALTER TABLE reviews DROP COLUMN replays_review_id; DROP INDEX reviews_history_order; DROP INDEX reviews_history_reviewer; DELETE FROM schema_migrations WHERE version>=2"); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Close(); err != nil {

@@ -73,6 +73,12 @@ Quality Reviews are packaged Profiles in the current slice; the remaining
 deferred review types and Party semantics remain captured in
 [`../product-model.md`](../product-model.md).
 
+2026-08-21 update: bounded concurrency (DEV-68), finite retries (DEV-69), and
+basic Party composition with persisted Review Bundles ([party
+v1](party-v1.md), Slice 26) now exist on top of this Conductor. Review
+Dependencies, Synthesis Review, conditional pipelines, and hosted execution
+remain deferred.
+
 ## Acceptance evidence
 
 - Later working-tree changes cannot alter the fixed Subject recorded for a

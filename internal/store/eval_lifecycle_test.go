@@ -52,7 +52,7 @@ func writeEvalSchemaV4(t *testing.T, directory string) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	if _, err := db.Exec("DROP TABLE adjudication_revisions; DROP TABLE eval_runs; DROP TABLE eval_suite_runs; ALTER TABLE attempts DROP COLUMN retry_after_ms; DELETE FROM schema_migrations WHERE version>=4"); err != nil {
+	if _, err := db.Exec("DROP TABLE adjudication_revisions; DROP TABLE eval_runs; DROP TABLE eval_suite_runs; DROP INDEX IF EXISTS review_bundles_party_history; DROP TABLE IF EXISTS review_bundles; ALTER TABLE attempts DROP COLUMN retry_after_ms; DELETE FROM schema_migrations WHERE version>=4"); err != nil {
 		t.Fatal(err)
 	}
 	evalSchema, err := migrationFiles.ReadFile("migrations/004_eval_runs.sql")
