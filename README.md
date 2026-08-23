@@ -60,8 +60,9 @@ silently fall back. An unavailable compatible Reviewer produces an inspectable
 Incomplete Review. Grok's built-in model is `grok-4.5`. OpenCode requires a
 model supplied by configuration or explicit `--model`. Personal and Repository
 Configuration can set `reviewers.<id>.model` and `allowed_models`; Repository
-Configuration takes precedence, and Review Party validates the effective
-selection before resolving the Review Subject. An authored `allowed_models`
+Configuration takes precedence. For a single Review, Review Party validates
+the effective selection before resolving the Review Subject. An authored
+`allowed_models`
 list also restricts explicit `--model` choices. Copilot's built-in `auto`
 selection records the model it resolves. Codex's built-in model is
 `gpt-5.6-luna` with high-effort reasoning by default.
@@ -87,14 +88,16 @@ time and then Review ID. The default limit is 20 and the maximum is 200. JSON
 output contains `entries`, the applied `limit`, and `has_more`. History selects
 existing Reviews; it does not rerun or replay them.
 
-## Personal Configuration
+## Personal and Repository Configuration
 
 Review Party loads Personal Configuration from
-`${XDG_CONFIG_HOME:-$HOME/.config}/review-party/config.json`. The versioned JSON
-document may select default Reviewer and Profile choices and enable, disable,
-select, or restrict models for each supported Reviewer. Advanced initialization
-may also add a `state_directory` field; ordinary callers should let `review-party init`
-manage it:
+`${XDG_CONFIG_HOME:-$HOME/.config}/review-party/config.json` and Repository
+Configuration from `<repo>/.reviewparty/config.json`. Both use schema version 1
+and may select default Reviewer and Profile choices or enable, disable, select,
+and restrict models for supported Reviewers. Repository values take precedence
+in Effective Configuration. Only Personal Configuration accepts
+`state_directory` and `eval`; ordinary callers should let `review-party init`
+manage the state directory:
 
 ```json
 {
@@ -126,8 +129,9 @@ manage it:
 An explicit `--reviewer` never bypasses `enabled: false`, and an explicit
 `--model` must belong to `allowed_models` when that list is configured. Unknown
 fields, unsupported versions, unknown Reviewers, disabled defaults, and
-disallowed models fail before Review Subject resolution or Agent Harness
-launch. A missing file preserves the built-in zero-configuration behavior.
+disallowed models fail before Agent Harness launch. A single Review validates
+these choices before Review Subject resolution. A missing file preserves the
+built-in zero-configuration behavior.
 Eval defaults are three total Attempts with finite jittered backoff and one
 active Reviewer execution. A named Experiment Configuration or explicit
 `--attempts` and `--concurrency` flags can override those user defaults for one

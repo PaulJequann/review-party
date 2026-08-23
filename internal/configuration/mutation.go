@@ -19,8 +19,11 @@ type Change struct {
 }
 
 // Plan is a staged, validated set of changes. Nothing is written until
-// Manager.Publish. Callers can render the exported preview fields before
-// deciding whether to publish the plan.
+// Manager.Publish. Callers must check Valid after planning and can render the
+// exported preview fields before deciding whether to publish the plan.
+// Manager.Plan reports invalid intents, including nil, through Valid and Reason
+// rather than its error result; Manager.Publish refuses an invalid Plan.
+// Warnings remains empty until a later Configuration Hub slice defines it.
 type Plan struct {
 	Changes  []Change
 	Scopes   []Scope
