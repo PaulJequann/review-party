@@ -242,8 +242,9 @@ publication.
   returning an error; callers check `Plan.Valid`, and `Manager.Publish` also
   rejects invalid plans.
 - Define a staged `Plan` containing semantic changes, affected scopes, affected
-  paths, validation results, and a `Warnings` field reserved for later slices;
-  Slice 2 leaves `Warnings` empty.
+  paths, validation results, and a stable `Warnings` field reserved for later
+  slices. Slice 2 always leaves `Warnings` empty; callers must ignore it until a
+  later slice defines warning semantics.
 - Publish a confirmed `Plan` atomically with private personal-file permissions
   through `Manager.Publish`.
   Multi-file failure must restore the pre-save state or leave an explicit,

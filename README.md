@@ -60,7 +60,9 @@ silently fall back. An unavailable compatible Reviewer produces an inspectable
 Incomplete Review. Grok's built-in model is `grok-4.5`. OpenCode requires a
 model supplied by configuration or explicit `--model`. Personal and Repository
 Configuration can set `reviewers.<id>.model` and `allowed_models`; Repository
-Configuration takes precedence. For a single Review, Review Party validates
+Configuration takes precedence per reviewer field (`enabled`, `model`, and
+`allowed_models`). Fields from both scopes compose, so a Repository allowlist
+can reject a Personal model. For a single Review, Review Party validates
 the effective selection before resolving the Review Subject. An authored
 `allowed_models`
 list also restricts explicit `--model` choices. Copilot's built-in `auto`
@@ -97,7 +99,9 @@ and may select default Reviewer and Profile choices or enable, disable, select,
 and restrict models for supported Reviewers. Repository values take precedence
 in Effective Configuration. Only Personal Configuration accepts
 `state_directory` and `eval`; ordinary callers should let `review-party init`
-manage the state directory:
+manage the state directory.
+
+Personal Configuration may include `eval` and `state_directory`:
 
 ```json
 {
@@ -122,6 +126,19 @@ manage the state directory:
       "max_backoff": "30s"
     },
     "concurrency_limit": 1
+  }
+}
+```
+
+Repository Configuration uses the same defaults and reviewer fields but omits
+Personal-only `eval` and `state_directory`:
+
+```json
+{
+  "schema_version": 1,
+  "defaults": {"reviewer": "grok"},
+  "reviewers": {
+    "grok": {"enabled": true, "model": "grok-4.5"}
   }
 }
 ```

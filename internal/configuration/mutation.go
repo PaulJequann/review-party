@@ -23,7 +23,8 @@ type Change struct {
 // exported preview fields before deciding whether to publish the plan.
 // Manager.Plan reports invalid intents, including nil, through Valid and Reason
 // rather than its error result; Manager.Publish refuses an invalid Plan.
-// Warnings remains empty until a later Configuration Hub slice defines it.
+// Warnings is stable but remains empty until a later Configuration Hub slice
+// defines it; callers must ignore it until then.
 type Plan struct {
 	Changes  []Change
 	Scopes   []Scope

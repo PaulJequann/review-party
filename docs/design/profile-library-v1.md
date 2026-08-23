@@ -34,9 +34,12 @@ ${XDG_CONFIG_HOME:-$HOME/.config}/review-party/
 
 Packaged defaults use the same Markdown representation and are embedded in the
 binary. Personal and Repository `config.json` documents share schema version 1
-and use the `schema_version`, `defaults.profile`, and `defaults.reviewer`
-fields. Repository scope cannot author Personal-only state or Eval settings.
-Unknown fields, unsupported schemas, unsafe names, invalid
+and use `schema_version`, `defaults.profile`, `defaults.reviewer`, and
+`reviewers.<id>.enabled|model|allowed_models`. Repository reviewer values win
+per field; fields absent there may still come from Personal Configuration. A
+disabled reviewer leaves its model and allowlist inert during document
+validation. Repository scope cannot author Personal-only state or Eval
+settings. Unknown fields, unsupported schemas, unsafe names, invalid
 UTF-8, empty Profiles, oversized files, symlinks, and special files fail before
 launch.
 
