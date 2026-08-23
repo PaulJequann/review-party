@@ -86,7 +86,7 @@ func prepareInitializationState(manager *configuration.Manager, selection initia
 		return false, err
 	}
 	if selection.remember {
-		if err := rememberStateDirectory(manager, selection.directory); err != nil {
+		if err := rememberStateDirectory(manager, string(selection.directory)); err != nil {
 			return false, err
 		}
 	}
