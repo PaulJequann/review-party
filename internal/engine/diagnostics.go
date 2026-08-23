@@ -2,31 +2,31 @@ package engine
 
 import (
 	"fmt"
-	"io/fs"
 	"sort"
 	"strings"
+
+	"reviewparty/internal/configuration"
 )
 
-func (library profileLibrary) missingProfileError(repository, name string, candidates []profileCandidate) error {
+func (library profileLibrary) missingProfileError(repository, name string, searched []string) error {
 	available := library.availableProfileNames(repository)
-	searched := make([]string, 0, len(candidates))
-	for _, candidate := range candidates {
-		searched = append(searched, "  "+candidate.source)
+	formatted := make([]string, 0, len(searched))
+	for _, source := range searched {
+		formatted = append(formatted, "  "+source)
 	}
-	return fmt.Errorf("profile %q was not found\nsearched:\n%s\navailable: %s", name, strings.Join(searched, "\n"), listOrNone(available))
+	return fmt.Errorf("profile %q was not found\nsearched:\n%s\navailable: %s", name, strings.Join(formatted, "\n"), listOrNone(available))
 }
 
 func (library profileLibrary) availableProfileNames(repository string) []string {
 	names := make(map[string]struct{})
 	seen := make(map[string]struct{})
-	layers := library.profileLayers(repository)
-	for _, layer := range layers {
-		entries, err := readProfileDirectory(layer)
-		if err != nil {
-			continue
+	authored, err := library.authoredProfileLibrary(configuration.Repository(repository))
+	if err == nil {
+		if entries, entriesErr := authored.Entries(); entriesErr == nil {
+			addAvailableProfileNames(names, seen, authored, entries)
 		}
-		addAvailableProfileNames(names, seen, layer, entries)
 	}
+	addAvailablePackagedProfileNames(names, seen)
 	available := make([]string, 0, len(names))
 	for name := range names {
 		available = append(available, name)
@@ -35,23 +35,38 @@ func (library profileLibrary) availableProfileNames(repository string) []string 
 	return available
 }
 
-func addAvailableProfileNames(names, seen map[string]struct{}, layer profileLayer, entries []fs.DirEntry) {
+func addAvailableProfileNames(names, seen map[string]struct{}, authored configuration.AuthoredLibrary, entries []configuration.AuthoredEntry) {
 	for _, entry := range entries {
-		name := strings.TrimSuffix(entry.Name(), ".md")
-		if !isAvailableProfileCandidate(entry, name, seen) {
+		name := entry.Name
+		if !isAvailableProfileCandidate(name, seen) {
 			continue
 		}
 		seen[name] = struct{}{}
-		candidate := profileCandidate{source: layerSource(layer, entry.Name()), path: layerProfilePath(layer, entry.Name()), anchor: layer.anchor}
-		if _, found, err := readProfileCandidate(candidate); err == nil && found {
+		if _, found, err := readAuthoredProfile(authored, entry); err == nil && found {
 			names[name] = struct{}{}
 		}
 	}
 }
 
-func isAvailableProfileCandidate(entry fs.DirEntry, name string, seen map[string]struct{}) bool {
+func addAvailablePackagedProfileNames(names, seen map[string]struct{}) {
+	entries, err := packagedProfileEntries()
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if !isAvailableProfileCandidate(entry.name, seen) {
+			continue
+		}
+		seen[entry.name] = struct{}{}
+		if _, found, err := readPackagedProfile(entry); err == nil && found {
+			names[entry.name] = struct{}{}
+		}
+	}
+}
+
+func isAvailableProfileCandidate(name string, seen map[string]struct{}) bool {
 	_, alreadySeen := seen[name]
-	return isMarkdownProfile(entry) && validateProfileName(name) == nil && !alreadySeen
+	return validateProfileName(name) == nil && !alreadySeen
 }
 
 func listOrNone(values []string) string {

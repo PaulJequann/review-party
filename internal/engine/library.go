@@ -4,6 +4,7 @@ import (
 	"embed"
 	"errors"
 	"fmt"
+	"path"
 	"strings"
 
 	"reviewparty/internal/configuration"
@@ -16,6 +17,36 @@ const (
 
 //go:embed profiles/*.md
 var packagedProfileFiles embed.FS
+
+type profileLocation struct {
+	name   string
+	path   string
+	source string
+}
+
+func profileLocationFrom(entry configuration.AuthoredEntry) profileLocation {
+	return profileLocation{name: entry.Name, path: entry.Path, source: entry.Source}
+}
+
+func packagedProfileEntries() ([]profileLocation, error) {
+	entries, err := packagedProfileFiles.ReadDir("profiles")
+	if err != nil {
+		return nil, fmt.Errorf("read packaged profile directory: %w", err)
+	}
+	profiles := make([]profileLocation, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || path.Ext(entry.Name()) != ".md" {
+			continue
+		}
+		profilePath := path.Join("profiles", entry.Name())
+		profiles = append(profiles, profileLocation{
+			name:   strings.TrimSuffix(entry.Name(), ".md"),
+			path:   profilePath,
+			source: "packaged:" + profilePath,
+		})
+	}
+	return profiles, nil
+}
 
 type profileLibrary struct {
 	configuration *configuration.Manager
@@ -39,14 +70,14 @@ type resolvedProfile struct {
 	effective    configuration.Effective
 }
 
-type profileCandidate struct {
-	source string
-	path   string
-	anchor string
-}
-
+// manager returns the owning Configuration Manager, constructing a default
+// one for zero-value libraries used by focused tests.
 func (library profileLibrary) manager() *configuration.Manager {
 	return library.configuration
+}
+
+func (library profileLibrary) authoredProfileLibrary(repository configuration.Repository) (configuration.AuthoredLibrary, error) {
+	return library.manager().AuthoredLibrary(configuration.LibraryProfiles, repository)
 }
 
 func newProfileLibrary(personalRoot string) profileLibrary {

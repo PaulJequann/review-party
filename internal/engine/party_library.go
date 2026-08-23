@@ -6,8 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
@@ -16,8 +14,6 @@ import (
 )
 
 const partyDefinitionSchema = 1
-
-const maximumPartyBytes = 16 * 1024
 
 func decodeStrictObject(payload []byte, destination any, objectName string, nonNullFields ...string) error {
 	if bytes.Equal(bytes.TrimSpace(payload), []byte("null")) {
@@ -52,12 +48,6 @@ func rejectTrailingJSON(decoder *json.Decoder) error {
 
 type PartySummary = model.PartySummary
 
-type partyLayer struct {
-	directory string
-	source    string
-	label     string
-}
-
 func builtinPartyDefinitions() []model.PartyDefinition {
 	return []model.PartyDefinition{{
 		SchemaVersion: partyDefinitionSchema,
@@ -67,16 +57,8 @@ func builtinPartyDefinitions() []model.PartyDefinition {
 	}}
 }
 
-func (conductor *Conductor) partyLayers(repository string) []partyLayer {
-	var layers []partyLayer
-	if repository != "" {
-		layers = append(layers, partyLayer{directory: filepath.Join(repository, ".reviewparty", "parties"), source: "repository", label: ".reviewparty/parties"})
-	}
-	manager := conductor.profiles.manager()
-	if directory, err := manager.PartiesDirectory(configuration.ScopePersonal, configuration.Repository("")); err == nil {
-		layers = append(layers, partyLayer{directory: directory, source: "personal", label: "parties"})
-	}
-	return layers
+func (conductor *Conductor) authoredPartyLibrary(repository string) (configuration.AuthoredLibrary, error) {
+	return conductor.profiles.manager().AuthoredLibrary(configuration.LibraryParties, configuration.Repository(repository))
 }
 
 type partyLookup struct {
@@ -100,15 +82,16 @@ func (conductor *Conductor) resolveParty(lookup partyLookup) (model.PartyDefinit
 }
 
 func (conductor *Conductor) resolveFilesystemParty(lookup partyLookup) (model.PartyDefinition, string, bool, error) {
-	layers := conductor.partyLayers(lookup.repository)
-	for _, layer := range layers {
-		definition, found, err := readPartyDefinition(layer, lookup)
-		if err != nil {
-			return model.PartyDefinition{}, "", false, err
-		}
-		if found {
-			return definition, layer.source + ":" + layer.label + "/" + lookup.name + ".json", true, nil
-		}
+	library, err := conductor.authoredPartyLibrary(lookup.repository)
+	if err != nil {
+		return model.PartyDefinition{}, "", false, err
+	}
+	definition, entry, found, err := readPartyDefinition(library, lookup)
+	if err != nil {
+		return model.PartyDefinition{}, "", false, err
+	}
+	if found {
+		return definition, entry.Source, true, nil
 	}
 	return model.PartyDefinition{}, "", false, nil
 }
@@ -122,30 +105,33 @@ func builtinPartyDefinition(name string) (model.PartyDefinition, bool) {
 	return model.PartyDefinition{}, false
 }
 
-func readPartyDefinition(layer partyLayer, lookup partyLookup) (model.PartyDefinition, bool, error) {
-	name := lookup.name
-	path := filepath.Join(layer.directory, name+".json")
-	payload, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return model.PartyDefinition{}, false, nil
-	}
+func readPartyDefinition(library configuration.AuthoredLibrary, lookup partyLookup) (model.PartyDefinition, configuration.AuthoredEntry, bool, error) {
+	entry, payload, found, err := library.Read(lookup.name)
 	if err != nil {
-		return model.PartyDefinition{}, false, fmt.Errorf("read party %q: %w", name, err)
+		return model.PartyDefinition{}, entry, false, fmt.Errorf("read party %q: %w", lookup.name, err)
 	}
-	if len(payload) > maximumPartyBytes {
-		return model.PartyDefinition{}, false, fmt.Errorf("party %q exceeds %d bytes", name, maximumPartyBytes)
+	if !found {
+		return model.PartyDefinition{}, entry, false, nil
 	}
+	definition, err := decodePartyDefinition(payload, lookup.name)
+	if err != nil {
+		return model.PartyDefinition{}, entry, false, err
+	}
+	return definition, entry, true, nil
+}
+
+func decodePartyDefinition(payload []byte, name string) (model.PartyDefinition, error) {
 	var definition model.PartyDefinition
 	if err := decodeStrictObject(payload, &definition, "party definition "+name, "schema_version", "name", "description", "profiles"); err != nil {
-		return model.PartyDefinition{}, false, InvalidPartyDefinitionError{Name: name, Reason: err.Error()}
+		return model.PartyDefinition{}, InvalidPartyDefinitionError{Name: name, Reason: err.Error()}
 	}
 	if err := validatePartyDefinition(definition); err != nil {
-		return model.PartyDefinition{}, false, InvalidPartyDefinitionError{Name: name, Reason: err.Error()}
+		return model.PartyDefinition{}, InvalidPartyDefinitionError{Name: name, Reason: err.Error()}
 	}
 	if definition.Name != name {
-		return model.PartyDefinition{}, false, InvalidPartyDefinitionError{Name: name, Reason: fmt.Sprintf("name field %q does not match file name", definition.Name)}
+		return model.PartyDefinition{}, InvalidPartyDefinitionError{Name: name, Reason: fmt.Sprintf("name field %q does not match file name", definition.Name)}
 	}
-	return definition, true, nil
+	return definition, nil
 }
 
 func validatePartyDefinition(definition model.PartyDefinition) error {
@@ -197,23 +183,19 @@ func (conductor *Conductor) partyNames(repository string) []string {
 	for _, definition := range builtinPartyDefinitions() {
 		names[definition.Name] = struct{}{}
 	}
-	layers := conductor.partyLayers(repository)
-	for _, layer := range layers {
-		addDirectoryPartyNames(names, layer.directory)
+	if library, err := conductor.authoredPartyLibrary(repository); err == nil {
+		addAuthoredPartyNames(names, library)
 	}
 	return sortedPartyNames(names)
 }
 
-func addDirectoryPartyNames(names map[string]struct{}, directory string) {
-	entries, err := os.ReadDir(directory)
+func addAuthoredPartyNames(names map[string]struct{}, library configuration.AuthoredLibrary) {
+	entries, err := library.Entries()
 	if err != nil {
 		return
 	}
 	for _, entry := range entries {
-		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
-			continue
-		}
-		names[strings.TrimSuffix(entry.Name(), ".json")] = struct{}{}
+		names[entry.Name] = struct{}{}
 	}
 }
 
@@ -231,9 +213,17 @@ func (conductor *Conductor) PartiesForRepository(repository string) ([]PartySumm
 	if err != nil {
 		return nil, err
 	}
+	library, err := conductor.authoredPartyLibrary(root)
+	if err != nil {
+		return nil, err
+	}
 	summaries := make([]PartySummary, 0)
 	seen := make(map[string]struct{})
-	if err := conductor.addLayerParties(&summaries, seen, root); err != nil {
+	entries, err := library.Entries()
+	if err != nil {
+		return nil, err
+	}
+	if err := addAuthoredPartySummaries(&summaries, seen, library, entries); err != nil {
 		return nil, err
 	}
 	addPackagedParties(&summaries, seen)
@@ -246,16 +236,6 @@ func resolvePartyRepositoryRoot(repository string) (string, error) {
 		return "", nil
 	}
 	return resolveRepositoryRoot(repository)
-}
-
-func (conductor *Conductor) addLayerParties(summaries *[]PartySummary, seen map[string]struct{}, repository string) error {
-	layers := conductor.partyLayers(repository)
-	for _, layer := range layers {
-		if err := addLayerPartySummaries(summaries, seen, layer); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func addPackagedParties(summaries *[]PartySummary, seen map[string]struct{}) {
@@ -273,23 +253,13 @@ func addPackagedParties(summaries *[]PartySummary, seen map[string]struct{}) {
 	}
 }
 
-func addLayerPartySummaries(summaries *[]PartySummary, seen map[string]struct{}, layer partyLayer) error {
-	entries, err := os.ReadDir(layer.directory)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("list parties in %q: %w", layer.directory, err)
-	}
+func addAuthoredPartySummaries(summaries *[]PartySummary, seen map[string]struct{}, library configuration.AuthoredLibrary, entries []configuration.AuthoredEntry) error {
 	for _, entry := range entries {
-		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
-			continue
-		}
-		name := strings.TrimSuffix(entry.Name(), ".json")
+		name := entry.Name
 		if _, exists := seen[name]; exists {
 			continue
 		}
-		summary := layerPartySummary(layer, partyLookup{name: name})
+		summary := authoredPartySummary(library, entry)
 		if summary.Source == "" {
 			continue
 		}
@@ -299,19 +269,24 @@ func addLayerPartySummaries(summaries *[]PartySummary, seen map[string]struct{},
 	return nil
 }
 
-// layerPartySummary summarizes one party file. An empty Source reports a
+// authoredPartySummary summarizes one party file. An empty Source reports a
 // missing definition that should not be listed.
-func layerPartySummary(layer partyLayer, lookup partyLookup) PartySummary {
-	summary := PartySummary{Name: lookup.name, Source: layer.source}
-	definition, found, err := readPartyDefinition(layer, lookup)
+func authoredPartySummary(library configuration.AuthoredLibrary, entry configuration.AuthoredEntry) PartySummary {
+	summary := PartySummary{Name: entry.Name, Source: string(entry.Scope)}
+	payload, found, err := library.ReadEntry(entry)
 	switch {
 	case err != nil:
 		summary.Error = err.Error()
 	case !found:
 		summary.Source = ""
 	default:
-		summary.Description = definition.Description
-		summary.Members = partyMemberNames(definition)
+		definition, decodeErr := decodePartyDefinition(payload, entry.Name)
+		if decodeErr != nil {
+			summary.Error = decodeErr.Error()
+		} else {
+			summary.Description = definition.Description
+			summary.Members = partyMemberNames(definition)
+		}
 	}
 	return summary
 }

@@ -33,7 +33,10 @@ const (
 	SourceExplicit   Source = "explicit"
 )
 
-const maximumDocumentBytes = 64 * 1024
+// MaximumDocumentBytes bounds one authored configuration document or Profile.
+const MaximumDocumentBytes = 64 * 1024
+
+const maximumPartyBytes = 16 * 1024
 
 // Repository identifies the repository whose team-owned configuration should
 // participate in a load or publication. The zero value means no repository.
@@ -155,24 +158,6 @@ func (manager *Manager) configPathAndAnchor(scope Scope, repository Repository) 
 		return manager.personalConfigPath, filepath.Dir(manager.personalConfigPath), nil
 	}
 	return filepath.Join(directory, "config.json"), anchor, nil
-}
-
-// ProfilesDirectory returns the Profile library directory for one scope.
-func (manager *Manager) ProfilesDirectory(scope Scope, repository Repository) (string, error) {
-	directory, _, err := manager.scopeDirectory(scope, repository)
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(directory, "profiles"), nil
-}
-
-// PartiesDirectory returns the Party definition directory for one scope.
-func (manager *Manager) PartiesDirectory(scope Scope, repository Repository) (string, error) {
-	directory, _, err := manager.scopeDirectory(scope, repository)
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(directory, "parties"), nil
 }
 
 func (manager *Manager) knownReviewers() []string {

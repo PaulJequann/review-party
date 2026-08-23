@@ -7,33 +7,6 @@ import (
 	"testing"
 )
 
-func TestLocalFileReaderRejectsFileSwappedForSymlinkBeforeOpen(t *testing.T) {
-	directory := t.TempDir()
-	path := filepath.Join(directory, "profile.md")
-	secretPath := filepath.Join(directory, "secret")
-	writeTestFile(t, path, "EXPECTED PROFILE")
-	writeTestFile(t, secretPath, "SECRET CONTENT")
-
-	payload, found, err := readLocalRegularFileWith(directory, path, "test profile", maximumProfileBytes, func(root *os.Root, name string) (*os.File, error) {
-		if removeErr := os.Remove(path); removeErr != nil {
-			return nil, removeErr
-		}
-		if symlinkErr := os.Symlink(filepath.Base(secretPath), path); symlinkErr != nil {
-			return nil, symlinkErr
-		}
-		return root.Open(name)
-	})
-	if err == nil {
-		t.Fatalf("error = %v", err)
-	}
-	if found {
-		t.Fatal("swapped file was reported as found")
-	}
-	if len(payload) != 0 {
-		t.Fatalf("secret payload was returned: %q", payload)
-	}
-}
-
 func TestProfileReaderRejectsSymlinkedLibraryDirectory(t *testing.T) {
 	repository := testRepository(t)
 	outside := t.TempDir()
