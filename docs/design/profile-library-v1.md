@@ -51,9 +51,11 @@ precedence produces the final effective Reviewer policy.
 
 An enabled Reviewer with a non-empty packaged model uses that model when no
 authored model wins. If an authored `allowed_models` restriction also wins, the
-allowlist must contain the packaged model. Clearing the allowlist removes the
-restriction. If the final effective Reviewer is disabled, its model and
-allowlist are inert and cannot make the policy invalid.
+allowlist must contain the packaged model. To clear the restriction, omit the
+`allowed_models` field or use `SetReviewerAllowedModels{Models: nil}`. An empty
+array means no model is allowed; it does not clear the restriction. If the final
+effective Reviewer is disabled, its model and allowlist are inert and cannot
+make the policy invalid.
 
 `Manager.Plan` returns an opaque plan. Its preview accessors return defensive
 copies, so a caller cannot mutate the staged documents through `Changes`,
