@@ -189,32 +189,21 @@ func validateScopeFields(document Document, scope Scope) error {
 }
 
 func validateDefaults(defaults Defaults, manager *Manager) error {
-	if err := validateDefaultReviewer(defaults.Reviewer, manager); err != nil {
+	if err := validateDefault("reviewer", defaults.Reviewer, manager.validateReviewer); err != nil {
 		return err
 	}
-	return validateDefaultProfile(defaults.Profile, manager)
+	return validateDefault("profile", defaults.Profile, manager.validateProfileName)
 }
 
-func validateDefaultReviewer(reviewer string, manager *Manager) error {
-	if reviewer == "" {
+func validateDefault(field, value string, validate func(string) error) error {
+	if value == "" {
 		return nil
 	}
-	err := manager.validateReviewer(reviewer)
+	err := validate(value)
 	if err == nil {
 		return nil
 	}
-	return fmt.Errorf("defaults.reviewer: %w", err)
-}
-
-func validateDefaultProfile(profile string, manager *Manager) error {
-	if profile == "" {
-		return nil
-	}
-	err := manager.validateProfileName(profile)
-	if err == nil {
-		return nil
-	}
-	return fmt.Errorf("defaults.profile: %w", err)
+	return fmt.Errorf("defaults.%s: %w", field, err)
 }
 
 func validateReviewers(policies map[string]ReviewerPolicy, manager *Manager) error {
@@ -222,34 +211,8 @@ func validateReviewers(policies map[string]ReviewerPolicy, manager *Manager) err
 		if err := manager.validateReviewer(id); err != nil {
 			return fmt.Errorf("reviewers.%s: %w", id, err)
 		}
-		if err := validateReviewerPolicy(policies[id]); err != nil {
-			return fmt.Errorf("reviewers.%s: %w", id, err)
-		}
 	}
 	return nil
-}
-
-func validateReviewerPolicy(policy ReviewerPolicy) error {
-	if reviewerIsDisabled(policy) {
-		// A disabled reviewer never runs, so an inconsistent model and
-		// allowlist stay inert instead of failing the whole document.
-		return nil
-	}
-	if reviewerModelIsDisallowed(policy) {
-		return fmt.Errorf("model %q is not in allowed_models %v", policy.Model, policy.AllowedModels)
-	}
-	return nil
-}
-
-func reviewerIsDisabled(policy ReviewerPolicy) bool {
-	return policy.Enabled != nil && !*policy.Enabled
-}
-
-func reviewerModelIsDisallowed(policy ReviewerPolicy) bool {
-	if policy.Model == "" || policy.AllowedModels == nil {
-		return false
-	}
-	return !containsModel(policy.AllowedModels, policy.Model)
 }
 
 func validateDocumentEval(policy *EvalPolicy) error {

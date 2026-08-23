@@ -1,10 +1,11 @@
 package configuration
 
+import "fmt"
+
 // Overrides are explicit Caller choices supplied at invocation time. They take
 // precedence over every authored scope and carry explicit provenance.
 type Overrides struct {
 	Reviewer string
-	Model    string
 	Profile  string
 }
 
@@ -36,10 +37,59 @@ type ReviewerSettings struct {
 type Effective struct {
 	DefaultProfile  Value[string]
 	DefaultReviewer Value[string]
-	Model           Value[string]
 	StateDirectory  Value[string]
 	Eval            Value[EvalPolicy]
 	Reviewers       map[string]ReviewerSettings
+}
+
+// EffectiveReviewerPolicyError reports an inconsistent enabled reviewer and
+// preserves the winning provenance for both authored fields.
+type EffectiveReviewerPolicyError struct {
+	Reviewer      string
+	Model         Value[string]
+	AllowedModels Value[[]string]
+}
+
+func (failure EffectiveReviewerPolicyError) Error() string {
+	return fmt.Sprintf(
+		"reviewer %q model %q from %s configuration %q is not in allowed_models %v from %s configuration %q",
+		failure.Reviewer,
+		failure.Model.Value,
+		failure.Model.Source,
+		failure.Model.Path,
+		failure.AllowedModels.Value,
+		failure.AllowedModels.Source,
+		failure.AllowedModels.Path,
+	)
+}
+
+// ReviewerPolicy returns one validated effective reviewer policy. Authored
+// model and allowlist consistency is inert while the effective reviewer is
+// disabled.
+func (effective Effective) ReviewerPolicy(id string) (ReviewerSettings, bool, error) {
+	settings, exists := effective.Reviewers[id]
+	if !exists {
+		return ReviewerSettings{}, false, nil
+	}
+	if reviewerPolicyIsEnabled(settings) && reviewerModelIsDisallowed(settings) {
+		return ReviewerSettings{}, true, EffectiveReviewerPolicyError{
+			Reviewer:      id,
+			Model:         settings.Model,
+			AllowedModels: settings.AllowedModels,
+		}
+	}
+	return settings, true, nil
+}
+
+func reviewerPolicyIsEnabled(settings ReviewerSettings) bool {
+	return !settings.Enabled.Authored || settings.Enabled.Value
+}
+
+func reviewerModelIsDisallowed(settings ReviewerSettings) bool {
+	if !settings.Model.Authored || !settings.AllowedModels.Authored {
+		return false
+	}
+	return !containsModel(settings.AllowedModels.Value, settings.Model.Value)
 }
 
 // Resolve loads both scopes and returns effective values with exact
@@ -56,11 +106,11 @@ func (manager *Manager) Resolve(request Request) (Effective, error) {
 		Eval:            evalValue(loaded),
 		Reviewers:       map[string]ReviewerSettings{},
 	}
-	if request.Overrides.Model != "" {
-		effective.Model = Value[string]{Value: request.Overrides.Model, Authored: true, Source: SourceExplicit}
-	}
 	for _, id := range manager.knownReviewers() {
 		effective.Reviewers[id] = resolveReviewerSettings(loaded, reviewerID(id))
+		if _, _, err := effective.ReviewerPolicy(id); err != nil {
+			return Effective{}, err
+		}
 	}
 	return effective, nil
 }

@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"reviewparty/internal/configuration"
 )
 
 const defaultReviewer = "grok"
@@ -15,6 +17,7 @@ type reviewerRegistration struct {
 	disabled                 bool
 	allowedModels            []string
 	modelAllowlistConfigured bool
+	disabledBy               configuration.Value[bool]
 	executor                 attemptExecutor
 }
 
@@ -63,7 +66,7 @@ func (catalog reviewerCatalog) resolve(id string) (reviewerRegistration, error) 
 		return reviewerRegistration{}, UnknownReviewerError{Name: id, Available: catalog.ids()}
 	}
 	if registration.disabled {
-		return reviewerRegistration{}, DisabledReviewerError{Name: id}
+		return reviewerRegistration{}, DisabledReviewerError{Name: id, Source: registration.disabledBy.Source, Path: registration.disabledBy.Path}
 	}
 	registration.capabilities = append([]Capability(nil), registration.capabilities...)
 	registration.allowedModels = append([]string(nil), registration.allowedModels...)
@@ -89,7 +92,9 @@ type UnknownReviewerError struct {
 }
 
 type DisabledReviewerError struct {
-	Name string
+	Name   string
+	Source configuration.Source
+	Path   string
 }
 
 type ReviewerEffortNotSupportedError struct {
@@ -103,7 +108,7 @@ func (failure ReviewerEffortNotSupportedError) Error() string {
 }
 
 func (failure DisabledReviewerError) Error() string {
-	return fmt.Sprintf("reviewer %q is disabled by user configuration", failure.Name)
+	return fmt.Sprintf("reviewer %q is disabled by %s configuration %q", failure.Name, failure.Source, failure.Path)
 }
 
 func (failure UnknownReviewerError) Error() string {

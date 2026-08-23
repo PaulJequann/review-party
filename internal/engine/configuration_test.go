@@ -147,7 +147,7 @@ func TestInvalidReviewerPolicyUsesAllowedModelsPathWhenModelUnset(t *testing.T) 
 	assertInvalidConfigurationPath(t, effective, "repository/grok-allowed-models.json")
 }
 
-func TestInvalidReviewerPolicyFallsBackToAuthoredDefaultPath(t *testing.T) {
+func TestInvalidReviewerPolicyDoesNotInventDefaultPathProvenance(t *testing.T) {
 	effective := configuration.Effective{
 		DefaultReviewer: configuration.Value[string]{Value: "grok", Authored: true, Path: "repository/default.json"},
 		Reviewers: map[string]configuration.ReviewerSettings{
@@ -157,7 +157,7 @@ func TestInvalidReviewerPolicyFallsBackToAuthoredDefaultPath(t *testing.T) {
 		},
 	}
 
-	assertInvalidConfigurationPath(t, effective, "repository/default.json")
+	assertInvalidConfigurationPath(t, effective, "")
 }
 
 func assertInvalidConfigurationPath(t *testing.T, effective configuration.Effective, expected string) {
@@ -259,7 +259,7 @@ func TestExplicitEmptyModelAllowlistRejectsConfiguredModel(t *testing.T) {
   }
 }`
 	_, err := invalidConfigurationFromPayload(t, configuration)
-	if !strings.Contains(err.Error(), `reviewers.opencode: model "meta/muse-spark-1.2-contributor" is not in allowed_models []`) {
+	if !strings.Contains(err.Error(), `reviewer "opencode" model "meta/muse-spark-1.2-contributor"`) || !strings.Contains(err.Error(), `is not in allowed_models []`) {
 		t.Fatalf("reason = %q", err.Error())
 	}
 }
@@ -398,7 +398,7 @@ func TestReviewRequiresUsableEffectiveDefault(t *testing.T) {
 		"built-in default is disabled": {configuration: `{
   "schema_version": 1,
   "reviewers": {"grok": {"enabled": false}}
-}`, reason: `reviewer "grok" is disabled by user configuration`},
+}`, reason: `reviewer "grok" is disabled by personal configuration`},
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {

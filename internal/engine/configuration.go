@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 
@@ -59,12 +60,16 @@ func configureReviewerCatalog(catalog reviewerCatalog, effective configuration.E
 // the exact authored path when a policy cannot be applied.
 func applyEffectiveReviewerPolicies(catalog reviewerCatalog, effective configuration.Effective) (reviewerCatalog, error) {
 	configured := cloneReviewerCatalog(catalog)
-	for id, settings := range effective.Reviewers {
+	for id := range effective.Reviewers {
 		registration, exists := configured.registrations[id]
 		if !exists {
 			continue
 		}
-		updated, err := applyReviewerPolicy(registration, settings, effective.DefaultReviewer.Path)
+		settings, _, err := effective.ReviewerPolicy(id)
+		if err != nil {
+			return reviewerCatalog{}, invalidEffectiveReviewerPolicy(err)
+		}
+		updated, err := applyReviewerPolicy(registration, settings)
 		if err != nil {
 			return reviewerCatalog{}, err
 		}
@@ -73,19 +78,18 @@ func applyEffectiveReviewerPolicies(catalog reviewerCatalog, effective configura
 	return configured, nil
 }
 
-func reviewerPolicyPath(settings configuration.ReviewerSettings, fallback string) string {
-	if settings.Model.Authored && settings.Model.Path != "" {
-		return settings.Model.Path
+func invalidEffectiveReviewerPolicy(err error) error {
+	var failure configuration.EffectiveReviewerPolicyError
+	if errors.As(err, &failure) {
+		return InvalidConfigurationError{Path: failure.Model.Path, Reason: failure.Error()}
 	}
-	if settings.AllowedModels.Authored && settings.AllowedModels.Path != "" {
-		return settings.AllowedModels.Path
-	}
-	return firstNonempty(settings.Enabled.Path, fallback)
+	return err
 }
 
-func applyReviewerPolicy(registration reviewerRegistration, settings configuration.ReviewerSettings, fallbackPath string) (reviewerRegistration, error) {
+func applyReviewerPolicy(registration reviewerRegistration, settings configuration.ReviewerSettings) (reviewerRegistration, error) {
 	if settings.Enabled.Authored {
 		registration.disabled = !settings.Enabled.Value
+		registration.disabledBy = settings.Enabled
 	}
 	if settings.AllowedModels.Authored {
 		registration.allowedModels = canonicalModels(settings.AllowedModels.Value)
@@ -94,13 +98,21 @@ func applyReviewerPolicy(registration reviewerRegistration, settings configurati
 	if settings.Model.Authored {
 		registration.candidate.Model = settings.Model.Value
 	}
-	if registration.disabled {
-		return registration, nil
-	}
-	if err := validateConfiguredModel(registration); err != nil {
-		return reviewerRegistration{}, InvalidConfigurationError{Path: reviewerPolicyPath(settings, fallbackPath), Reason: err.Error()}
+	if packagedModelIsDisallowed(registration, settings) {
+		reason := ReviewerModelNotAllowedError{Reviewer: registration.candidate.ID, Model: registration.candidate.Model, Allowed: registration.allowedModels}
+		return reviewerRegistration{}, InvalidConfigurationError{Path: settings.AllowedModels.Path, Reason: reason.Error()}
 	}
 	return registration, nil
+}
+
+func packagedModelIsDisallowed(registration reviewerRegistration, settings configuration.ReviewerSettings) bool {
+	if registration.disabled || registration.candidate.Model == "" {
+		return false
+	}
+	if settings.Model.Authored || !settings.AllowedModels.Authored {
+		return false
+	}
+	return !containsModel(registration.allowedModels, registration.candidate.Model)
 }
 
 func applyDefaultReviewer(catalog *reviewerCatalog, reviewer string) error {
@@ -144,16 +156,6 @@ func cloneReviewerCatalog(catalog reviewerCatalog) reviewerCatalog {
 	clone := newReviewerCatalog(registrations)
 	clone.defaultReviewer = catalog.defaultReviewer
 	return clone
-}
-
-func validateConfiguredModel(registration reviewerRegistration) error {
-	if registration.candidate.Model == "" || !registration.modelAllowlistConfigured {
-		return nil
-	}
-	if !containsModel(registration.allowedModels, registration.candidate.Model) {
-		return ReviewerModelNotAllowedError{Reviewer: registration.candidate.ID, Model: registration.candidate.Model, Allowed: registration.allowedModels}
-	}
-	return nil
 }
 
 func canonicalModels(models []string) []string {
