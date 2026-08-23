@@ -118,7 +118,7 @@ func TestRepositoryScopeRejectsPersonalOnlyFields(t *testing.T) {
 	}
 }
 
-func TestConfirmIsAtomicWhenASecondFileFails(t *testing.T) {
+func TestPublishIsAtomicWhenASecondFileFails(t *testing.T) {
 	root := t.TempDir()
 	repository := t.TempDir()
 	personalPath := filepath.Join(root, "config.json")
@@ -146,7 +146,7 @@ func TestConfirmIsAtomicWhenASecondFileFails(t *testing.T) {
 		t.Fatalf("plan = %#v", plan)
 	}
 
-	err = plan.Confirm()
+	err = manager.Publish(plan)
 	if err == nil {
 		t.Fatal("publication unexpectedly succeeded")
 	}
@@ -160,7 +160,7 @@ func TestConfirmIsAtomicWhenASecondFileFails(t *testing.T) {
 	}
 }
 
-func TestPlanPreviewsWithoutPublishingUntilConfirmed(t *testing.T) {
+func TestPlanPreviewsWithoutPublishingUntilPublished(t *testing.T) {
 	root := t.TempDir()
 	manager := testManager(t, root)
 	plan, err := manager.Plan(Repository(""), []Intent{
@@ -176,7 +176,7 @@ func TestPlanPreviewsWithoutPublishingUntilConfirmed(t *testing.T) {
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("planning created configuration: %v", err)
 	}
-	if err := plan.Confirm(); err != nil {
+	if err := manager.Publish(plan); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(path); err != nil {
@@ -184,7 +184,7 @@ func TestPlanPreviewsWithoutPublishingUntilConfirmed(t *testing.T) {
 	}
 }
 
-func TestConfirmedTypedReviewerIntentsUpdateEffectiveValues(t *testing.T) {
+func TestPublishedTypedReviewerIntentsUpdateEffectiveValues(t *testing.T) {
 	root := t.TempDir()
 	manager := testManager(t, root)
 	requireConfirmedPlan(t, manager, []Intent{
@@ -251,7 +251,7 @@ func boolPointer(value bool) *bool {
 	return &value
 }
 
-func TestPlanRejectsUnknownReviewerAndConfirmRefusesInvalidPlan(t *testing.T) {
+func TestPlanRejectsUnknownReviewerAndPublishRefusesInvalidPlan(t *testing.T) {
 	root := t.TempDir()
 	manager := testManager(t, root)
 
@@ -264,8 +264,8 @@ func TestPlanRejectsUnknownReviewerAndConfirmRefusesInvalidPlan(t *testing.T) {
 	if plan.Valid || !strings.Contains(plan.Reason, `unknown reviewer "unknown"`) {
 		t.Fatalf("plan = %#v", plan)
 	}
-	if err := plan.Confirm(); err == nil || !strings.Contains(err.Error(), "invalid change plan") {
-		t.Fatalf("confirm error = %v", err)
+	if err := manager.Publish(plan); err == nil || !strings.Contains(err.Error(), "invalid change plan") {
+		t.Fatalf("publish error = %v", err)
 	}
 }
 
@@ -274,7 +274,7 @@ func TestPublishedPersonalConfigurationIsPrivateAndReadable(t *testing.T) {
 	manager := testManager(t, root)
 	plan := requirePersonalPlan(t, manager, root)
 	assertPersonalPlanShape(t, plan)
-	if err := plan.Confirm(); err != nil {
+	if err := manager.Publish(plan); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(root, "config.json")
@@ -308,7 +308,7 @@ func requireConfirmedPlan(t *testing.T, manager *Manager, intents []Intent) {
 	if !plan.Valid {
 		t.Fatalf("plan = %#v", plan)
 	}
-	if err := plan.Confirm(); err != nil {
+	if err := manager.Publish(plan); err != nil {
 		t.Fatal(err)
 	}
 }

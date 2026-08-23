@@ -5,6 +5,67 @@ import (
 	"strings"
 )
 
+// Intent is one typed configuration change request. Intents describe semantic
+// changes; they never carry dotted JSON paths or raw documents. The package
+// owns how each intent maps to a document field so callers only choose a
+// supported operation and its typed values.
+type Intent interface {
+	intentScope() Scope
+	intentField() string
+	applyIntent(*Document)
+	readIntent(Document) (string, bool)
+}
+
+// SetDefaultReviewer selects or clears (empty Reviewer) the default reviewer in one scope.
+type SetDefaultReviewer struct {
+	Target   Scope
+	Reviewer string
+}
+
+// SetDefaultProfile selects or clears (empty Profile) the default profile in one scope.
+type SetDefaultProfile struct {
+	Target  Scope
+	Profile string
+}
+
+// SetReviewerEnabled enables or disables one reviewer in one scope.
+type SetReviewerEnabled struct {
+	Target   Scope
+	Reviewer string
+	Enabled  bool
+}
+
+// SetReviewerModel selects or clears (empty Model) one reviewer's model in one scope.
+type SetReviewerModel struct {
+	Target   Scope
+	Reviewer string
+	Model    string
+}
+
+// SetReviewerAllowedModels restricts or clears (nil Models) one reviewer's model allowlist in one scope.
+type SetReviewerAllowedModels struct {
+	Target   Scope
+	Reviewer string
+	Models   []string
+}
+
+// SetStateDirectory selects or clears (empty Directory) the managed state location.
+// Managed state is always a Personal Configuration choice.
+type SetStateDirectory struct {
+	Directory string
+}
+
+func reviewerField(reviewer, field string) string {
+	return "reviewers." + reviewer + "." + field
+}
+
+func (document *Document) reviewerPolicy(id string) ReviewerPolicy {
+	if document.Reviewers == nil {
+		document.Reviewers = map[string]ReviewerPolicy{}
+	}
+	return document.Reviewers[id]
+}
+
 // intentScope, intentField, applyIntent, and readIntent are deliberately
 // package-private. Callers submit typed values through Intent; only this
 // package knows how those values map to document fields or preview values.

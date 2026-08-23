@@ -1,7 +1,7 @@
 // Package configuration owns Review Party's Personal and Repository
 // Configuration: one load returns authored documents and effective values with
-// exact provenance, typed mutations are staged into validated change plans,
-// and confirmed plans publish atomically. Callers never inspect raw
+// exact provenance, typed intents are staged into validated Plans, and
+// confirmed Plans publish atomically. Callers never inspect raw
 // configuration maps or implement precedence rules themselves.
 package configuration
 
