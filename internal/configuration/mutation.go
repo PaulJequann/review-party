@@ -4,9 +4,8 @@ import (
 	"fmt"
 )
 
-// This file retains the historical name for configuration change planning.
-// Typed intents and their field mapping live in intent.go; Plan owns staging
-// and validation here.
+// Change planning lives in this file. Typed intents and their field mapping
+// live in intent.go; Change, Plan staging, and validation live here.
 
 // Change records one semantic staged change to one field of one file.
 type Change struct {
