@@ -49,7 +49,9 @@ func New(config Config) (*Conductor, error) {
 	if err != nil {
 		return nil, err
 	}
-	reviewers, err := configureReviewerCatalog(defaultReviewerCatalog(), effective)
+	// Apply Personal reviewer policies now, but validate the effective default
+	// only after a repository can contribute its higher-precedence choices.
+	reviewers, err := applyEffectiveReviewerPolicies(defaultReviewerCatalog(), effective)
 	if err != nil {
 		return nil, err
 	}

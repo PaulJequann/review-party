@@ -385,7 +385,7 @@ func TestProfilesUsesConfiguredDefaultWhenBuiltInDefaultIsDisabled(t *testing.T)
 	}
 }
 
-func TestConfigurationRequiresUsableEffectiveDefault(t *testing.T) {
+func TestReviewRequiresUsableEffectiveDefault(t *testing.T) {
 	tests := map[string]struct {
 		configuration string
 		reason        string
@@ -394,11 +394,11 @@ func TestConfigurationRequiresUsableEffectiveDefault(t *testing.T) {
   "schema_version": 1,
   "defaults": {"reviewer": "opencode"},
   "reviewers": {"opencode": {"enabled": true}}
-}`, reason: `effective default reviewer "opencode" requires a model`},
+}`, reason: `reviewer "opencode" requires a model`},
 		"built-in default is disabled": {configuration: `{
   "schema_version": 1,
   "reviewers": {"grok": {"enabled": false}}
-}`, reason: `effective default reviewer "grok" is disabled`},
+}`, reason: `reviewer "grok" is disabled by user configuration`},
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -407,6 +407,29 @@ func TestConfigurationRequiresUsableEffectiveDefault(t *testing.T) {
 				t.Fatalf("error = %q, want it to contain %q", err.Error(), test.reason)
 			}
 		})
+	}
+}
+
+func TestRepositoryCanRepairUnusablePersonalDefault(t *testing.T) {
+	conductor := configuredTestConductor(t, `{
+  "schema_version": 1,
+  "reviewers": {
+    "grok": {"enabled": false},
+    "opencode": {"enabled": true, "model": "meta/muse-spark-1.2-contributor"}
+  }
+}`)
+	repository := changedTestRepository(t)
+	writeProfileConfigFixture(t, filepath.Join(repository, ".reviewparty", "config.json"), `{
+  "schema_version": 1,
+  "defaults": {"reviewer": "opencode"}
+}`)
+
+	explanation, err := conductor.ExplainForRepository(context.Background(), ProfileSelection{Profile: "bugs"}, repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if explanation.ProfileRevision.ReviewerID != "opencode" {
+		t.Fatalf("reviewer = %q, want opencode", explanation.ProfileRevision.ReviewerID)
 	}
 }
 
@@ -491,7 +514,10 @@ func conductorFromConfiguration(t *testing.T, configuration string) (*Conductor,
 
 func invalidConfigurationFromPayload(t *testing.T, payload string) (string, error) {
 	t.Helper()
-	_, path, err := conductorFromConfiguration(t, payload)
+	conductor, path, err := conductorFromConfiguration(t, payload)
+	if err == nil {
+		_, err = conductor.Explain(context.Background(), ProfileSelection{Profile: "bugs"})
+	}
 	if err == nil {
 		t.Fatal("configuration payload was accepted")
 	}
