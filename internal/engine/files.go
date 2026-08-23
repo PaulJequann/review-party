@@ -47,7 +47,8 @@ func (library profileLibrary) findProfile(lookup profileLookup) (resolvedProfile
 func (library profileLibrary) profileCandidates(lookup profileLookup) []profileCandidate {
 	filename := lookup.name + ".md"
 	var candidates []profileCandidate
-	for _, layer := range library.profileLayers(lookup.repository) {
+	layers := library.profileLayers(lookup.repository)
+	for _, layer := range layers {
 		candidates = append(candidates, profileCandidate{
 			source: layerSource(layer, filename),
 			path:   layerProfilePath(layer, filename),
@@ -62,7 +63,8 @@ func (library profileLibrary) profileLayers(repository string) []profileLayer {
 	if repository != "" {
 		layers = append(layers, profileLayer{directory: filepath.Join(repository, ".reviewparty", "profiles"), anchor: repository, source: "repository"})
 	}
-	if directory, err := library.manager().ProfilesDirectory(configuration.ScopePersonal, configuration.Repository("")); err == nil {
+	manager := library.manager()
+	if directory, err := manager.ProfilesDirectory(configuration.ScopePersonal, configuration.Repository("")); err == nil {
 		layers = append(layers, profileLayer{directory: directory, anchor: filepath.Dir(filepath.Dir(directory)), source: "personal"})
 	}
 	return append(layers, profileLayer{directory: "profiles", source: "packaged", packaged: true})
@@ -84,11 +86,13 @@ func isMarkdownProfile(entry fs.DirEntry) bool {
 }
 
 func (library profileLibrary) list(repository string) ([]ProfileSummary, error) {
-	if _, err := library.manager().Load(configuration.Repository(repository)); err != nil {
+	manager := library.manager()
+	if _, err := manager.Resolve(configuration.Request{Repository: configuration.Repository(repository)}); err != nil {
 		return nil, err
 	}
 	winners := make(map[string]ProfileSummary)
-	for _, layer := range library.profileLayers(repository) {
+	layers := library.profileLayers(repository)
+	for _, layer := range layers {
 		if err := addLayerProfiles(winners, layer); err != nil {
 			return nil, err
 		}

@@ -19,7 +19,8 @@ func (library profileLibrary) missingProfileError(repository, name string, candi
 func (library profileLibrary) availableProfileNames(repository string) []string {
 	names := make(map[string]struct{})
 	seen := make(map[string]struct{})
-	for _, layer := range library.profileLayers(repository) {
+	layers := library.profileLayers(repository)
+	for _, layer := range layers {
 		entries, err := readProfileDirectory(layer)
 		if err != nil {
 			continue

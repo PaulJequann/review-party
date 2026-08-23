@@ -36,52 +36,71 @@ func (failure ReviewerModelNotAllowedError) Error() string {
 	return fmt.Sprintf("model %q is not allowed for reviewer %q; expected %v", failure.Model, failure.Reviewer, failure.Allowed)
 }
 
-// configureReviewerCatalog applies an authored Personal Configuration document
-// to the packaged reviewer catalog and validates the effective default.
-func configureReviewerCatalog(catalog reviewerCatalog, document configuration.Document, path string) (reviewerCatalog, error) {
-	configured := cloneReviewerCatalog(catalog)
-	if err := applyReviewerPolicies(&configured, document.Reviewers); err != nil {
-		return reviewerCatalog{}, InvalidConfigurationError{Path: path, Reason: err.Error()}
+// configureReviewerCatalog applies Effective Configuration to the packaged
+// reviewer catalog and validates the effective default.
+func configureReviewerCatalog(catalog reviewerCatalog, effective configuration.Effective) (reviewerCatalog, error) {
+	configured, err := applyEffectiveReviewerPolicies(catalog, effective)
+	if err != nil {
+		return reviewerCatalog{}, err
 	}
-	if err := applyDefaultReviewer(&configured, document.Defaults.Reviewer); err != nil {
-		return reviewerCatalog{}, InvalidConfigurationError{Path: path, Reason: err.Error()}
+	if effective.DefaultReviewer.Authored {
+		if err := applyDefaultReviewer(&configured, effective.DefaultReviewer.Value); err != nil {
+			return reviewerCatalog{}, InvalidConfigurationError{Path: effective.DefaultReviewer.Path, Reason: err.Error()}
+		}
 	}
 	if err := validateEffectiveDefault(configured); err != nil {
-		return reviewerCatalog{}, InvalidConfigurationError{Path: path, Reason: err.Error()}
+		return reviewerCatalog{}, InvalidConfigurationError{Path: effective.DefaultReviewer.Path, Reason: err.Error()}
 	}
 	return configured, nil
 }
 
-func applyReviewerPolicies(catalog *reviewerCatalog, policies map[string]configuration.ReviewerPolicy) error {
-	for id, policy := range policies {
-		registration, exists := catalog.registrations[id]
+// applyEffectiveReviewerPolicies applies repository and Personal reviewer
+// settings without requiring the caller to know their precedence. It returns
+// the exact authored path when a policy cannot be applied.
+func applyEffectiveReviewerPolicies(catalog reviewerCatalog, effective configuration.Effective) (reviewerCatalog, error) {
+	configured := cloneReviewerCatalog(catalog)
+	for id, settings := range effective.Reviewers {
+		registration, exists := configured.registrations[id]
 		if !exists {
-			return fmt.Errorf("unknown reviewer %q", id)
+			continue
 		}
-		configured, err := applyReviewerPolicy(registration, policy)
+		updated, err := applyReviewerPolicy(registration, settings, effective.DefaultReviewer.Path)
 		if err != nil {
-			return err
+			return reviewerCatalog{}, err
 		}
-		catalog.registrations[id] = configured
+		configured.registrations[id] = updated
 	}
-	return nil
+	return configured, nil
 }
 
-func applyReviewerPolicy(registration reviewerRegistration, policy configuration.ReviewerPolicy) (reviewerRegistration, error) {
-	if policy.Enabled != nil {
-		registration.disabled = !*policy.Enabled
+func reviewerPolicyPath(settings configuration.ReviewerSettings, fallback string) string {
+	if settings.Model.Authored && settings.Model.Path != "" {
+		return settings.Model.Path
 	}
-	if policy.AllowedModels != nil {
-		registration.allowedModels = canonicalModels(policy.AllowedModels)
+	if settings.AllowedModels.Authored && settings.AllowedModels.Path != "" {
+		return settings.AllowedModels.Path
+	}
+	return firstNonempty(settings.Enabled.Path, fallback)
+}
+
+func applyReviewerPolicy(registration reviewerRegistration, settings configuration.ReviewerSettings, fallbackPath string) (reviewerRegistration, error) {
+	if settings.Enabled.Authored {
+		registration.disabled = !settings.Enabled.Value
+	}
+	if settings.AllowedModels.Authored {
+		registration.allowedModels = canonicalModels(settings.AllowedModels.Value)
 		registration.modelAllowlistConfigured = true
 	}
-	if policy.Model != "" {
-		registration.candidate.Model = policy.Model
+	if settings.Model.Authored {
+		registration.candidate.Model = settings.Model.Value
 	}
 	if registration.disabled {
 		return registration, nil
 	}
-	return registration, validateConfiguredModel(registration)
+	if err := validateConfiguredModel(registration); err != nil {
+		return reviewerRegistration{}, InvalidConfigurationError{Path: reviewerPolicyPath(settings, fallbackPath), Reason: err.Error()}
+	}
+	return registration, nil
 }
 
 func applyDefaultReviewer(catalog *reviewerCatalog, reviewer string) error {

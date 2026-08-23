@@ -83,6 +83,95 @@ func TestRepositoryDefaultReviewerOwnsExplicitModelValidation(t *testing.T) {
 	}
 }
 
+func TestRepositoryEffectiveReviewerOverridesPersonalPolicy(t *testing.T) {
+	conductor := configuredTestConductor(t, `{
+  "schema_version": 1,
+  "defaults": {"reviewer": "opencode"},
+  "reviewers": {
+    "grok": {"enabled": true, "model": "personal-grok"},
+    "opencode": {"enabled": true, "model": "personal-opencode"}
+  }
+}`)
+	repository := changedTestRepository(t)
+	writeProfileConfigFixture(t, filepath.Join(repository, ".reviewparty", "config.json"), `{
+  "schema_version": 1,
+  "defaults": {"reviewer": "grok"},
+  "reviewers": {"grok": {"model": "repository-grok"}}
+}`)
+
+	explanation, err := conductor.ExplainForRepository(context.Background(), ProfileSelection{Profile: "bugs"}, repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if explanation.ProfileRevision.ReviewerID != "grok" || explanation.ProfileRevision.Model != "repository-grok" {
+		t.Fatalf("profile reviewer = %q/%q, want grok/repository-grok", explanation.ProfileRevision.ReviewerID, explanation.ProfileRevision.Model)
+	}
+}
+
+func TestInvalidDefaultUsesAuthoredDefaultPath(t *testing.T) {
+	effective := configuration.Effective{
+		DefaultReviewer: configuration.Value[string]{Value: "grok", Authored: true, Path: "repository/default.json"},
+		Reviewers: map[string]configuration.ReviewerSettings{
+			"grok": {
+				Enabled: configuration.Value[bool]{Value: false, Authored: true, Path: "repository/grok.json"},
+			},
+		},
+	}
+
+	assertInvalidConfigurationPath(t, effective, "repository/default.json")
+}
+
+func TestInvalidReviewerPolicyUsesAuthoredReviewerPath(t *testing.T) {
+	effective := configuration.Effective{
+		DefaultReviewer: configuration.Value[string]{Value: "grok", Authored: true, Path: "personal/default.json"},
+		Reviewers: map[string]configuration.ReviewerSettings{
+			"opencode": {
+				Model:         configuration.Value[string]{Value: "bad-model", Authored: true, Path: "personal/opencode-model.json"},
+				AllowedModels: configuration.Value[[]string]{Value: []string{"allowed-model"}, Authored: true, Path: "repository/opencode-allowed-models.json"},
+			},
+		},
+	}
+
+	assertInvalidConfigurationPath(t, effective, "personal/opencode-model.json")
+}
+
+func TestInvalidReviewerPolicyUsesAllowedModelsPathWhenModelUnset(t *testing.T) {
+	effective := configuration.Effective{
+		Reviewers: map[string]configuration.ReviewerSettings{
+			"grok": {
+				AllowedModels: configuration.Value[[]string]{Value: []string{"allowed-model"}, Authored: true, Path: "repository/grok-allowed-models.json"},
+			},
+		},
+	}
+
+	assertInvalidConfigurationPath(t, effective, "repository/grok-allowed-models.json")
+}
+
+func TestInvalidReviewerPolicyFallsBackToAuthoredDefaultPath(t *testing.T) {
+	effective := configuration.Effective{
+		DefaultReviewer: configuration.Value[string]{Value: "grok", Authored: true, Path: "repository/default.json"},
+		Reviewers: map[string]configuration.ReviewerSettings{
+			"grok": {
+				AllowedModels: configuration.Value[[]string]{Value: []string{"allowed-model"}, Authored: true},
+			},
+		},
+	}
+
+	assertInvalidConfigurationPath(t, effective, "repository/default.json")
+}
+
+func assertInvalidConfigurationPath(t *testing.T, effective configuration.Effective, expected string) {
+	t.Helper()
+	_, err := configureReviewerCatalog(defaultReviewerCatalog(), effective)
+	var invalid InvalidConfigurationError
+	if !errors.As(err, &invalid) {
+		t.Fatalf("error = %v, want InvalidConfigurationError", err)
+	}
+	if invalid.Path != expected {
+		t.Fatalf("error path = %q, want %q", invalid.Path, expected)
+	}
+}
+
 func TestOpenCodeModelOverrideMustBeAllowed(t *testing.T) {
 	conductor := configuredTestConductor(t, configuredReviewers)
 

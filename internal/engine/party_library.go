@@ -72,7 +72,8 @@ func (conductor *Conductor) partyLayers(repository string) []partyLayer {
 	if repository != "" {
 		layers = append(layers, partyLayer{directory: filepath.Join(repository, ".reviewparty", "parties"), source: "repository", label: ".reviewparty/parties"})
 	}
-	if directory, err := conductor.profiles.manager().PartiesDirectory(configuration.ScopePersonal, configuration.Repository("")); err == nil {
+	manager := conductor.profiles.manager()
+	if directory, err := manager.PartiesDirectory(configuration.ScopePersonal, configuration.Repository("")); err == nil {
 		layers = append(layers, partyLayer{directory: directory, source: "personal", label: "parties"})
 	}
 	return layers
@@ -94,11 +95,13 @@ func (conductor *Conductor) resolveParty(lookup partyLookup) (model.PartyDefinit
 	if definition, found := builtinPartyDefinition(lookup.name); found {
 		return definition, "packaged", nil
 	}
-	return model.PartyDefinition{}, "", UnknownPartyError{Name: lookup.name, Available: conductor.partyNames(lookup.repository)}
+	available := conductor.partyNames(lookup.repository)
+	return model.PartyDefinition{}, "", UnknownPartyError{Name: lookup.name, Available: available}
 }
 
 func (conductor *Conductor) resolveFilesystemParty(lookup partyLookup) (model.PartyDefinition, string, bool, error) {
-	for _, layer := range conductor.partyLayers(lookup.repository) {
+	layers := conductor.partyLayers(lookup.repository)
+	for _, layer := range layers {
 		definition, found, err := readPartyDefinition(layer, lookup)
 		if err != nil {
 			return model.PartyDefinition{}, "", false, err
@@ -194,7 +197,8 @@ func (conductor *Conductor) partyNames(repository string) []string {
 	for _, definition := range builtinPartyDefinitions() {
 		names[definition.Name] = struct{}{}
 	}
-	for _, layer := range conductor.partyLayers(repository) {
+	layers := conductor.partyLayers(repository)
+	for _, layer := range layers {
 		addDirectoryPartyNames(names, layer.directory)
 	}
 	return sortedPartyNames(names)
@@ -245,7 +249,8 @@ func resolvePartyRepositoryRoot(repository string) (string, error) {
 }
 
 func (conductor *Conductor) addLayerParties(summaries *[]PartySummary, seen map[string]struct{}, repository string) error {
-	for _, layer := range conductor.partyLayers(repository) {
+	layers := conductor.partyLayers(repository)
+	for _, layer := range layers {
 		if err := addLayerPartySummaries(summaries, seen, layer); err != nil {
 			return err
 		}

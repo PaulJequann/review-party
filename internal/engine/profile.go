@@ -56,11 +56,7 @@ func compileProfileDefinition(catalog reviewerCatalog, selection ProfileSelectio
 	if err != nil {
 		return compiledProfile{}, err
 	}
-	missing := missingCapabilities(definition.requiredCapabilities, registration.capabilities)
-	if len(missing) > 0 {
-		return compiledProfile{}, UnsupportedCapabilitiesError{Profile: selection.Profile, Reviewer: registration.candidate.ID, Missing: missing}
-	}
-	registration, err = resolveReviewerSelection(registration, selection)
+	registration, err = validateReviewerSelection(registration, selection, definition.requiredCapabilities, definition.name)
 	if err != nil {
 		return compiledProfile{}, err
 	}
@@ -88,6 +84,14 @@ func compileProfileDefinition(catalog reviewerCatalog, selection ProfileSelectio
 		reviewer:           registration,
 		reviewerWasDefault: reviewerWasDefault,
 	}, nil
+}
+
+func validateReviewerSelection(registration reviewerRegistration, selection ProfileSelection, required []Capability, profileName string) (reviewerRegistration, error) {
+	missing := missingCapabilities(required, registration.capabilities)
+	if len(missing) > 0 {
+		return reviewerRegistration{}, UnsupportedCapabilitiesError{Profile: profileName, Reviewer: registration.candidate.ID, Missing: missing}
+	}
+	return resolveReviewerSelection(registration, selection)
 }
 
 func resolveReviewerSelection(registration reviewerRegistration, selection ProfileSelection) (reviewerRegistration, error) {

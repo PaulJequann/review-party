@@ -139,11 +139,14 @@ func TestReviewPreservesValidFindings(t *testing.T) {
 func TestRecordSaveFailureRemovesPublishedAttemptArtifacts(t *testing.T) {
 	repository := changedTestRepository(t)
 	store := &failFinalRecordStore{}
-	conductor := newConductor(store, map[string]attemptExecutor{defaultReviewer: successfulExecutor(cleanReview)}, time.Second)
+	conductor, err := newConductorWithProfiles(store, catalogWithExecutors(map[string]attemptExecutor{defaultReviewer: successfulExecutor(cleanReview)}), newProfileLibrary(t.TempDir()), time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
 	artifactRoot := t.TempDir()
 	conductor.artifacts = mustNewArtifactStore(t, artifactRoot)
 
-	_, err := conductor.Review(context.Background(), testSelection(repository))
+	_, err = conductor.Review(context.Background(), testSelection(repository))
 	if err == nil || !strings.Contains(err.Error(), "final record save") {
 		t.Fatalf("error = %v, want final record save failure", err)
 	}
@@ -162,8 +165,14 @@ func TestOverflowedExecutionMarksAssistantArtifactTruncated(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(attempt.Artifacts) != 2 || !attempt.Artifacts[1].Truncated || attempt.RawOutput != "" {
-		t.Fatalf("attempt = %#v, want truncated assistant artifact and no raw record output", attempt)
+	if len(attempt.Artifacts) != 2 {
+		t.Fatalf("artifacts = %d, want 2", len(attempt.Artifacts))
+	}
+	if !attempt.Artifacts[1].Truncated {
+		t.Fatalf("assistant artifact = %#v, want truncated", attempt.Artifacts[1])
+	}
+	if attempt.RawOutput != "" {
+		t.Fatalf("raw output = %q, want empty", attempt.RawOutput)
 	}
 }
 
@@ -476,7 +485,11 @@ func testConductorWithExecutors(t *testing.T, executors map[string]attemptExecut
 	if err != nil {
 		t.Fatal(err)
 	}
-	return newConductor(store, executors, deadline)
+	conductor, err := newConductorWithProfiles(store, catalogWithExecutors(executors), newProfileLibrary(t.TempDir()), deadline)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return conductor
 }
 
 func testSelection(repository string) ReviewSelection {

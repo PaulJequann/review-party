@@ -51,10 +51,13 @@ func TestGlobalDefaultsSelectProfileAndReviewer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	conductor := newConductorWithProfiles(store, catalogWithExecutors(map[string]attemptExecutor{
+	conductor, err := newConductorWithProfiles(store, catalogWithExecutors(map[string]attemptExecutor{
 		"grok":    grok,
 		"copilot": copilot,
 	}), newProfileLibrary(globalDirectory), time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	record, err := conductor.Review(context.Background(), ReviewSelection{Repository: repository, Subject: WorkingChanges()})
 	if err != nil {
@@ -74,7 +77,10 @@ func TestInvalidRepositoryProfileFailsBeforeLaunchWithoutFallback(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	conductor := newConductorWithProfiles(store, catalogWithExecutors(map[string]attemptExecutor{defaultReviewer: executor}), newProfileLibrary(globalDirectory), time.Second)
+	conductor, err := newConductorWithProfiles(store, catalogWithExecutors(map[string]attemptExecutor{defaultReviewer: executor}), newProfileLibrary(globalDirectory), time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	_, err = conductor.Review(context.Background(), ReviewSelection{Repository: repository, Subject: WorkingChanges()})
 	if err == nil {
@@ -143,6 +149,26 @@ func TestMissingProfileExplainsSearchAndAvailableNames(t *testing.T) {
 	}
 }
 
+func TestExplicitReviewerMissingProfileReturnsResolutionError(t *testing.T) {
+	repository := changedTestRepository(t)
+	store := &trackingRecordStore{}
+	executor := successfulExecutor(cleanReview)
+	conductor := newTestConductorWithCatalog(t, store, catalogWithExecutors(map[string]attemptExecutor{
+		defaultReviewer: executor,
+	}), time.Minute)
+
+	_, err := conductor.Review(context.Background(), ReviewSelection{
+		Repository: repository,
+		Subject:    WorkingChanges(),
+		Profile:    "does-not-exist",
+		Reviewer:   defaultReviewer,
+	})
+	if err == nil || !strings.Contains(err.Error(), `profile "does-not-exist" was not found`) {
+		t.Fatalf("error = %v, want missing profile error", err)
+	}
+	assertNoReviewActivity(t, store, executor)
+}
+
 func TestProfileConfigRejectsUnknownFieldsAndUnsafeNames(t *testing.T) {
 	for name, payload := range map[string]string{
 		"unknown field": `{"schema_version":1,"defaults":{"profil":"bugs"}}`,
@@ -163,7 +189,7 @@ func TestProfileRevisionChangesWithMarkdown(t *testing.T) {
 	repository := testRepository(t)
 	path := filepath.Join(repository, ".reviewparty", "profiles", "bugs.md")
 	writeProfileFixture(t, path, "FIRST GUIDANCE")
-	library := profileLibrary{}
+	library := newProfileLibrary(t.TempDir())
 	first, err := compileTestProfile(library, "bugs", "grok", ReviewSubject{Repository: repository})
 	if err != nil {
 		t.Fatal(err)
@@ -181,7 +207,7 @@ func TestProfileRevisionChangesWithMarkdown(t *testing.T) {
 }
 
 func TestPackagedBugsProfileRemainsZeroConfigurationDefault(t *testing.T) {
-	profile, err := compileTestProfile(profileLibrary{}, "", "", ReviewSubject{})
+	profile, err := compileTestProfile(newProfileLibrary(t.TempDir()), "", "", ReviewSubject{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,10 +257,11 @@ func writeProfileConfigFixture(t *testing.T, path, content string) {
 
 func compileTestProfile(library profileLibrary, name, reviewer string, subject ReviewSubject) (compiledProfile, error) {
 	conductor := Conductor{reviewers: defaultReviewerCatalog(), profiles: library, attemptDeadline: 10 * time.Minute}
-	return conductor.compileFilesystemProfile(ProfileSelection{Profile: name, Reviewer: reviewer}, subject.Repository)
+	selection := ProfileSelection{Profile: name, Reviewer: reviewer}
+	return conductor.compileFilesystemProfile(selection, subject.Repository)
 }
 
 func compileSelectedTestProfile(catalog reviewerCatalog, selection ProfileSelection, deadline time.Duration) (compiledProfile, error) {
-	conductor := Conductor{reviewers: catalog, profiles: profileLibrary{}, attemptDeadline: deadline}
+	conductor := Conductor{reviewers: catalog, profiles: newProfileLibrary(""), attemptDeadline: deadline}
 	return conductor.compileFilesystemProfile(selection, "")
 }

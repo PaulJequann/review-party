@@ -5,7 +5,7 @@ package engine
 import "testing"
 
 func TestPackagedProfileUsesEmbedPathOnWindows(t *testing.T) {
-	profile, err := (profileLibrary{}).findProfile(profileLookup{name: "bugs"})
+	profile, err := newProfileLibrary(t.TempDir()).findProfile(profileLookup{name: "bugs"})
 	if err != nil {
 		t.Fatal(err)
 	}

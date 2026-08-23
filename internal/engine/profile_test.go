@@ -24,7 +24,7 @@ func (*trackingRecordStore) Load(ReviewID) (ReviewRecord, error) {
 }
 
 func TestProfilesReturnsBuiltInsInStableOrder(t *testing.T) {
-	conductor := newConductorWithCatalog(&trackingRecordStore{}, defaultReviewerCatalog(), time.Minute)
+	conductor := newTestConductorWithCatalog(t, &trackingRecordStore{}, defaultReviewerCatalog(), time.Minute)
 
 	profiles, err := conductor.Profiles(context.Background())
 	if err != nil {
@@ -60,7 +60,7 @@ func TestExplainCompilesWithoutStartingReview(t *testing.T) {
 	store := &trackingRecordStore{}
 	executor := successfulExecutor(cleanReview)
 	catalog := catalogWithExecutors(map[string]attemptExecutor{defaultReviewer: executor})
-	conductor := newConductorWithCatalog(store, catalog, time.Minute)
+	conductor := newTestConductorWithCatalog(t, store, catalog, time.Minute)
 
 	explanation, err := conductor.Explain(context.Background(), ProfileSelection{Profile: "documentation"})
 	if err != nil {
@@ -76,6 +76,7 @@ func TestExplainCompilesWithoutStartingReview(t *testing.T) {
 }
 
 func TestProfilesUseDistinctRecipesAndPrompts(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	catalog := defaultReviewerCatalog()
 	bugs, err := compileSelectedTestProfile(catalog, ProfileSelection{Profile: "bugs", Reviewer: "grok"}, time.Minute)
 	if err != nil {
@@ -113,7 +114,8 @@ func TestProfilesUseDistinctRecipesAndPrompts(t *testing.T) {
 func TestDocumentationReviewMatchesExplainedRecipe(t *testing.T) {
 	repository := changedTestRepository(t)
 	executor := successfulExecutor(cleanReview)
-	conductor := newConductorWithCatalog(
+	conductor := newTestConductorWithCatalog(
+		t,
 		&trackingRecordStore{},
 		catalogWithExecutors(map[string]attemptExecutor{defaultReviewer: executor}),
 		time.Minute,
@@ -146,7 +148,7 @@ func TestCapabilityMismatchPreventsReviewLifecycle(t *testing.T) {
 		capabilities: []Capability{CapabilityRepositoryRead},
 		executor:     executor,
 	}
-	conductor := newConductorWithCatalog(store, newReviewerCatalog([]reviewerRegistration{registration}), time.Minute)
+	conductor := newTestConductorWithCatalog(t, store, newReviewerCatalog([]reviewerRegistration{registration}), time.Minute)
 
 	_, err := conductor.Review(context.Background(), ReviewSelection{
 		Repository: "/repository-must-not-be-resolved",
@@ -161,9 +163,36 @@ func TestCapabilityMismatchPreventsReviewLifecycle(t *testing.T) {
 	assertNoReviewActivity(t, store, executor)
 }
 
+func TestCompileProfileDefinitionAlwaysChecksRequiredCapabilities(t *testing.T) {
+	registration := reviewerRegistration{
+		candidate:    reviewerCandidate{ID: "restricted", Model: "model"},
+		capabilities: restrictedReviewCapabilities(),
+		executor:     successfulExecutor(cleanReview),
+	}
+	definition := profileDefinition{
+		name:                 "synthetic",
+		defaultReviewer:      "restricted",
+		requiredCapabilities: append(restrictedReviewCapabilities(), Capability("extra-cap")),
+	}
+
+	_, err := compileProfileDefinition(
+		newReviewerCatalog([]reviewerRegistration{registration}),
+		ProfileSelection{Profile: "synthetic", Reviewer: "restricted"},
+		time.Minute,
+		definition,
+	)
+	var mismatch UnsupportedCapabilitiesError
+	if !errors.As(err, &mismatch) {
+		t.Fatalf("error = %v, want UnsupportedCapabilitiesError", err)
+	}
+	if !reflect.DeepEqual(mismatch.Missing, []Capability{Capability("extra-cap")}) {
+		t.Fatalf("missing capabilities = %#v", mismatch.Missing)
+	}
+}
+
 func TestEffectiveDeadlineChangesProfileRevision(t *testing.T) {
-	short := newConductorWithCatalog(&trackingRecordStore{}, defaultReviewerCatalog(), time.Minute)
-	long := newConductorWithCatalog(&trackingRecordStore{}, defaultReviewerCatalog(), 2*time.Minute)
+	short := newTestConductorWithCatalog(t, &trackingRecordStore{}, defaultReviewerCatalog(), time.Minute)
+	long := newTestConductorWithCatalog(t, &trackingRecordStore{}, defaultReviewerCatalog(), 2*time.Minute)
 
 	shortExplanation, err := short.Explain(context.Background(), ProfileSelection{Profile: "bugs"})
 	if err != nil {
@@ -179,7 +208,7 @@ func TestEffectiveDeadlineChangesProfileRevision(t *testing.T) {
 }
 
 func TestExplainPreservesExplicitReviewer(t *testing.T) {
-	conductor := newConductorWithCatalog(&trackingRecordStore{}, defaultReviewerCatalog(), time.Minute)
+	conductor := newTestConductorWithCatalog(t, &trackingRecordStore{}, defaultReviewerCatalog(), time.Minute)
 
 	explanation, err := conductor.Explain(context.Background(), ProfileSelection{Profile: "bugs", Reviewer: "copilot"})
 	if err != nil {
@@ -188,6 +217,22 @@ func TestExplainPreservesExplicitReviewer(t *testing.T) {
 	if explanation.ReviewerWasDefault || explanation.ProfileRevision.Reviewer.ReviewerID != "copilot" {
 		t.Fatalf("explanation = %#v", explanation)
 	}
+}
+
+func TestConductorRequiresExplicitProfileConfiguration(t *testing.T) {
+	_, err := newConductorWithProfiles(&trackingRecordStore{}, defaultReviewerCatalog(), profileLibrary{}, time.Minute)
+	if !errors.Is(err, errProfileLibraryNotConfigured) {
+		t.Fatalf("error = %v, want %v", err, errProfileLibraryNotConfigured)
+	}
+}
+
+func newTestConductorWithCatalog(t *testing.T, store recordStore, reviewers reviewerCatalog, deadline time.Duration) *Conductor {
+	t.Helper()
+	conductor, err := newConductorWithProfiles(store, reviewers, newProfileLibrary(t.TempDir()), deadline)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return conductor
 }
 
 func assertNoReviewActivity(t *testing.T, store *trackingRecordStore, executor *scriptedExecutor) {

@@ -461,7 +461,10 @@ func testEvalConductor(t *testing.T, executor attemptExecutor) *Conductor {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = ledger.Close() })
-	conductor := newConductor(ledger, map[string]attemptExecutor{defaultReviewer: executor}, time.Second)
+	conductor, err := newConductorWithProfiles(ledger, catalogWithExecutors(map[string]attemptExecutor{defaultReviewer: executor}), newProfileLibrary(t.TempDir()), time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
 	conductor.artifacts, err = artifact.NewStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
