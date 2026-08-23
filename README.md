@@ -84,19 +84,19 @@ time and then Review ID. The default limit is 20 and the maximum is 200. JSON
 output contains `entries`, the applied `limit`, and `has_more`. History selects
 existing Reviews; it does not rerun or replay them.
 
-## User configuration
+## Personal Configuration
 
-Review Party loads user policy from
+Review Party loads Personal Configuration from
 `${XDG_CONFIG_HOME:-$HOME/.config}/review-party/config.json`. The versioned JSON
-document may set one Default Reviewer and enable, disable, select, or restrict
-models for each supported Reviewer. An advanced initialization may also add a
-`state_directory` field; ordinary callers should let `review-party init`
+document may select default Reviewer and Profile choices and enable, disable,
+select, or restrict models for each supported Reviewer. Advanced initialization
+may also add a `state_directory` field; ordinary callers should let `review-party init`
 manage it:
 
 ```json
 {
-  "version": 1,
-  "default_reviewer": "grok",
+  "schema_version": 1,
+  "defaults": {"reviewer": "grok"},
   "reviewers": {
     "grok": {"enabled": true, "model": "grok-4.5"},
     "opencode": {
@@ -292,7 +292,8 @@ review-party inspect rb_... --format json
 
 The packaged `standard` Party runs `bugs`, `code-quality`, and `documentation`
 over one shared Subject. Define reusable repository Parties in
-`.reviewparty/parties/<name>.json` or personal Parties under the global library:
+`.reviewparty/parties/<name>.json` or personal Parties under the personal
+configuration library:
 
 ```json
 {
@@ -308,7 +309,7 @@ over one shared Subject. Define reusable repository Parties in
 }
 ```
 
-Repository files shadow global files with the same name, which shadow packaged
+Repository files shadow personal files with the same name, which shadow packaged
 definitions; a definition never inherits or concatenates another Party.
 Explicit `--reviewer`, `--model`, `--effort`, and `--concurrency` flags narrow
 every member to that choice and freeze a distinct recorded Party Revision into
@@ -376,7 +377,7 @@ or use `--global` for personal copies. Existing files are retained. Owned
 Profiles shadow packaged updates, and installation does not change the selected
 default Profile.
 
-Repository and global libraries use the same shape:
+Repository and personal libraries use the same shape:
 
 ```text
 .reviewparty/
@@ -386,20 +387,24 @@ Repository and global libraries use the same shape:
     └── security.md
 ```
 
-The global library is `~/.reviewparty/`. Set `REVIEW_PARTY_HOME` to relocate
-it. Profile configuration is optional
-and only selects defaults:
+The personal library lives at
+`${XDG_CONFIG_HOME:-$HOME/.config}/review-party/`, next to the Personal
+Configuration document. Configuration is optional and only selects defaults;
+Personal and Repository documents share one schema, while Repository scope does
+not accept managed-state or evaluation fields:
 
 ```json
 {
-  "schema": 1,
-  "defaultProfile": "security",
-  "defaultReviewer": "grok"
+  "schema_version": 1,
+  "defaults": {
+    "profile": "security",
+    "reviewer": "grok"
+  }
 }
 ```
 
-Selection precedence is explicit caller choice, repository config, global
-config, then packaged defaults. A repository Markdown file shadows a global or
+Selection precedence is explicit caller choice, repository config, personal
+config, then packaged defaults. A repository Markdown file shadows a personal or
 packaged file with the same name as one complete definition; Review Party does
 not concatenate or inherit prompt text. An invalid higher-precedence file stops
 before an Agent Harness launches rather than silently selecting another
@@ -411,7 +416,7 @@ the canonical Review Result contract, deadlines, and incomplete-result
 semantics. Profiles cannot configure executables, transports, or shell commands.
 
 Packaged Profiles contain their complete purpose-specific judgment instructions.
-A repository or global Profile that shadows one of them does not silently inherit
+A repository or personal Profile that shadows one of them does not silently inherit
 the packaged risk taxonomy, evidence rules, confidence threshold, or review
 style. `review-party profile explain PROFILE` shows the authored Markdown and
 the compiler-owned execution recipe separately before a Reviewer is launched.

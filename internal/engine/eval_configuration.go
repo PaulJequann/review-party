@@ -1,50 +1,47 @@
 package engine
 
 import (
+	"reviewparty/internal/configuration"
 	"reviewparty/internal/model"
 )
 
-type userEvalPolicy struct {
-	RetryPolicy      model.RetryPolicy `json:"retry_policy,omitempty"`
-	ConcurrencyLimit int               `json:"concurrency_limit,omitempty"`
-}
-
-func (policy *userEvalPolicy) UnmarshalJSON(payload []byte) error {
-	type plainPolicy userEvalPolicy
-	var decoded plainPolicy
-	if err := decodeStrictObject(payload, &decoded, "eval policy", "retry_policy"); err != nil {
-		return err
-	}
-	*policy = userEvalPolicy(decoded)
-	return nil
-}
-
-func ApplyEvalConfigurationDefaults(path string, experiment *model.ExperimentConfiguration) error {
-	configuration, err := loadUserConfiguration(path)
+// ApplyEvalConfigurationDefaults applies the authored Personal Configuration
+// defaults for the reviewer, model, retry policy, and concurrency limit of an
+// Experiment Configuration.
+func ApplyEvalConfigurationDefaults(personalConfigPath string, experiment *model.ExperimentConfiguration) error {
+	manager := newConfigurationManager(personalConfigPath)
+	loaded, err := manager.Load(configuration.Repository(""))
 	if err != nil {
 		return err
 	}
-	applyConfiguredEvalReviewer(configuration, experiment)
-	applyConfiguredEvalPolicy(configuration.Eval, experiment)
+	applyConfiguredEvalReviewer(loaded.Personal.Document, experiment)
+	applyConfiguredEvalPolicy(loaded.Personal.Document.Eval, experiment)
 	return nil
 }
 
-func applyConfiguredEvalReviewer(configuration userConfiguration, experiment *model.ExperimentConfiguration) {
-	if experiment.Reviewer == "" && configuration.DefaultReviewer != "" {
-		experiment.Reviewer = configuration.DefaultReviewer
+func applyConfiguredEvalReviewer(document configuration.Document, experiment *model.ExperimentConfiguration) {
+	if experiment.Reviewer == "" && document.Defaults.Reviewer != "" {
+		experiment.Reviewer = document.Defaults.Reviewer
 	}
 	if experiment.Model != "" || experiment.Reviewer == "" {
 		return
 	}
-	policy, configured := configuration.Reviewers[experiment.Reviewer]
-	if configured && policy.Model.present {
-		experiment.Model = policy.Model.value
+	policy, configured := document.Reviewers[experiment.Reviewer]
+	if configured && policy.Model != "" {
+		experiment.Model = policy.Model
 	}
 }
 
-func applyConfiguredEvalPolicy(policy userEvalPolicy, experiment *model.ExperimentConfiguration) {
+func applyConfiguredEvalPolicy(policy *configuration.EvalPolicy, experiment *model.ExperimentConfiguration) {
+	if policy == nil {
+		return
+	}
 	if experiment.RetryPolicy.MaxAttempts == 0 && policy.RetryPolicy.MaxAttempts != 0 {
-		experiment.RetryPolicy = policy.RetryPolicy
+		experiment.RetryPolicy = model.RetryPolicy{
+			MaxAttempts:    policy.RetryPolicy.MaxAttempts,
+			InitialBackoff: policy.RetryPolicy.InitialBackoff,
+			MaxBackoff:     policy.RetryPolicy.MaxBackoff,
+		}
 	}
 	if experiment.ConcurrencyLimit == 0 && policy.ConcurrencyLimit != 0 {
 		experiment.ConcurrencyLimit = policy.ConcurrencyLimit

@@ -20,7 +20,7 @@ func TestExplainUsesDefaultUserConfiguration(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	payload := `{"version":1,"default_reviewer":"opencode","reviewers":{"opencode":{"enabled":true,"model":"meta/muse-spark-1.2-contributor","allowed_models":["meta/muse-spark-1.2-contributor","opencode-go/deepseek-v4-flash"]}}}`
+	payload := `{"schema_version":1,"defaults":{"reviewer":"opencode"},"reviewers":{"opencode":{"enabled":true,"model":"meta/muse-spark-1.2-contributor","allowed_models":["meta/muse-spark-1.2-contributor","opencode-go/deepseek-v4-flash"]}}}`
 	if err := os.WriteFile(path, []byte(payload), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -43,7 +43,7 @@ func TestExplainUsesDefaultUserConfiguration(t *testing.T) {
 
 func TestExplainAppliesExplicitEffort(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
-	payload := `{"version":1,"default_reviewer":"opencode","reviewers":{"opencode":{"enabled":true,"model":"meta/muse-spark-1.2-contributor"}}}`
+	payload := `{"schema_version":1,"defaults":{"reviewer":"opencode"},"reviewers":{"opencode":{"enabled":true,"model":"meta/muse-spark-1.2-contributor"}}}`
 	if err := os.WriteFile(path, []byte(payload), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +82,7 @@ func TestConfigPathUsesXDGConfigurationDirectory(t *testing.T) {
 
 func TestConfigShowReadsSelectedConfiguration(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "selected.json")
-	payload := `{"version":1,"default_reviewer":"opencode","reviewers":{"opencode":{"enabled":true,"model":"meta/muse-spark-1.2-contributor"}}}`
+	payload := `{"schema_version":1,"defaults":{"reviewer":"opencode"},"reviewers":{"opencode":{"enabled":true,"model":"meta/muse-spark-1.2-contributor"}}}`
 	if err := os.WriteFile(path, []byte(payload), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -94,19 +94,21 @@ func TestConfigShowReadsSelectedConfiguration(t *testing.T) {
 		t.Fatalf("exit = %d, stderr = %q", exitCode, stderr.String())
 	}
 	var configuration struct {
-		DefaultReviewer string `json:"default_reviewer"`
+		Defaults struct {
+			Reviewer string `json:"reviewer"`
+		} `json:"defaults"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &configuration); err != nil {
 		t.Fatal(err)
 	}
-	if configuration.DefaultReviewer != "opencode" {
+	if configuration.Defaults.Reviewer != "opencode" {
 		t.Fatalf("configuration = %#v", configuration)
 	}
 }
 
 func TestReviewAppliesConfiguredModelPolicyBeforeSubjectResolution(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
-	payload := `{"version":1,"default_reviewer":"opencode","reviewers":{"opencode":{"enabled":true,"model":"meta/muse-spark-1.2-contributor","allowed_models":["meta/muse-spark-1.2-contributor"]}}}`
+	payload := `{"schema_version":1,"defaults":{"reviewer":"opencode"},"reviewers":{"opencode":{"enabled":true,"model":"meta/muse-spark-1.2-contributor","allowed_models":["meta/muse-spark-1.2-contributor"]}}}`
 	if err := os.WriteFile(path, []byte(payload), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +132,7 @@ func TestExplainDoesNotLoadConfigurationFromWorkingDirectory(t *testing.T) {
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v\n%s", err, output)
 	}
-	payload := `{"version":1,"reviewers":{"grok":{"enabled":false}}}`
+	payload := `{"schema_version":1,"reviewers":{"grok":{"enabled":false}}}`
 	if err := os.WriteFile(filepath.Join(repository, "review-party-config.json"), []byte(payload), 0o600); err != nil {
 		t.Fatal(err)
 	}

@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"reviewparty/internal/configuration"
 )
 
 type ProfileInitialization struct {
@@ -223,14 +225,14 @@ func initializationDirectory(initialization ProfileInitialization) (string, fs.F
 	if initialization.Global {
 		directory := initialization.GlobalDirectory
 		if directory == "" {
-			directory = defaultGlobalProfileDirectory()
+			directory = configuration.DefaultPersonalRoot()
 		}
 		if directory == "" {
-			return "", 0, errors.New("resolve global profile directory: user home is unavailable; set REVIEW_PARTY_HOME")
+			return "", 0, errors.New("resolve personal configuration root: set XDG_CONFIG_HOME or HOME")
 		}
 		absolute, err := filepath.Abs(directory)
 		if err != nil {
-			return "", 0, fmt.Errorf("resolve global profile directory %q: %w", directory, err)
+			return "", 0, fmt.Errorf("resolve personal profile directory %q: %w", directory, err)
 		}
 		return absolute, 0o700, nil
 	}

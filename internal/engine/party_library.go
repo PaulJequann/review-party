@@ -1,13 +1,17 @@
 package engine
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 
+	"reviewparty/internal/configuration"
 	"reviewparty/internal/model"
 )
 
@@ -15,11 +19,43 @@ const partyDefinitionSchema = 1
 
 const maximumPartyBytes = 16 * 1024
 
+func decodeStrictObject(payload []byte, destination any, objectName string, nonNullFields ...string) error {
+	if bytes.Equal(bytes.TrimSpace(payload), []byte("null")) {
+		return fmt.Errorf("%s must be an object, not null", objectName)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &fields); err != nil {
+		return err
+	}
+	for _, name := range nonNullFields {
+		if value, exists := fields[name]; exists && bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
+			return fmt.Errorf("%s must not be null", name)
+		}
+	}
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(destination); err != nil {
+		return err
+	}
+	return rejectTrailingJSON(decoder)
+}
+
+func rejectTrailingJSON(decoder *json.Decoder) error {
+	var extra any
+	if err := decoder.Decode(&extra); errors.Is(err, io.EOF) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	return errors.New("multiple JSON values")
+}
+
 type PartySummary = model.PartySummary
 
 type partyLayer struct {
 	directory string
 	source    string
+	label     string
 }
 
 func builtinPartyDefinitions() []model.PartyDefinition {
@@ -34,10 +70,10 @@ func builtinPartyDefinitions() []model.PartyDefinition {
 func (conductor *Conductor) partyLayers(repository string) []partyLayer {
 	var layers []partyLayer
 	if repository != "" {
-		layers = append(layers, partyLayer{directory: filepath.Join(repository, ".reviewparty", "parties"), source: "repository"})
+		layers = append(layers, partyLayer{directory: filepath.Join(repository, ".reviewparty", "parties"), source: "repository", label: ".reviewparty/parties"})
 	}
-	if global := conductor.profiles.globalDirectory; global != "" {
-		layers = append(layers, partyLayer{directory: filepath.Join(global, "parties"), source: "global"})
+	if directory, err := conductor.profiles.manager().PartiesDirectory(configuration.ScopePersonal, configuration.Repository("")); err == nil {
+		layers = append(layers, partyLayer{directory: directory, source: "personal", label: "parties"})
 	}
 	return layers
 }
@@ -68,7 +104,7 @@ func (conductor *Conductor) resolveFilesystemParty(lookup partyLookup) (model.Pa
 			return model.PartyDefinition{}, "", false, err
 		}
 		if found {
-			return definition, layer.source + ":.reviewparty/parties/" + lookup.name + ".json", true, nil
+			return definition, layer.source + ":" + layer.label + "/" + lookup.name + ".json", true, nil
 		}
 	}
 	return model.PartyDefinition{}, "", false, nil

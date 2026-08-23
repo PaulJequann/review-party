@@ -12,6 +12,8 @@ import (
 	"sort"
 	"strings"
 	"unicode/utf8"
+
+	"reviewparty/internal/configuration"
 )
 
 const maximumProfileBytes = 64 * 1024
@@ -60,8 +62,8 @@ func (library profileLibrary) profileLayers(repository string) []profileLayer {
 	if repository != "" {
 		layers = append(layers, profileLayer{directory: filepath.Join(repository, ".reviewparty", "profiles"), anchor: repository, source: "repository"})
 	}
-	if library.globalDirectory != "" {
-		layers = append(layers, profileLayer{directory: filepath.Join(library.globalDirectory, "profiles"), anchor: filepath.Dir(library.globalDirectory), source: "global"})
+	if directory, err := library.manager().ProfilesDirectory(configuration.ScopePersonal, configuration.Repository("")); err == nil {
+		layers = append(layers, profileLayer{directory: directory, anchor: filepath.Dir(filepath.Dir(directory)), source: "personal"})
 	}
 	return append(layers, profileLayer{directory: "profiles", source: "packaged", packaged: true})
 }
@@ -82,7 +84,7 @@ func isMarkdownProfile(entry fs.DirEntry) bool {
 }
 
 func (library profileLibrary) list(repository string) ([]ProfileSummary, error) {
-	if _, err := library.loadSettings(repository); err != nil {
+	if _, err := library.manager().Load(configuration.Repository(repository)); err != nil {
 		return nil, err
 	}
 	winners := make(map[string]ProfileSummary)
@@ -144,6 +146,9 @@ func sortedProfileSummaries(winners map[string]ProfileSummary) []ProfileSummary 
 func layerSource(layer profileLayer, filename string) string {
 	if layer.source == "repository" {
 		return "repository:.reviewparty/profiles/" + filename
+	}
+	if layer.source == "personal" {
+		return "personal:profiles/" + filename
 	}
 	return layer.source + ":profiles/" + filename
 }

@@ -137,6 +137,30 @@ _Avoid_: Legacy import, exposed records-directory setup, implicit inspect setup
 The first-use operation that prepares Review Party for one repository, including its managed Review Record state. It does not create a custom Review Profile.
 _Avoid_: Profile initialization, first Review
 
+**Configuration Hub**:
+The interactive control center for inspecting and changing Review Party configuration over time. It serves recurring customization as Reviewers, models, Profiles, and preferences change; first-use guidance is one journey through the Hub rather than its defining purpose.
+_Avoid_: Setup wizard, onboarding screen, web UI
+
+**Personal Configuration**:
+A Caller’s configuration that applies across repositories, including Reviewer and model preferences, personal Profile and Party definitions, evaluation defaults, and managed-state choices. It is one coherent scope regardless of how its contents are organized internally.
+_Avoid_: User policy, global Profile defaults, repository configuration
+
+**Repository Configuration**:
+Shared Review Party configuration associated with one repository. It may select repository defaults or define team-owned Profiles and Parties, and remains distinct from Personal Configuration.
+_Avoid_: Personal Configuration, local user settings, project delivery policy
+
+**Configuration Scope**:
+The explicit ownership context in which a configuration value or definition applies: Personal Configuration or Repository Configuration. Effective values retain their originating scope so precedence is visible rather than implicit.
+_Avoid_: Config directory, hidden precedence, environment
+
+**Model Discovery**:
+The best-effort collection of model choices reported by an available Agent Harness for one Reviewer. Discovered choices make selection searchable and provider-correct, but do not replace manual model entry when discovery is unavailable or incomplete.
+_Avoid_: Packaged model catalog, model allowlist, guaranteed availability
+
+**Effective Configuration**:
+The resolved configuration Review Party will use after applying packaged defaults, Personal Configuration, Repository Configuration, and explicit Caller choices in precedence order. Every effective value retains visible provenance identifying the choice and Configuration Scope that supplied it.
+_Avoid_: Configuration file, merged JSON, implicit defaults
+
 **Profile Creation**:
 The operation that creates the editable local material for one named Review Profile. It is separate from Review Party Initialization.
 _Avoid_: Profile init, unnamed profile material

@@ -5,7 +5,7 @@ Status: implemented
 ## Decision
 
 Review Party resolves named Review Profiles through one deep profile-library
-Module inside the Conductor. The Module hides repository/global discovery,
+Module inside the Conductor. The Module hides repository/personal discovery,
 strict configuration parsing, whole-file precedence, Markdown validation,
 Reviewer defaults, prompt assembly, Profile Revision hashing, and source
 provenance.
@@ -24,19 +24,19 @@ Repository scope:
 └── profiles/<name>.md
 ```
 
-Global scope:
+Personal scope:
 
 ```text
-~/.reviewparty/
+${XDG_CONFIG_HOME:-$HOME/.config}/review-party/
 ├── config.json
 └── profiles/<name>.md
 ```
 
-`REVIEW_PARTY_HOME` relocates the global directory. Packaged defaults use the
-same Markdown representation and are embedded in the binary.
-
-The optional config has schema 1 and only `defaultProfile` and
-`defaultReviewer`. Unknown fields, unsupported schemas, unsafe names, invalid
+Packaged defaults use the same Markdown representation and are embedded in the
+binary. Personal and Repository `config.json` documents share schema version 1
+and use the `schema_version`, `defaults.profile`, and `defaults.reviewer`
+fields. Repository scope cannot author Personal-only state or Eval settings.
+Unknown fields, unsupported schemas, unsafe names, invalid
 UTF-8, empty Profiles, oversized files, symlinks, and special files fail before
 launch.
 
@@ -46,10 +46,10 @@ Profile and Reviewer selection precedence is:
 
 1. explicit caller selection;
 2. repository config;
-3. global config;
+3. personal config;
 4. packaged/program defaults.
 
-A named Profile is searched in repository, global, then packaged scope. The
+A named Profile is searched in repository, personal, then packaged scope. The
 first existing file wins as a whole definition. There is no inheritance,
 fragment concatenation, environment interpolation, remote include, or script
 execution. A malformed higher-precedence file is an error, never permission to
@@ -74,10 +74,11 @@ remain profile-neutral Review Party constraints and result framing.
   managed Review Record state selected by that configuration and does not
   create Profile material.
 - `review-party profile create NAME (--blank|--from-packaged PROFILE)` creates
-  exactly one owned Profile at repository or global scope without overwriting.
+  exactly one owned Profile at repository or personal scope without overwriting.
 - `review-party profile install-defaults [--repo PATH|--global]` creates owned
-  copies of every packaged starter Profile, retains existing files, and does not
-  change default Profile selection.
+  copies of every packaged starter Profile in Repository or Personal
+  Configuration (the existing `--global` spelling selects Personal), retains
+  existing files, and does not change default Profile selection.
 - `review-party profiles [--repo PATH]` lists effective named Profiles and
   their winning sources; invalid peer files are included with validation errors
   without hiding valid Profiles.
@@ -96,7 +97,7 @@ remain profile-neutral Review Party constraints and result framing.
 
 ## Acceptance evidence
 
-Focused tests deliberately prove repository shadowing, global defaults,
+Focused tests deliberately prove repository shadowing, personal defaults,
 pre-launch rejection without fallback, searched-location diagnostics, strict
 config validation, content-sensitive revisions, non-destructive initialization,
 the packaged zero-config path, and the `init` to `profiles` CLI journey.

@@ -36,7 +36,7 @@ func TestRepositoryProfileShadowsGlobalAsWholeDefinition(t *testing.T) {
 func TestGlobalDefaultsSelectProfileAndReviewer(t *testing.T) {
 	repository := changedTestRepository(t)
 	globalDirectory := t.TempDir()
-	writeProfileConfigFixture(t, filepath.Join(globalDirectory, "config.json"), `{"schema":1,"defaultProfile":"security","defaultReviewer":"copilot"}`)
+	writeProfileConfigFixture(t, filepath.Join(globalDirectory, "config.json"), `{"schema_version":1,"defaults":{"profile":"security","reviewer":"copilot"}}`)
 	writeProfileFixture(t, filepath.Join(globalDirectory, "profiles", "security.md"), "GLOBAL SECURITY GUIDANCE")
 
 	grok := &scriptedExecutor{
@@ -66,7 +66,7 @@ func TestGlobalDefaultsSelectProfileAndReviewer(t *testing.T) {
 func TestInvalidRepositoryProfileFailsBeforeLaunchWithoutFallback(t *testing.T) {
 	repository := changedTestRepository(t)
 	globalDirectory := t.TempDir()
-	writeProfileConfigFixture(t, filepath.Join(repository, ".reviewparty", "config.json"), `{"schema":1,"defaultProfile":"security"}`)
+	writeProfileConfigFixture(t, filepath.Join(repository, ".reviewparty", "config.json"), `{"schema_version":1,"defaults":{"profile":"security"}}`)
 	writeProfileFixture(t, filepath.Join(repository, ".reviewparty", "profiles", "security.md"), "   \n")
 	writeProfileFixture(t, filepath.Join(globalDirectory, "profiles", "security.md"), "VALID GLOBAL FALLBACK THAT MUST NOT RUN")
 	executor := successfulExecutor(cleanReview)
@@ -95,7 +95,7 @@ func assertGlobalDefaultReview(t *testing.T, record ReviewRecord, grok, copilot 
 	if record.ProfileRevision.Name != "security" || record.ProfileRevision.ReviewerID != "copilot" {
 		t.Fatalf("revision = %#v", record.ProfileRevision)
 	}
-	if record.ProfileRevision.Source != "global:profiles/security.md" || !strings.Contains(record.ProfileSnapshot.Instructions, "GLOBAL SECURITY GUIDANCE") {
+	if record.ProfileRevision.Source != "personal:profiles/security.md" || !strings.Contains(record.ProfileSnapshot.Instructions, "GLOBAL SECURITY GUIDANCE") {
 		t.Fatalf("profile provenance = %#v, snapshot = %#v", record.ProfileRevision, record.ProfileSnapshot)
 	}
 	if grok.attemptCount() != 0 || copilot.attemptCount() != 1 {
@@ -133,7 +133,7 @@ func TestMissingProfileExplainsSearchAndAvailableNames(t *testing.T) {
 	}
 	for _, expected := range []string{
 		"repository:.reviewparty/profiles/architecture.md",
-		"global:profiles/architecture.md",
+		"personal:profiles/architecture.md",
 		"packaged:profiles/architecture.md",
 		"available: bugs, code-quality, documentation, security",
 	} {
@@ -145,14 +145,14 @@ func TestMissingProfileExplainsSearchAndAvailableNames(t *testing.T) {
 
 func TestProfileConfigRejectsUnknownFieldsAndUnsafeNames(t *testing.T) {
 	for name, payload := range map[string]string{
-		"unknown field": `{"schema":1,"defaultProfil":"bugs"}`,
-		"unsafe name":   `{"schema":1,"defaultProfile":"../bugs"}`,
+		"unknown field": `{"schema_version":1,"defaults":{"profil":"bugs"}}`,
+		"unsafe name":   `{"schema_version":1,"defaults":{"profile":"../bugs"}}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			globalDirectory := t.TempDir()
 			writeProfileConfigFixture(t, filepath.Join(globalDirectory, "config.json"), payload)
 			_, err := compileTestProfile(newProfileLibrary(globalDirectory), "", "", ReviewSubject{})
-			if err == nil || !strings.Contains(err.Error(), "profile config") {
+			if err == nil || !strings.Contains(err.Error(), "invalid personal configuration") {
 				t.Fatalf("error = %v", err)
 			}
 		})

@@ -8,16 +8,19 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
 	"reviewparty/internal/artifact"
+	"reviewparty/internal/configuration"
 	"reviewparty/internal/model"
 	"reviewparty/internal/store"
 	"time"
 )
 
 type Config struct {
-	GlobalProfileDirectory string
-	AttemptDeadline        time.Duration
-	UserConfigurationPath  string
+	AttemptDeadline time.Duration
+	// UserConfigurationPath optionally overrides the canonical Personal
+	// Configuration file location for tests and explicit --config flags.
+	UserConfigurationPath string
 }
 
 type Conductor struct {
@@ -36,20 +39,22 @@ func New(config Config) (*Conductor, error) {
 	if config.AttemptDeadline <= 0 {
 		config.AttemptDeadline = 10 * time.Minute
 	}
-	userConfiguration, err := loadUserConfiguration(config.UserConfigurationPath)
+	manager := newConfigurationManager(config.UserConfigurationPath)
+	loaded, err := manager.Load(configuration.Repository(""))
 	if err != nil {
 		return nil, err
 	}
-	stateDirectory := firstNonempty(userConfiguration.StateDirectory, defaultStateDirectory())
+	personalDocument := loaded.Personal.Document
+	stateDirectory := firstNonempty(personalDocument.StateDirectory, defaultStateDirectory())
 	store, err := newDeferredLedgerRecordStore(stateDirectory)
 	if err != nil {
 		return nil, err
 	}
-	reviewers, err := configureReviewerCatalog(defaultReviewerCatalog(), userConfiguration, config.UserConfigurationPath)
+	reviewers, err := configureReviewerCatalog(defaultReviewerCatalog(), personalDocument, loaded.Personal.Path)
 	if err != nil {
 		return nil, err
 	}
-	conductor := newConductorWithProfiles(store, reviewers, newProfileLibrary(config.GlobalProfileDirectory), config.AttemptDeadline)
+	conductor := newConductorWithProfiles(store, reviewers, newProfileLibrary(personalConfigurationRoot(config.UserConfigurationPath)), config.AttemptDeadline)
 	conductor.artifacts, err = artifact.NewStore(stateDirectory)
 	if err != nil {
 		return nil, err

@@ -4,6 +4,8 @@ import (
 	"embed"
 	"fmt"
 	"strings"
+
+	"reviewparty/internal/configuration"
 )
 
 const (
@@ -15,7 +17,7 @@ const (
 var packagedProfileFiles embed.FS
 
 type profileLibrary struct {
-	globalDirectory string
+	configuration *configuration.Manager
 }
 
 type profileRequest struct {
@@ -39,11 +41,23 @@ type profileCandidate struct {
 	anchor string
 }
 
-func newProfileLibrary(globalDirectory string) profileLibrary {
-	if globalDirectory == "" {
-		globalDirectory = defaultGlobalProfileDirectory()
+// manager returns the owning Configuration Manager, constructing a default
+// one for zero-value libraries used by focused tests.
+func (library profileLibrary) manager() *configuration.Manager {
+	if library.configuration != nil {
+		return library.configuration
 	}
-	return profileLibrary{globalDirectory: globalDirectory}
+	return newProfileLibrary("").configuration
+}
+
+func newProfileLibrary(personalRoot string) profileLibrary {
+	return profileLibrary{configuration: configuration.NewManager(configuration.Options{
+		PersonalRoot:            personalRoot,
+		Reviewers:               supportedReviewerIDs(),
+		PackagedDefaultReviewer: defaultReviewer,
+		PackagedDefaultProfile:  packagedDefaultProfileName,
+		ValidateProfileName:     validateProfileName,
+	})}
 }
 
 func (conductor *Conductor) compileFilesystemProfile(selection ProfileSelection, repository string) (compiledProfile, error) {
@@ -128,11 +142,11 @@ func (conductor *Conductor) profileSummaries(repository string) ([]ProfileSummar
 }
 
 func (library profileLibrary) resolve(catalog reviewerCatalog, request profileRequest) (resolvedProfile, error) {
-	settings, err := library.loadSettings(request.repository)
+	loaded, err := library.manager().Load(configuration.Repository(request.repository))
 	if err != nil {
 		return resolvedProfile{}, err
 	}
-	selection, err := settings.selectProfile(catalog, profileSelection{name: request.name, reviewer: request.reviewer})
+	selection, err := selectProfileFromScopes(catalog, profileSelection{name: request.name, reviewer: request.reviewer}, loaded.Personal.Document, loaded.Repository.Document)
 	if err != nil {
 		return resolvedProfile{}, err
 	}

@@ -60,7 +60,7 @@ func TestProfilesCommandUsesConfiguredDefault(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	payload := `{"version":1,"default_reviewer":"opencode","reviewers":{"grok":{"enabled":false},"opencode":{"enabled":true,"model":"meta/muse-spark-1.2-contributor"}}}`
+	payload := `{"schema_version":1,"defaults":{"reviewer":"opencode"},"reviewers":{"grok":{"enabled":false},"opencode":{"enabled":true,"model":"meta/muse-spark-1.2-contributor"}}}`
 	if err := os.WriteFile(path, []byte(payload), 0o600); err != nil {
 		t.Fatal(err)
 	}

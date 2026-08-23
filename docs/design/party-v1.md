@@ -25,9 +25,10 @@ Reusable Parties are strict version-1 JSON documents:
 }
 ```
 
-- Repository layer: `.reviewparty/parties/<name>.json`; global layer:
-  `<global library>/parties/<name>.json`. Repository shadows global; packaged
-  definitions are the last fallback. Shadowing replaces the whole definition.
+- Repository layer: `.reviewparty/parties/<name>.json`; Personal layer:
+  `${XDG_CONFIG_HOME:-$HOME/.config}/review-party/parties/<name>.json`.
+  Repository shadows Personal; packaged definitions are the last fallback.
+  Shadowing replaces the whole definition.
 - The `name` field must equal the file name. Unknown fields, unsupported
   schema versions, empty member lists, duplicate profile entries, and negative
   concurrency limits fail validation before anything launches.

@@ -5,15 +5,18 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
+
+	"reviewparty/internal/configuration"
 )
 
+// defaultUserConfigurationPath returns the canonical Personal Configuration
+// file, or an empty path when the platform provides no configuration home.
 func defaultUserConfigurationPath() string {
-	directory, err := os.UserConfigDir()
-	if err != nil {
+	root := configuration.DefaultPersonalRoot()
+	if root == "" {
 		return ""
 	}
-	return filepath.Join(directory, "review-party", "config.json")
+	return root + string(os.PathSeparator) + "config.json"
 }
 
 func runConfig(arguments []string, stdout, stderr io.Writer) int {

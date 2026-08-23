@@ -8,11 +8,13 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"reviewparty/internal/configuration"
 )
 
 const configuredReviewers = `{
-  "version": 1,
-  "default_reviewer": "opencode",
+  "schema_version": 1,
+  "defaults": {"reviewer": "opencode"},
   "reviewers": {
     "grok": {"enabled": true, "model": "grok-4.5"},
     "opencode": {
@@ -58,7 +60,7 @@ func TestDisabledReviewerFailsBeforeSubjectResolution(t *testing.T) {
 
 func TestRepositoryDefaultReviewerOwnsExplicitModelValidation(t *testing.T) {
 	configuration := `{
-  "version": 1,
+  "schema_version": 1,
   "reviewers": {
     "grok": {"enabled": true, "model": "grok-4.5", "allowed_models": ["grok-4.5"]},
     "opencode": {"enabled": true, "model": "model-m", "allowed_models": ["model-m"]}
@@ -70,7 +72,7 @@ func TestRepositoryDefaultReviewerOwnsExplicitModelValidation(t *testing.T) {
 	registration.executor = executor
 	conductor.reviewers.registrations["opencode"] = registration
 	repository := changedTestRepository(t)
-	writeProfileConfigFixture(t, filepath.Join(repository, ".reviewparty", "config.json"), `{"schema":1,"defaultReviewer":"opencode"}`)
+	writeProfileConfigFixture(t, filepath.Join(repository, ".reviewparty", "config.json"), `{"schema_version":1,"defaults":{"reviewer":"opencode"}}`)
 
 	record, err := conductor.Review(context.Background(), ReviewSelection{Repository: repository, Subject: WorkingChanges(), Model: "model-m"})
 	if err != nil {
@@ -138,7 +140,7 @@ func TestExplainRejectsUnsupportedExplicitEffort(t *testing.T) {
 
 func TestOmittedModelAllowlistAllowsExplicitModel(t *testing.T) {
 	configuration := `{
-  "version": 1,
+  "schema_version": 1,
   "reviewers": {"opencode": {"enabled": true}}
 }`
 	conductor := configuredTestConductor(t, configuration)
@@ -158,7 +160,7 @@ func TestOmittedModelAllowlistAllowsExplicitModel(t *testing.T) {
 
 func TestExplicitEmptyModelAllowlistRejectsConfiguredModel(t *testing.T) {
 	configuration := `{
-  "version": 1,
+  "schema_version": 1,
   "reviewers": {
     "opencode": {
       "enabled": true,
@@ -167,15 +169,15 @@ func TestExplicitEmptyModelAllowlistRejectsConfiguredModel(t *testing.T) {
     }
   }
 }`
-	invalid, _ := invalidConfigurationFromPayload(t, configuration)
-	if !strings.Contains(invalid.Reason, `model "meta/muse-spark-1.2-contributor" is not allowed for reviewer "opencode"`) {
-		t.Fatalf("reason = %q", invalid.Reason)
+	_, err := invalidConfigurationFromPayload(t, configuration)
+	if !strings.Contains(err.Error(), `reviewers.opencode: model "meta/muse-spark-1.2-contributor" is not in allowed_models []`) {
+		t.Fatalf("reason = %q", err.Error())
 	}
 }
 
 func TestExplicitEmptyModelAllowlistRejectsExplicitModel(t *testing.T) {
 	configuration := `{
-  "version": 1,
+  "schema_version": 1,
   "reviewers": {"opencode": {"enabled": true, "allowed_models": []}}
 }`
 	conductor := configuredTestConductor(t, configuration)
@@ -199,18 +201,18 @@ func TestExplicitEmptyModelAllowlistRejectsExplicitModel(t *testing.T) {
 
 func TestNullModelAllowlistIsInvalid(t *testing.T) {
 	configuration := `{
-  "version": 1,
+  "schema_version": 1,
   "reviewers": {"opencode": {"enabled": true, "allowed_models": null}}
 }`
-	invalid, _ := invalidConfigurationFromPayload(t, configuration)
-	if !strings.Contains(invalid.Reason, "allowed_models must be an array, not null") {
-		t.Fatalf("reason = %q", invalid.Reason)
+	_, err := invalidConfigurationFromPayload(t, configuration)
+	if !strings.Contains(err.Error(), "allowed_models must not be null") {
+		t.Fatalf("reason = %q", err.Error())
 	}
 }
 
 func TestNullReviewerModelIsInvalid(t *testing.T) {
 	configuration := `{
-  "version": 1,
+  "schema_version": 1,
   "reviewers": {"grok": {"model": null}}
 }`
 	assertInvalidConfigurationReason(t, configuration, "model must not be null")
@@ -218,7 +220,7 @@ func TestNullReviewerModelIsInvalid(t *testing.T) {
 
 func TestEmptyReviewerModelIsInvalid(t *testing.T) {
 	configuration := `{
-  "version": 1,
+  "schema_version": 1,
   "reviewers": {"grok": {"model": ""}}
 }`
 	assertInvalidConfigurationReason(t, configuration, "model must not be empty")
@@ -226,7 +228,7 @@ func TestEmptyReviewerModelIsInvalid(t *testing.T) {
 
 func TestNullReviewerEnabledIsInvalid(t *testing.T) {
 	configuration := `{
-  "version": 1,
+  "schema_version": 1,
   "reviewers": {"grok": {"enabled": null}}
 }`
 	assertInvalidConfigurationReason(t, configuration, "enabled must not be null")
@@ -234,26 +236,30 @@ func TestNullReviewerEnabledIsInvalid(t *testing.T) {
 
 func TestNullDefaultReviewerIsInvalid(t *testing.T) {
 	configuration := `{
-  "version": 1,
-  "default_reviewer": null
+  "schema_version": 1,
+  "defaults": {"reviewer": null}
 }`
-	assertInvalidConfigurationReason(t, configuration, "default_reviewer must not be null")
+	assertInvalidConfigurationReason(t, configuration, "reviewer must not be null")
 }
 
 func TestNullReviewersPolicyIsInvalid(t *testing.T) {
 	configuration := `{
-  "version": 1,
+  "schema_version": 1,
   "reviewers": null
 }`
 	assertInvalidConfigurationReason(t, configuration, "reviewers must not be null")
 }
 
 func TestInvalidUserConfigurationFailsClosed(t *testing.T) {
-	invalidConfigurationFromPayload(t, `{"version":1,"unexpected":true}`)
+	invalidConfigurationFromPayload(t, `{"schema_version":1,"unexpected":true}`)
 }
 
 func TestSemanticConfigurationErrorNamesSourcePath(t *testing.T) {
-	invalid, path := invalidConfigurationFromPayload(t, `{"version":1,"reviewers":{"unknown":{}}}`)
+	path, err := invalidConfigurationFromPayload(t, `{"schema_version":1,"reviewers":{"unknown":{}}}`)
+	var invalid configuration.InvalidDocumentError
+	if !errors.As(err, &invalid) {
+		t.Fatalf("error = %v, want InvalidDocumentError", err)
+	}
 	if invalid.Path != path {
 		t.Fatalf("error path = %q, want %q", invalid.Path, path)
 	}
@@ -261,8 +267,8 @@ func TestSemanticConfigurationErrorNamesSourcePath(t *testing.T) {
 
 func TestProfilesUsesConfiguredDefaultWhenBuiltInDefaultIsDisabled(t *testing.T) {
 	configuration := `{
-  "version": 1,
-  "default_reviewer": "opencode",
+  "schema_version": 1,
+  "defaults": {"reviewer": "opencode"},
   "reviewers": {
     "grok": {"enabled": false},
     "opencode": {"enabled": true, "model": "meta/muse-spark-1.2-contributor"}
@@ -296,20 +302,20 @@ func TestConfigurationRequiresUsableEffectiveDefault(t *testing.T) {
 		reason        string
 	}{
 		"configured default has no model": {configuration: `{
-  "version": 1,
-  "default_reviewer": "opencode",
+  "schema_version": 1,
+  "defaults": {"reviewer": "opencode"},
   "reviewers": {"opencode": {"enabled": true}}
 }`, reason: `effective default reviewer "opencode" requires a model`},
 		"built-in default is disabled": {configuration: `{
-  "version": 1,
+  "schema_version": 1,
   "reviewers": {"grok": {"enabled": false}}
 }`, reason: `effective default reviewer "grok" is disabled`},
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			invalid, _ := invalidConfigurationFromPayload(t, test.configuration)
-			if !strings.Contains(invalid.Reason, test.reason) {
-				t.Fatalf("reason = %q, want it to contain %q", invalid.Reason, test.reason)
+			_, err := invalidConfigurationFromPayload(t, test.configuration)
+			if !strings.Contains(err.Error(), test.reason) {
+				t.Fatalf("error = %q, want it to contain %q", err.Error(), test.reason)
 			}
 		})
 	}
@@ -317,8 +323,8 @@ func TestConfigurationRequiresUsableEffectiveDefault(t *testing.T) {
 
 func TestDisabledReviewerIgnoresInactiveModelAllowlist(t *testing.T) {
 	configuration := `{
-  "version": 1,
-  "default_reviewer": "opencode",
+  "schema_version": 1,
+  "defaults": {"reviewer": "opencode"},
   "reviewers": {
     "grok": {"enabled": false, "model": "grok-4.5", "allowed_models": ["other"]},
     "opencode": {"enabled": true, "model": "meta/muse-spark-1.2-contributor"}
@@ -353,6 +359,7 @@ func TestMissingUserConfigurationPreservesBuiltInDefault(t *testing.T) {
 }
 
 func TestOpenCodeRequiresCallerOwnedModelWithoutConfiguration(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	conductor, err := New(Config{})
 	if err != nil {
@@ -366,6 +373,15 @@ func TestOpenCodeRequiresCallerOwnedModelWithoutConfiguration(t *testing.T) {
 }
 
 func configuredTestConductor(t *testing.T, configuration string) *Conductor {
+	t.Helper()
+	conductor, _, err := conductorFromConfiguration(t, configuration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return conductor
+}
+
+func conductorFromConfiguration(t *testing.T, configuration string) (*Conductor, string, error) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "config.json")
 	if err := os.WriteFile(path, []byte(configuration), 0o600); err != nil {
@@ -381,31 +397,22 @@ func configuredTestConductor(t *testing.T, configuration string) *Conductor {
 		t.Fatal(err)
 	}
 	conductor, err := New(Config{UserConfigurationPath: path})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return conductor
+	return conductor, path, err
 }
 
-func invalidConfigurationFromPayload(t *testing.T, payload string) (InvalidUserConfigurationError, string) {
+func invalidConfigurationFromPayload(t *testing.T, payload string) (string, error) {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "config.json")
-	if err := os.WriteFile(path, []byte(payload), 0o600); err != nil {
-		t.Fatal(err)
+	_, path, err := conductorFromConfiguration(t, payload)
+	if err == nil {
+		t.Fatal("configuration payload was accepted")
 	}
-	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	_, err := New(Config{UserConfigurationPath: path})
-	var invalid InvalidUserConfigurationError
-	if !errors.As(err, &invalid) {
-		t.Fatalf("error = %v, want InvalidUserConfigurationError", err)
-	}
-	return invalid, path
+	return path, err
 }
 
 func assertInvalidConfigurationReason(t *testing.T, payload, reason string) {
 	t.Helper()
-	invalid, _ := invalidConfigurationFromPayload(t, payload)
-	if !strings.Contains(invalid.Reason, reason) {
-		t.Fatalf("reason = %q, want it to contain %q", invalid.Reason, reason)
+	_, err := invalidConfigurationFromPayload(t, payload)
+	if !strings.Contains(err.Error(), reason) {
+		t.Fatalf("error = %q, want it to contain %q", err.Error(), reason)
 	}
 }
