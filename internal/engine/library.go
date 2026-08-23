@@ -187,23 +187,20 @@ func (conductor *Conductor) profileSummaries(repository string) ([]ProfileSummar
 	return summaries, nil
 }
 
-func (library profileLibrary) resolveEffective(request profileRequest) (configuration.Effective, error) {
-	return library.manager().Resolve(configuration.Request{
+func (library profileLibrary) resolveConfiguration(request profileRequest) (configuration.Effective, profileSelection, error) {
+	effective, err := library.manager().Resolve(configuration.Request{
 		Repository: configuration.Repository(request.repository),
 		Overrides:  configuration.Overrides{Profile: request.name},
 	})
+	if err != nil {
+		return configuration.Effective{}, profileSelection{}, err
+	}
+	selection, err := selectProfileFromEffective(effective, request.reviewer)
+	return effective, selection, err
 }
 
 func (library profileLibrary) resolve(request profileRequest) (resolvedProfile, error) {
-	effective, err := library.resolveEffective(request)
-	if err != nil {
-		return resolvedProfile{}, err
-	}
-	return library.resolveWithEffective(effective, request)
-}
-
-func (library profileLibrary) resolveWithEffective(effective configuration.Effective, request profileRequest) (resolvedProfile, error) {
-	selection, err := selectProfileFromEffective(effective, request.reviewer)
+	effective, selection, err := library.resolveConfiguration(request)
 	if err != nil {
 		return resolvedProfile{}, err
 	}
@@ -218,7 +215,7 @@ func (library profileLibrary) resolveWithEffective(effective configuration.Effec
 
 func (library profileLibrary) validateExplicitReviewer(selection ProfileSelection, repository string, catalog reviewerCatalog) error {
 	request := profileRequest{repository: repository, name: selection.Profile, reviewer: selection.Reviewer}
-	effective, err := library.resolveEffective(request)
+	effective, resolvedSelection, err := library.resolveConfiguration(request)
 	if err != nil {
 		return err
 	}
@@ -227,8 +224,8 @@ func (library profileLibrary) validateExplicitReviewer(selection ProfileSelectio
 		return err
 	}
 	required := restrictedReviewCapabilities()
-	profileName := firstNonempty(selection.Profile, effective.DefaultProfile.Value, "bugs")
-	if resolved, resolveErr := library.resolveWithEffective(effective, request); resolveErr == nil {
+	profileName := resolvedSelection.name
+	if resolved, findErr := library.findProfile(profileLookup{repository: repository, name: profileName}); findErr == nil {
 		if definition, definitionErr := profileDefinitionFor(resolved); definitionErr == nil {
 			required = definition.requiredCapabilities
 			profileName = definition.name
