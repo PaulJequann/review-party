@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -117,7 +118,7 @@ func TestRepositoryScopeRejectsPersonalOnlyFields(t *testing.T) {
 	}
 }
 
-func TestPublishIsAtomicWhenASecondFileFails(t *testing.T) {
+func TestConfirmIsAtomicWhenASecondFileFails(t *testing.T) {
 	root := t.TempDir()
 	repository := t.TempDir()
 	personalPath := filepath.Join(root, "config.json")
@@ -134,7 +135,7 @@ func TestPublishIsAtomicWhenASecondFileFails(t *testing.T) {
 	t.Cleanup(func() { os.Chmod(repositoryDirectory, 0o700) })
 	manager := testManager(t, root)
 
-	plan, err := manager.Plan(Repository(repository), []Mutation{
+	plan, err := manager.Plan(Repository(repository), []Intent{
 		SetStateDirectory{Directory: root},
 		SetDefaultReviewer{Target: ScopeRepository, Reviewer: "codex"},
 	})
@@ -145,7 +146,7 @@ func TestPublishIsAtomicWhenASecondFileFails(t *testing.T) {
 		t.Fatalf("plan = %#v", plan)
 	}
 
-	err = manager.Publish(plan)
+	err = plan.Confirm()
 	if err == nil {
 		t.Fatal("publication unexpectedly succeeded")
 	}
@@ -156,6 +157,47 @@ func TestPublishIsAtomicWhenASecondFileFails(t *testing.T) {
 	const original = `{"schema_version":1,"defaults":{"reviewer":"opencode"}}`
 	if string(payload) != original {
 		t.Fatalf("personal configuration changed during failed publication:\n%s", payload)
+	}
+}
+
+func TestPlanPreviewsWithoutPublishingUntilConfirmed(t *testing.T) {
+	root := t.TempDir()
+	manager := testManager(t, root)
+	plan, err := manager.Plan(Repository(""), []Intent{
+		SetStateDirectory{Directory: root},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !plan.Valid {
+		t.Fatalf("plan = %#v", plan)
+	}
+	path := filepath.Join(root, "config.json")
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("planning created configuration: %v", err)
+	}
+	if err := plan.Confirm(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("confirmed configuration was not published: %v", err)
+	}
+}
+
+func TestConfirmedTypedReviewerIntentsUpdateEffectiveValues(t *testing.T) {
+	root := t.TempDir()
+	manager := testManager(t, root)
+	requireConfirmedPlan(t, manager, []Intent{
+		SetDefaultProfile{Target: ScopePersonal, Profile: "security"},
+		SetReviewerEnabled{Target: ScopePersonal, Reviewer: "opencode", Enabled: false},
+		SetReviewerAllowedModels{Target: ScopePersonal, Reviewer: "opencode", Models: []string{"model-a", "model-b"}},
+	})
+	effective := requireEffective(t, manager)
+	assertStringValue(t, "default profile", effective.DefaultProfile, "security", true, SourcePersonal, filepath.Join(root, "config.json"))
+	opencode := effective.Reviewers["opencode"]
+	assertBoolValue(t, "opencode enabled", opencode.Enabled, false, true, SourcePersonal, filepath.Join(root, "config.json"))
+	if !reflect.DeepEqual(opencode.AllowedModels.Value, []string{"model-a", "model-b"}) || !opencode.AllowedModels.Authored {
+		t.Fatalf("opencode allowed models = %#v", opencode.AllowedModels)
 	}
 }
 
@@ -209,11 +251,11 @@ func boolPointer(value bool) *bool {
 	return &value
 }
 
-func TestPlanRejectsUnknownReviewerAndPublishRefusesInvalidPlan(t *testing.T) {
+func TestPlanRejectsUnknownReviewerAndConfirmRefusesInvalidPlan(t *testing.T) {
 	root := t.TempDir()
 	manager := testManager(t, root)
 
-	plan, err := manager.Plan(Repository(""), []Mutation{
+	plan, err := manager.Plan(Repository(""), []Intent{
 		SetDefaultReviewer{Target: ScopePersonal, Reviewer: "unknown"},
 	})
 	if err != nil {
@@ -222,8 +264,8 @@ func TestPlanRejectsUnknownReviewerAndPublishRefusesInvalidPlan(t *testing.T) {
 	if plan.Valid || !strings.Contains(plan.Reason, `unknown reviewer "unknown"`) {
 		t.Fatalf("plan = %#v", plan)
 	}
-	if err := manager.Publish(plan); err == nil || !strings.Contains(err.Error(), "invalid change plan") {
-		t.Fatalf("publish error = %v", err)
+	if err := plan.Confirm(); err == nil || !strings.Contains(err.Error(), "invalid change plan") {
+		t.Fatalf("confirm error = %v", err)
 	}
 }
 
@@ -232,7 +274,7 @@ func TestPublishedPersonalConfigurationIsPrivateAndReadable(t *testing.T) {
 	manager := testManager(t, root)
 	plan := requirePersonalPlan(t, manager, root)
 	assertPersonalPlanShape(t, plan)
-	if err := manager.Publish(plan); err != nil {
+	if err := plan.Confirm(); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(root, "config.json")
@@ -244,7 +286,7 @@ func TestPublishedPersonalConfigurationIsPrivateAndReadable(t *testing.T) {
 
 func requirePersonalPlan(t *testing.T, manager *Manager, root string) Plan {
 	t.Helper()
-	plan, err := manager.Plan(Repository(""), []Mutation{
+	plan, err := manager.Plan(Repository(""), []Intent{
 		SetStateDirectory{Directory: root},
 		SetReviewerModel{Target: ScopePersonal, Reviewer: "opencode", Model: "meta/muse-spark-1.2-contributor"},
 	})
@@ -255,6 +297,20 @@ func requirePersonalPlan(t *testing.T, manager *Manager, root string) Plan {
 		t.Fatalf("plan = %#v", plan)
 	}
 	return plan
+}
+
+func requireConfirmedPlan(t *testing.T, manager *Manager, intents []Intent) {
+	t.Helper()
+	plan, err := manager.Plan(Repository(""), intents)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !plan.Valid {
+		t.Fatalf("plan = %#v", plan)
+	}
+	if err := plan.Confirm(); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func assertPersonalPlanShape(t *testing.T, plan Plan) {

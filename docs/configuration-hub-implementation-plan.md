@@ -233,7 +233,7 @@ publication.
   must be deleted.
 - Return each resolved value with provenance and distinguish absent authored
   values from effective packaged defaults.
-- Define typed mutation requests rather than generic dotted JSON paths.
+- Define typed configuration intents rather than generic dotted JSON paths.
 - Define a staged `ChangePlan` containing semantic changes, affected scopes,
   affected paths, warnings, and validation results.
 - Publish a confirmed plan atomically with private personal-file permissions.

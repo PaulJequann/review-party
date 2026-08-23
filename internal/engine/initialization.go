@@ -151,19 +151,16 @@ func absoluteOptionalPath(path string) (statePath, error) {
 	return statePath(filepath.Clean(absolute)), nil
 }
 
-// rememberStateDirectory stages and publishes one typed mutation so the
+// rememberStateDirectory stages and confirms one typed intent so the
 // managed state location becomes an authored Personal Configuration value.
-func rememberStateDirectory(manager *configuration.Manager, stateDirectory statePath) error {
-	plan, err := manager.Plan(configuration.Repository(""), []configuration.Mutation{
-		configuration.SetStateDirectory{Directory: string(stateDirectory)},
+func rememberStateDirectory(manager *configuration.Manager, stateDirectory string) error {
+	plan, err := manager.Plan(configuration.Repository(""), []configuration.Intent{
+		configuration.SetStateDirectory{Directory: stateDirectory},
 	})
 	if err != nil {
 		return fmt.Errorf("stage managed state location: %w", err)
 	}
-	if !plan.Valid {
-		return fmt.Errorf("stage managed state location: %s", plan.Reason)
-	}
-	if err := manager.Publish(plan); err != nil {
+	if err := plan.Confirm(); err != nil {
 		return fmt.Errorf("remember managed state location: %w", err)
 	}
 	return nil

@@ -26,12 +26,13 @@ type pendingWrite struct {
 	complete bool
 }
 
-// Publish writes every staged document of a confirmed plan atomically.
+// publish writes every staged document of a confirmed plan atomically. The
+// exported Plan.Confirm method is the only caller-facing publication step.
 // Personal files are private (0600, directories 0700). If any file fails to
 // publish, the previously published files are restored to their pre-save
 // contents and an error is returned; a partially accepted configuration is
 // never reported as success.
-func (manager *Manager) Publish(plan Plan) error {
+func (manager *Manager) publish(plan Plan) error {
 	if !plan.Valid {
 		return fmt.Errorf("refuse to publish an invalid change plan: %s", plan.Reason)
 	}

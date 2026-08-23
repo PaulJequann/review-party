@@ -2,16 +2,17 @@ package configuration
 
 import (
 	"fmt"
-	"strings"
 )
 
-// Mutation is one typed configuration change request. Mutations describe
-// semantic changes; they never carry dotted JSON paths or raw documents.
-type Mutation interface {
-	TargetScope() Scope
-	Field() string
-	Apply(document *Document)
-	Read(document Document) (string, bool)
+// Intent is one typed configuration change request. Intents describe semantic
+// changes; they never carry dotted JSON paths or raw documents. The package
+// owns how each intent maps to a document field so callers only choose a
+// supported operation and its typed values.
+type Intent interface {
+	intentScope() Scope
+	intentField() string
+	applyIntent(*Document)
+	readIntent(Document) (string, bool)
 }
 
 // SetDefaultReviewer selects or clears (empty Reviewer) the default reviewer in one scope.
@@ -53,93 +54,6 @@ type SetStateDirectory struct {
 	Directory string
 }
 
-func (mutation SetDefaultReviewer) TargetScope() Scope { return mutation.Target }
-func (mutation SetDefaultReviewer) Field() string      { return "defaults.reviewer" }
-
-func (mutation SetDefaultReviewer) Apply(document *Document) {
-	document.Defaults.Reviewer = mutation.Reviewer
-}
-
-func (mutation SetDefaultReviewer) Read(document Document) (string, bool) {
-	return authoredString(configurationText(document.Defaults.Reviewer))
-}
-
-func (mutation SetDefaultProfile) TargetScope() Scope { return mutation.Target }
-func (mutation SetDefaultProfile) Field() string      { return "defaults.profile" }
-
-func (mutation SetDefaultProfile) Apply(document *Document) {
-	document.Defaults.Profile = mutation.Profile
-}
-
-func (mutation SetDefaultProfile) Read(document Document) (string, bool) {
-	return authoredString(configurationText(document.Defaults.Profile))
-}
-
-func (mutation SetReviewerEnabled) TargetScope() Scope { return mutation.Target }
-func (mutation SetReviewerEnabled) Field() string      { return reviewerField(mutation.Reviewer, "enabled") }
-
-func (mutation SetReviewerEnabled) Apply(document *Document) {
-	policy := document.reviewerPolicy(mutation.Reviewer)
-	enabled := mutation.Enabled
-	policy.Enabled = &enabled
-	document.Reviewers[mutation.Reviewer] = policy
-}
-
-func (mutation SetReviewerEnabled) Read(document Document) (string, bool) {
-	policy, exists := document.Reviewers[mutation.Reviewer]
-	if !exists || policy.Enabled == nil {
-		return "", false
-	}
-	return fmt.Sprintf("%t", *policy.Enabled), true
-}
-
-func (mutation SetReviewerModel) TargetScope() Scope { return mutation.Target }
-func (mutation SetReviewerModel) Field() string      { return reviewerField(mutation.Reviewer, "model") }
-
-func (mutation SetReviewerModel) Apply(document *Document) {
-	policy := document.reviewerPolicy(mutation.Reviewer)
-	policy.Model = mutation.Model
-	document.Reviewers[mutation.Reviewer] = policy
-}
-
-func (mutation SetReviewerModel) Read(document Document) (string, bool) {
-	return authoredString(configurationText(document.Reviewers[mutation.Reviewer].Model))
-}
-
-func (mutation SetReviewerAllowedModels) TargetScope() Scope { return mutation.Target }
-func (mutation SetReviewerAllowedModels) Field() string {
-	return reviewerField(mutation.Reviewer, "allowed_models")
-}
-
-func (mutation SetReviewerAllowedModels) Apply(document *Document) {
-	policy := document.reviewerPolicy(mutation.Reviewer)
-	if mutation.Models == nil {
-		policy.AllowedModels = nil
-	} else {
-		policy.AllowedModels = append([]string(nil), mutation.Models...)
-	}
-	document.Reviewers[mutation.Reviewer] = policy
-}
-
-func (mutation SetReviewerAllowedModels) Read(document Document) (string, bool) {
-	models := document.Reviewers[mutation.Reviewer].AllowedModels
-	if models == nil {
-		return "", false
-	}
-	return strings.Join(models, ","), true
-}
-
-func (mutation SetStateDirectory) TargetScope() Scope { return ScopePersonal }
-func (mutation SetStateDirectory) Field() string      { return "state_directory" }
-
-func (mutation SetStateDirectory) Apply(document *Document) {
-	document.StateDirectory = mutation.Directory
-}
-
-func (mutation SetStateDirectory) Read(document Document) (string, bool) {
-	return authoredString(configurationText(document.StateDirectory))
-}
-
 func reviewerField(reviewer, field string) string {
 	return "reviewers." + reviewer + "." + field
 }
@@ -162,7 +76,9 @@ type Change struct {
 	HadAfter  bool
 }
 
-// Plan is a staged, validated set of changes. Nothing is written until Publish.
+// Plan is a staged, validated set of changes. Nothing is written until
+// Confirm. Callers can render the exported preview fields before deciding
+// whether to confirm the plan.
 type Plan struct {
 	Changes  []Change
 	Scopes   []Scope
@@ -171,7 +87,8 @@ type Plan struct {
 	Valid    bool
 	Reason   string
 
-	staged []stagedDocument
+	manager *Manager
+	staged  []stagedDocument
 }
 
 type stagedDocument struct {
@@ -180,17 +97,17 @@ type stagedDocument struct {
 	document Document
 }
 
-// Plan stages mutations against loaded documents and validates each complete
-// resulting document. Planning writes nothing and creates no files.
-func (manager *Manager) Plan(repository Repository, mutations []Mutation) (Plan, error) {
+// Plan stages typed intents against loaded documents and validates each
+// complete resulting document. Planning writes nothing and creates no files.
+func (manager *Manager) Plan(repository Repository, intents []Intent) (Plan, error) {
 	loaded, err := manager.Load(repository)
 	if err != nil {
 		return Plan{}, err
 	}
 	staged := map[Scope]*stagedDocument{}
-	plan := Plan{}
-	for _, mutation := range mutations {
-		change, err := manager.stageMutation(&plan, staged, loaded, repository, mutation)
+	plan := Plan{manager: manager}
+	for _, intent := range intents {
+		change, err := manager.stageIntent(&plan, staged, loaded, repository, intent)
 		if err != nil {
 			plan.Valid = false
 			plan.Reason = err.Error()
@@ -207,22 +124,26 @@ func (manager *Manager) Plan(repository Repository, mutations []Mutation) (Plan,
 	return plan, nil
 }
 
-func (manager *Manager) stageMutation(plan *Plan, staged map[Scope]*stagedDocument, loaded Loaded, repository Repository, mutation Mutation) (*Change, error) {
-	switch mutation.TargetScope() {
+func (manager *Manager) stageIntent(plan *Plan, staged map[Scope]*stagedDocument, loaded Loaded, repository Repository, intent Intent) (*Change, error) {
+	if intent == nil {
+		return nil, fmt.Errorf("configuration intent must not be nil")
+	}
+	scope := intent.intentScope()
+	switch scope {
 	case ScopePersonal, ScopeRepository:
 	default:
-		return nil, fmt.Errorf("unknown configuration scope %q", mutation.TargetScope())
+		return nil, fmt.Errorf("unknown configuration scope %q", scope)
 	}
-	current := loadedScopeFor(loaded, mutation.TargetScope())
-	target, ok := staged[mutation.TargetScope()]
+	current := loadedScopeFor(loaded, scope)
+	target, ok := staged[scope]
 	if !ok {
-		target = &stagedDocument{scope: mutation.TargetScope(), path: current.Path, document: current.Document}
-		staged[mutation.TargetScope()] = target
+		target = &stagedDocument{scope: scope, path: current.Path, document: current.Document}
+		staged[scope] = target
 	}
-	before, hadBefore := mutation.Read(target.document)
-	mutation.Apply(&target.document)
-	after, hadAfter := mutation.Read(target.document)
-	path, err := manager.ConfigPath(mutation.TargetScope(), repository)
+	before, hadBefore := intent.readIntent(target.document)
+	intent.applyIntent(&target.document)
+	after, hadAfter := intent.readIntent(target.document)
+	path, err := manager.ConfigPath(scope, repository)
 	if err != nil {
 		return nil, err
 	}
@@ -230,7 +151,16 @@ func (manager *Manager) stageMutation(plan *Plan, staged map[Scope]*stagedDocume
 	if before == after && hadBefore == hadAfter {
 		return nil, nil
 	}
-	return &Change{Field: mutation.Field(), Scope: mutation.TargetScope(), Path: path, Before: before, After: after, HadBefore: hadBefore, HadAfter: hadAfter}, nil
+	return &Change{Field: intent.intentField(), Scope: scope, Path: path, Before: before, After: after, HadBefore: hadBefore, HadAfter: hadAfter}, nil
+}
+
+// Confirm publishes this plan atomically. Callers should render the plan and
+// obtain any user or automation confirmation before invoking this method.
+func (plan Plan) Confirm() error {
+	if plan.manager == nil {
+		return fmt.Errorf("cannot confirm a change plan without its configuration manager")
+	}
+	return plan.manager.publish(plan)
 }
 
 func (manager *Manager) validateStaged(plan *Plan, staged map[Scope]*stagedDocument) error {
