@@ -1,6 +1,6 @@
 # Configuration Hub implementation plan
 
-Status: Slice 2 complete; remaining slices pending
+Status: Slice 2 implementation complete; boundary replacements required before Slice 3
 Last reconciled: 2026-08-23
 
 This plan replaces Review Party's fragmented personal configuration experience
@@ -106,6 +106,64 @@ Model Discovery is a separate Module behind one small interface per Reviewer.
 Provider-specific commands and response formats stay in Reviewer adapters.
 A discovery failure affects only that Reviewer and never prevents the Hub from
 opening.
+
+## Design boundaries twice
+
+Slice 2 established the configuration rules, but its first exported types are
+not compatibility commitments. Review Party is pre-release. The Configuration
+Manager can replace those types before the Hub and command callers depend on
+them.
+
+### Effective reviewer selection
+
+The Configuration Manager needs to answer one execution question: which
+Reviewer and model may this Review use? Two designs can answer it.
+
+| Concern | Exported effective field graph | Operation-oriented validated selection |
+| --- | --- | --- |
+| Cohesion | Callers combine `DefaultReviewer`, reviewer policy, an explicit model, and provenance. Configuration rules leak into each caller. | One operation resolves and validates the Reviewer selection. The Configuration Manager keeps precedence and policy together. |
+| Interface size and caller knowledge | The exported graph exposes unrelated defaults, evaluation settings, and every Reviewer policy. A caller must know which fields interact. | The request contains the repository, requested Reviewer, and requested model. The result contains only the selected Reviewer, selected model, and their provenance. |
+| Dependency direction | Execution code depends on the configuration document's resolved shape. Changes to configuration fields can force execution changes. | Execution code depends on a selection result. The document shape and precedence algorithm remain private to configuration. |
+| Testability | Tests must assemble a graph and repeat the selection algorithm or test callers through broad fixtures. | Table tests exercise selection inputs, winning values, provenance, and errors at one boundary. Callers can use a small fake operation. |
+| Failure containment | A caller can overlook disabled policy or apply a model restriction in the wrong order. Different callers can disagree. | The operation either returns one valid selection or a scoped error. Invalid policy cannot escape as executable state. |
+| Pre-release compatibility | Keeping the current graph avoids a short-term replacement, but turns an exploratory type into a broad API. | Replacing the graph now breaks no supported users and leaves a smaller contract for later slices. |
+| Measured performance | No benchmark measures graph resolution or caller-side selection. | No benchmark measures operation-oriented selection. The choice has no performance claim. |
+
+Select the operation-oriented interface. It is smaller and keeps configuration
+rules in the Configuration Manager. The operation resolves each policy field
+by precedence before it interprets the combined policy. If the effective
+`enabled` value is false, the effective model and model restriction are inert.
+They cannot make selection fail because the Reviewer cannot run. An error for
+an active Reviewer retains the scope and path of the winning authored value
+that caused the error.
+
+An explicit requested model is an input to reviewer selection, not an
+independent `Effective.Model` value. The selected result records explicit
+provenance when that input wins. No future caller may infer behavior from the
+currently unused `Effective.Model` field.
+
+### Staged publication
+
+The Configuration Manager also needs to let a caller preview changes and then
+publish exactly those changes. Two designs can provide that workflow.
+
+| Concern | Exported mutable `Plan` | Opaque snapshot-bound `Plan` |
+| --- | --- | --- |
+| Cohesion | The plan mixes caller-facing preview fields with private staged documents. Exported slices invite callers to treat storage details as state. | The Configuration Manager owns the staged documents and snapshot identity. A separate preview value describes the proposed change. |
+| Interface size and caller knowledge | Callers see validity flags, reasons, paths, scopes, changes, and reserved fields, then must know which parts publication trusts. | Callers receive an opaque plan capability and an immutable preview. They only decide whether to publish that capability. |
+| Dependency direction | Publication accepts a caller-copyable value whose exported parts can diverge from its hidden state. | Callers depend on `Preview` and `Publish`; only the Configuration Manager knows the plan representation. |
+| Testability | Tests can mutate exported slices, but must inspect private state to prove what publication will write. | Tests can verify that preview mutations do not affect publication, stale snapshots fail, and a fresh plan publishes the previewed change. |
+| Failure containment | A long-lived plan can overwrite configuration changed after planning. Mutable preview data can misrepresent the staged write. | Publication rejects a plan when any source snapshot changed. Copied preview data cannot mutate staged state. |
+| Pre-release compatibility | Retaining the struct preserves an API that no supported release requires. Reserved fields such as `Warnings` enlarge that API before semantics exist. | Replacing the struct now avoids a compatibility promise and permits later warning semantics to use a deliberate result type. |
+| Measured performance | No benchmark measures copying or publishing the exported plan. | No benchmark measures snapshot comparison or defensive preview copies. The choice has no performance claim. |
+
+Select the opaque snapshot-bound `Plan`. Planning captures the identity and
+content digest of every loaded configuration file that can affect the staged
+result. `Publish` compares those snapshots immediately before it writes and
+rejects a stale plan without writing any file. Preview access returns data that
+cannot mutate the staged documents, including defensive copies of slices and
+maps. The Interface does not reserve `Plan.Warnings`. Adding warnings requires
+a separate design decision with defined semantics and consumer behavior.
 
 ## Dependency order
 
@@ -237,14 +295,10 @@ publication.
   `SourceRepository` or `SourcePersonal` value and its authored path.
 - Define typed configuration intents rather than generic dotted JSON paths.
 - Keep `Intent` as a closed set of package-owned typed operations with
-  package-private mechanics. `Manager.Plan` accepts `[]Intent` and represents a
-  nil intent as an invalid `Plan` (`Valid: false` with a `Reason`) rather than
-  returning an error; callers check `Plan.Valid`, and `Manager.Publish` also
-  rejects invalid plans.
-- Define a staged `Plan` containing semantic changes, affected scopes, affected
-  paths, validation results, and a stable `Warnings` field reserved for later
-  slices. Slice 2 always leaves `Warnings` empty; callers must ignore it until a
-  later slice defines warning semantics.
+  package-private mechanics. Planning rejects invalid intents without exposing
+  a publishable `Plan`.
+- Return an opaque, snapshot-bound `Plan` and a separate immutable preview of
+  semantic changes, affected scopes, affected paths, and validation results.
 - Publish a confirmed `Plan` atomically with private personal-file permissions
   through `Manager.Publish`.
   Multi-file failure must restore the pre-save state or leave an explicit,
@@ -277,8 +331,7 @@ publication.
   precedence, and malformed-document fail-closed behavior.
 - Configuration Manager tests cover provenance, explicit choices, atomic
   rollback, scope validation, stable JSON, typed-plan validation including nil
-  intent refusal, and private personal publication. Slice 2 does not populate
-  `Plan.Warnings`; that field remains reserved for later slices.
+  intent refusal, and private personal publication.
 
 ## Slice 3 — Cobra command tree
 
@@ -351,9 +404,8 @@ do not expose arbitrary dotted-key intents.
 
 - Show a semantic before/after plan and require confirmation for intents.
 - Support `--yes` for explicitly authorized automation.
-- Return structured changed scope, affected paths, before/after values,
-  validation results, and warnings in JSON mode. Agent callers must not rely on
-  warnings until a later slice defines and populates them.
+- Return structured changed scope, affected paths, before and after values, and
+  validation results in JSON mode.
 - Keep stdout machine-clean; prompts and diagnostics use the correct terminal or
   error stream.
 - Refuse interactive confirmation without a controlling terminal unless
@@ -461,8 +513,8 @@ Complete recurring configuration management across all accepted Hub areas.
 - Repository editor: make scope and tracked paths unmistakable and expose the
   repository values that may override Personal Configuration.
 - Advanced editor: Eval retry/backoff/concurrency and managed-state location.
-- Review Changes: group semantic changes by scope and path, display warnings,
-  validate the complete Effective Configuration, and confirm one atomic save.
+- Review Changes: group semantic changes by scope and path, display validation
+  results, and confirm one atomic save.
 - Require ordinary confirmation for setting removal and typed-name confirmation
   before deleting authored Profile or Party files.
 - Preserve completed editor changes in the draft when another editor is
