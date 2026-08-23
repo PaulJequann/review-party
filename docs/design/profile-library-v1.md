@@ -36,12 +36,31 @@ Packaged defaults use the same Markdown representation and are embedded in the
 binary. Personal and Repository `config.json` documents share schema version 1
 and use `schema_version`, `defaults.profile`, `defaults.reviewer`, and
 `reviewers.<id>.enabled|model|allowed_models`. Repository reviewer values win
-per field; fields absent there may still come from Personal Configuration. A
-disabled reviewer leaves its model and allowlist inert during document
-validation. Repository scope cannot author Personal-only state or Eval
-settings. Unknown fields, unsupported schemas, unsafe names, invalid
-UTF-8, empty Profiles, oversized files, symlinks, and special files fail before
-launch.
+per field; fields absent there may still come from Personal Configuration.
+Document validation enforces shape, scope, and known Reviewer names in
+isolation. Repository scope cannot author Personal-only state or Eval settings.
+Unknown fields, unsupported schemas, unsafe names, invalid UTF-8, empty Profiles,
+oversized files, symlinks, and special files fail before launch.
+
+## Effective policy and publication contract
+
+`Manager.Resolve` and `Manager.Plan` resolve `enabled`, `model`, and
+`allowed_models` independently across Repository, Personal, and packaged
+values. They validate model and allowlist consistency only after that per-field
+precedence produces the final effective Reviewer policy.
+
+An enabled Reviewer with a non-empty packaged model uses that model when no
+authored model wins. If an authored `allowed_models` restriction also wins, the
+allowlist must contain the packaged model. Clearing the allowlist removes the
+restriction. If the final effective Reviewer is disabled, its model and
+allowlist are inert and cannot make the policy invalid.
+
+`Manager.Plan` returns an opaque plan. Its preview accessors return defensive
+copies, so a caller cannot mutate the staged documents through `Changes`,
+`Scopes`, or `Paths`. Planning also captures the baseline bytes for each target
+file. `Manager.Publish` preflights every target against its baseline and rejects
+a stale plan before any write begins. After a concurrent configuration edit,
+the caller must create and review a fresh plan before publishing.
 
 ## Resolution
 

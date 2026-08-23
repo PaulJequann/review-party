@@ -64,8 +64,13 @@ Configuration takes precedence per reviewer field (`enabled`, `model`, and
 `allowed_models`). Fields from both scopes compose, so a Repository allowlist
 can reject a Personal model. For a single Review, Review Party validates
 the effective selection before resolving the Review Subject. An authored
-`allowed_models`
-list also restricts explicit `--model` choices. Copilot's built-in `auto`
+`allowed_models` list also restricts explicit `--model` choices and the
+packaged model used when no authored model wins. Include that packaged model in
+the allowlist, clear the allowlist to remove the restriction, or disable the
+Reviewer to make its model policy inert. The full precedence and validation
+contract is in
+[`docs/design/profile-library-v1.md`](docs/design/profile-library-v1.md#effective-policy-and-publication-contract).
+Copilot's built-in `auto`
 selection records the model it resolves. Codex's built-in model is
 `gpt-5.6-luna` with high-effort reasoning by default.
 
