@@ -33,25 +33,12 @@ func supportedReviewerIDs() []string {
 	return defaultReviewerCatalog().ids()
 }
 
-// personalConfigurationRoot derives the personal root from an optional
-// explicit configuration file path (empty means the canonical root).
-func personalConfigurationRoot(personalConfigPath string) string {
-	if personalConfigPath == "" {
-		return ""
-	}
-	return filepath.Dir(personalConfigPath)
-}
-
-func selectProfileFromScopes(catalog reviewerCatalog, request profileSelection, personal, repository configuration.Document) (profileSelection, error) {
-	name := firstNonempty(request.name, repository.Defaults.Profile, personal.Defaults.Profile, packagedDefaultProfileName)
+func selectProfileFromEffective(effective configuration.Effective, explicitReviewer string) (profileSelection, error) {
+	name := effective.DefaultProfile.Value
 	if err := validateProfileName(name); err != nil {
 		return profileSelection{}, fmt.Errorf("profile name %q: %w", name, err)
 	}
-	reviewer := firstNonempty(request.reviewer, repository.Defaults.Reviewer, personal.Defaults.Reviewer, catalog.defaultReviewer, defaultReviewer)
-	if _, err := catalog.resolve(reviewer); err != nil {
-		return profileSelection{}, err
-	}
-	return profileSelection{name: name, reviewer: reviewer}, nil
+	return profileSelection{name: name, reviewer: firstNonempty(explicitReviewer, effective.DefaultReviewer.Value)}, nil
 }
 
 // profileSelection carries an explicit or defaulted Profile and Reviewer choice.

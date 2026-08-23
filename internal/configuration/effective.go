@@ -104,8 +104,8 @@ func resolveReviewerSettings(loaded Loaded, id reviewerID) ReviewerSettings {
 		Model:         Value[string]{Source: SourcePackaged},
 		AllowedModels: Value[[]string]{Source: SourcePackaged},
 	}
-	settings.apply(loaded.Personal, id)
 	settings.apply(loaded.Repository, id)
+	settings.apply(loaded.Personal, id)
 	return settings
 }
 

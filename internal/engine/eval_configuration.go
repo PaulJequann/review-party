@@ -10,32 +10,33 @@ import (
 // Experiment Configuration.
 func ApplyEvalConfigurationDefaults(personalConfigPath string, experiment *model.ExperimentConfiguration) error {
 	manager := newConfigurationManager(personalConfigPath)
-	loaded, err := manager.Load(configuration.Repository(""))
+	effective, err := manager.Resolve(configuration.Request{})
 	if err != nil {
 		return err
 	}
-	applyConfiguredEvalReviewer(loaded.Personal.Document, experiment)
-	applyConfiguredEvalPolicy(loaded.Personal.Document.Eval, experiment)
+	applyConfiguredEvalReviewer(effective, experiment)
+	applyConfiguredEvalPolicy(effective.Eval, experiment)
 	return nil
 }
 
-func applyConfiguredEvalReviewer(document configuration.Document, experiment *model.ExperimentConfiguration) {
-	if experiment.Reviewer == "" && document.Defaults.Reviewer != "" {
-		experiment.Reviewer = document.Defaults.Reviewer
+func applyConfiguredEvalReviewer(effective configuration.Effective, experiment *model.ExperimentConfiguration) {
+	if experiment.Reviewer == "" && effective.DefaultReviewer.Authored {
+		experiment.Reviewer = effective.DefaultReviewer.Value
 	}
 	if experiment.Model != "" || experiment.Reviewer == "" {
 		return
 	}
-	policy, configured := document.Reviewers[experiment.Reviewer]
-	if configured && policy.Model != "" {
-		experiment.Model = policy.Model
+	settings, configured := effective.Reviewers[experiment.Reviewer]
+	if configured && settings.Model.Authored {
+		experiment.Model = settings.Model.Value
 	}
 }
 
-func applyConfiguredEvalPolicy(policy *configuration.EvalPolicy, experiment *model.ExperimentConfiguration) {
-	if policy == nil {
+func applyConfiguredEvalPolicy(value configuration.Value[configuration.EvalPolicy], experiment *model.ExperimentConfiguration) {
+	if !value.Authored {
 		return
 	}
+	policy := value.Value
 	if experiment.RetryPolicy.MaxAttempts == 0 && policy.RetryPolicy.MaxAttempts != 0 {
 		experiment.RetryPolicy = model.RetryPolicy{
 			MaxAttempts:    policy.RetryPolicy.MaxAttempts,
