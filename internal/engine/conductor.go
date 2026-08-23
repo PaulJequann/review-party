@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 
 	"reviewparty/internal/artifact"
-	"reviewparty/internal/configuration"
 	"reviewparty/internal/model"
 	"reviewparty/internal/store"
 	"time"
@@ -40,18 +39,18 @@ func New(config Config) (*Conductor, error) {
 		config.AttemptDeadline = 10 * time.Minute
 	}
 	manager := newConfigurationManager(config.UserConfigurationPath)
-	effective, err := manager.Resolve(configuration.Request{})
+	configuredState, err := manager.ResolveStateDirectory()
 	if err != nil {
 		return nil, err
 	}
-	stateDirectory := firstNonempty(effective.StateDirectory.Value, defaultStateDirectory())
+	stateDirectory := firstNonempty(configuredState.Value, defaultStateDirectory())
 	store, err := newDeferredLedgerRecordStore(stateDirectory)
 	if err != nil {
 		return nil, err
 	}
-	// Apply Personal reviewer policies now, but validate the effective default
-	// only after a repository can contribute its higher-precedence choices.
-	reviewers := applyEffectiveReviewerPolicies(defaultReviewerCatalog(), effective)
+	// Repository-scoped profile compilation applies the complete Personal and
+	// Repository reviewer policy before validating a selection.
+	reviewers := defaultReviewerCatalog()
 	conductor, err := newConductorWithProfiles(store, reviewers, profileLibrary{configuration: manager}, config.AttemptDeadline)
 	if err != nil {
 		return nil, err

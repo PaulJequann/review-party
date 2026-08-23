@@ -117,6 +117,16 @@ func (manager *Manager) Resolve(request Request) (Effective, error) {
 	return effective, nil
 }
 
+// ResolveStateDirectory returns the Personal managed-state setting without
+// treating Personal reviewer policy as final before a repository is known.
+func (manager *Manager) ResolveStateDirectory() (Value[string], error) {
+	loaded, err := manager.Load("")
+	if err != nil {
+		return Value[string]{}, err
+	}
+	return personalValue(loaded, stateDirectoryValue), nil
+}
+
 func (manager *Manager) resolveEffectiveReviewers(loaded Loaded) (map[string]ReviewerSettings, error) {
 	reviewers := make(map[string]ReviewerSettings, len(manager.reviewers))
 	for _, id := range manager.knownReviewers() {

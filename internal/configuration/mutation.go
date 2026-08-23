@@ -121,25 +121,27 @@ func (manager *Manager) stageIntent(plan *Plan, staged map[Scope]*stagedDocument
 		return nil, fmt.Errorf("unknown configuration scope %q", scope)
 	}
 	current := loadedScopeFor(loaded, scope)
-	target, ok := staged[scope]
-	if !ok {
+	target, alreadyStaged := staged[scope]
+	if !alreadyStaged {
 		target = &stagedDocument{
 			scope: scope, path: current.Path, document: current.Document,
 			baseline: fileState{existed: current.Present, payload: append([]byte(nil), current.payload...)},
 		}
-		staged[scope] = target
 	}
 	before, hadBefore := intent.readIntent(target.document)
 	intent.applyIntent(&target.document)
 	after, hadAfter := intent.readIntent(target.document)
+	if before == after && hadBefore == hadAfter {
+		return nil, nil
+	}
 	path, anchor, err := manager.configPathAndAnchor(scope, repository)
 	if err != nil {
 		return nil, err
 	}
 	target.path = path
 	target.anchor = anchor
-	if before == after && hadBefore == hadAfter {
-		return nil, nil
+	if !alreadyStaged {
+		staged[scope] = target
 	}
 	return &Change{Field: intent.intentField(), Scope: scope, Path: path, Before: before, After: after, HadBefore: hadBefore, HadAfter: hadAfter}, nil
 }

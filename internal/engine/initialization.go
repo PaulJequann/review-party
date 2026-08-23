@@ -56,11 +56,11 @@ func resolveInitialization(request ReviewPartyInitialization) (resolvedInitializ
 		return resolvedInitialization{}, err
 	}
 	manager := newConfigurationManager(request.UserConfigurationPath)
-	effective, err := manager.Resolve(configuration.Request{})
+	configuredState, err := manager.ResolveStateDirectory()
 	if err != nil {
 		return resolvedInitialization{}, err
 	}
-	selection, err := selectInitializationState(request, statePath(effective.StateDirectory.Value))
+	selection, err := selectInitializationState(request, statePath(configuredState.Value))
 	if err != nil {
 		return resolvedInitialization{}, err
 	}

@@ -82,6 +82,19 @@ type EvalPolicy struct {
 	ConcurrencyLimit int         `json:"concurrency_limit,omitempty"`
 }
 
+func (policy *EvalPolicy) UnmarshalJSON(payload []byte) error {
+	if _, err := decodeObjectFields(payload, "eval policy", "retry_policy", "concurrency_limit"); err != nil {
+		return err
+	}
+	type plainEvalPolicy EvalPolicy
+	var decoded plainEvalPolicy
+	if err := strictDecode(payload, &decoded); err != nil {
+		return err
+	}
+	*policy = EvalPolicy(decoded)
+	return nil
+}
+
 // Document is the unified configuration document shared by Personal and
 // Repository scopes. Scope validation decides which fields each scope permits.
 type Document struct {

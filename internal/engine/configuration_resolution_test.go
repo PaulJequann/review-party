@@ -8,6 +8,32 @@ import (
 	"time"
 )
 
+func TestNewDefersReviewerPolicyValidationUntilRepositoryResolution(t *testing.T) {
+	personalPath := filepath.Join(t.TempDir(), "config.json")
+	writeProfileConfigFixture(t, personalPath, `{
+  "schema_version": 1,
+  "reviewers": {"grok": {"allowed_models": ["repo-model"]}}
+}`)
+	repository := t.TempDir()
+	writeProfileConfigFixture(t, filepath.Join(repository, ".reviewparty", "config.json"), `{
+  "schema_version": 1,
+  "reviewers": {"grok": {"model": "repo-model"}}
+}`)
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+
+	conductor, err := New(Config{UserConfigurationPath: personalPath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile, err := conductor.compileFilesystemProfile(ProfileSelection{Profile: "bugs"}, repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if profile.reviewer.candidate.Model != "repo-model" {
+		t.Fatalf("model = %q, want repository model", profile.reviewer.candidate.Model)
+	}
+}
+
 func TestExplicitReviewerUsesResolvedRepositoryConfiguration(t *testing.T) {
 	repository := changedTestRepository(t)
 	writeProfileConfigFixture(t, filepath.Join(repository, ".reviewparty", "config.json"), `{
