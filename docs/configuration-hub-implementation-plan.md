@@ -60,8 +60,8 @@ backfill, or legacy-read paths.
 - Lip Gloss supplies restrained styling with readable no-color behavior.
 - The Hub is recurring configuration management, not a first-run wizard.
 - A non-TTY `review-party config` prints concise guidance and performs no
-  mutation.
-- Human users primarily use the Hub. Agent-facing mutations remain explicit,
+  configuration change.
+- Human users primarily use the Hub. Agent-facing intents remain explicit,
   composable, and machine-readable.
 - Hub changes are staged in memory and saved as one reviewed transaction.
   Cancellation before confirmation writes nothing.
@@ -234,8 +234,14 @@ publication.
 - Return each resolved value with provenance and distinguish absent authored
   values from effective packaged defaults.
 - Define typed configuration intents rather than generic dotted JSON paths.
-- Define a staged `Plan` containing semantic changes, affected scopes,
-  affected paths, warnings, and validation results.
+- Keep `Intent` as a closed set of package-owned typed operations with
+  package-private mechanics. `Manager.Plan` accepts `[]Intent` and represents a
+  nil intent as an invalid `Plan` (`Valid: false` with a `Reason`) rather than
+  returning an error; callers check `Plan.Valid`, and `Manager.Publish` also
+  rejects invalid plans.
+- Define a staged `Plan` containing semantic changes, affected scopes, affected
+  paths, validation results, and a `Warnings` field reserved for later slices;
+  Slice 2 leaves `Warnings` empty.
 - Publish a confirmed `Plan` atomically with private personal-file permissions
   through `Manager.Publish`.
   Multi-file failure must restore the pre-save state or leave an explicit,
@@ -267,8 +273,9 @@ publication.
   advanced-state publication with `0700`/`0600` permissions, repository
   precedence, and malformed-document fail-closed behavior.
 - Configuration Manager tests cover provenance, explicit choices, atomic
-  rollback, scope validation, stable JSON, typed-plan validation, and private
-  personal publication.
+  rollback, scope validation, stable JSON, typed-plan validation including nil
+  intent refusal, and private personal publication. Slice 2 does not populate
+  `Plan.Warnings`; that field remains reserved for later slices.
 
 ## Slice 3 — Cobra command tree
 
@@ -335,11 +342,11 @@ review-party config advanced ...
 ```
 
 Exact verbs should remain domain-oriented and discoverable through Cobra help;
-do not expose arbitrary dotted-key mutation.
+do not expose arbitrary dotted-key intents.
 
 ### Work
 
-- Show a semantic before/after plan and require confirmation for mutations.
+- Show a semantic before/after plan and require confirmation for intents.
 - Support `--yes` for explicitly authorized automation.
 - Return structured changed scope, affected paths, before/after values,
   validation results, and warnings in JSON mode.
@@ -350,7 +357,7 @@ do not expose arbitrary dotted-key mutation.
 
 ### Acceptance
 
-- Every Hub mutation planned for Slice 7 has a typed noninteractive operation.
+- Every Hub intent planned for Slice 7 has a typed noninteractive operation.
 - Commands and the eventual Hub produce equivalent Plans.
 - Invalid changes write nothing.
 - Agent callers never need to parse styled terminal output.
@@ -466,7 +473,7 @@ Complete recurring configuration management across all accepted Hub areas.
   accepting the invalid file.
 - Save either publishes the complete reviewed Plan or reports failure
   without partial accepted state.
-- Repository mutations identify tracked-file effects before confirmation.
+- Repository intents identify tracked-file effects before confirmation.
 
 ## Slice 8 — Recovery, diagnostics, and release polish
 
@@ -521,12 +528,12 @@ are written.
 | Defaults remain zero-write | Opening the Hub creates a config that later masks packaged updates | Public Hub over isolated XDG dirs | Open and exit leaves no files |
 | Cobra preserves automation | Framework migration changes JSON shape or usage exit codes | Public CLI | Golden semantic JSON and exit behavior remain stable |
 | Discovery is bounded and isolated | One hanging harness freezes all Reviewer configuration | Discovery Module and Hub update loop | Other screens remain responsive and cancellation reaps the process |
-| Discovery remains observational | Refresh launches login or writes another tool's settings | Scripted harness fixture | No auth or mutation occurs before explicit action |
+| Discovery remains observational | Refresh launches login or writes another tool's settings | Scripted harness fixture | No auth or configuration change occurs before explicit action |
 | Manual model entry remains available | Incomplete discovery prevents selection of a valid new model | Reviewer editor | Warning can be confirmed and selected ID is saved |
 | Hub cancellation is clean | Leaving a nested form writes a partially edited policy | Hub and Configuration Manager | Cancel/exit before final confirmation changes no files |
 | Destructive actions preserve intent | A misfocused key deletes authored Profile content | Hub deletion flow | Typed identity and final Plan are required |
 | Recovery preserves malformed input | Guided repair silently drops an unrecognized field | Recovery flow over real files | Original bytes remain available until explicit confirmed replacement |
-| Machine commands do not require a TTY | An agent blocks waiting for Huh confirmation | Cobra config command | Non-TTY mutation refuses unless explicit authorization is supplied |
+| Machine commands do not require a TTY | An agent blocks waiting for Huh confirmation | Cobra config command | Non-TTY configuration change refuses unless explicit authorization is supplied |
 | Profile editor validates external edits | `$EDITOR` writes an invalid Profile that becomes effective | Editor integration and Profile compiler | Invalid content is rejected before publication |
 
 ## Explicit non-goals

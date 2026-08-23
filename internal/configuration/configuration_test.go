@@ -269,6 +269,20 @@ func TestPlanRejectsUnknownReviewerAndPublishRefusesInvalidPlan(t *testing.T) {
 	}
 }
 
+func TestPlanRejectsNilIntentAndPublishRefusesInvalidPlan(t *testing.T) {
+	manager := testManager(t, t.TempDir())
+	plan, err := manager.Plan(Repository(""), []Intent{nil})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Valid || !strings.Contains(plan.Reason, "configuration intent must not be nil") {
+		t.Fatalf("plan = %#v", plan)
+	}
+	if err := manager.Publish(plan); err == nil || !strings.Contains(err.Error(), "invalid change plan") {
+		t.Fatalf("publish error = %v", err)
+	}
+}
+
 func TestPublishedPersonalConfigurationIsPrivateAndReadable(t *testing.T) {
 	root := t.TempDir()
 	manager := testManager(t, root)
