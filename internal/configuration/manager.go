@@ -69,6 +69,7 @@ type Manager struct {
 	reviewers          map[string]struct{}
 	packaged           packagedDefaults
 	profiles           func(string) error
+	publishWrite       func(*pendingWrite) error
 }
 
 type packagedDefaults struct {
@@ -97,6 +98,7 @@ func NewManager(options Options) *Manager {
 		reviewers:          reviewers,
 		packaged:           packagedDefaults{defaultReviewer: options.PackagedDefaultReviewer, defaultProfile: options.PackagedDefaultProfile},
 		profiles:           options.ValidateProfileName,
+		publishWrite:       writeAtomically,
 	}
 }
 

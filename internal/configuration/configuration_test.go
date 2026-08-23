@@ -123,17 +123,15 @@ func TestPublishIsAtomicWhenASecondFileFails(t *testing.T) {
 	repository := t.TempDir()
 	personalPath := filepath.Join(root, "config.json")
 	writeDocument(t, personalPath, `{"schema_version":1,"defaults":{"reviewer":"opencode"}}`)
-	// An unwritable repository configuration directory forces the second
-	// publication step to fail after the first file was already renamed.
-	repositoryDirectory := filepath.Join(repository, ".reviewparty")
-	if err := os.MkdirAll(repositoryDirectory, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chmod(repositoryDirectory, 0o500); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.Chmod(repositoryDirectory, 0o700) })
 	manager := testManager(t, root)
+	writes := 0
+	manager.publishWrite = func(write *pendingWrite) error {
+		writes++
+		if writes == 2 {
+			return errors.New("forced second publication failure")
+		}
+		return writeAtomically(write)
+	}
 
 	plan, err := manager.Plan(Repository(repository), []Intent{
 		SetStateDirectory{Directory: root},

@@ -43,7 +43,7 @@ func (manager *Manager) Publish(plan Plan) error {
 		return nil
 	}
 	for index := range writes {
-		if err := writeAtomically(&writes[index]); err != nil {
+		if err := manager.publishWrite(&writes[index]); err != nil {
 			err = fmt.Errorf("publish configuration %q: %w", writes[index].path, err)
 			return errors.Join(err, rollbackCompleted(writes[:index+1]))
 		}
