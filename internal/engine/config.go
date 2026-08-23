@@ -18,6 +18,7 @@ const packagedDefaultProfileName = "bugs"
 func newConfigurationManager(personalConfigPath string) *configuration.Manager {
 	options := configuration.Options{
 		Reviewers:               supportedReviewerIDs(),
+		PackagedReviewerModels:  packagedReviewerModels(),
 		PackagedDefaultReviewer: defaultReviewer,
 		PackagedDefaultProfile:  packagedDefaultProfileName,
 		ValidateProfileName:     validateProfileName,
@@ -31,6 +32,16 @@ func newConfigurationManager(personalConfigPath string) *configuration.Manager {
 
 func supportedReviewerIDs() []string {
 	return defaultReviewerCatalog().ids()
+}
+
+func packagedReviewerModels() map[string]string {
+	models := map[string]string{}
+	for id, registration := range defaultReviewerCatalog().registrations {
+		if registration.candidate.Model != "" {
+			models[id] = registration.candidate.Model
+		}
+	}
+	return models
 }
 
 func selectProfileFromEffective(effective configuration.Effective, explicitReviewer string) (profileSelection, error) {

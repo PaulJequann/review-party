@@ -1,6 +1,9 @@
 package configuration
 
-import "fmt"
+import (
+	"fmt"
+	"sort"
+)
 
 // Overrides are explicit Caller choices supplied at invocation time. They take
 // precedence over every authored scope and carry explicit provenance.
@@ -39,7 +42,7 @@ type Effective struct {
 	DefaultReviewer Value[string]
 	StateDirectory  Value[string]
 	Eval            Value[EvalPolicy]
-	Reviewers       map[string]ReviewerSettings
+	reviewers       map[string]ReviewerSettings
 }
 
 // EffectiveReviewerPolicyError reports an inconsistent enabled reviewer and
@@ -65,11 +68,22 @@ func (failure EffectiveReviewerPolicyError) Error() string {
 
 // ReviewerPolicy returns one effective reviewer policy validated by Resolve.
 func (effective Effective) ReviewerPolicy(id string) (ReviewerSettings, bool) {
-	settings, exists := effective.Reviewers[id]
+	settings, exists := effective.reviewers[id]
 	if !exists {
 		return ReviewerSettings{}, false
 	}
+	settings.AllowedModels.Value = append([]string(nil), settings.AllowedModels.Value...)
 	return settings, true
+}
+
+// ReviewerIDs returns the configured reviewer identifiers in stable order.
+func (effective Effective) ReviewerIDs() []string {
+	ids := make([]string, 0, len(effective.reviewers))
+	for id := range effective.reviewers {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
 }
 
 func reviewerPolicyIsEnabled(settings ReviewerSettings) bool {
@@ -77,7 +91,7 @@ func reviewerPolicyIsEnabled(settings ReviewerSettings) bool {
 }
 
 func reviewerModelIsDisallowed(settings ReviewerSettings) bool {
-	if !settings.Model.Authored || !settings.AllowedModels.Authored {
+	if settings.Model.Value == "" || !settings.AllowedModels.Authored {
 		return false
 	}
 	return !containsModel(settings.AllowedModels.Value, settings.Model.Value)
@@ -96,7 +110,7 @@ func (manager *Manager) Resolve(request Request) (Effective, error) {
 		StateDirectory:  personalValue(loaded, stateDirectoryValue),
 		Eval:            evalValue(loaded),
 	}
-	effective.Reviewers, err = manager.resolveEffectiveReviewers(loaded)
+	effective.reviewers, err = manager.resolveEffectiveReviewers(loaded)
 	if err != nil {
 		return Effective{}, err
 	}
@@ -106,7 +120,7 @@ func (manager *Manager) Resolve(request Request) (Effective, error) {
 func (manager *Manager) resolveEffectiveReviewers(loaded Loaded) (map[string]ReviewerSettings, error) {
 	reviewers := make(map[string]ReviewerSettings, len(manager.reviewers))
 	for _, id := range manager.knownReviewers() {
-		settings := resolveReviewerSettings(loaded, reviewerID(id))
+		settings := resolveReviewerSettings(loaded, reviewerID(id), manager.reviewers[id])
 		if err := validateEffectiveReviewerPolicy(id, settings); err != nil {
 			return nil, err
 		}
@@ -155,10 +169,10 @@ func resolveDefault(loaded Loaded, override defaultChoice, read documentDefault,
 	return Value[string]{Value: string(fallback), Source: SourcePackaged}
 }
 
-func resolveReviewerSettings(loaded Loaded, id reviewerID) ReviewerSettings {
+func resolveReviewerSettings(loaded Loaded, id reviewerID, packagedModel string) ReviewerSettings {
 	settings := ReviewerSettings{
 		Enabled:       Value[bool]{Value: true, Source: SourcePackaged},
-		Model:         Value[string]{Source: SourcePackaged},
+		Model:         Value[string]{Value: packagedModel, Source: SourcePackaged},
 		AllowedModels: Value[[]string]{Source: SourcePackaged},
 	}
 	settings.apply(loaded.Repository, id)

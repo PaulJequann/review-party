@@ -14,6 +14,7 @@ func testManager(t *testing.T, personalRoot string) *Manager {
 	return NewManager(Options{
 		PersonalRoot:            personalRoot,
 		Reviewers:               []string{"grok", "opencode", "copilot", "codex"},
+		PackagedReviewerModels:  map[string]string{"grok": "grok-4.5", "copilot": "auto", "codex": "gpt-5.6-luna"},
 		PackagedDefaultReviewer: "grok",
 		PackagedDefaultProfile:  "bugs",
 		ValidateProfileName: func(name string) error {
@@ -59,10 +60,10 @@ func TestResolvePreservesScopeProvenance(t *testing.T) {
 
 	assertStringValue(t, "default reviewer", effective.DefaultReviewer, "opencode", true, SourcePersonal, personalPath)
 	assertStringValue(t, "default profile", effective.DefaultProfile, "security", true, SourceRepository, repositoryPath)
-	opencode := effective.Reviewers["opencode"]
+	opencode := mustReviewerPolicy(t, effective, "opencode")
 	assertBoolValue(t, "opencode enabled", opencode.Enabled, false, true, SourceRepository, repositoryPath)
 	assertStringValue(t, "opencode model", opencode.Model, "meta/muse-spark-1.2-contributor", true, SourcePersonal, personalPath)
-	grok := effective.Reviewers["grok"]
+	grok := mustReviewerPolicy(t, effective, "grok")
 	assertBoolValue(t, "grok enabled", grok.Enabled, true, false, SourcePackaged, "")
 }
 
@@ -192,7 +193,7 @@ func TestPublishedTypedReviewerIntentsUpdateEffectiveValues(t *testing.T) {
 	})
 	effective := requireEffective(t, manager)
 	assertStringValue(t, "default profile", effective.DefaultProfile, "security", true, SourcePersonal, filepath.Join(root, "config.json"))
-	opencode := effective.Reviewers["opencode"]
+	opencode := mustReviewerPolicy(t, effective, "opencode")
 	assertBoolValue(t, "opencode enabled", opencode.Enabled, false, true, SourcePersonal, filepath.Join(root, "config.json"))
 	if !reflect.DeepEqual(opencode.AllowedModels.Value, []string{"model-a", "model-b"}) || !opencode.AllowedModels.Authored {
 		t.Fatalf("opencode allowed models = %#v", opencode.AllowedModels)
@@ -293,7 +294,16 @@ func TestPublishedPersonalConfigurationIsPrivateAndReadable(t *testing.T) {
 	assertPrivateFile(t, path)
 	effective := requireEffective(t, manager)
 	assertStringValue(t, "state directory", effective.StateDirectory, root, true, SourcePersonal, path)
-	assertStringValue(t, "model", effective.Reviewers["opencode"].Model, "meta/muse-spark-1.2-contributor", true, SourcePersonal, path)
+	assertStringValue(t, "model", mustReviewerPolicy(t, effective, "opencode").Model, "meta/muse-spark-1.2-contributor", true, SourcePersonal, path)
+}
+
+func mustReviewerPolicy(t *testing.T, effective Effective, id string) ReviewerSettings {
+	t.Helper()
+	policy, exists := effective.ReviewerPolicy(id)
+	if !exists {
+		t.Fatalf("reviewer policy %q is absent", id)
+	}
+	return policy
 }
 
 func requirePersonalPlan(t *testing.T, manager *Manager, root string) Plan {

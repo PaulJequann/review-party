@@ -87,6 +87,7 @@ func newProfileLibrary(personalRoot string) profileLibrary {
 	return profileLibrary{configuration: configuration.NewManager(configuration.Options{
 		PersonalRoot:            personalRoot,
 		Reviewers:               supportedReviewerIDs(),
+		PackagedReviewerModels:  packagedReviewerModels(),
 		PackagedDefaultReviewer: defaultReviewer,
 		PackagedDefaultProfile:  packagedDefaultProfileName,
 		ValidateProfileName:     validateProfileName,
@@ -102,10 +103,7 @@ func (conductor *Conductor) compileFilesystemProfile(selection ProfileSelection,
 }
 
 func (conductor *Conductor) compileProfile(selection ProfileSelection, resolved resolvedProfile) (compiledProfile, error) {
-	reviewers, err := applyEffectiveReviewerPolicies(conductor.reviewers, resolved.effective)
-	if err != nil {
-		return compiledProfile{}, err
-	}
+	reviewers := applyEffectiveReviewerPolicies(conductor.reviewers, resolved.effective)
 	reviewerWasDefault := selection.Reviewer == ""
 	selection.Profile = resolved.name
 	if selection.Reviewer == "" {
@@ -168,11 +166,7 @@ func (conductor *Conductor) profileSummaries(repository string) ([]ProfileSummar
 			summaries[index].Error = resolveErr.Error()
 			continue
 		}
-		reviewers, resolveErr := applyEffectiveReviewerPolicies(conductor.reviewers, resolved.effective)
-		if resolveErr != nil {
-			summaries[index].Error = resolveErr.Error()
-			continue
-		}
+		reviewers := applyEffectiveReviewerPolicies(conductor.reviewers, resolved.effective)
 		definition, _ := profileDefinitionFor(resolved)
 		registration, resolveErr := reviewers.resolve(resolved.reviewer)
 		if resolveErr != nil {
@@ -219,10 +213,7 @@ func (library profileLibrary) validateExplicitReviewer(selection ProfileSelectio
 	if err != nil {
 		return err
 	}
-	reviewers, err := applyEffectiveReviewerPolicies(catalog, effective)
-	if err != nil {
-		return err
-	}
+	reviewers := applyEffectiveReviewerPolicies(catalog, effective)
 	required := restrictedReviewCapabilities()
 	profileName := resolvedSelection.name
 	if resolved, findErr := library.findProfile(profileLookup{repository: repository, name: profileName}); findErr == nil {

@@ -51,10 +51,7 @@ func New(config Config) (*Conductor, error) {
 	}
 	// Apply Personal reviewer policies now, but validate the effective default
 	// only after a repository can contribute its higher-precedence choices.
-	reviewers, err := applyEffectiveReviewerPolicies(defaultReviewerCatalog(), effective)
-	if err != nil {
-		return nil, err
-	}
+	reviewers := applyEffectiveReviewerPolicies(defaultReviewerCatalog(), effective)
 	conductor, err := newConductorWithProfiles(store, reviewers, profileLibrary{configuration: manager}, config.AttemptDeadline)
 	if err != nil {
 		return nil, err

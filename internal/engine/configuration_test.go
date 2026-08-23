@@ -108,53 +108,17 @@ func TestRepositoryEffectiveReviewerOverridesPersonalPolicy(t *testing.T) {
 	}
 }
 
-func TestInvalidDefaultUsesAuthoredDefaultPath(t *testing.T) {
-	effective := configuration.Effective{
-		DefaultReviewer: configuration.Value[string]{Value: "grok", Authored: true, Path: "repository/default.json"},
-		Reviewers: map[string]configuration.ReviewerSettings{
-			"grok": {
-				Enabled: configuration.Value[bool]{Value: false, Authored: true, Path: "repository/grok.json"},
-			},
-		},
+func TestPackagedReviewerModelAllowedByConfiguration(t *testing.T) {
+	conductor := configuredTestConductor(t, `{
+  "schema_version": 1,
+  "reviewers": {"grok": {"allowed_models": ["grok-4.5"]}}
+}`)
+	explanation, err := conductor.Explain(context.Background(), ProfileSelection{Profile: "bugs", Reviewer: "grok"})
+	if err != nil {
+		t.Fatal(err)
 	}
-
-	assertInvalidConfigurationPath(t, effective, "repository/default.json")
-}
-
-func TestInvalidReviewerPolicyUsesAllowedModelsPathWhenModelUnset(t *testing.T) {
-	effective := configuration.Effective{
-		Reviewers: map[string]configuration.ReviewerSettings{
-			"grok": {
-				AllowedModels: configuration.Value[[]string]{Value: []string{"allowed-model"}, Authored: true, Path: "repository/grok-allowed-models.json"},
-			},
-		},
-	}
-
-	assertInvalidConfigurationPath(t, effective, "repository/grok-allowed-models.json")
-}
-
-func TestInvalidReviewerPolicyDoesNotInventDefaultPathProvenance(t *testing.T) {
-	effective := configuration.Effective{
-		DefaultReviewer: configuration.Value[string]{Value: "grok", Authored: true, Path: "repository/default.json"},
-		Reviewers: map[string]configuration.ReviewerSettings{
-			"grok": {
-				AllowedModels: configuration.Value[[]string]{Value: []string{"allowed-model"}, Authored: true},
-			},
-		},
-	}
-
-	assertInvalidConfigurationPath(t, effective, "")
-}
-
-func assertInvalidConfigurationPath(t *testing.T, effective configuration.Effective, expected string) {
-	t.Helper()
-	_, err := configureReviewerCatalog(defaultReviewerCatalog(), effective)
-	var invalid InvalidConfigurationError
-	if !errors.As(err, &invalid) {
-		t.Fatalf("error = %v, want InvalidConfigurationError", err)
-	}
-	if invalid.Path != expected {
-		t.Fatalf("error path = %q, want %q", invalid.Path, expected)
+	if explanation.ProfileRevision.Model != "grok-4.5" {
+		t.Fatalf("model = %q, want packaged grok model", explanation.ProfileRevision.Model)
 	}
 }
 

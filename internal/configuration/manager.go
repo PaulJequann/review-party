@@ -53,6 +53,8 @@ type Options struct {
 	PersonalConfigPath string
 	// Reviewers lists the packaged reviewer identifiers that documents may reference.
 	Reviewers []string
+	// PackagedReviewerModels supplies each reviewer's packaged model when one exists.
+	PackagedReviewerModels map[string]string
 	// PackagedDefaultReviewer is the effective default reviewer when nothing is authored.
 	PackagedDefaultReviewer string
 	// PackagedDefaultProfile is the effective default profile when nothing is authored.
@@ -66,7 +68,7 @@ type Options struct {
 type Manager struct {
 	personalRoot       string
 	personalConfigPath string
-	reviewers          map[string]struct{}
+	reviewers          map[string]string
 	packaged           packagedDefaults
 	profiles           func(string) error
 	publishWrite       func(*pendingWrite) error
@@ -88,9 +90,9 @@ func NewManager(options Options) *Manager {
 			options.PersonalRoot = DefaultPersonalRoot()
 		}
 	}
-	reviewers := make(map[string]struct{}, len(options.Reviewers))
+	reviewers := make(map[string]string, len(options.Reviewers))
 	for _, id := range options.Reviewers {
-		reviewers[id] = struct{}{}
+		reviewers[id] = options.PackagedReviewerModels[id]
 	}
 	return &Manager{
 		personalRoot:       options.PersonalRoot,

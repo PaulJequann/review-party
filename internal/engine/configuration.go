@@ -39,10 +39,7 @@ func (failure ReviewerModelNotAllowedError) Error() string {
 // configureReviewerCatalog applies Effective Configuration to the packaged
 // reviewer catalog and validates the effective default.
 func configureReviewerCatalog(catalog reviewerCatalog, effective configuration.Effective) (reviewerCatalog, error) {
-	configured, err := applyEffectiveReviewerPolicies(catalog, effective)
-	if err != nil {
-		return reviewerCatalog{}, err
-	}
+	configured := applyEffectiveReviewerPolicies(catalog, effective)
 	if effective.DefaultReviewer.Authored {
 		if err := applyDefaultReviewer(&configured, effective.DefaultReviewer.Value); err != nil {
 			return reviewerCatalog{}, InvalidConfigurationError{Path: effective.DefaultReviewer.Path, Reason: err.Error()}
@@ -54,31 +51,24 @@ func configureReviewerCatalog(catalog reviewerCatalog, effective configuration.E
 	return configured, nil
 }
 
-// applyEffectiveReviewerPolicies applies repository and Personal reviewer
-// settings without requiring the caller to know their precedence. It returns
-// the exact authored path when a policy cannot be applied.
-func applyEffectiveReviewerPolicies(catalog reviewerCatalog, effective configuration.Effective) (reviewerCatalog, error) {
+// applyEffectiveReviewerPolicies applies validated repository and Personal
+// reviewer settings without requiring the caller to know their precedence.
+func applyEffectiveReviewerPolicies(catalog reviewerCatalog, effective configuration.Effective) reviewerCatalog {
 	configured := cloneReviewerCatalog(catalog)
-	for id := range effective.Reviewers {
+	for _, id := range effective.ReviewerIDs() {
 		registration, exists := configured.registrations[id]
 		if !exists {
 			continue
 		}
 		settings, _ := effective.ReviewerPolicy(id)
-		updated, err := applyReviewerPolicy(registration, settings)
-		if err != nil {
-			return reviewerCatalog{}, err
-		}
-		configured.registrations[id] = updated
+		configured.registrations[id] = applyReviewerPolicy(registration, settings)
 	}
-	return configured, nil
+	return configured
 }
 
-func applyReviewerPolicy(registration reviewerRegistration, settings configuration.ReviewerSettings) (reviewerRegistration, error) {
+func applyReviewerPolicy(registration reviewerRegistration, settings configuration.ReviewerSettings) reviewerRegistration {
 	if settings.Enabled.Authored {
-		registration.disabled = !settings.Enabled.Value
-		registration.disabledSource = string(settings.Enabled.Source)
-		registration.disabledPath = settings.Enabled.Path
+		registration.enabled = settings.Enabled
 	}
 	if settings.AllowedModels.Authored {
 		registration.allowedModels = canonicalModels(settings.AllowedModels.Value)
@@ -87,21 +77,7 @@ func applyReviewerPolicy(registration reviewerRegistration, settings configurati
 	if settings.Model.Authored {
 		registration.candidate.Model = settings.Model.Value
 	}
-	if packagedModelIsDisallowed(registration, settings) {
-		reason := ReviewerModelNotAllowedError{Reviewer: registration.candidate.ID, Model: registration.candidate.Model, Allowed: registration.allowedModels}
-		return reviewerRegistration{}, InvalidConfigurationError{Path: settings.AllowedModels.Path, Reason: reason.Error()}
-	}
-	return registration, nil
-}
-
-func packagedModelIsDisallowed(registration reviewerRegistration, settings configuration.ReviewerSettings) bool {
-	if registration.disabled || registration.candidate.Model == "" {
-		return false
-	}
-	if settings.Model.Authored || !settings.AllowedModels.Authored {
-		return false
-	}
-	return !containsModel(registration.allowedModels, registration.candidate.Model)
+	return registration
 }
 
 func applyDefaultReviewer(catalog *reviewerCatalog, reviewer string) error {
@@ -112,7 +88,7 @@ func applyDefaultReviewer(catalog *reviewerCatalog, reviewer string) error {
 	if !exists {
 		return fmt.Errorf("unknown default reviewer %q", reviewer)
 	}
-	if registration.disabled {
+	if registration.isDisabled() {
 		return fmt.Errorf("default reviewer %q is disabled", reviewer)
 	}
 	catalog.defaultReviewer = reviewer
@@ -128,7 +104,7 @@ func validateEffectiveDefault(catalog reviewerCatalog) error {
 	if !exists {
 		return fmt.Errorf("unknown effective default reviewer %q", reviewer)
 	}
-	if registration.disabled {
+	if registration.isDisabled() {
 		return fmt.Errorf("effective default reviewer %q is disabled", reviewer)
 	}
 	if registration.candidate.Model == "" {

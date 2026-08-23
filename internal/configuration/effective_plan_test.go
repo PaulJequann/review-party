@@ -46,6 +46,42 @@ func TestPlanAllowsDisabledSameScopeModelMismatch(t *testing.T) {
 	}
 }
 
+func TestPlanRejectsAllowlistExcludingPackagedModelWithoutWriting(t *testing.T) {
+	personalRoot := t.TempDir()
+	manager := testManager(t, personalRoot)
+	personalPath := filepath.Join(personalRoot, "config.json")
+
+	plan, err := manager.Plan("", []Intent{
+		SetReviewerAllowedModels{Target: ScopePersonal, Reviewer: "grok", Models: []string{"other-model"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Valid() {
+		t.Fatal("plan is valid, want packaged model rejection")
+	}
+	for _, fragment := range []string{"grok-4.5", "packaged configuration", personalPath} {
+		if !strings.Contains(plan.Reason(), fragment) {
+			t.Fatalf("plan reason = %q, want %q", plan.Reason(), fragment)
+		}
+	}
+	assertPublishRefused(t, manager, plan)
+	assertFileAbsent(t, personalPath)
+}
+
+func TestPlanAllowsAllowlistContainingPackagedModel(t *testing.T) {
+	manager := testManager(t, t.TempDir())
+	plan, err := manager.Plan("", []Intent{
+		SetReviewerAllowedModels{Target: ScopePersonal, Reviewer: "grok", Models: []string{"grok-4.5"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !plan.Valid() {
+		t.Fatalf("plan reason = %q, want packaged model allowed", plan.Reason())
+	}
+}
+
 func TestPlanValidatesStagedScopeAgainstUntouchedScopeWithoutWriting(t *testing.T) {
 	personalRoot := t.TempDir()
 	repository := t.TempDir()
