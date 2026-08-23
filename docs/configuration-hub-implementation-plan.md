@@ -220,11 +220,7 @@ For each slice:
 
 ## Slice 1 — Dependency and harness capability spike
 
-Status: **Implementation complete; Interface not frozen**
-
-The operation-oriented reviewer selection and opaque snapshot-bound `Plan`
-defined in [Design boundaries twice](#design-boundaries-twice) must replace the
-Slice 2 Interface before Slice 3 begins.
+Status: **Complete**
 
 ### Goal
 
@@ -278,9 +274,13 @@ direct dependencies and checksums are explicit in `go.mod` and `go.sum`.
 
 ## Slice 2 — Scoped Configuration Manager
 
-Status: **Complete**
+Status: **Implementation complete; Interface not frozen**
 
 Depends on: Slice 1 dependency versions, but not the Hub spike implementation.
+
+The operation-oriented reviewer selection and opaque snapshot-bound `Plan`
+defined in [Design boundaries twice](#design-boundaries-twice) must replace the
+Slice 2 Interface before Slice 3 begins.
 
 ### Goal
 
