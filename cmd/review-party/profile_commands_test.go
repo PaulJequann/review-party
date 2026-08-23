@@ -79,7 +79,7 @@ func TestInitRemembersAdvancedStateSelection(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(configurationPath), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	payload := `{"version":1}`
+	payload := `{"schema_version":1}`
 	if err := os.WriteFile(configurationPath, []byte(payload), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +189,7 @@ func TestReviewWithoutProfileUsesRepositoryDefault(t *testing.T) {
 	if err := os.MkdirAll(profileDirectory, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(repository, ".reviewparty", "config.json"), []byte(`{"schema":1,"defaultProfile":"security"}`), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(repository, ".reviewparty", "config.json"), []byte(`{"schema_version":1,"defaults":{"profile":"security"}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(profileDirectory, "security.md"), []byte("   \n"), 0o600); err != nil {
@@ -221,7 +221,6 @@ func runProfileTestCommand(t *testing.T, command *exec.Cmd) {
 
 func isolateProfileCommandEnvironment(t *testing.T) {
 	t.Helper()
-	t.Setenv("REVIEW_PARTY_HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 }

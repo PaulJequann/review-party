@@ -253,8 +253,10 @@ func newObservedEvalStore(t *testing.T) (*store.LedgerRecordStore, *observingEva
 
 func newLifecycleTestConductor(t *testing.T, records recordStore, executor attemptExecutor) *Conductor {
 	t.Helper()
-	conductor := newConductor(records, map[string]attemptExecutor{defaultReviewer: executor}, time.Second)
-	var err error
+	conductor, err := newConductorWithProfiles(records, catalogWithExecutors(map[string]attemptExecutor{defaultReviewer: executor}), newProfileLibrary(t.TempDir()), time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
 	conductor.artifacts, err = artifact.NewStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)

@@ -31,7 +31,7 @@ func runProfileInstallDefaults(arguments []string, stdout, stderr io.Writer) int
 	flags := flag.NewFlagSet("profile install-defaults", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	repository := flags.String("repo", ".", "Git repository that will own the Profiles")
-	global := flags.Bool("global", false, "Install personal global Profiles")
+	global := flags.Bool("global", false, "Install starter Profiles in Personal Configuration")
 	if err := flags.Parse(arguments); err != nil {
 		return 2
 	}
@@ -58,7 +58,7 @@ func runProfileCreate(arguments []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("profile create", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	repository := flags.String("repo", ".", "Git repository that will own the Profile")
-	global := flags.Bool("global", false, "Create a personal global Profile")
+	global := flags.Bool("global", false, "Create a personal Profile in Personal Configuration")
 	blank := flags.Bool("blank", false, "Start from a minimal blank Profile")
 	packaged := flags.String("from-packaged", "", "Start from a packaged Profile")
 	if err := flags.Parse(arguments); err != nil {

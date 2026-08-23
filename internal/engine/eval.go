@@ -82,7 +82,8 @@ func (conductor *Conductor) validateEvalSelection(experiment model.ExperimentCon
 	if err := validateExperiment(experiment, conductor.attemptDeadline); err != nil {
 		return err
 	}
-	_, err := conductor.compileFilesystemProfile(ProfileSelection{Profile: experiment.Profile, Reviewer: experiment.Reviewer, Model: experiment.Model, Effort: experiment.Effort}, "")
+	selection := ProfileSelection{Profile: experiment.Profile, Reviewer: experiment.Reviewer, Model: experiment.Model, Effort: experiment.Effort}
+	_, err := conductor.compileFilesystemProfile(selection, "")
 	return err
 }
 

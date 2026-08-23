@@ -182,7 +182,7 @@ func TestUsageListsEverySupportedReviewer(t *testing.T) {
 
 func TestEvalUserConfigurationControlsRuntimeDefaultsAndFlagsOverride(t *testing.T) {
 	configuration := filepath.Join(t.TempDir(), "review-party.json")
-	if err := os.WriteFile(configuration, []byte(`{"version":1,"default_reviewer":"opencode","reviewers":{"opencode":{"model":"configured-model"}},"eval":{"retry_policy":{"max_attempts":4,"initial_backoff":"2s","max_backoff":"20s"},"concurrency_limit":3}}`), 0o600); err != nil {
+	if err := os.WriteFile(configuration, []byte(`{"schema_version":1,"defaults":{"reviewer":"opencode"},"reviewers":{"opencode":{"model":"configured-model"}},"eval":{"retry_policy":{"max_attempts":4,"initial_backoff":"2s","max_backoff":"20s"},"concurrency_limit":3}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	experiment, _, err := resolveEvalExperiment(evalRunOptions{configuration: configuration, attempts: 2, overrides: map[string]bool{"attempts": true}})

@@ -1,12 +1,12 @@
 package engine
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 
+	"reviewparty/internal/configuration"
 	"reviewparty/internal/store"
 )
 
@@ -29,13 +29,13 @@ func InitializeReviewParty(request ReviewPartyInitialization) (ReviewPartyInitia
 	if err != nil {
 		return ReviewPartyInitializationResult{}, err
 	}
-	alreadyReady, err := prepareInitializationState(request.UserConfigurationPath, resolved.selection)
+	alreadyReady, err := prepareInitializationState(resolved.manager, resolved.selection)
 	if err != nil {
 		return ReviewPartyInitializationResult{}, err
 	}
 	return ReviewPartyInitializationResult{
 		Repository:     resolved.repository,
-		StateDirectory: resolved.selection.directory,
+		StateDirectory: string(resolved.selection.directory),
 		AdvancedState:  resolved.selection.advanced,
 		AlreadyReady:   alreadyReady,
 	}, nil
@@ -44,6 +44,7 @@ func InitializeReviewParty(request ReviewPartyInitialization) (ReviewPartyInitia
 type resolvedInitialization struct {
 	repository string
 	selection  initializationStateSelection
+	manager    *configuration.Manager
 }
 
 func resolveInitialization(request ReviewPartyInitialization) (resolvedInitialization, error) {
@@ -54,15 +55,16 @@ func resolveInitialization(request ReviewPartyInitialization) (resolvedInitializ
 	if err := validateConfigurationPath(request.UserConfigurationPath); err != nil {
 		return resolvedInitialization{}, err
 	}
-	configuration, err := loadUserConfiguration(request.UserConfigurationPath)
+	manager := newConfigurationManager(request.UserConfigurationPath)
+	configuredState, err := manager.ResolveStateDirectory()
 	if err != nil {
 		return resolvedInitialization{}, err
 	}
-	selection, err := selectInitializationState(request, configuration)
+	selection, err := selectInitializationState(request, statePath(configuredState.Value))
 	if err != nil {
 		return resolvedInitialization{}, err
 	}
-	return resolvedInitialization{repository: repository, selection: selection}, nil
+	return resolvedInitialization{repository: repository, selection: selection, manager: manager}, nil
 }
 
 func validateConfigurationPath(path string) error {
@@ -72,19 +74,19 @@ func validateConfigurationPath(path string) error {
 	return rejectSpecialConfigurationPath(path)
 }
 
-func prepareInitializationState(configurationPath string, selection initializationStateSelection) (bool, error) {
-	alreadyReady, err := store.ReviewRecordStatePrepared(selection.directory)
+func prepareInitializationState(manager *configuration.Manager, selection initializationStateSelection) (bool, error) {
+	alreadyReady, err := store.ReviewRecordStatePrepared(string(selection.directory))
 	if err != nil && !errors.Is(err, store.ErrReviewRecordStateRequiresPreparation) {
 		return false, err
 	}
 	if errors.Is(err, store.ErrReviewRecordStateRequiresPreparation) {
 		alreadyReady = false
 	}
-	if err := store.PrepareReviewRecordState(selection.directory); err != nil {
+	if err := store.PrepareReviewRecordState(string(selection.directory)); err != nil {
 		return false, err
 	}
 	if selection.remember {
-		if err := persistStateDirectory(configurationPath, selection.directory); err != nil {
+		if err := rememberStateDirectory(manager, string(selection.directory)); err != nil {
 			return false, err
 		}
 	}
@@ -92,41 +94,43 @@ func prepareInitializationState(configurationPath string, selection initializati
 }
 
 type initializationStateSelection struct {
-	directory string
+	directory statePath
 	advanced  bool
 	remember  bool
 }
 
-func selectInitializationState(request ReviewPartyInitialization, configuration userConfiguration) (initializationStateSelection, error) {
+type statePath string
+
+func selectInitializationState(request ReviewPartyInitialization, configuredStateDirectory statePath) (initializationStateSelection, error) {
 	explicit, err := absoluteOptionalPath(request.StateDirectory)
 	if err != nil {
 		return initializationStateSelection{}, err
 	}
-	if configuration.StateDirectory != "" {
-		return selectConfiguredState(configuration.StateDirectory, explicit)
+	if configuredStateDirectory != "" {
+		return selectConfiguredState(configuredStateDirectory, explicit)
 	}
-	defaultDirectory := defaultStateDirectory()
+	defaultDirectory := statePath(defaultStateDirectory())
 	if explicit == "" || explicit == defaultDirectory {
 		return initializationStateSelection{directory: defaultDirectory}, nil
 	}
 	return selectAdvancedState(request, defaultDirectory, explicit)
 }
 
-func selectConfiguredState(configured, explicit string) (initializationStateSelection, error) {
+func selectConfiguredState(configured, explicit statePath) (initializationStateSelection, error) {
 	if explicit != "" && explicit != configured {
 		return initializationStateSelection{}, fmt.Errorf("Review Party is already configured to use state at %q; refusing to switch to %q", configured, explicit)
 	}
 	return initializationStateSelection{directory: configured, advanced: true}, nil
 }
 
-func selectAdvancedState(request ReviewPartyInitialization, defaultDirectory, explicit string) (initializationStateSelection, error) {
+func selectAdvancedState(request ReviewPartyInitialization, defaultDirectory, explicit statePath) (initializationStateSelection, error) {
 	if request.UserConfigurationPath == "" {
 		return initializationStateSelection{}, errors.New("remember advanced state location: user configuration path is unavailable")
 	}
 	if !request.UseDefaultConfiguration {
 		return initializationStateSelection{directory: explicit, advanced: true, remember: true}, nil
 	}
-	defaultReady, err := store.ReviewRecordStatePrepared(defaultDirectory)
+	defaultReady, err := store.ReviewRecordStatePrepared(string(defaultDirectory))
 	if err != nil {
 		return initializationStateSelection{}, err
 	}
@@ -136,7 +140,7 @@ func selectAdvancedState(request ReviewPartyInitialization, defaultDirectory, ex
 	return initializationStateSelection{directory: explicit, advanced: true, remember: true}, nil
 }
 
-func absoluteOptionalPath(path string) (string, error) {
+func absoluteOptionalPath(path string) (statePath, error) {
 	if path == "" {
 		return "", nil
 	}
@@ -144,63 +148,22 @@ func absoluteOptionalPath(path string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve state location %q: %w", path, err)
 	}
-	return filepath.Clean(absolute), nil
+	return statePath(filepath.Clean(absolute)), nil
 }
 
-func persistStateDirectory(configurationPath, stateDirectory string) error {
-	fields, err := readConfigurationFields(configurationPath)
+// rememberStateDirectory stages and publishes one typed intent so the
+// managed state location becomes an authored Personal Configuration value.
+func rememberStateDirectory(manager *configuration.Manager, stateDirectory string) error {
+	plan, err := manager.Plan(configuration.Repository(""), []configuration.Intent{
+		configuration.SetStateDirectory{Directory: stateDirectory},
+	})
 	if err != nil {
-		return err
+		return fmt.Errorf("stage managed state location: %w", err)
 	}
-	encodedState, err := json.Marshal(stateDirectory)
-	if err != nil {
-		return err
+	if err := manager.Publish(plan); err != nil {
+		return fmt.Errorf("remember managed state location: %w", err)
 	}
-	fields["state_directory"] = encodedState
-	payload, err := json.MarshalIndent(fields, "", "  ")
-	if err != nil {
-		return fmt.Errorf("encode user configuration: %w", err)
-	}
-	payload = append(payload, '\n')
-	return writeUserConfiguration(configurationPath, payload)
-}
-
-func readConfigurationFields(path string) (map[string]json.RawMessage, error) {
-	payload, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return map[string]json.RawMessage{"version": json.RawMessage("1")}, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("read user configuration %q: %w", path, err)
-	}
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(payload, &fields); err != nil {
-		return nil, fmt.Errorf("decode user configuration %q: %w", path, err)
-	}
-	return fields, nil
-}
-
-func writeUserConfiguration(path string, payload []byte) error {
-	directory := filepath.Dir(path)
-	if err := os.MkdirAll(directory, 0o700); err != nil {
-		return fmt.Errorf("create user configuration directory %q: %w", directory, err)
-	}
-	if err := rejectSpecialConfigurationPath(path); err != nil {
-		return err
-	}
-	temporary, err := os.CreateTemp(directory, ".config-*.tmp")
-	if err != nil {
-		return fmt.Errorf("create temporary user configuration: %w", err)
-	}
-	temporaryPath := temporary.Name()
-	defer os.Remove(temporaryPath)
-	if err := writeConfigurationPayload(temporary, payload); err != nil {
-		return err
-	}
-	if err := os.Rename(temporaryPath, path); err != nil {
-		return fmt.Errorf("publish user configuration %q: %w", path, err)
-	}
-	return syncDirectory(directory)
+	return nil
 }
 
 func rejectSpecialConfigurationPath(path string) error {
@@ -213,37 +176,6 @@ func rejectSpecialConfigurationPath(path string) error {
 	}
 	if !info.Mode().IsRegular() {
 		return fmt.Errorf("user configuration %q must be a regular file, not a symlink or special file", path)
-	}
-	return nil
-}
-
-func writeConfigurationPayload(file *os.File, payload []byte) error {
-	if err := file.Chmod(0o600); err != nil {
-		file.Close()
-		return fmt.Errorf("restrict temporary user configuration: %w", err)
-	}
-	if _, err := file.Write(payload); err != nil {
-		file.Close()
-		return fmt.Errorf("write temporary user configuration: %w", err)
-	}
-	if err := file.Sync(); err != nil {
-		file.Close()
-		return fmt.Errorf("sync temporary user configuration: %w", err)
-	}
-	if err := file.Close(); err != nil {
-		return fmt.Errorf("close temporary user configuration: %w", err)
-	}
-	return nil
-}
-
-func syncDirectory(directory string) error {
-	opened, err := os.Open(directory)
-	if err != nil {
-		return fmt.Errorf("open user configuration directory for sync: %w", err)
-	}
-	defer opened.Close()
-	if err := opened.Sync(); err != nil {
-		return fmt.Errorf("sync user configuration directory: %w", err)
 	}
 	return nil
 }

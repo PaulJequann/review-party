@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
 	"reviewparty/internal/artifact"
 	"reviewparty/internal/model"
 	"reviewparty/internal/store"
@@ -15,9 +16,10 @@ import (
 )
 
 type Config struct {
-	GlobalProfileDirectory string
-	AttemptDeadline        time.Duration
-	UserConfigurationPath  string
+	AttemptDeadline time.Duration
+	// UserConfigurationPath optionally overrides the canonical Personal
+	// Configuration file location for tests and explicit --config flags.
+	UserConfigurationPath string
 }
 
 type Conductor struct {
@@ -36,20 +38,23 @@ func New(config Config) (*Conductor, error) {
 	if config.AttemptDeadline <= 0 {
 		config.AttemptDeadline = 10 * time.Minute
 	}
-	userConfiguration, err := loadUserConfiguration(config.UserConfigurationPath)
+	manager := newConfigurationManager(config.UserConfigurationPath)
+	configuredState, err := manager.ResolveStateDirectory()
 	if err != nil {
 		return nil, err
 	}
-	stateDirectory := firstNonempty(userConfiguration.StateDirectory, defaultStateDirectory())
+	stateDirectory := firstNonempty(configuredState.Value, defaultStateDirectory())
 	store, err := newDeferredLedgerRecordStore(stateDirectory)
 	if err != nil {
 		return nil, err
 	}
-	reviewers, err := configureReviewerCatalog(defaultReviewerCatalog(), userConfiguration, config.UserConfigurationPath)
+	// Repository-scoped profile compilation applies the complete Personal and
+	// Repository reviewer policy before validating a selection.
+	reviewers := defaultReviewerCatalog()
+	conductor, err := newConductorWithProfiles(store, reviewers, profileLibrary{configuration: manager}, config.AttemptDeadline)
 	if err != nil {
 		return nil, err
 	}
-	conductor := newConductorWithProfiles(store, reviewers, newProfileLibrary(config.GlobalProfileDirectory), config.AttemptDeadline)
 	conductor.artifacts, err = artifact.NewStore(stateDirectory)
 	if err != nil {
 		return nil, err
@@ -57,15 +62,18 @@ func New(config Config) (*Conductor, error) {
 	return conductor, nil
 }
 
-func newConductor(store recordStore, executors map[string]attemptExecutor, deadline time.Duration) *Conductor {
+func newConductor(store recordStore, executors map[string]attemptExecutor, deadline time.Duration) (*Conductor, error) {
 	return newConductorWithCatalog(store, catalogWithExecutors(executors), deadline)
 }
 
-func newConductorWithCatalog(store recordStore, reviewers reviewerCatalog, deadline time.Duration) *Conductor {
-	return newConductorWithProfiles(store, reviewers, profileLibrary{}, deadline)
+func newConductorWithCatalog(store recordStore, reviewers reviewerCatalog, deadline time.Duration) (*Conductor, error) {
+	return newConductorWithProfiles(store, reviewers, newProfileLibrary(""), deadline)
 }
 
-func newConductorWithProfiles(store recordStore, reviewers reviewerCatalog, profiles profileLibrary, deadline time.Duration) *Conductor {
+func newConductorWithProfiles(store recordStore, reviewers reviewerCatalog, profiles profileLibrary, deadline time.Duration) (*Conductor, error) {
+	if profiles.configuration == nil {
+		return nil, errProfileLibraryNotConfigured
+	}
 	return &Conductor{
 		store:           store,
 		reviewers:       reviewers,
@@ -75,7 +83,7 @@ func newConductorWithProfiles(store recordStore, reviewers reviewerCatalog, prof
 		buildProvenance: currentRuntimeProvenance,
 		retryDelay:      retryDelay,
 		wait:            waitForRetry,
-	}
+	}, nil
 }
 
 func waitForRetry(ctx context.Context, delay time.Duration) error {
@@ -192,18 +200,24 @@ type preparedReview struct {
 
 func (conductor *Conductor) prepareReview(selection ReviewSelection) (preparedReview, error) {
 	profileSelection := selection.ProfileSelection()
-	if err := conductor.validateExplicitReviewer(profileSelection); err != nil {
-		return preparedReview{}, err
-	}
 	timings := ReviewTimings{}
 	subjectStarted := conductor.now().UTC()
-	repository, err := resolveReviewRepository(selection)
+	repository, repositoryErr := resolveReviewRepository(selection)
 	timings.SubjectResolutionMS += elapsedMilliseconds(subjectStarted, conductor.now().UTC())
+	if repositoryErr != nil {
+		if selection.Reviewer != "" {
+			if err := conductor.profiles.validateExplicitReviewer(selection.ProfileSelection(), selection.Repository, conductor.reviewers); err != nil {
+				return preparedReview{}, err
+			}
+		}
+		return preparedReview{}, repositoryErr
+	}
+	resolved, err := conductor.profiles.resolve(profileRequest{repository: repository, name: profileSelection.Profile, reviewer: profileSelection.Reviewer})
 	if err != nil {
 		return preparedReview{}, err
 	}
 	profileStarted := conductor.now().UTC()
-	profile, err := conductor.compileFilesystemProfile(profileSelection, repository)
+	profile, err := conductor.compileProfile(profileSelection, resolved)
 	timings.ProfileCompilationMS = elapsedMilliseconds(profileStarted, conductor.now().UTC())
 	if err != nil {
 		return preparedReview{}, err
@@ -219,7 +233,7 @@ func (conductor *Conductor) prepareReview(selection ReviewSelection) (preparedRe
 
 func resolveReviewRepository(selection ReviewSelection) (string, error) {
 	if selection.Subject.Kind == SubjectCapturedChange {
-		return "", nil
+		return selection.Repository, nil
 	}
 	return resolveRepositoryRoot(selection.Repository)
 }
@@ -268,22 +282,6 @@ func (conductor *Conductor) explainAt(ctx context.Context, selection ProfileSele
 		ReviewerWasDefault: profile.reviewerWasDefault,
 		Instructions:       profile.snapshot.Instructions,
 	}, nil
-}
-
-func (conductor *Conductor) validateExplicitReviewer(selection ProfileSelection) error {
-	if selection.Reviewer == "" {
-		return nil
-	}
-	registration, err := conductor.reviewers.resolve(selection.Reviewer)
-	if err != nil {
-		return err
-	}
-	missing := missingCapabilities(restrictedReviewCapabilities(), registration.capabilities)
-	if len(missing) > 0 {
-		return UnsupportedCapabilitiesError{Profile: firstNonempty(selection.Profile, "bugs"), Reviewer: registration.candidate.ID, Missing: missing}
-	}
-	_, err = resolveReviewerModel(registration, selection.Model)
-	return err
 }
 
 func (conductor *Conductor) Inspect(_ context.Context, id ReviewID) (ReviewRecord, error) {

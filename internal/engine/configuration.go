@@ -1,114 +1,21 @@
 package engine
 
 import (
-	"bytes"
-	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
-	"os"
-	"path/filepath"
 	"sort"
+
+	"reviewparty/internal/configuration"
 )
 
-type userConfiguration struct {
-	Version         int                           `json:"version"`
-	StateDirectory  string                        `json:"state_directory,omitempty"`
-	DefaultReviewer string                        `json:"default_reviewer,omitempty"`
-	Reviewers       map[string]userReviewerPolicy `json:"reviewers,omitempty"`
-	Eval            userEvalPolicy                `json:"eval,omitempty"`
-}
-
-func (configuration *userConfiguration) UnmarshalJSON(payload []byte) error {
-	type plainConfiguration userConfiguration
-	var decoded plainConfiguration
-	if err := decodeStrictObject(payload, &decoded, "user configuration", "state_directory", "default_reviewer", "reviewers", "eval"); err != nil {
-		return err
-	}
-	*configuration = userConfiguration(decoded)
-	return nil
-}
-
-type userReviewerPolicy struct {
-	Enabled       *bool                    `json:"enabled,omitempty"`
-	Model         configuredReviewerModel  `json:"model,omitempty"`
-	AllowedModels configuredModelAllowlist `json:"allowed_models,omitempty"`
-}
-
-type configuredReviewerModel struct {
-	value   string
-	present bool
-}
-
-func (model *configuredReviewerModel) UnmarshalJSON(payload []byte) error {
-	var value string
-	if err := json.Unmarshal(payload, &value); err != nil {
-		return err
-	}
-	if value == "" {
-		return errors.New("model must not be empty")
-	}
-	model.value = value
-	model.present = true
-	return nil
-}
-
-func (policy *userReviewerPolicy) UnmarshalJSON(payload []byte) error {
-	type plainPolicy userReviewerPolicy
-	var decoded plainPolicy
-	if err := decodeStrictObject(payload, &decoded, "reviewer policy", "enabled", "model"); err != nil {
-		return err
-	}
-	*policy = userReviewerPolicy(decoded)
-	return nil
-}
-
-func decodeStrictObject(payload []byte, destination any, objectName string, nonNullFields ...string) error {
-	if bytes.Equal(bytes.TrimSpace(payload), []byte("null")) {
-		return fmt.Errorf("%s must be an object, not null", objectName)
-	}
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(payload, &fields); err != nil {
-		return err
-	}
-	for _, name := range nonNullFields {
-		if value, exists := fields[name]; exists && bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
-			return fmt.Errorf("%s must not be null", name)
-		}
-	}
-	decoder := json.NewDecoder(bytes.NewReader(payload))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(destination); err != nil {
-		return err
-	}
-	return rejectTrailingJSON(decoder)
-}
-
-type configuredModelAllowlist struct {
-	models  []string
-	present bool
-}
-
-func (allowlist *configuredModelAllowlist) UnmarshalJSON(payload []byte) error {
-	if bytes.Equal(bytes.TrimSpace(payload), []byte("null")) {
-		return errors.New("allowed_models must be an array, not null")
-	}
-	var models []string
-	if err := json.Unmarshal(payload, &models); err != nil {
-		return err
-	}
-	allowlist.models = models
-	allowlist.present = true
-	return nil
-}
-
-type InvalidUserConfigurationError struct {
+// InvalidConfigurationError reports a Personal or Repository Configuration
+// document that could not produce a usable effective configuration.
+type InvalidConfigurationError struct {
 	Path   string
 	Reason string
 }
 
-func (failure InvalidUserConfigurationError) Error() string {
-	return fmt.Sprintf("invalid user configuration %q: %s", failure.Path, failure.Reason)
+func (failure InvalidConfigurationError) Error() string {
+	return fmt.Sprintf("invalid configuration %q: %s", failure.Path, failure.Reason)
 }
 
 type ReviewerModelRequiredError struct {
@@ -116,7 +23,7 @@ type ReviewerModelRequiredError struct {
 }
 
 func (failure ReviewerModelRequiredError) Error() string {
-	return fmt.Sprintf("reviewer %q requires a model in user configuration or an explicit selection", failure.Reviewer)
+	return fmt.Sprintf("reviewer %q requires a model in configuration or an explicit selection", failure.Reviewer)
 }
 
 type ReviewerModelNotAllowedError struct {
@@ -129,102 +36,48 @@ func (failure ReviewerModelNotAllowedError) Error() string {
 	return fmt.Sprintf("model %q is not allowed for reviewer %q; expected %v", failure.Model, failure.Reviewer, failure.Allowed)
 }
 
-func loadUserConfiguration(path string) (userConfiguration, error) {
-	if path == "" {
-		return userConfiguration{}, nil
-	}
-	payload, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return userConfiguration{}, nil
-	}
-	if err != nil {
-		return userConfiguration{}, InvalidUserConfigurationError{Path: path, Reason: err.Error()}
-	}
-	decoder := json.NewDecoder(bytes.NewReader(payload))
-	decoder.DisallowUnknownFields()
-	var configuration userConfiguration
-	if err := decoder.Decode(&configuration); err != nil {
-		return userConfiguration{}, InvalidUserConfigurationError{Path: path, Reason: err.Error()}
-	}
-	if err := rejectTrailingJSON(decoder); err != nil {
-		return userConfiguration{}, InvalidUserConfigurationError{Path: path, Reason: err.Error()}
-	}
-	if err := validateUserConfiguration(configuration); err != nil {
-		return userConfiguration{}, InvalidUserConfigurationError{Path: path, Reason: err.Error()}
-	}
-	return configuration, nil
-}
-
-func validateUserConfiguration(configuration userConfiguration) error {
-	if configuration.Version != 1 {
-		return fmt.Errorf("unsupported version %d", configuration.Version)
-	}
-	if configuration.StateDirectory != "" && !filepath.IsAbs(configuration.StateDirectory) {
-		return errors.New("state_directory must be an absolute path")
-	}
-	if configuration.Eval.ConcurrencyLimit < 0 {
-		return errors.New("eval concurrency_limit must be positive")
-	}
-	if configuration.Eval.RetryPolicy.MaxAttempts < 0 {
-		return errors.New("eval retry_policy max_attempts must be positive")
-	}
-	return nil
-}
-
-func rejectTrailingJSON(decoder *json.Decoder) error {
-	var extra any
-	if err := decoder.Decode(&extra); errors.Is(err, io.EOF) {
-		return nil
-	} else if err != nil {
-		return err
-	}
-	return errors.New("multiple JSON values")
-}
-
-func configureReviewerCatalog(catalog reviewerCatalog, configuration userConfiguration, path string) (reviewerCatalog, error) {
-	configured := cloneReviewerCatalog(catalog)
-	if err := applyReviewerPolicies(&configured, configuration.Reviewers); err != nil {
-		return reviewerCatalog{}, invalidConfiguration(path, err)
-	}
-	if err := applyDefaultReviewer(&configured, configuration.DefaultReviewer); err != nil {
-		return reviewerCatalog{}, invalidConfiguration(path, err)
+// configureReviewerCatalog applies Effective Configuration to the packaged
+// reviewer catalog and validates the effective default.
+func configureReviewerCatalog(catalog reviewerCatalog, effective configuration.Effective) (reviewerCatalog, error) {
+	configured := applyEffectiveReviewerPolicies(catalog, effective)
+	if effective.DefaultReviewer.Authored {
+		if err := applyDefaultReviewer(&configured, effective.DefaultReviewer.Value); err != nil {
+			return reviewerCatalog{}, InvalidConfigurationError{Path: effective.DefaultReviewer.Path, Reason: err.Error()}
+		}
 	}
 	if err := validateEffectiveDefault(configured); err != nil {
-		return reviewerCatalog{}, invalidConfiguration(path, err)
+		return reviewerCatalog{}, InvalidConfigurationError{Path: effective.DefaultReviewer.Path, Reason: err.Error()}
 	}
 	return configured, nil
 }
 
-func applyReviewerPolicies(catalog *reviewerCatalog, policies map[string]userReviewerPolicy) error {
-	for id, policy := range policies {
-		registration, exists := catalog.registrations[id]
+// applyEffectiveReviewerPolicies applies validated repository and Personal
+// reviewer settings without requiring the caller to know their precedence.
+func applyEffectiveReviewerPolicies(catalog reviewerCatalog, effective configuration.Effective) reviewerCatalog {
+	configured := cloneReviewerCatalog(catalog)
+	for _, id := range effective.ReviewerIDs() {
+		registration, exists := configured.registrations[id]
 		if !exists {
-			return fmt.Errorf("unknown reviewer %q", id)
+			continue
 		}
-		configured, err := applyReviewerPolicy(registration, policy)
-		if err != nil {
-			return err
-		}
-		catalog.registrations[id] = configured
+		settings, _ := effective.ReviewerPolicy(id)
+		configured.registrations[id] = applyReviewerPolicy(registration, settings)
 	}
-	return nil
+	return configured
 }
 
-func applyReviewerPolicy(registration reviewerRegistration, policy userReviewerPolicy) (reviewerRegistration, error) {
-	if policy.Enabled != nil {
-		registration.disabled = !*policy.Enabled
+func applyReviewerPolicy(registration reviewerRegistration, settings configuration.ReviewerSettings) reviewerRegistration {
+	if settings.Enabled.Authored {
+		registration.enabled = settings.Enabled
 	}
-	if policy.AllowedModels.present {
-		registration.allowedModels = canonicalModels(policy.AllowedModels.models)
+	if settings.AllowedModels.Authored {
+		registration.allowedModels = canonicalModels(settings.AllowedModels.Value)
 		registration.modelAllowlistConfigured = true
 	}
-	if policy.Model.present {
-		registration.candidate.Model = policy.Model.value
+	if settings.Model.Authored {
+		registration.candidate.Model = settings.Model.Value
 	}
-	if registration.disabled {
-		return registration, nil
-	}
-	return registration, validateConfiguredModel(registration)
+	return registration
 }
 
 func applyDefaultReviewer(catalog *reviewerCatalog, reviewer string) error {
@@ -235,15 +88,11 @@ func applyDefaultReviewer(catalog *reviewerCatalog, reviewer string) error {
 	if !exists {
 		return fmt.Errorf("unknown default reviewer %q", reviewer)
 	}
-	if registration.disabled {
+	if registration.isDisabled() {
 		return fmt.Errorf("default reviewer %q is disabled", reviewer)
 	}
 	catalog.defaultReviewer = reviewer
 	return nil
-}
-
-func invalidConfiguration(path string, err error) InvalidUserConfigurationError {
-	return InvalidUserConfigurationError{Path: path, Reason: err.Error()}
 }
 
 func validateEffectiveDefault(catalog reviewerCatalog) error {
@@ -255,7 +104,7 @@ func validateEffectiveDefault(catalog reviewerCatalog) error {
 	if !exists {
 		return fmt.Errorf("unknown effective default reviewer %q", reviewer)
 	}
-	if registration.disabled {
+	if registration.isDisabled() {
 		return fmt.Errorf("effective default reviewer %q is disabled", reviewer)
 	}
 	if registration.candidate.Model == "" {
@@ -272,16 +121,6 @@ func cloneReviewerCatalog(catalog reviewerCatalog) reviewerCatalog {
 	clone := newReviewerCatalog(registrations)
 	clone.defaultReviewer = catalog.defaultReviewer
 	return clone
-}
-
-func validateConfiguredModel(registration reviewerRegistration) error {
-	if registration.candidate.Model == "" || !registration.modelAllowlistConfigured {
-		return nil
-	}
-	if !containsModel(registration.allowedModels, registration.candidate.Model) {
-		return ReviewerModelNotAllowedError{Reviewer: registration.candidate.ID, Model: registration.candidate.Model, Allowed: registration.allowedModels}
-	}
-	return nil
 }
 
 func canonicalModels(models []string) []string {

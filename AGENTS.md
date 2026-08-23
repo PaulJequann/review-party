@@ -24,6 +24,11 @@ result contract does not require every agent to use the same wire protocol.
 - Keep project governance outside the review engine. The CLI may report facts
   and validated results, but repository instructions and the caller decide
   whether a finding blocks delivery or whether remediation is authorized.
+- Treat the product as pre-release with no existing-user compatibility burden.
+  Prefer direct replacement over migrations, backfills, legacy readers, or
+  compatibility branches. Surface obsolete code and files for removal; when a
+  tracked path should be deleted, request the path-specific approval required
+  below rather than retaining dead code.
 
 ## Dogfooding
 

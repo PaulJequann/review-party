@@ -137,7 +137,8 @@ func (conductor *Conductor) compilePartyMembers(repository string, effective mod
 	members := make([]compiledPartyMember, 0, len(effective.Profiles))
 	for _, member := range effective.Profiles {
 		compiledStarted := conductor.now().UTC()
-		profile, err := conductor.compileFilesystemProfile(ProfileSelection{Profile: member.Profile, Reviewer: member.Reviewer, Model: member.Model, Effort: member.Effort}, repository)
+		selection := ProfileSelection{Profile: member.Profile, Reviewer: member.Reviewer, Model: member.Model, Effort: member.Effort}
+		profile, err := conductor.compileFilesystemProfile(selection, repository)
 		if err != nil {
 			return nil, fmt.Errorf("party %q member %q: %w", effective.Name, member.Profile, err)
 		}

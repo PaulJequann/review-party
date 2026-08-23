@@ -2,8 +2,12 @@ package engine
 
 import (
 	"embed"
+	"errors"
 	"fmt"
+	"path"
 	"strings"
+
+	"reviewparty/internal/configuration"
 )
 
 const (
@@ -14,9 +18,41 @@ const (
 //go:embed profiles/*.md
 var packagedProfileFiles embed.FS
 
-type profileLibrary struct {
-	globalDirectory string
+type profileLocation struct {
+	name   string
+	path   string
+	source string
 }
+
+func profileLocationFrom(entry configuration.AuthoredEntry) profileLocation {
+	return profileLocation{name: entry.Name, path: entry.Path, source: entry.Source}
+}
+
+func packagedProfileEntries() ([]profileLocation, error) {
+	entries, err := packagedProfileFiles.ReadDir("profiles")
+	if err != nil {
+		return nil, fmt.Errorf("read packaged profile directory: %w", err)
+	}
+	profiles := make([]profileLocation, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || path.Ext(entry.Name()) != ".md" {
+			continue
+		}
+		profilePath := path.Join("profiles", entry.Name())
+		profiles = append(profiles, profileLocation{
+			name:   strings.TrimSuffix(entry.Name(), ".md"),
+			path:   profilePath,
+			source: "packaged:" + profilePath,
+		})
+	}
+	return profiles, nil
+}
+
+type profileLibrary struct {
+	configuration *configuration.Manager
+}
+
+var errProfileLibraryNotConfigured = errors.New("profile library requires an explicit configuration manager")
 
 type profileRequest struct {
 	repository string
@@ -31,27 +67,44 @@ type resolvedProfile struct {
 	path         string
 	digest       string
 	reviewer     string
+	effective    configuration.Effective
 }
 
-type profileCandidate struct {
-	source string
-	path   string
-	anchor string
+// manager returns the Configuration Manager that owns this Profile library.
+func (library profileLibrary) manager() *configuration.Manager {
+	return library.configuration
 }
 
-func newProfileLibrary(globalDirectory string) profileLibrary {
-	if globalDirectory == "" {
-		globalDirectory = defaultGlobalProfileDirectory()
+func (library profileLibrary) authoredProfileLibrary(repository configuration.Repository) (configuration.AuthoredLibrary, error) {
+	manager := library.manager()
+	if manager == nil {
+		return configuration.AuthoredLibrary{}, errProfileLibraryNotConfigured
 	}
-	return profileLibrary{globalDirectory: globalDirectory}
+	return manager.AuthoredLibrary(configuration.LibraryProfiles, repository)
+}
+
+func newProfileLibrary(personalRoot string) profileLibrary {
+	return profileLibrary{configuration: configuration.NewManager(configuration.Options{
+		PersonalRoot:            personalRoot,
+		Reviewers:               supportedReviewerIDs(),
+		PackagedReviewerModels:  packagedReviewerModels(),
+		PackagedDefaultReviewer: defaultReviewer,
+		PackagedDefaultProfile:  packagedDefaultProfileName,
+		ValidateProfileName:     validateProfileName,
+	})}
 }
 
 func (conductor *Conductor) compileFilesystemProfile(selection ProfileSelection, repository string) (compiledProfile, error) {
-	reviewerWasDefault := selection.Reviewer == ""
-	resolved, err := conductor.profiles.resolve(conductor.reviewers, profileRequest{repository: repository, name: selection.Profile, reviewer: selection.Reviewer})
+	resolved, err := conductor.profiles.resolve(profileRequest{repository: repository, name: selection.Profile, reviewer: selection.Reviewer})
 	if err != nil {
 		return compiledProfile{}, err
 	}
+	return conductor.compileProfile(selection, resolved)
+}
+
+func (conductor *Conductor) compileProfile(selection ProfileSelection, resolved resolvedProfile) (compiledProfile, error) {
+	reviewers := applyEffectiveReviewerPolicies(conductor.reviewers, resolved.effective)
+	reviewerWasDefault := selection.Reviewer == ""
 	selection.Profile = resolved.name
 	if selection.Reviewer == "" {
 		selection.Reviewer = resolved.reviewer
@@ -60,7 +113,7 @@ func (conductor *Conductor) compileFilesystemProfile(selection ProfileSelection,
 	if err != nil {
 		return compiledProfile{}, err
 	}
-	profile, err := compileProfileDefinition(conductor.reviewers, selection, conductor.attemptDeadline, definition)
+	profile, err := compileProfileDefinition(reviewers, selection, conductor.attemptDeadline, definition)
 	if err != nil {
 		return compiledProfile{}, err
 	}
@@ -108,13 +161,14 @@ func (conductor *Conductor) profileSummaries(repository string) ([]ProfileSummar
 		if summaries[index].Error != "" {
 			continue
 		}
-		resolved, resolveErr := conductor.profiles.resolve(conductor.reviewers, profileRequest{repository: repository, name: summaries[index].Name})
+		resolved, resolveErr := conductor.profiles.resolve(profileRequest{repository: repository, name: summaries[index].Name})
 		if resolveErr != nil {
 			summaries[index].Error = resolveErr.Error()
 			continue
 		}
+		reviewers := applyEffectiveReviewerPolicies(conductor.reviewers, resolved.effective)
 		definition, _ := profileDefinitionFor(resolved)
-		registration, resolveErr := conductor.reviewers.resolve(resolved.reviewer)
+		registration, resolveErr := reviewers.resolve(resolved.reviewer)
 		if resolveErr != nil {
 			summaries[index].Error = resolveErr.Error()
 			continue
@@ -127,12 +181,20 @@ func (conductor *Conductor) profileSummaries(repository string) ([]ProfileSummar
 	return summaries, nil
 }
 
-func (library profileLibrary) resolve(catalog reviewerCatalog, request profileRequest) (resolvedProfile, error) {
-	settings, err := library.loadSettings(request.repository)
+func (library profileLibrary) resolveConfiguration(request profileRequest) (configuration.Effective, profileSelection, error) {
+	effective, err := library.manager().Resolve(configuration.Request{
+		Repository: configuration.Repository(request.repository),
+		Overrides:  configuration.Overrides{Profile: request.name},
+	})
 	if err != nil {
-		return resolvedProfile{}, err
+		return configuration.Effective{}, profileSelection{}, err
 	}
-	selection, err := settings.selectProfile(catalog, profileSelection{name: request.name, reviewer: request.reviewer})
+	selection, err := selectProfileFromEffective(effective, request.reviewer)
+	return effective, selection, err
+}
+
+func (library profileLibrary) resolve(request profileRequest) (resolvedProfile, error) {
+	effective, selection, err := library.resolveConfiguration(request)
 	if err != nil {
 		return resolvedProfile{}, err
 	}
@@ -141,7 +203,31 @@ func (library profileLibrary) resolve(catalog reviewerCatalog, request profileRe
 		return resolvedProfile{}, err
 	}
 	profile.reviewer = selection.reviewer
+	profile.effective = effective
 	return profile, nil
+}
+
+func (library profileLibrary) validateExplicitReviewer(selection ProfileSelection, repository string, catalog reviewerCatalog) error {
+	request := profileRequest{repository: repository, name: selection.Profile, reviewer: selection.Reviewer}
+	effective, resolvedSelection, err := library.resolveConfiguration(request)
+	if err != nil {
+		return err
+	}
+	reviewers := applyEffectiveReviewerPolicies(catalog, effective)
+	required := restrictedReviewCapabilities()
+	profileName := resolvedSelection.name
+	if resolved, findErr := library.findProfile(profileLookup{repository: repository, name: profileName}); findErr == nil {
+		if definition, definitionErr := profileDefinitionFor(resolved); definitionErr == nil {
+			required = definition.requiredCapabilities
+			profileName = definition.name
+		}
+	}
+	registration, err := reviewers.resolve(selection.Reviewer)
+	if err != nil {
+		return err
+	}
+	_, err = validateReviewerSelection(registration, selection, required, profileName)
+	return err
 }
 
 func renderReviewPrompt(profile resolvedProfile, subject ReviewSubject) string {

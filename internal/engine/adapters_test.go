@@ -63,6 +63,7 @@ func TestCopilotUnavailableModelIsClassifiedWithoutRetry(t *testing.T) {
 }
 
 func TestReviewerSelectionChangesProfileRevision(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	executor := successfulExecutor(cleanReview)
 	capabilities := restrictedReviewCapabilities()
 	catalog := newReviewerCatalog([]reviewerRegistration{
@@ -83,6 +84,7 @@ func TestReviewerSelectionChangesProfileRevision(t *testing.T) {
 }
 
 func TestCompiledBugProfileIncludesPromisedPass(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	profile, err := compileSelectedTestProfile(defaultReviewerCatalog(), ProfileSelection{Profile: "bugs", Reviewer: "grok"}, time.Second)
 	if err != nil {
 		t.Fatal(err)

@@ -6,22 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"os"
-	"path"
-	"path/filepath"
 	"sort"
 	"strings"
 	"unicode/utf8"
+
+	"reviewparty/internal/configuration"
 )
-
-const maximumProfileBytes = 64 * 1024
-
-type profileLayer struct {
-	directory string
-	anchor    string
-	source    string
-	packaged  bool
-}
 
 type profileLookup struct {
 	repository string
@@ -29,107 +19,141 @@ type profileLookup struct {
 }
 
 func (library profileLibrary) findProfile(lookup profileLookup) (resolvedProfile, error) {
-	candidates := library.profileCandidates(lookup)
-	for _, candidate := range candidates {
-		instructions, found, err := readProfileCandidate(candidate)
+	authored, err := library.authoredProfileLibrary(configuration.Repository(lookup.repository))
+	if err != nil {
+		return resolvedProfile{}, err
+	}
+	entries, err := authored.Candidates(lookup.name)
+	if err != nil {
+		return resolvedProfile{}, err
+	}
+	searched := authoredSources(entries)
+	for _, entry := range entries {
+		instructions, found, err := readAuthoredProfile(authored, entry)
 		if err != nil {
 			return resolvedProfile{}, err
 		}
 		if found {
-			return resolvedProfileFrom(candidate, lookup.name, instructions), nil
+			return resolvedProfileFrom(profileLocationFrom(entry), instructions), nil
 		}
 	}
-	return resolvedProfile{}, library.missingProfileError(lookup.repository, lookup.name, candidates)
+	packaged := profileLocation{
+		name:   lookup.name,
+		path:   "profiles/" + lookup.name + ".md",
+		source: "packaged:profiles/" + lookup.name + ".md",
+	}
+	searched = append(searched, packaged.source)
+	instructions, found, err := readPackagedProfile(packaged)
+	if err != nil {
+		return resolvedProfile{}, err
+	}
+	if found {
+		return resolvedProfileFrom(packaged, instructions), nil
+	}
+	return resolvedProfile{}, library.missingProfileError(lookup.repository, lookup.name, searched)
 }
 
-func (library profileLibrary) profileCandidates(lookup profileLookup) []profileCandidate {
-	filename := lookup.name + ".md"
-	var candidates []profileCandidate
-	for _, layer := range library.profileLayers(lookup.repository) {
-		candidates = append(candidates, profileCandidate{
-			source: layerSource(layer, filename),
-			path:   layerProfilePath(layer, filename),
-			anchor: layer.anchor,
-		})
+func authoredSources(entries []configuration.AuthoredEntry) []string {
+	sources := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		sources = append(sources, entry.Source)
 	}
-	return candidates
+	return sources
 }
 
-func (library profileLibrary) profileLayers(repository string) []profileLayer {
-	var layers []profileLayer
-	if repository != "" {
-		layers = append(layers, profileLayer{directory: filepath.Join(repository, ".reviewparty", "profiles"), anchor: repository, source: "repository"})
-	}
-	if library.globalDirectory != "" {
-		layers = append(layers, profileLayer{directory: filepath.Join(library.globalDirectory, "profiles"), anchor: filepath.Dir(library.globalDirectory), source: "global"})
-	}
-	return append(layers, profileLayer{directory: "profiles", source: "packaged", packaged: true})
-}
-
-func resolvedProfileFrom(candidate profileCandidate, name, instructions string) resolvedProfile {
+func resolvedProfileFrom(location profileLocation, instructions string) resolvedProfile {
 	digest := sha256.Sum256([]byte(instructions))
 	return resolvedProfile{
-		name:         name,
+		name:         location.name,
 		instructions: instructions,
-		source:       candidate.source,
-		path:         candidate.path,
+		source:       location.source,
+		path:         location.path,
 		digest:       hex.EncodeToString(digest[:]),
 	}
 }
 
-func isMarkdownProfile(entry fs.DirEntry) bool {
-	return !entry.IsDir() && filepath.Ext(entry.Name()) == ".md"
-}
-
 func (library profileLibrary) list(repository string) ([]ProfileSummary, error) {
-	if _, err := library.loadSettings(repository); err != nil {
+	manager := library.manager()
+	if _, err := manager.Resolve(configuration.Request{Repository: configuration.Repository(repository)}); err != nil {
+		return nil, err
+	}
+	authored, err := library.authoredProfileLibrary(configuration.Repository(repository))
+	if err != nil {
+		return nil, err
+	}
+	entries, err := authored.Entries()
+	if err != nil {
 		return nil, err
 	}
 	winners := make(map[string]ProfileSummary)
-	for _, layer := range library.profileLayers(repository) {
-		if err := addLayerProfiles(winners, layer); err != nil {
-			return nil, err
+	if err := addAuthoredProfiles(winners, authored, entries); err != nil {
+		return nil, err
+	}
+	packaged, err := packagedProfileSummaries(winners)
+	if err != nil {
+		return nil, err
+	}
+	for name, summary := range packaged {
+		if _, exists := winners[name]; !exists {
+			winners[name] = summary
 		}
 	}
 	return sortedProfileSummaries(winners), nil
 }
 
-func addLayerProfiles(winners map[string]ProfileSummary, layer profileLayer) error {
-	entries, err := readProfileDirectory(layer)
-	if err != nil {
-		return err
-	}
+func addAuthoredProfiles(winners map[string]ProfileSummary, authored configuration.AuthoredLibrary, entries []configuration.AuthoredEntry) error {
 	for _, entry := range entries {
-		if !isMarkdownProfile(entry) {
-			continue
-		}
-		name := strings.TrimSuffix(entry.Name(), ".md")
+		name := entry.Name
+		location := profileLocationFrom(entry)
 		if _, exists := winners[name]; exists {
 			continue
 		}
-		candidate := profileCandidate{source: layerSource(layer, entry.Name()), path: layerProfilePath(layer, entry.Name()), anchor: layer.anchor}
 		if err := validateProfileName(name); err != nil {
-			winners[name] = invalidProfileSummary(name, candidate, err)
+			winners[name] = invalidProfileSummary(location, err)
 			continue
 		}
-		if _, _, err := readProfileCandidate(candidate); err != nil {
-			winners[name] = invalidProfileSummary(name, candidate, err)
+		if _, found, err := readAuthoredProfile(authored, entry); err != nil {
+			winners[name] = invalidProfileSummary(location, err)
+			continue
+		} else if !found {
 			continue
 		}
-		winners[name] = ProfileSummary{Name: name, Source: candidate.source, Path: candidate.path}
+		winners[name] = ProfileSummary{Name: location.name, Source: location.source, Path: location.path}
 	}
 	return nil
 }
 
-func invalidProfileSummary(name string, candidate profileCandidate, err error) ProfileSummary {
-	return ProfileSummary{Name: name, Source: candidate.source, Path: candidate.path, Error: err.Error()}
+func packagedProfileSummaries(winners map[string]ProfileSummary) (map[string]ProfileSummary, error) {
+	entries, err := packagedProfileEntries()
+	if err != nil {
+		return nil, err
+	}
+	summaries := make(map[string]ProfileSummary)
+	for _, entry := range entries {
+		if summary, found := summarizePackagedProfile(entry, winners); found {
+			summaries[summary.Name] = summary
+		}
+	}
+	return summaries, nil
 }
 
-func layerProfilePath(layer profileLayer, filename string) string {
-	if layer.packaged {
-		return path.Join(layer.directory, filename)
+func summarizePackagedProfile(entry profileLocation, winners map[string]ProfileSummary) (ProfileSummary, bool) {
+	if _, exists := winners[entry.name]; exists {
+		return ProfileSummary{}, false
 	}
-	return filepath.Join(layer.directory, filename)
+	if err := validateProfileName(entry.name); err != nil {
+		return invalidProfileSummary(entry, err), true
+	}
+	if _, found, err := readPackagedProfile(entry); err != nil {
+		return invalidProfileSummary(entry, err), true
+	} else if found {
+		return ProfileSummary{Name: entry.name, Source: entry.source, Path: entry.path}, true
+	}
+	return ProfileSummary{}, false
+}
+
+func invalidProfileSummary(location profileLocation, err error) ProfileSummary {
+	return ProfileSummary{Name: location.name, Source: location.source, Path: location.path, Error: err.Error()}
 }
 
 func sortedProfileSummaries(winners map[string]ProfileSummary) []ProfileSummary {
@@ -141,64 +165,43 @@ func sortedProfileSummaries(winners map[string]ProfileSummary) []ProfileSummary 
 	return profiles
 }
 
-func layerSource(layer profileLayer, filename string) string {
-	if layer.source == "repository" {
-		return "repository:.reviewparty/profiles/" + filename
+func readAuthoredProfile(library configuration.AuthoredLibrary, entry configuration.AuthoredEntry) (string, bool, error) {
+	payload, found, err := library.ReadEntry(entry)
+	location := profileLocationFrom(entry)
+	if err != nil {
+		return validateProfilePayload(location, nil, err)
 	}
-	return layer.source + ":profiles/" + filename
+	if !found {
+		return "", false, nil
+	}
+	return validateProfilePayload(location, payload, nil)
 }
 
-func readProfileCandidate(candidate profileCandidate) (string, bool, error) {
-	if strings.HasPrefix(candidate.source, "packaged:") {
-		payload, err := packagedProfileFiles.ReadFile(candidate.path)
-		if errors.Is(err, fs.ErrNotExist) {
-			return "", false, nil
-		}
-		return validateProfilePayload(candidate, payload, err)
+func readPackagedProfile(entry profileLocation) (string, bool, error) {
+	payload, err := packagedProfileFiles.ReadFile(entry.path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return "", false, nil
 	}
-	payload, found, err := readLocalProfile(candidate)
-	if err != nil || !found {
-		return "", found, err
+	if err != nil {
+		return validateProfilePayload(entry, nil, err)
 	}
-	return validateProfilePayload(candidate, payload, nil)
+	if len(payload) > configuration.MaximumDocumentBytes {
+		return "", false, fmt.Errorf("profile %s at %q exceeds %d bytes", entry.source, entry.path, configuration.MaximumDocumentBytes)
+	}
+	return validateProfilePayload(entry, payload, nil)
 }
 
-func readLocalProfile(candidate profileCandidate) ([]byte, bool, error) {
-	description := fmt.Sprintf("profile %s", candidate.source)
-	return readLocalRegularFile(candidate.anchor, candidate.path, description, maximumProfileBytes)
-}
-
-func validateProfilePayload(candidate profileCandidate, payload []byte, readErr error) (string, bool, error) {
+func validateProfilePayload(location profileLocation, payload []byte, readErr error) (string, bool, error) {
 	if readErr != nil {
-		return "", false, fmt.Errorf("read profile %s at %q: %w", candidate.source, candidate.path, readErr)
-	}
-	if len(payload) > maximumProfileBytes {
-		return "", false, fmt.Errorf("profile %s at %q exceeds %d bytes", candidate.source, candidate.path, maximumProfileBytes)
+		return "", false, fmt.Errorf("read profile %s at %q: %w", location.source, location.path, readErr)
 	}
 	if !utf8.Valid(payload) {
-		return "", false, fmt.Errorf("profile %s at %q is not valid UTF-8", candidate.source, candidate.path)
+		return "", false, fmt.Errorf("profile %s at %q is not valid UTF-8", location.source, location.path)
 	}
 	instructions := strings.ReplaceAll(string(payload), "\r\n", "\n")
 	instructions = strings.TrimSpace(strings.ReplaceAll(instructions, "\r", "\n"))
 	if instructions == "" {
-		return "", false, fmt.Errorf("profile %s at %q is empty", candidate.source, candidate.path)
+		return "", false, fmt.Errorf("profile %s at %q is empty", location.source, location.path)
 	}
 	return instructions, true, nil
-}
-
-func readProfileDirectory(layer profileLayer) ([]fs.DirEntry, error) {
-	var entries []fs.DirEntry
-	var err error
-	if layer.packaged {
-		entries, err = packagedProfileFiles.ReadDir(layer.directory)
-	} else {
-		entries, err = os.ReadDir(layer.directory)
-	}
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("read profile directory %q: %w", layer.directory, err)
-	}
-	return entries, nil
 }
