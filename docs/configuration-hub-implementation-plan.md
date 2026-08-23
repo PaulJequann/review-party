@@ -137,10 +137,10 @@ They cannot make selection fail because the Reviewer cannot run. An error for
 an active Reviewer retains the scope and path of the winning authored value
 that caused the error.
 
-An explicit requested model is an input to reviewer selection, not an
-independent `Effective.Model` value. The selected result records explicit
-provenance when that input wins. No future caller may infer behavior from the
-currently unused `Effective.Model` field.
+The Slice 2 implementation still populates `Effective.Model` from
+`Overrides.Model`. The replacement removes that field. An explicit requested
+model becomes an input to reviewer selection, and the selected result records
+explicit provenance when that input wins.
 
 ### Staged publication
 
@@ -157,13 +157,18 @@ publish exactly those changes. Two designs can provide that workflow.
 | Pre-release compatibility | Retaining the struct preserves an API that no supported release requires. Reserved fields such as `Warnings` enlarge that API before semantics exist. | Replacing the struct now avoids a compatibility promise and permits later warning semantics to use a deliberate result type. |
 | Measured performance | No benchmark measures copying or publishing the exported plan. | No benchmark measures snapshot comparison or defensive preview copies. The choice has no performance claim. |
 
-Select the opaque snapshot-bound `Plan`. Planning captures the identity and
-content digest of every loaded configuration file that can affect the staged
-result. `Publish` compares those snapshots immediately before it writes and
-rejects a stale plan without writing any file. Preview access returns data that
-cannot mutate the staged documents, including defensive copies of slices and
-maps. The Interface does not reserve `Plan.Warnings`. Adding warnings requires
-a separate design decision with defined semantics and consumer behavior.
+Select the opaque snapshot-bound `Plan`. The replacement must capture the
+identity and content digest of every loaded configuration file that can affect
+the staged result. `Publish` must compare those snapshots immediately before it
+writes and reject a stale plan without writing any file. Preview access must
+return defensive copies of slices and maps, so preview data cannot mutate the
+staged documents.
+
+The Slice 2 implementation instead exports mutable preview fields and publishes
+without a snapshot comparison. It also exports `Plan.Warnings`, which always
+remains empty and has no accepted semantics. The replacement removes that
+field. Adding warnings later requires a separate design decision with defined
+semantics and consumer behavior.
 
 ## Dependency order
 
@@ -295,10 +300,11 @@ publication.
   `SourceRepository` or `SourcePersonal` value and its authored path.
 - Define typed configuration intents rather than generic dotted JSON paths.
 - Keep `Intent` as a closed set of package-owned typed operations with
-  package-private mechanics. Planning rejects invalid intents without exposing
-  a publishable `Plan`.
-- Return an opaque, snapshot-bound `Plan` and a separate immutable preview of
-  semantic changes, affected scopes, affected paths, and validation results.
+  package-private mechanics. `Manager.Plan` accepts `[]Intent` and represents a
+  nil intent as an invalid `Plan` with `Valid: false` and a `Reason`.
+- Return an exported `Plan` containing semantic changes, affected scopes,
+  affected paths, validation results, and an empty `Warnings` field. This is
+  shipped Slice 2 behavior, not the accepted boundary for later callers.
 - Publish a confirmed `Plan` atomically with private personal-file permissions
   through `Manager.Publish`.
   Multi-file failure must restore the pre-save state or leave an explicit,
