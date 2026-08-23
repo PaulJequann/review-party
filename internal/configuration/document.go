@@ -18,10 +18,11 @@ const SchemaVersion = 1
 type Defaults struct {
 	Reviewer string `json:"reviewer,omitempty"`
 	Profile  string `json:"profile,omitempty"`
+	Party    string `json:"party,omitempty"`
 }
 
 func (defaults *Defaults) UnmarshalJSON(payload []byte) error {
-	if _, err := decodeObjectFields(payload, "defaults", "reviewer", "profile"); err != nil {
+	if _, err := decodeObjectFields(payload, "defaults", "reviewer", "profile", "party"); err != nil {
 		return err
 	}
 	type plainDefaults Defaults
@@ -34,7 +35,7 @@ func (defaults *Defaults) UnmarshalJSON(payload []byte) error {
 }
 
 func (defaults Defaults) empty() bool {
-	return defaults.Reviewer == "" && defaults.Profile == ""
+	return defaults.Reviewer == "" && defaults.Profile == "" && defaults.Party == ""
 }
 
 // ReviewerPolicy is one reviewer's authored policy inside one scope. A nil
@@ -205,7 +206,10 @@ func validateDefaults(defaults Defaults, manager *Manager) error {
 	if err := validateDefault("reviewer", defaults.Reviewer, manager.validateReviewer); err != nil {
 		return err
 	}
-	return validateDefault("profile", defaults.Profile, manager.validateProfileName)
+	if err := validateDefault("profile", defaults.Profile, manager.validateName); err != nil {
+		return err
+	}
+	return validateDefault("party", defaults.Party, manager.validateName)
 }
 
 func validateDefault(field, value string, validate func(string) error) error {

@@ -84,14 +84,9 @@ func (library profileLibrary) authoredProfileLibrary(repository configuration.Re
 }
 
 func newProfileLibrary(personalRoot string) profileLibrary {
-	return profileLibrary{configuration: configuration.NewManager(configuration.Options{
-		PersonalRoot:            personalRoot,
-		Reviewers:               supportedReviewerIDs(),
-		PackagedReviewerModels:  packagedReviewerModels(),
-		PackagedDefaultReviewer: defaultReviewer,
-		PackagedDefaultProfile:  packagedDefaultProfileName,
-		ValidateProfileName:     validateProfileName,
-	})}
+	options := reviewPartyConfigurationOptions()
+	options.PersonalRoot = personalRoot
+	return profileLibrary{configuration: configuration.NewManager(options)}
 }
 
 func (conductor *Conductor) compileFilesystemProfile(selection ProfileSelection, repository string) (compiledProfile, error) {

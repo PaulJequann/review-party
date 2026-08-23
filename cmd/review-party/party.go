@@ -76,10 +76,6 @@ type partyRunOptions struct {
 
 func parsePartyRunOptions(arguments []string, stderr io.Writer) (partyRunOptions, bool) {
 	name, remaining := takeLeadingValue(arguments)
-	if name == "" {
-		fmt.Fprintln(stderr, "review-party: party run requires a party name")
-		return partyRunOptions{}, false
-	}
 	flags := flag.NewFlagSet("party run", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	repository := flags.String("repo", ".", "Git repository to review")
@@ -167,7 +163,11 @@ func printHumanPartySummaries(stdout io.Writer, summaries []model.PartySummary) 
 		if summary.Error != "" {
 			description = summary.Error
 		}
-		fmt.Fprintf(stdout, "%s · %s · %s\n  profiles: %s\n", summary.Name, summary.Source, description, strings.Join(summary.Members, ", "))
+		fmt.Fprintf(stdout, "%s · %s · %s\n", summary.Name, summary.Source, description)
+		if len(summary.Extends) > 0 {
+			fmt.Fprintf(stdout, "  extends: %s\n", strings.Join(summary.Extends, ", "))
+		}
+		fmt.Fprintf(stdout, "  profiles: %s\n", strings.Join(summary.Members, ", "))
 	}
 }
 

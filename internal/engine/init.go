@@ -66,7 +66,7 @@ func InitializeProfiles(initialization ProfileInitialization) (ProfileInitializa
 }
 
 func CreateProfile(creation ProfileCreation) (ProfileInitializationResult, error) {
-	if err := validateProfileName(creation.Name); err != nil {
+	if err := validateAuthoredName(creation.Name); err != nil {
 		return ProfileInitializationResult{}, fmt.Errorf("invalid Profile name %q: %w", creation.Name, err)
 	}
 	if creation.Blank == (creation.PackagedProfile != "") {
@@ -101,7 +101,7 @@ func profileCreationPayload(creation ProfileCreation) ([]byte, error) {
 	if creation.Blank {
 		return []byte("Describe the Reviewer Judgment for this Profile.\n"), nil
 	}
-	if err := validateProfileName(creation.PackagedProfile); err != nil {
+	if err := validateAuthoredName(creation.PackagedProfile); err != nil {
 		return nil, fmt.Errorf("invalid packaged Profile name %q: %w", creation.PackagedProfile, err)
 	}
 	payload, err := packagedProfileFiles.ReadFile("profiles/" + creation.PackagedProfile + ".md")

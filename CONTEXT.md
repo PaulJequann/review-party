@@ -242,7 +242,7 @@ A Caller-selected composition of Review Profiles applied to one Review Subject. 
 _Avoid_: Review, Review Pipeline, mandatory multi-review workflow
 
 **Party Revision**:
-One exact version of a reusable Party, including its selected Profile Revisions and declared dependencies. A Party name may evolve while each Review Bundle retains the effective composition it used.
+One exact effective version of a reusable Party, including its concurrency limit, ordered member selections, and their selected Profile Revisions. Authored `extends` chains that flatten to the same effective composition share a Party Revision; declared parent lineage remains part of the authored Party definition and listing. A Party name may evolve while each Review Bundle retains the effective composition it used.
 _Avoid_: Party name, mutable profile list
 
 **Review Dependency**:

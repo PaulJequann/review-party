@@ -29,11 +29,54 @@ Reusable Parties are strict version-1 JSON documents:
   `${XDG_CONFIG_HOME:-$HOME/.config}/review-party/parties/<name>.json`.
   Repository shadows Personal; packaged definitions are the last fallback.
   Shadowing replaces the whole definition.
-- The `name` field must equal the file name. Unknown fields, unsupported
-  schema versions, empty member lists, duplicate profile entries, and negative
-  concurrency limits fail validation before anything launches.
+- Party names, `defaults.party`, and every `extends` entry must match
+  `[a-z0-9][a-z0-9-]*`; the `name` field must equal the file name. Unknown
+  fields, unsupported schema versions, empty member lists (including on an
+  extending definition), duplicate Profile or parent entries, self-extension,
+  and invalid concurrency limits fail before anything launches.
+  `concurrency_limit` must be omitted or a non-negative integer; explicit
+  `null` and negative values are invalid. Zero behaves like omission for
+  inheritance and the sequential fallback. Cycles and unknown parents also
+  fail before launch.
 - Members may pin reviewer/model/effort. Explicit caller flags narrow every
   member to one choice and never substitute a member's declared selection.
+
+## Layered composition
+
+A Party may declare `extends`: an ordered list of other party names resolved
+through normal Repository, Personal, then packaged precedence. This is how a
+Personal baseline composes with repository-specific steps in one seamless run:
+
+```json
+{
+  "schema_version": 1,
+  "name": "release-gate",
+  "extends": ["org-baseline"],
+  "profiles": [{"profile": "code-quality", "reviewer": "codex", "effort": "high"}]
+}
+```
+
+- Inherited members run first in their declared order; genuinely new local
+  members append after them.
+- Across parents, a later parent in `extends` order replaces an earlier
+  parent's member settings at that Profile's original position. A local member
+  then replaces inherited settings at the same position. These are
+  definition-time composition rules, not runtime Substitution.
+- A Party's own `concurrency_limit` wins when set. Otherwise, the first parent
+  in `extends` order that provides a nonzero limit supplies the inherited bound.
+- Cycles and unknown parent names fail closed before any launch. A parent name
+  resolves through the same shadowing rules as a direct request.
+- The composition produces ONE Review Bundle: all members review the single
+  frozen Subject through the ordinary path. Personal baselines and repository
+  additions are never split across runs.
+
+`review-party parties` shows each valid definition's declared `extends` chain
+and local `profiles`, not the flattened effective members; the persisted Bundle
+records the effective members after `party run`. An invalid definition reports
+its decoding or validation error instead. Bare
+`review-party party run` resolves `defaults.party` from Repository then
+Personal Configuration, falling back to packaged `standard`. A positional Party
+name is explicit and takes precedence over every configured default.
 
 ## Execution contract
 
@@ -41,10 +84,11 @@ Reusable Parties are strict version-1 JSON documents:
   every member Profile Revision against the catalog, and only then creates the
   Bundle row. Any compilation failure aborts the Party with zero attempts and
   no Bundle.
-- The Party Revision digest freezes the effective composition: name,
+- The Party Revision digest freezes the flattened effective composition: name,
   concurrency limit, each member's effective reviewer/model/effort, and each
-  compiled Profile Revision hash. Flag overrides therefore produce a distinct
-  revision rather than silently overwriting recorded provenance.
+  compiled Profile Revision hash. Different authored `extends` chains that
+  flatten to the same effective composition share a revision. Flag overrides
+  produce a distinct revision rather than silently overwriting effective state.
 - Members execute through the same ordinary `Review` path as standalone
   Reviews, including capability backstops, canonical result validation,
   fail-closed Incomplete semantics, artifacts, and per-member Attempt records.
@@ -73,7 +117,7 @@ members remain visible with their findings.
 
 ```text
 review-party parties [--repo PATH] [--format human|json]
-review-party party run PARTY [--reviewer ID] [--model MODEL] [--effort EFFORT]
+review-party party run [PARTY] [--reviewer ID] [--model MODEL] [--effort EFFORT]
     [--concurrency N] [--repo PATH] [--base COMMIT --head COMMIT]
     [--deadline DURATION] [--config PATH] [--format human|json]
 review-party inspect rb_... [--format human|json]
@@ -86,6 +130,6 @@ Reviews.
 
 Review Dependencies, Synthesis Review, conditional or ordered pipelines,
 per-member retry policies, optional (non-required) members, Party-level result
-merging, and hosted execution remain deferred. The Bundle aggregates Records;
-it never merges Findings into a single verdict and never acquires delivery
-authority.
+merging, ad hoc multi-party composition on one command line, and hosted
+execution remain deferred. The Bundle aggregates Records; it never merges
+Findings into a single verdict and never acquires delivery authority.
