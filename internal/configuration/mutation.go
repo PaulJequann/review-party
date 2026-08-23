@@ -18,28 +18,70 @@ type Change struct {
 	HadAfter  bool
 }
 
-// Plan is a staged, validated set of changes. Nothing is written until
-// Manager.Publish. Callers must check Valid after planning and can render the
-// exported preview fields before deciding whether to publish the plan.
-// Manager.Plan reports invalid intents, including nil, through Valid and Reason
-// rather than its error result; Manager.Publish refuses an invalid Plan.
-// Warnings is stable but remains empty until a later Configuration Hub slice
-// defines it; callers must ignore it until then.
+// Plan is an opaque, staged set of changes created by Manager.Plan. Nothing is
+// written until Manager.Publish. Its methods expose a read-only preview;
+// callers cannot construct or mutate publishable state.
 type Plan struct {
-	Changes  []Change
-	Scopes   []Scope
-	Paths    []string
-	Warnings []string
-	Valid    bool
-	Reason   string
+	state *planState
+}
 
-	staged []stagedDocument
+type planState struct {
+	changes []Change
+	scopes  []Scope
+	paths   []string
+	valid   bool
+	reason  string
+	staged  []stagedDocument
 }
 
 type stagedDocument struct {
 	scope    Scope
 	path     string
+	anchor   string
 	document Document
+	baseline fileState
+}
+
+type fileState struct {
+	existed bool
+	payload []byte
+}
+
+// Valid reports whether the staged changes passed validation.
+func (plan Plan) Valid() bool {
+	return plan.state != nil && plan.state.valid
+}
+
+// Reason explains why a plan is invalid.
+func (plan Plan) Reason() string {
+	if plan.state == nil {
+		return "plan was not created by Manager.Plan"
+	}
+	return plan.state.reason
+}
+
+// Changes returns a copy of the semantic changes for preview.
+func (plan Plan) Changes() []Change {
+	if plan.state == nil {
+		return nil
+	}
+	return append([]Change(nil), plan.state.changes...)
+}
+
+// Scopes returns a copy of the affected scopes for preview.
+func (plan Plan) Scopes() []Scope {
+	if plan.state == nil {
+		return nil
+	}
+	return append([]Scope(nil), plan.state.scopes...)
+}
+
+// Paths returns a copy of the affected paths for preview.
+func (plan Plan) Paths() []string {
+	if plan.state == nil {
+		return nil
+	}
+	return append([]string(nil), plan.state.paths...)
 }
 
 // Plan stages typed intents against loaded documents and validates each
@@ -50,22 +92,21 @@ func (manager *Manager) Plan(repository Repository, intents []Intent) (Plan, err
 		return Plan{}, err
 	}
 	staged := map[Scope]*stagedDocument{}
-	plan := Plan{}
+	plan := Plan{state: &planState{}}
 	for _, intent := range intents {
 		change, err := manager.stageIntent(&plan, staged, loaded, repository, intent)
 		if err != nil {
-			plan.Valid = false
-			plan.Reason = err.Error()
+			plan.state.reason = err.Error()
 			return plan, nil
 		}
 		if change != nil {
-			plan.Changes = append(plan.Changes, *change)
+			plan.state.changes = append(plan.state.changes, *change)
 		}
 	}
 	if err := manager.validateStaged(&plan, staged); err != nil {
 		return plan, nil
 	}
-	plan.Valid = true
+	plan.state.valid = true
 	return plan, nil
 }
 
@@ -82,17 +123,21 @@ func (manager *Manager) stageIntent(plan *Plan, staged map[Scope]*stagedDocument
 	current := loadedScopeFor(loaded, scope)
 	target, ok := staged[scope]
 	if !ok {
-		target = &stagedDocument{scope: scope, path: current.Path, document: current.Document}
+		target = &stagedDocument{
+			scope: scope, path: current.Path, document: current.Document,
+			baseline: fileState{existed: current.Present, payload: append([]byte(nil), current.payload...)},
+		}
 		staged[scope] = target
 	}
 	before, hadBefore := intent.readIntent(target.document)
 	intent.applyIntent(&target.document)
 	after, hadAfter := intent.readIntent(target.document)
-	path, err := manager.ConfigPath(scope, repository)
+	path, anchor, err := manager.configPathAndAnchor(scope, repository)
 	if err != nil {
 		return nil, err
 	}
 	target.path = path
+	target.anchor = anchor
 	if before == after && hadBefore == hadAfter {
 		return nil, nil
 	}
@@ -106,13 +151,12 @@ func (manager *Manager) validateStaged(plan *Plan, staged map[Scope]*stagedDocum
 			continue
 		}
 		if err := validateDocument(document.document, document.scope, manager); err != nil {
-			plan.Valid = false
-			plan.Reason = invalid(document.scope, document.path, err).Error()
+			plan.state.reason = invalid(document.scope, document.path, err).Error()
 			return err
 		}
-		plan.staged = append(plan.staged, *document)
-		plan.Paths = append(plan.Paths, document.path)
-		addScopeOnce(&plan.Scopes, document.scope)
+		plan.state.staged = append(plan.state.staged, *document)
+		plan.state.paths = append(plan.state.paths, document.path)
+		addScopeOnce(&plan.state.scopes, document.scope)
 	}
 	return nil
 }

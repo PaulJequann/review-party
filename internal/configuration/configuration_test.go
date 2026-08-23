@@ -140,7 +140,7 @@ func TestPublishIsAtomicWhenASecondFileFails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !plan.Valid {
+	if !plan.Valid() {
 		t.Fatalf("plan = %#v", plan)
 	}
 
@@ -167,7 +167,7 @@ func TestPlanPreviewsWithoutPublishingUntilPublished(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !plan.Valid {
+	if !plan.Valid() {
 		t.Fatalf("plan = %#v", plan)
 	}
 	path := filepath.Join(root, "config.json")
@@ -259,7 +259,7 @@ func TestPlanRejectsUnknownReviewerAndPublishRefusesInvalidPlan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if plan.Valid || !strings.Contains(plan.Reason, `unknown reviewer "unknown"`) {
+	if plan.Valid() || !strings.Contains(plan.Reason(), `unknown reviewer "unknown"`) {
 		t.Fatalf("plan = %#v", plan)
 	}
 	if err := manager.Publish(plan); err == nil || !strings.Contains(err.Error(), "invalid change plan") {
@@ -273,7 +273,7 @@ func TestPlanRejectsNilIntentAndPublishRefusesInvalidPlan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if plan.Valid || !strings.Contains(plan.Reason, "configuration intent must not be nil") {
+	if plan.Valid() || !strings.Contains(plan.Reason(), "configuration intent must not be nil") {
 		t.Fatalf("plan = %#v", plan)
 	}
 	if err := manager.Publish(plan); err == nil || !strings.Contains(err.Error(), "invalid change plan") {
@@ -305,7 +305,7 @@ func requirePersonalPlan(t *testing.T, manager *Manager, root string) Plan {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !plan.Valid {
+	if !plan.Valid() {
 		t.Fatalf("plan = %#v", plan)
 	}
 	return plan
@@ -317,7 +317,7 @@ func requireConfirmedPlan(t *testing.T, manager *Manager, intents []Intent) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !plan.Valid {
+	if !plan.Valid() {
 		t.Fatalf("plan = %#v", plan)
 	}
 	if err := manager.Publish(plan); err != nil {
@@ -327,14 +327,14 @@ func requireConfirmedPlan(t *testing.T, manager *Manager, intents []Intent) {
 
 func assertPersonalPlanShape(t *testing.T, plan Plan) {
 	t.Helper()
-	if len(plan.Changes) != 2 {
-		t.Fatalf("plan changes = %#v", plan.Changes)
+	if len(plan.Changes()) != 2 {
+		t.Fatalf("plan changes = %#v", plan.Changes())
 	}
-	if len(plan.Paths) != 1 {
-		t.Fatalf("plan paths = %#v", plan.Paths)
+	if len(plan.Paths()) != 1 {
+		t.Fatalf("plan paths = %#v", plan.Paths())
 	}
-	if plan.Scopes[0] != ScopePersonal {
-		t.Fatalf("plan scopes = %#v", plan.Scopes)
+	if plan.Scopes()[0] != ScopePersonal {
+		t.Fatalf("plan scopes = %#v", plan.Scopes())
 	}
 }
 

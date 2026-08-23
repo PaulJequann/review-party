@@ -32,8 +32,8 @@ type pendingWrite struct {
 // contents and an error is returned; a partially accepted configuration is
 // never reported as success.
 func (manager *Manager) Publish(plan Plan) error {
-	if !plan.Valid {
-		return fmt.Errorf("refuse to publish an invalid change plan: %s", plan.Reason)
+	if !plan.Valid() {
+		return fmt.Errorf("refuse to publish an invalid change plan: %s", plan.Reason())
 	}
 	writes, err := manager.prepareWrites(plan)
 	if err != nil {
@@ -52,15 +52,18 @@ func (manager *Manager) Publish(plan Plan) error {
 }
 
 func (manager *Manager) prepareWrites(plan Plan) ([]pendingWrite, error) {
-	writes := make([]pendingWrite, 0, len(plan.staged))
-	for _, document := range plan.staged {
+	writes := make([]pendingWrite, 0, len(plan.state.staged))
+	for _, document := range plan.state.staged {
 		payload, err := renderDocument(document.document)
 		if err != nil {
 			return nil, err
 		}
-		current, mode, existed, err := readCurrentContents(document.path)
+		current, mode, existed, err := readCurrentContents(document.anchor, document.path)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("refuse to publish stale change plan for configuration %q: %w", document.path, err)
+		}
+		if existed != document.baseline.existed || !bytes.Equal(current, document.baseline.payload) {
+			return nil, fmt.Errorf("refuse to publish stale change plan: configuration %q changed after planning", document.path)
 		}
 		if existed && bytes.Equal(current, payload) {
 			continue
@@ -70,20 +73,20 @@ func (manager *Manager) prepareWrites(plan Plan) ([]pendingWrite, error) {
 	return writes, nil
 }
 
-func readCurrentContents(path string) ([]byte, fs.FileMode, bool, error) {
-	info, err := os.Lstat(path)
-	if errors.Is(err, os.ErrNotExist) {
+func readCurrentContents(anchor, path string) ([]byte, fs.FileMode, bool, error) {
+	payload, existed, err := readRegularFile(anchor, path, "configuration", MaximumDocumentBytes)
+	if err != nil {
+		return nil, 0, false, err
+	}
+	if !existed {
 		return nil, 0, false, nil
 	}
+	info, err := os.Lstat(path)
 	if err != nil {
-		return nil, 0, false, fmt.Errorf("inspect existing configuration %q: %w", path, err)
+		return nil, 0, false, fmt.Errorf("inspect permissions for configuration %q: %w", path, err)
 	}
 	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
-		return nil, 0, false, fmt.Errorf("configuration %q must be a regular file, not a symlink or special file", path)
-	}
-	payload, err := os.ReadFile(path)
-	if err != nil {
-		return nil, 0, false, fmt.Errorf("read existing configuration %q: %w", path, err)
+		return nil, 0, false, fmt.Errorf("configuration %q changed while its publication was being prepared", path)
 	}
 	return payload, info.Mode().Perm(), true, nil
 }

@@ -18,6 +18,8 @@ type LoadedDocument struct {
 	Path     string
 	Present  bool
 	Document Document
+
+	payload []byte
 }
 
 // Loaded carries both configuration scopes for one repository request.
@@ -68,7 +70,7 @@ func (manager *Manager) loadScope(scope Scope, repository Repository) (LoadedDoc
 	if err := validateDocument(document, scope, manager); err != nil {
 		return LoadedDocument{}, invalid(scope, path, err)
 	}
-	return LoadedDocument{Scope: scope, Path: path, Present: true, Document: document}, nil
+	return LoadedDocument{Scope: scope, Path: path, Present: true, Document: document, payload: payload}, nil
 }
 
 // readRegularFile reads a regular file below anchor without following
