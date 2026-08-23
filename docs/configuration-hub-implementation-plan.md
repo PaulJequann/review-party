@@ -114,28 +114,27 @@ freezing the pre-release contract. The comparisons below record why the
 Configuration Manager exposes operations and read-only views instead of its
 document and staged-state shapes.
 
-### Effective reviewer selection
+### Effective reviewer policy
 
-The Configuration Manager needs to answer one execution question: which
-Reviewer and model may this Review use? Two designs can answer it.
+The Configuration Manager needs to answer one policy question: which effective
+settings apply to each Reviewer? Two designs can answer it.
 
-| Concern | Exported effective field graph | Operation-oriented validated selection |
+| Concern | Exported mutable field graph | Validated policy access |
 | --- | --- | --- |
-| Cohesion | Callers combine `DefaultReviewer`, reviewer policy, an explicit model, and provenance. Configuration rules leak into each caller. | One operation resolves and validates the Reviewer selection. The Configuration Manager keeps precedence and policy together. |
-| Interface size and caller knowledge | The exported graph exposes unrelated defaults, evaluation settings, and every Reviewer policy. A caller must know which fields interact. | The request contains the repository, requested Reviewer, and requested model. The result contains only the selected Reviewer, selected model, and their provenance. |
-| Dependency direction | Execution code depends on the configuration document's resolved shape. Changes to configuration fields can force execution changes. | Execution code depends on a selection result. The document shape and precedence algorithm remain private to configuration. |
-| Testability | Tests must assemble a graph and repeat the selection algorithm or test callers through broad fixtures. | Table tests exercise selection inputs, winning values, provenance, and errors at one boundary. Callers can use a small fake operation. |
-| Failure containment | A caller can overlook disabled policy or apply a model restriction in the wrong order. Different callers can disagree. | The operation either returns one valid selection or a scoped error. Invalid policy cannot escape as executable state. |
-| Pre-release compatibility | Keeping the current graph avoids a short-term replacement, but turns an exploratory type into a broad API. | Replacing the graph now breaks no supported users and leaves a smaller contract for later slices. |
-| Measured performance | No benchmark measures graph resolution or caller-side selection. | No benchmark measures operation-oriented selection. The choice has no performance claim. |
+| Cohesion | Callers combine defaults, Reviewer policy, and provenance, and can mutate the resolved map. | `Resolve` applies precedence and validates each effective policy before read-only access. |
+| Interface size and caller knowledge | The exported graph exposes the policy map and lets callers bypass its invariants. | Callers enumerate Reviewer IDs and request defensive policy values. Explicit model selection remains an execution concern. |
+| Dependency direction | Execution code depends on mutable configuration storage. | Execution code depends on validated policy values; document shape and precedence remain private. |
+| Testability | Tests can mutate the graph into states that `Resolve` never produced. | Table tests exercise winning values, provenance, defensive copies, and scoped errors at one seam. |
+| Failure containment | Different callers can interpret disabled policy or model restrictions in different orders. | `Resolve` either returns validated policies or a scoped error. Invalid authored policy cannot escape as executable state. |
+| Pre-release compatibility | Keeping the mutable graph preserves an interface no supported release requires. | Replacing it now breaks no supported users and leaves a smaller contract for later slices. |
+| Measured performance | No benchmark measures direct map access. | No benchmark measures defensive policy access. The choice has no performance claim. |
 
-Select the operation-oriented interface. It is smaller and keeps configuration
-rules in the Configuration Manager. The operation resolves each policy field
-by precedence before it interprets the combined policy. If the effective
+Select validated policy access. The Configuration Manager resolves each policy
+field by precedence before interpreting the combined policy. If the effective
 `enabled` value is false, the effective model and model restriction are inert.
-They cannot make selection fail because the Reviewer cannot run. An error for
-an active Reviewer retains the scope and path of the winning authored value
-that caused the error.
+An error for an active Reviewer retains the scope and path of the winning value
+that caused it. Explicit `--model` validation remains in profile compilation,
+where the Caller request and Reviewer candidate meet.
 
 `Effective` has no independent `Model`, and `Overrides` has no `Model` input.
 `Resolve` applies per-field precedence before it validates each effective
@@ -320,7 +319,7 @@ publication.
 ### Acceptance
 
 - One load returns effective values and exact provenance across packaged,
-  Personal, Repository, and explicit choices.
+  Personal, Repository, and explicit Reviewer or Profile choices.
 - A failed multi-file save does not expose a partially accepted configuration.
 - A stale plan writes no file.
 - Preview data cannot mutate the plan's staged state.

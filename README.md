@@ -61,17 +61,17 @@ Incomplete Review. Grok's built-in model is `grok-4.5`. OpenCode requires a
 model supplied by configuration or explicit `--model`. Personal and Repository
 Configuration can set `reviewers.<id>.model` and `allowed_models`; Repository
 Configuration takes precedence per reviewer field (`enabled`, `model`, and
-`allowed_models`). Fields from both scopes compose, so a Repository or Personal
-allowlist can reject a model supplied by either scope or by the packaged
-fallback. For a
-single Review, Review Party validates the effective selection before resolving
-the Review Subject. An authored `allowed_models` list also restricts explicit
-`--model` choices. For an enabled Reviewer with a non-empty packaged model,
-include that model in the allowlist when no authored model wins: `grok-4.5` for
-Grok, `auto` for Copilot, or `gpt-5.6-luna` for Codex. OpenCode has no packaged
-model. Remove the `allowed_models` field to clear the restriction, or disable
-the Reviewer to make its model policy inert. The full precedence and validation
-contract is in
+`allowed_models`). Repository `allowed_models` wins when authored; otherwise
+Personal wins. Review Party checks only that winning list against the winning
+model from Repository, Personal, or the packaged fallback. For a single Review,
+Review Party validates the effective selection before resolving the Review
+Subject. An authored `allowed_models` list also restricts explicit `--model`
+choices. For an enabled Reviewer with a non-empty packaged model, include that
+model in the allowlist when no authored model wins: `grok-4.5` for Grok, `auto`
+for Copilot, or `gpt-5.6-luna` for Codex. OpenCode has no packaged model. Remove
+the `allowed_models` field to clear the restriction; an empty array allows no
+model. Disabling the Reviewer makes its model policy inert. The full precedence
+and validation contract is in
 [`docs/design/profile-library-v1.md`](docs/design/profile-library-v1.md#effective-policy-and-publication-contract).
 Copilot's built-in `auto`
 selection records the model it resolves. Codex's built-in model is
