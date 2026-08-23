@@ -137,10 +137,12 @@ They cannot make selection fail because the Reviewer cannot run. An error for
 an active Reviewer retains the scope and path of the winning authored value
 that caused the error.
 
-The Slice 2 implementation still populates `Effective.Model` from
-`Overrides.Model`. The replacement removes that field. An explicit requested
-model becomes an input to reviewer selection, and the selected result records
-explicit provenance when that input wins.
+The Slice 2 implementation still exports the `Effective` graph and populates
+`Effective.Model` from `Overrides.Model`. The operation-oriented replacement
+removes that graph from the reviewer-selection call path, including the
+`Effective.Model` field. An explicit requested model becomes an input to
+reviewer selection, and the selected result records explicit provenance when
+that input wins.
 
 ### Staged publication
 
@@ -218,7 +220,11 @@ For each slice:
 
 ## Slice 1 — Dependency and harness capability spike
 
-Status: **Complete**
+Status: **Implementation complete; Interface not frozen**
+
+The operation-oriented reviewer selection and opaque snapshot-bound `Plan`
+defined in [Design boundaries twice](#design-boundaries-twice) must replace the
+Slice 2 Interface before Slice 3 begins.
 
 ### Goal
 
@@ -304,11 +310,15 @@ publication.
   nil intent as an invalid `Plan` with `Valid: false` and a `Reason`.
 - Return an exported `Plan` containing semantic changes, affected scopes,
   affected paths, validation results, and an empty `Warnings` field. This is
-  shipped Slice 2 behavior, not the accepted boundary for later callers.
+  shipped Slice 2 behavior only. Callers must ignore `Warnings`; the boundary
+  replacement removes it.
 - Publish a confirmed `Plan` atomically with private personal-file permissions
   through `Manager.Publish`.
   Multi-file failure must restore the pre-save state or leave an explicit,
   recoverable failure without claiming success.
+  Slice 2 does not detect a configuration file changed after planning. The
+  boundary replacement must reject that stale plan before later callers use
+  publication.
 - Produce stable, readable JSON with two-space indentation, trailing newline,
   semantic field ordering, expanded nested objects, and omitted redundant
   defaults.
@@ -322,6 +332,8 @@ publication.
 - One load returns effective values and exact provenance across packaged,
   Personal, Repository, and explicit choices.
 - A failed multi-file save does not expose a partially accepted configuration.
+- Publication is not accepted for later callers until stale-snapshot rejection
+  prevents a plan from overwriting changes made after planning.
 - Opening or resolving defaults does not create a file.
 - Personal Profiles and Parties resolve only from the XDG configuration home.
 - No migration, backfill, legacy reader, or compatibility branch remains.
@@ -343,7 +355,9 @@ publication.
 
 Status: **Pending**
 
-Depends on: Slice 2 Interface shape.
+Depends on: Slice 2 configuration rules and both completed boundary
+replacements: operation-oriented reviewer selection and an opaque,
+snapshot-bound `Plan`.
 
 ### Goal
 
