@@ -24,10 +24,7 @@ func TestEffectiveDisabledReviewerLeavesCrossScopeModelPolicyInert(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	policy, exists, err := effective.ReviewerPolicy("opencode")
-	if err != nil {
-		t.Fatal(err)
-	}
+	policy, exists := effective.ReviewerPolicy("opencode")
 	if !exists || policy.Enabled.Value {
 		t.Fatalf("policy = %#v, want disabled effective reviewer", policy)
 	}

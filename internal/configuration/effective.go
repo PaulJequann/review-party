@@ -63,22 +63,13 @@ func (failure EffectiveReviewerPolicyError) Error() string {
 	)
 }
 
-// ReviewerPolicy returns one validated effective reviewer policy. Authored
-// model and allowlist consistency is inert while the effective reviewer is
-// disabled.
-func (effective Effective) ReviewerPolicy(id string) (ReviewerSettings, bool, error) {
+// ReviewerPolicy returns one effective reviewer policy validated by Resolve.
+func (effective Effective) ReviewerPolicy(id string) (ReviewerSettings, bool) {
 	settings, exists := effective.Reviewers[id]
 	if !exists {
-		return ReviewerSettings{}, false, nil
+		return ReviewerSettings{}, false
 	}
-	if reviewerPolicyIsEnabled(settings) && reviewerModelIsDisallowed(settings) {
-		return ReviewerSettings{}, true, EffectiveReviewerPolicyError{
-			Reviewer:      id,
-			Model:         settings.Model,
-			AllowedModels: settings.AllowedModels,
-		}
-	}
-	return settings, true, nil
+	return settings, true
 }
 
 func reviewerPolicyIsEnabled(settings ReviewerSettings) bool {
@@ -107,12 +98,20 @@ func (manager *Manager) Resolve(request Request) (Effective, error) {
 		Reviewers:       map[string]ReviewerSettings{},
 	}
 	for _, id := range manager.knownReviewers() {
-		effective.Reviewers[id] = resolveReviewerSettings(loaded, reviewerID(id))
-		if _, _, err := effective.ReviewerPolicy(id); err != nil {
+		settings := resolveReviewerSettings(loaded, reviewerID(id))
+		if err := validateEffectiveReviewerPolicy(id, settings); err != nil {
 			return Effective{}, err
 		}
+		effective.Reviewers[id] = settings
 	}
 	return effective, nil
+}
+
+func validateEffectiveReviewerPolicy(id string, settings ReviewerSettings) error {
+	if !reviewerPolicyIsEnabled(settings) || !reviewerModelIsDisallowed(settings) {
+		return nil
+	}
+	return EffectiveReviewerPolicyError{Reviewer: id, Model: settings.Model, AllowedModels: settings.AllowedModels}
 }
 
 type documentDefault func(Document) (string, bool)

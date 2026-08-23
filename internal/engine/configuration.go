@@ -1,7 +1,6 @@
 package engine
 
 import (
-	"errors"
 	"fmt"
 	"sort"
 
@@ -65,10 +64,7 @@ func applyEffectiveReviewerPolicies(catalog reviewerCatalog, effective configura
 		if !exists {
 			continue
 		}
-		settings, _, err := effective.ReviewerPolicy(id)
-		if err != nil {
-			return reviewerCatalog{}, invalidEffectiveReviewerPolicy(err)
-		}
+		settings, _ := effective.ReviewerPolicy(id)
 		updated, err := applyReviewerPolicy(registration, settings)
 		if err != nil {
 			return reviewerCatalog{}, err
@@ -78,18 +74,11 @@ func applyEffectiveReviewerPolicies(catalog reviewerCatalog, effective configura
 	return configured, nil
 }
 
-func invalidEffectiveReviewerPolicy(err error) error {
-	var failure configuration.EffectiveReviewerPolicyError
-	if errors.As(err, &failure) {
-		return InvalidConfigurationError{Path: failure.Model.Path, Reason: failure.Error()}
-	}
-	return err
-}
-
 func applyReviewerPolicy(registration reviewerRegistration, settings configuration.ReviewerSettings) (reviewerRegistration, error) {
 	if settings.Enabled.Authored {
 		registration.disabled = !settings.Enabled.Value
-		registration.disabledBy = settings.Enabled
+		registration.disabledSource = string(settings.Enabled.Source)
+		registration.disabledPath = settings.Enabled.Path
 	}
 	if settings.AllowedModels.Authored {
 		registration.allowedModels = canonicalModels(settings.AllowedModels.Value)

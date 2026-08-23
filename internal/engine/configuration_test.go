@@ -121,20 +121,6 @@ func TestInvalidDefaultUsesAuthoredDefaultPath(t *testing.T) {
 	assertInvalidConfigurationPath(t, effective, "repository/default.json")
 }
 
-func TestInvalidReviewerPolicyUsesAuthoredReviewerPath(t *testing.T) {
-	effective := configuration.Effective{
-		DefaultReviewer: configuration.Value[string]{Value: "grok", Authored: true, Path: "personal/default.json"},
-		Reviewers: map[string]configuration.ReviewerSettings{
-			"opencode": {
-				Model:         configuration.Value[string]{Value: "bad-model", Authored: true, Path: "personal/opencode-model.json"},
-				AllowedModels: configuration.Value[[]string]{Value: []string{"allowed-model"}, Authored: true, Path: "repository/opencode-allowed-models.json"},
-			},
-		},
-	}
-
-	assertInvalidConfigurationPath(t, effective, "personal/opencode-model.json")
-}
-
 func TestInvalidReviewerPolicyUsesAllowedModelsPathWhenModelUnset(t *testing.T) {
 	effective := configuration.Effective{
 		Reviewers: map[string]configuration.ReviewerSettings{

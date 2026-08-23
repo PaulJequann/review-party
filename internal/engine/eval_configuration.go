@@ -14,28 +14,22 @@ func ApplyEvalConfigurationDefaults(personalConfigPath string, experiment *model
 	if err != nil {
 		return err
 	}
-	if err := applyConfiguredEvalReviewer(effective, experiment); err != nil {
-		return err
-	}
+	applyConfiguredEvalReviewer(effective, experiment)
 	applyConfiguredEvalPolicy(effective.Eval, experiment)
 	return nil
 }
 
-func applyConfiguredEvalReviewer(effective configuration.Effective, experiment *model.ExperimentConfiguration) error {
+func applyConfiguredEvalReviewer(effective configuration.Effective, experiment *model.ExperimentConfiguration) {
 	if experiment.Reviewer == "" && effective.DefaultReviewer.Authored {
 		experiment.Reviewer = effective.DefaultReviewer.Value
 	}
 	if experiment.Model != "" || experiment.Reviewer == "" {
-		return nil
+		return
 	}
-	settings, configured, err := effective.ReviewerPolicy(experiment.Reviewer)
-	if err != nil {
-		return err
-	}
+	settings, configured := effective.ReviewerPolicy(experiment.Reviewer)
 	if configured && settings.Model.Authored {
 		experiment.Model = settings.Model.Value
 	}
-	return nil
 }
 
 func applyConfiguredEvalPolicy(value configuration.Value[configuration.EvalPolicy], experiment *model.ExperimentConfiguration) {
