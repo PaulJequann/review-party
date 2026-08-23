@@ -103,7 +103,7 @@ func (manager *Manager) Plan(repository Repository, intents []Intent) (Plan, err
 			plan.state.changes = append(plan.state.changes, *change)
 		}
 	}
-	if err := manager.validateStaged(&plan, staged); err != nil {
+	if err := manager.validateStaged(&plan, staged, loaded); err != nil {
 		return plan, nil
 	}
 	plan.state.valid = true
@@ -144,7 +144,7 @@ func (manager *Manager) stageIntent(plan *Plan, staged map[Scope]*stagedDocument
 	return &Change{Field: intent.intentField(), Scope: scope, Path: path, Before: before, After: after, HadBefore: hadBefore, HadAfter: hadAfter}, nil
 }
 
-func (manager *Manager) validateStaged(plan *Plan, staged map[Scope]*stagedDocument) error {
+func (manager *Manager) validateStaged(plan *Plan, staged map[Scope]*stagedDocument, loaded Loaded) error {
 	for _, scope := range []Scope{ScopePersonal, ScopeRepository} {
 		document, ok := staged[scope]
 		if !ok {
@@ -158,7 +158,25 @@ func (manager *Manager) validateStaged(plan *Plan, staged map[Scope]*stagedDocum
 		plan.state.paths = append(plan.state.paths, document.path)
 		addScopeOnce(&plan.state.scopes, document.scope)
 	}
+	if _, err := manager.resolveEffectiveReviewers(withStagedDocuments(loaded, staged)); err != nil {
+		plan.state.reason = err.Error()
+		return err
+	}
 	return nil
+}
+
+func withStagedDocuments(loaded Loaded, staged map[Scope]*stagedDocument) Loaded {
+	for scope, stagedDocument := range staged {
+		document := LoadedDocument{
+			Scope: scope, Path: stagedDocument.path, Present: true, Document: stagedDocument.document,
+		}
+		if scope == ScopeRepository {
+			loaded.Repository = document
+		} else {
+			loaded.Personal = document
+		}
+	}
+	return loaded
 }
 
 func loadedScopeFor(loaded Loaded, scope Scope) LoadedDocument {

@@ -95,16 +95,24 @@ func (manager *Manager) Resolve(request Request) (Effective, error) {
 		DefaultReviewer: resolveDefault(loaded, defaultChoice(request.Overrides.Reviewer), reviewerDefault, defaultChoice(manager.packaged.defaultReviewer)),
 		StateDirectory:  personalValue(loaded, stateDirectoryValue),
 		Eval:            evalValue(loaded),
-		Reviewers:       map[string]ReviewerSettings{},
 	}
+	effective.Reviewers, err = manager.resolveEffectiveReviewers(loaded)
+	if err != nil {
+		return Effective{}, err
+	}
+	return effective, nil
+}
+
+func (manager *Manager) resolveEffectiveReviewers(loaded Loaded) (map[string]ReviewerSettings, error) {
+	reviewers := make(map[string]ReviewerSettings, len(manager.reviewers))
 	for _, id := range manager.knownReviewers() {
 		settings := resolveReviewerSettings(loaded, reviewerID(id))
 		if err := validateEffectiveReviewerPolicy(id, settings); err != nil {
-			return Effective{}, err
+			return nil, err
 		}
-		effective.Reviewers[id] = settings
+		reviewers[id] = settings
 	}
-	return effective, nil
+	return reviewers, nil
 }
 
 func validateEffectiveReviewerPolicy(id string, settings ReviewerSettings) error {
