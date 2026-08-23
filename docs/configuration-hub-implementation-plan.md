@@ -232,7 +232,9 @@ publication.
   after obtaining path-specific deletion approval for any tracked files that
   must be deleted.
 - Return each resolved value with provenance and distinguish absent authored
-  values from effective packaged defaults.
+  values from effective packaged defaults. Repository reviewer settings take
+  precedence over Personal settings; `Effective` exposes the winning
+  `SourceRepository` or `SourcePersonal` value and its authored path.
 - Define typed configuration intents rather than generic dotted JSON paths.
 - Keep `Intent` as a closed set of package-owned typed operations with
   package-private mechanics. `Manager.Plan` accepts `[]Intent` and represents a
@@ -349,7 +351,8 @@ do not expose arbitrary dotted-key intents.
 - Show a semantic before/after plan and require confirmation for intents.
 - Support `--yes` for explicitly authorized automation.
 - Return structured changed scope, affected paths, before/after values,
-  validation results, and warnings in JSON mode.
+  validation results, and warnings in JSON mode. Agent callers must not rely on
+  warnings until a later slice defines and populates them.
 - Keep stdout machine-clean; prompts and diagnostics use the correct terminal or
   error stream.
 - Refuse interactive confirmation without a controlling terminal unless

@@ -58,10 +58,13 @@ purposes, materiality thresholds, Passes, prompts, and Profile Revisions.
 Review Party rejects an incompatible Reviewer before launch and does not
 silently fall back. An unavailable compatible Reviewer produces an inspectable
 Incomplete Review. Grok's built-in model is `grok-4.5`. OpenCode requires a
-model supplied by user configuration or explicit `--model`; the product does
-not compile a personal OpenCode model preference into its catalog. Copilot's
-built-in `auto` selection records the model it resolves. Codex's built-in
-model is `gpt-5.6-luna` with high-effort reasoning by default.
+model supplied by configuration or explicit `--model`. Personal and Repository
+Configuration can set `reviewers.<id>.model` and `allowed_models`; Repository
+Configuration takes precedence, and Review Party validates the effective
+selection before resolving the Review Subject. An authored `allowed_models`
+list also restricts explicit `--model` choices. Copilot's built-in `auto`
+selection records the model it resolves. Codex's built-in model is
+`gpt-5.6-luna` with high-effort reasoning by default.
 
 Callers may override the selected Reviewer's reasoning effort with
 `--effort`. For OpenCode, Review Party passes an explicit value such as `high`
