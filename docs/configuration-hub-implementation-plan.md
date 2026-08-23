@@ -1,6 +1,6 @@
 # Configuration Hub implementation plan
 
-Status: Slice 2 implementation complete; boundary replacements required before Slice 3
+Status: Slice 2 complete; remaining slices pending
 Last reconciled: 2026-08-23
 
 This plan replaces Review Party's fragmented personal configuration experience
@@ -109,10 +109,10 @@ opening.
 
 ## Design boundaries twice
 
-Slice 2 established the configuration rules, but its first exported types are
-not compatibility commitments. Review Party is pre-release. The Configuration
-Manager can replace those types before the Hub and command callers depend on
-them.
+Slice 2 tested each material interface against a credible alternative before
+freezing the pre-release contract. The comparisons below record why the
+Configuration Manager exposes operations and read-only views instead of its
+document and staged-state shapes.
 
 ### Effective reviewer selection
 
@@ -137,12 +137,11 @@ They cannot make selection fail because the Reviewer cannot run. An error for
 an active Reviewer retains the scope and path of the winning authored value
 that caused the error.
 
-The Slice 2 implementation still exports the `Effective` graph and populates
-`Effective.Model` from `Overrides.Model`. The operation-oriented replacement
-removes that graph from the reviewer-selection call path, including the
-`Effective.Model` field. An explicit requested model becomes an input to
-reviewer selection, and the selected result records explicit provenance when
-that input wins.
+`Effective` has no independent `Model`, and `Overrides` has no `Model` input.
+`Resolve` applies per-field precedence before it validates each effective
+Reviewer model and allowlist. A disabled effective policy is inert. The engine
+consumes `Effective.ReviewerPolicy` and preserves the winning disabled value's
+source and path.
 
 ### Staged publication
 
@@ -159,18 +158,12 @@ publish exactly those changes. Two designs can provide that workflow.
 | Pre-release compatibility | Retaining the struct preserves an API that no supported release requires. Reserved fields such as `Warnings` enlarge that API before semantics exist. | Replacing the struct now avoids a compatibility promise and permits later warning semantics to use a deliberate result type. |
 | Measured performance | No benchmark measures copying or publishing the exported plan. | No benchmark measures snapshot comparison or defensive preview copies. The choice has no performance claim. |
 
-Select the opaque snapshot-bound `Plan`. The replacement must capture the
-identity and content digest of every loaded configuration file that can affect
-the staged result. `Publish` must compare those snapshots immediately before it
-writes and reject a stale plan without writing any file. Preview access must
-return defensive copies of slices and maps, so preview data cannot mutate the
-staged documents.
-
-The Slice 2 implementation instead exports mutable preview fields and publishes
-without a snapshot comparison. It also exports `Plan.Warnings`, which always
-remains empty and has no accepted semantics. The replacement removes that
-field. Adding warnings later requires a separate design decision with defined
-semantics and consumer behavior.
+Select the opaque snapshot-bound `Plan`. `Plan` exposes `Valid`, `Reason`,
+`Changes`, `Scopes`, and `Paths` through read-only methods and has no `Warnings`
+field. Planning captures the baseline bytes for every publication target.
+`Publish` preflights all targets against those baselines and rejects a stale
+plan before it writes any file. The preview methods return defensive copies, so
+preview data cannot mutate the staged documents.
 
 ## Dependency order
 
@@ -274,13 +267,9 @@ direct dependencies and checksums are explicit in `go.mod` and `go.sum`.
 
 ## Slice 2 — Scoped Configuration Manager
 
-Status: **Implementation complete; Interface not frozen**
+Status: **Complete**
 
 Depends on: Slice 1 dependency versions, but not the Hub spike implementation.
-
-The operation-oriented reviewer selection and opaque snapshot-bound `Plan`
-defined in [Design boundaries twice](#design-boundaries-twice) must replace the
-Slice 2 Interface before Slice 3 begins.
 
 ### Goal
 
@@ -302,23 +291,24 @@ publication.
   must be deleted.
 - Return each resolved value with provenance and distinguish absent authored
   values from effective packaged defaults. Repository reviewer settings take
-  precedence over Personal settings; `Effective` exposes the winning
-  `SourceRepository` or `SourcePersonal` value and its authored path.
+  precedence over Personal settings. `Resolve` validates each effective
+  Reviewer model and allowlist after per-field precedence. Disabled effective
+  policies remain inert, and `Effective.ReviewerPolicy` retains the winning
+  source and path for the engine.
 - Define typed configuration intents rather than generic dotted JSON paths.
 - Keep `Intent` as a closed set of package-owned typed operations with
   package-private mechanics. `Manager.Plan` accepts `[]Intent` and represents a
-  nil intent as an invalid `Plan` with `Valid: false` and a `Reason`.
-- Return an exported `Plan` containing semantic changes, affected scopes,
-  affected paths, validation results, and an empty `Warnings` field. This is
-  shipped Slice 2 behavior only. Callers must ignore `Warnings`; the boundary
-  replacement removes it.
+  nil intent as an invalid opaque `Plan` with read-only `Valid` and `Reason`
+  methods.
+- Expose semantic changes, affected scopes, and affected paths through the
+  read-only `Plan.Changes`, `Plan.Scopes`, and `Plan.Paths` methods. These
+  methods return copies and cannot mutate staged state.
 - Publish a confirmed `Plan` atomically with private personal-file permissions
   through `Manager.Publish`.
   Multi-file failure must restore the pre-save state or leave an explicit,
   recoverable failure without claiming success.
-  Slice 2 does not detect a configuration file changed after planning. The
-  boundary replacement must reject that stale plan before later callers use
-  publication.
+  Planning captures baseline bytes, and publication preflights every target.
+  A stale target rejects the complete plan before any write begins.
 - Produce stable, readable JSON with two-space indentation, trailing newline,
   semantic field ordering, expanded nested objects, and omitted redundant
   defaults.
@@ -332,8 +322,8 @@ publication.
 - One load returns effective values and exact provenance across packaged,
   Personal, Repository, and explicit choices.
 - A failed multi-file save does not expose a partially accepted configuration.
-- Publication is not accepted for later callers until stale-snapshot rejection
-  prevents a plan from overwriting changes made after planning.
+- A stale plan writes no file.
+- Preview data cannot mutate the plan's staged state.
 - Opening or resolving defaults does not create a file.
 - Personal Profiles and Parties resolve only from the XDG configuration home.
 - No migration, backfill, legacy reader, or compatibility branch remains.
@@ -355,9 +345,7 @@ publication.
 
 Status: **Pending**
 
-Depends on: Slice 2 configuration rules and both completed boundary
-replacements: operation-oriented reviewer selection and an opaque,
-snapshot-bound `Plan`.
+Depends on: the completed Slice 2 Interface.
 
 ### Goal
 
