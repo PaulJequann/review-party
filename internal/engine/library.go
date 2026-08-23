@@ -70,14 +70,17 @@ type resolvedProfile struct {
 	effective    configuration.Effective
 }
 
-// manager returns the owning Configuration Manager, constructing a default
-// one for zero-value libraries used by focused tests.
+// manager returns the Configuration Manager that owns this Profile library.
 func (library profileLibrary) manager() *configuration.Manager {
 	return library.configuration
 }
 
 func (library profileLibrary) authoredProfileLibrary(repository configuration.Repository) (configuration.AuthoredLibrary, error) {
-	return library.manager().AuthoredLibrary(configuration.LibraryProfiles, repository)
+	manager := library.manager()
+	if manager == nil {
+		return configuration.AuthoredLibrary{}, errProfileLibraryNotConfigured
+	}
+	return manager.AuthoredLibrary(configuration.LibraryProfiles, repository)
 }
 
 func newProfileLibrary(personalRoot string) profileLibrary {

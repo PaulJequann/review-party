@@ -226,6 +226,13 @@ func TestConductorRequiresExplicitProfileConfiguration(t *testing.T) {
 	}
 }
 
+func TestZeroValueProfileLibraryReturnsConfigurationError(t *testing.T) {
+	_, err := (profileLibrary{}).findProfile(profileLookup{name: "bugs"})
+	if !errors.Is(err, errProfileLibraryNotConfigured) {
+		t.Fatalf("error = %v, want %v", err, errProfileLibraryNotConfigured)
+	}
+}
+
 func newTestConductorWithCatalog(t *testing.T, store recordStore, reviewers reviewerCatalog, deadline time.Duration) *Conductor {
 	t.Helper()
 	conductor, err := newConductorWithProfiles(store, reviewers, newProfileLibrary(t.TempDir()), deadline)
