@@ -58,7 +58,6 @@ func New(config Config) (*Conductor, error) {
 	if err != nil {
 		return nil, err
 	}
-	conductor.runner.artifacts = conductor.artifacts
 	return conductor, nil
 }
 
@@ -84,7 +83,7 @@ func newConductorWithProfiles(store recordStore, reviewers reviewerCatalog, prof
 		retryDelay:      retryDelay,
 		wait:            waitForRetry,
 	}
-	conductor.runner = newReviewRunner(store, func() time.Time { return conductor.now() }, func() RuntimeProvenance { return conductor.buildProvenance() }, nil)
+	conductor.runner = newReviewRunner(store, func() time.Time { return conductor.now() }, func() RuntimeProvenance { return conductor.buildProvenance() }, func() *artifact.Store { return conductor.artifacts })
 	return conductor, nil
 }
 
@@ -287,15 +286,12 @@ func (conductor *Conductor) History(_ context.Context, query store.HistoryQuery)
 }
 
 // lifecycle delegation — the deep Review module owns these seams.
-// getRunner is the single sync point: lazy-init and keep store/artifacts in sync
-// so callers cross one seam instead of seven duplicated nil-guard + sync branches.
+// getRunner is race-free: runner is immutable after construction; artifacts
+// are read via closure so per-call sync and racy writes are eliminated.
 func (conductor *Conductor) getRunner() *reviewRunner {
 	if conductor.runner == nil {
-		conductor.runner = newReviewRunner(conductor.store, func() time.Time { return conductor.now() }, func() RuntimeProvenance { return conductor.buildProvenance() }, conductor.artifacts)
-		return conductor.runner
+		conductor.runner = newReviewRunner(conductor.store, func() time.Time { return conductor.now() }, func() RuntimeProvenance { return conductor.buildProvenance() }, func() *artifact.Store { return conductor.artifacts })
 	}
-	conductor.runner.store = conductor.store
-	conductor.runner.artifacts = conductor.artifacts
 	return conductor.runner
 }
 

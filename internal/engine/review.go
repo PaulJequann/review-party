@@ -19,10 +19,13 @@ type reviewRunner struct {
 	store           recordStore
 	now             func() time.Time
 	buildProvenance func() RuntimeProvenance
-	artifacts       *artifact.Store
+	artifacts       func() *artifact.Store
 }
 
-func newReviewRunner(store recordStore, now func() time.Time, buildProvenance func() RuntimeProvenance, artifacts *artifact.Store) *reviewRunner {
+func newReviewRunner(store recordStore, now func() time.Time, buildProvenance func() RuntimeProvenance, artifacts func() *artifact.Store) *reviewRunner {
+	if artifacts == nil {
+		artifacts = func() *artifact.Store { return nil }
+	}
 	return &reviewRunner{
 		store:           store,
 		now:             now,
@@ -192,7 +195,7 @@ func (runner *reviewRunner) buildAttempt(id ReviewID, prompt string, candidate r
 		StartedAt:    started,
 		CompletedAt:  completed,
 	}
-	if runner.artifacts == nil {
+	if runner.artifacts() == nil {
 		return attempt, nil
 	}
 	references, err := runner.publishAttemptArtifacts(id, attempt.Number, prompt, execution)
@@ -216,7 +219,7 @@ func (runner *reviewRunner) publishAttemptArtifacts(id ReviewID, number int, pro
 	references := make([]ArtifactReference, 0, len(inputs))
 	for _, input := range inputs {
 		contents := boundedArtifactContents(input.contents)
-		reference, err := runner.artifacts.Publish(id, number, input.kind, contents, input.truncated)
+		reference, err := runner.artifacts().Publish(id, number, input.kind, contents, input.truncated)
 		if err != nil {
 			runner.removeArtifacts(references)
 			return nil, err
@@ -235,18 +238,18 @@ func boundedArtifactContents(contents []byte) []byte {
 
 func (runner *reviewRunner) removeArtifacts(references []ArtifactReference) {
 	for _, reference := range references {
-		_ = runner.artifacts.Remove(reference)
+		_ = runner.artifacts().Remove(reference)
 	}
 }
 
 func (runner *reviewRunner) VerifyArtifacts(record ReviewRecord) error {
-	if runner.artifacts == nil {
+	if runner.artifacts() == nil {
 		return nil
 	}
 	for _, pass := range record.Passes {
 		for _, attempt := range pass.Attempts {
 			for _, reference := range attempt.Artifacts {
-				if _, err := runner.artifacts.Read(reference); err != nil {
+				if _, err := runner.artifacts().Read(reference); err != nil {
 					return err
 				}
 			}
