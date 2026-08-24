@@ -114,13 +114,18 @@ func (conductor *Conductor) Review(ctx context.Context, selection ReviewSelectio
 	if err != nil {
 		return ReviewRecord{}, err
 	}
-	return conductor.runner.runPreparedReview(ctx, prepared, nil, reviewStarted)
+	return conductor.runPreparedReview(ctx, prepared, nil, reviewStarted)
 }
 
 // runPreparedReview is the deep lifecycle seam: one place owns pending →
 // availability → execution → validation → persistence. Tests and Party/Eval
 // cross this seam instead of duplicating the sequence.
 func (conductor *Conductor) runPreparedReview(ctx context.Context, prepared preparedReview, replaysReviewID *ReviewID, reviewStarted time.Time) (ReviewRecord, error) {
+	if conductor.runner == nil {
+		runner := newReviewRunner(conductor.store, func() time.Time { return conductor.now() }, func() RuntimeProvenance { return conductor.buildProvenance() }, conductor.artifacts)
+		return runner.runPreparedReview(ctx, prepared, replaysReviewID, reviewStarted)
+	}
+	conductor.runner.artifacts = conductor.artifacts
 	return conductor.runner.runPreparedReview(ctx, prepared, replaysReviewID, reviewStarted)
 }
 
@@ -295,6 +300,7 @@ func (conductor *Conductor) executePass(ctx context.Context, pass passExecution)
 		runner := newReviewRunner(conductor.store, func() time.Time { return conductor.now() }, func() RuntimeProvenance { return conductor.buildProvenance() }, conductor.artifacts)
 		return runner.executePass(ctx, pass)
 	}
+	conductor.runner.artifacts = conductor.artifacts
 	return conductor.runner.executePass(ctx, pass)
 }
 
@@ -303,6 +309,7 @@ func (conductor *Conductor) finishIncomplete(record ReviewRecord, termination Re
 		runner := newReviewRunner(conductor.store, func() time.Time { return conductor.now() }, func() RuntimeProvenance { return conductor.buildProvenance() }, conductor.artifacts)
 		return runner.finishIncomplete(record, termination, reviewStarted)
 	}
+	conductor.runner.artifacts = conductor.artifacts
 	return conductor.runner.finishIncomplete(record, termination, reviewStarted)
 }
 
@@ -312,6 +319,7 @@ func (conductor *Conductor) finalizeOperationalRecord(record *ReviewRecord, revi
 		runner.finalizeOperationalRecord(record, reviewStarted)
 		return
 	}
+	conductor.runner.artifacts = conductor.artifacts
 	conductor.runner.finalizeOperationalRecord(record, reviewStarted)
 }
 
@@ -320,6 +328,7 @@ func (conductor *Conductor) buildAttempt(id ReviewID, prompt string, candidate r
 		runner := &reviewRunner{artifacts: conductor.artifacts}
 		return runner.buildAttempt(id, prompt, candidate, execution, outcome, started, completed)
 	}
+	conductor.runner.artifacts = conductor.artifacts
 	return conductor.runner.buildAttempt(id, prompt, candidate, execution, outcome, started, completed)
 }
 
@@ -328,6 +337,7 @@ func (conductor *Conductor) publishAttemptArtifacts(id ReviewID, number int, pro
 		runner := &reviewRunner{artifacts: conductor.artifacts}
 		return runner.publishAttemptArtifacts(id, number, prompt, execution)
 	}
+	conductor.runner.artifacts = conductor.artifacts
 	return conductor.runner.publishAttemptArtifacts(id, number, prompt, execution)
 }
 
@@ -337,6 +347,7 @@ func (conductor *Conductor) removeArtifacts(references []ArtifactReference) {
 		runner.removeArtifacts(references)
 		return
 	}
+	conductor.runner.artifacts = conductor.artifacts
 	conductor.runner.removeArtifacts(references)
 }
 
@@ -345,6 +356,7 @@ func (conductor *Conductor) VerifyArtifacts(record ReviewRecord) error {
 		runner := &reviewRunner{artifacts: conductor.artifacts}
 		return runner.VerifyArtifacts(record)
 	}
+	conductor.runner.artifacts = conductor.artifacts
 	return conductor.runner.VerifyArtifacts(record)
 }
 
