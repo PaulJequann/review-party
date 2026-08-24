@@ -2,8 +2,6 @@ package engine
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -32,6 +30,7 @@ type Conductor struct {
 	artifacts       *artifact.Store
 	retryDelay      func(model.RetryPolicy, int, time.Duration) time.Duration
 	wait            func(context.Context, time.Duration) error
+	runner          *reviewRunner
 }
 
 func New(config Config) (*Conductor, error) {
@@ -59,6 +58,7 @@ func New(config Config) (*Conductor, error) {
 	if err != nil {
 		return nil, err
 	}
+	conductor.runner.artifacts = conductor.artifacts
 	return conductor, nil
 }
 
@@ -74,7 +74,7 @@ func newConductorWithProfiles(store recordStore, reviewers reviewerCatalog, prof
 	if profiles.configuration == nil {
 		return nil, errProfileLibraryNotConfigured
 	}
-	return &Conductor{
+	conductor := &Conductor{
 		store:           store,
 		reviewers:       reviewers,
 		profiles:        profiles,
@@ -83,7 +83,9 @@ func newConductorWithProfiles(store recordStore, reviewers reviewerCatalog, prof
 		buildProvenance: currentRuntimeProvenance,
 		retryDelay:      retryDelay,
 		wait:            waitForRetry,
-	}, nil
+	}
+	conductor.runner = newReviewRunner(store, func() time.Time { return conductor.now() }, func() RuntimeProvenance { return conductor.buildProvenance() }, nil)
+	return conductor, nil
 }
 
 func waitForRetry(ctx context.Context, delay time.Duration) error {
@@ -112,39 +114,14 @@ func (conductor *Conductor) Review(ctx context.Context, selection ReviewSelectio
 	if err != nil {
 		return ReviewRecord{}, err
 	}
-	return conductor.runPreparedReview(ctx, prepared, nil, reviewStarted)
+	return conductor.runner.runPreparedReview(ctx, prepared, nil, reviewStarted)
 }
 
+// runPreparedReview is the deep lifecycle seam: one place owns pending →
+// availability → execution → validation → persistence. Tests and Party/Eval
+// cross this seam instead of duplicating the sequence.
 func (conductor *Conductor) runPreparedReview(ctx context.Context, prepared preparedReview, replaysReviewID *ReviewID, reviewStarted time.Time) (ReviewRecord, error) {
-	record, err := conductor.pendingRecord(prepared.subject, prepared.profile, prepared.timings, replaysReviewID)
-	if err != nil {
-		return ReviewRecord{}, err
-	}
-	if err := conductor.store.Save(record); err != nil {
-		return ReviewRecord{}, err
-	}
-
-	record.Lifecycle = LifecycleRunning
-	record.UpdatedAt = conductor.now().UTC()
-	if err := conductor.store.Save(record); err != nil {
-		return record, err
-	}
-
-	executor := prepared.profile.reviewer.executor
-	availabilityStarted := conductor.now().UTC()
-	check := executor.Check(ctx, prepared.profile.reviewer.candidate)
-	record.Timings.AvailabilityCheckMS = elapsedMilliseconds(availabilityStarted, conductor.now().UTC())
-	if !check.Available {
-		termination := terminationForAvailability(check.Diagnostic)
-		return conductor.finishIncomplete(record, termination, reviewStarted)
-	}
-	return conductor.executePass(ctx, passExecution{
-		record:        record,
-		profile:       prepared.profile,
-		executor:      executor,
-		reviewStarted: reviewStarted,
-		deadline:      prepared.deadline,
-	})
+	return conductor.runner.runPreparedReview(ctx, prepared, replaysReviewID, reviewStarted)
 }
 
 func (conductor *Conductor) Replay(ctx context.Context, selection ReplaySelection) (ReviewRecord, error) {
@@ -309,106 +286,66 @@ func (conductor *Conductor) History(_ context.Context, query store.HistoryQuery)
 	return page, err
 }
 
-func (conductor *Conductor) pendingRecord(subject ReviewSubject, profile compiledProfile, timings ReviewTimings, replaysReviewID *ReviewID) (ReviewRecord, error) {
-	id, err := newReviewID(conductor.now())
-	if err != nil {
-		return ReviewRecord{}, err
-	}
-	now := conductor.now().UTC()
-	runtime := conductor.buildProvenance()
-	passes := make([]PassRecord, 0, len(profile.revision.Passes))
-	for _, planned := range profile.revision.Passes {
-		passes = append(passes, PassRecord{Name: planned.Name, Required: planned.Required, Attempts: []AttemptRecord{}})
-	}
-	return ReviewRecord{
-		SchemaVersion:   currentReviewRecordSchemaVersion,
-		ID:              id,
-		ReplaysReviewID: replaysReviewID,
-		Lifecycle:       LifecyclePending,
-		Subject:         subject,
-		ProfileRevision: profile.revision,
-		ProfileSnapshot: profile.snapshot,
-		Passes:          passes,
-		Runtime:         &runtime,
-		Timings:         &timings,
-		CreatedAt:       now,
-		UpdatedAt:       now,
-	}, nil
-}
-
-type passExecution struct {
-	record        ReviewRecord
-	profile       compiledProfile
-	executor      attemptExecutor
-	reviewStarted time.Time
-	deadline      time.Duration
-}
+// lifecycle delegation — the deep Review module owns these seams.
+// Conductor keeps thin wrappers so existing callers (party, eval, tests) cross
+// one seam without duplication.
 
 func (conductor *Conductor) executePass(ctx context.Context, pass passExecution) (ReviewRecord, error) {
-	record := pass.record
-	started := conductor.now().UTC()
-	attemptContext, cancel := context.WithTimeout(ctx, pass.deadline)
-	defer cancel()
-	prompt := pass.profile.prompt(record.Subject)
-	execution, cleanupErr := conductor.executeAttempt(attemptContext, record, pass, prompt)
-	completed := conductor.now().UTC()
-	record.Timings.AttemptExecutionMS = elapsedMilliseconds(started, completed)
-
-	validationStarted := conductor.now().UTC()
-	result, parseErr := canonicalReviewResultContract.Parse(execution.AssistantText)
-	record.Timings.ResultValidationMS = elapsedMilliseconds(validationStarted, conductor.now().UTC())
-	outcome := applyAttemptResult(&record, result, execution, parseErr)
-	attempt, artifactErr := conductor.buildAttempt(record.ID, prompt, pass.profile.reviewer.candidate, execution, outcome, started, completed)
-	if artifactErr != nil {
-		return record, artifactErr
+	if conductor.runner == nil {
+		runner := newReviewRunner(conductor.store, func() time.Time { return conductor.now() }, func() RuntimeProvenance { return conductor.buildProvenance() }, conductor.artifacts)
+		return runner.executePass(ctx, pass)
 	}
-	attempt.Number = record.AttemptCount() + 1
-	record.Passes[0].Attempts = append(record.Passes[0].Attempts, attempt)
-	conductor.finalizeOperationalRecord(&record, pass.reviewStarted)
-	if err := conductor.store.Save(record); err != nil {
-		conductor.removeArtifacts(attempt.Artifacts)
-		return record, err
-	}
-	if cleanupErr != nil {
-		return record, fmt.Errorf("Review %s was persisted but its Subject execution checkout could not be cleaned: %w", record.ID, cleanupErr)
-	}
-	return record, nil
+	return conductor.runner.executePass(ctx, pass)
 }
 
-func applyAttemptResult(record *ReviewRecord, result ReviewResult, execution attemptExecution, parseErr error) AttemptOutcome {
-	outcome := execution.Outcome
-	if outcome == AttemptCompleted && parseErr == nil {
-		record.Result = &result
-		record.Lifecycle = LifecycleCompleted
-		return outcome
+func (conductor *Conductor) finishIncomplete(record ReviewRecord, termination ReviewTermination, reviewStarted time.Time) (ReviewRecord, error) {
+	if conductor.runner == nil {
+		runner := newReviewRunner(conductor.store, func() time.Time { return conductor.now() }, func() RuntimeProvenance { return conductor.buildProvenance() }, conductor.artifacts)
+		return runner.finishIncomplete(record, termination, reviewStarted)
 	}
-	if outcome == AttemptCompleted {
-		outcome = AttemptInvalidResult
-	} else if outcome == "" {
-		outcome = AttemptUnknownFailure
-	}
-	record.Lifecycle = LifecycleIncomplete
-	termination := terminationForAttempt(execution, outcome, parseErr)
-	record.Termination = &termination
-	return outcome
+	return conductor.runner.finishIncomplete(record, termination, reviewStarted)
 }
 
-func (conductor *Conductor) executeAttempt(ctx context.Context, record ReviewRecord, pass passExecution, prompt string) (attemptExecution, error) {
-	checkout, err := prepareSubjectExecution(record.Subject, string(record.ID)+"-1")
-	if err != nil {
-		return failedExecution(AttemptUnknownFailure, TerminationTransportFailure, PhaseHarnessLaunch, err.Error()), nil
+func (conductor *Conductor) finalizeOperationalRecord(record *ReviewRecord, reviewStarted time.Time) {
+	if conductor.runner == nil {
+		runner := newReviewRunner(conductor.store, func() time.Time { return conductor.now() }, func() RuntimeProvenance { return conductor.buildProvenance() }, conductor.artifacts)
+		runner.finalizeOperationalRecord(record, reviewStarted)
+		return
 	}
-	defer checkout.Close()
-	if gate := attemptGateFromContext(ctx); gate != nil {
-		select {
-		case gate <- struct{}{}:
-			defer func() { <-gate }()
-		case <-ctx.Done():
-			return contextExecution(ctx.Err()), checkout.Close()
-		}
+	conductor.runner.finalizeOperationalRecord(record, reviewStarted)
+}
+
+func (conductor *Conductor) buildAttempt(id ReviewID, prompt string, candidate reviewerCandidate, execution attemptExecution, outcome AttemptOutcome, started, completed time.Time) (AttemptRecord, error) {
+	if conductor.runner == nil {
+		runner := &reviewRunner{artifacts: conductor.artifacts}
+		return runner.buildAttempt(id, prompt, candidate, execution, outcome, started, completed)
 	}
-	execution := pass.executor.Execute(ctx, attemptSpec{Repository: checkout.Repository, Prompt: prompt, Candidate: pass.profile.reviewer.candidate})
-	return execution, checkout.Close()
+	return conductor.runner.buildAttempt(id, prompt, candidate, execution, outcome, started, completed)
+}
+
+func (conductor *Conductor) publishAttemptArtifacts(id ReviewID, number int, prompt string, execution attemptExecution) ([]ArtifactReference, error) {
+	if conductor.runner == nil {
+		runner := &reviewRunner{artifacts: conductor.artifacts}
+		return runner.publishAttemptArtifacts(id, number, prompt, execution)
+	}
+	return conductor.runner.publishAttemptArtifacts(id, number, prompt, execution)
+}
+
+func (conductor *Conductor) removeArtifacts(references []ArtifactReference) {
+	if conductor.runner == nil {
+		runner := &reviewRunner{artifacts: conductor.artifacts}
+		runner.removeArtifacts(references)
+		return
+	}
+	conductor.runner.removeArtifacts(references)
+}
+
+func (conductor *Conductor) VerifyArtifacts(record ReviewRecord) error {
+	if conductor.runner == nil {
+		runner := &reviewRunner{artifacts: conductor.artifacts}
+		return runner.VerifyArtifacts(record)
+	}
+	return conductor.runner.VerifyArtifacts(record)
 }
 
 func boundedAttemptOutput(output string) string {
@@ -429,99 +366,11 @@ func resolvedProvenance(candidate reviewerCandidate, execution attemptExecution)
 	return provenance
 }
 
-func (conductor *Conductor) finishIncomplete(record ReviewRecord, termination ReviewTermination, reviewStarted time.Time) (ReviewRecord, error) {
-	record.Lifecycle = LifecycleIncomplete
-	record.Termination = &termination
-	conductor.finalizeOperationalRecord(&record, reviewStarted)
-	if err := conductor.store.Save(record); err != nil {
-		return record, err
-	}
-	return record, nil
-}
-
-func (conductor *Conductor) finalizeOperationalRecord(record *ReviewRecord, reviewStarted time.Time) {
-	completed := conductor.now().UTC()
-	record.UpdatedAt = completed
-	record.Timings.TotalMS = elapsedMilliseconds(reviewStarted, completed)
-}
-
-func terminationForAvailability(diagnostic string) ReviewTermination {
-	category := TerminationReviewerUnavailable
-	if diagnosticFailureCategory(diagnostic) == TerminationAuthenticationFailure {
-		category = TerminationAuthenticationFailure
-	}
-	return ReviewTermination{Category: category, Phase: PhaseAvailabilityCheck, Message: diagnostic}
-}
-
-func terminationForAttempt(execution attemptExecution, outcome AttemptOutcome, parseErr error) ReviewTermination {
-	message := attemptTerminationMessage(outcome, execution.Diagnostic, parseErr)
-	if execution.FailureCategory != "" {
-		return ReviewTermination{Category: execution.FailureCategory, Phase: execution.FailurePhase, Message: message}
-	}
-	switch {
-	case execution.Outcome == AttemptCompleted && parseErr != nil:
-		return ReviewTermination{Category: TerminationResultValidationFailure, Phase: PhaseResultValidation, Message: message}
-	case outcome == AttemptInvalidResult:
-		return ReviewTermination{Category: TerminationMalformedOutput, Phase: PhaseOutputDecode, Message: message}
-	case outcome == AttemptReviewerUnavailable:
-		return ReviewTermination{Category: TerminationReviewerUnavailable, Phase: PhaseHarnessLaunch, Message: message}
-	case outcome == AttemptTransientFailure:
-		return ReviewTermination{Category: TerminationTransportFailure, Phase: PhaseReviewerExecution, Message: message}
-	case outcome == AttemptCancelled:
-		return ReviewTermination{Category: TerminationCancelled, Phase: PhaseReviewerExecution, Message: message}
-	default:
-		return ReviewTermination{Category: TerminationUnknownFailure, Phase: PhaseReviewerExecution, Message: message}
-	}
-}
-
-func attemptTerminationMessage(outcome AttemptOutcome, diagnostic string, parseErr error) string {
-	if outcome == AttemptInvalidResult && parseErr != nil {
-		if diagnostic == "" {
-			return parseErr.Error()
-		}
-		return parseErr.Error() + "; adapter diagnostic: " + diagnostic
-	}
-	if diagnostic != "" {
-		return diagnostic
-	}
-	return fmt.Sprintf("attempt ended with %s", outcome)
-}
-
 func elapsedMilliseconds(started, completed time.Time) int64 {
 	if completed.Before(started) {
 		return 0
 	}
 	return completed.Sub(started).Milliseconds()
-}
-
-func newReviewID(now time.Time) (ReviewID, error) {
-	random := make([]byte, 8)
-	if _, err := rand.Read(random); err != nil {
-		return "", fmt.Errorf("generate review id: %w", err)
-	}
-	return ReviewID(fmt.Sprintf("rp_%d_%s", now.UTC().UnixMilli(), hex.EncodeToString(random))), nil
-}
-
-func validReviewID(id ReviewID) bool {
-	if len(id) < 24 || len(id) > 64 {
-		return false
-	}
-	for _, character := range id {
-		if !validReviewIDCharacter(character) {
-			return false
-		}
-	}
-	return true
-}
-
-func validReviewIDCharacter(character rune) bool {
-	if character == '_' {
-		return true
-	}
-	if character >= 'a' && character <= 'z' {
-		return true
-	}
-	return character >= '0' && character <= '9'
 }
 
 func defaultStateDirectory() string {
