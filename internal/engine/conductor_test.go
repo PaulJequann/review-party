@@ -223,11 +223,9 @@ func TestFailedExecutionCannotBeCompletedByValidPayload(t *testing.T) {
 	executor := &scriptedExecutor{
 		availability: availability{Available: true},
 		execute: func(context.Context, attemptSpec) attemptExecution {
-			return attemptExecution{
-				AssistantText: cleanReview,
-				Outcome:       AttemptTransientFailure,
-				Diagnostic:    "reviewer connection closed",
-			}
+			execution := failedExecution(AttemptTransientFailure, TerminationTransportFailure, PhaseReviewerExecution, "reviewer connection closed")
+			execution.AssistantText = cleanReview
+			return execution
 		},
 	}
 	conductor := testConductor(t, executor, time.Second)

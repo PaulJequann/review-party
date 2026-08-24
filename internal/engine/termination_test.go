@@ -24,8 +24,9 @@ func TestAttemptTerminationClassification(t *testing.T) {
 			category:  TerminationCancelled, phase: PhaseReviewerExecution,
 		},
 		"transport": {
-			outcome:  AttemptTransientFailure,
-			category: TerminationTransportFailure, phase: PhaseReviewerExecution,
+			execution: failedExecution(AttemptTransientFailure, TerminationTransportFailure, PhaseReviewerExecution, ""),
+			outcome:   AttemptTransientFailure,
+			category:  TerminationTransportFailure, phase: PhaseReviewerExecution,
 		},
 		"malformed harness output": {
 			execution: attemptExecution{
@@ -36,18 +37,24 @@ func TestAttemptTerminationClassification(t *testing.T) {
 			category: TerminationMalformedOutput, phase: PhaseOutputDecode,
 		},
 		"canonical validation": {
-			execution: attemptExecution{Outcome: AttemptCompleted},
-			outcome:   AttemptInvalidResult,
-			parseErr:  errors.New("missing END_REVIEW"),
-			category:  TerminationResultValidationFailure, phase: PhaseResultValidation,
+			execution: attemptExecution{
+				Outcome:         AttemptCompleted,
+				FailureCategory: TerminationResultValidationFailure,
+				FailurePhase:    PhaseResultValidation,
+			},
+			outcome:  AttemptInvalidResult,
+			parseErr: errors.New("missing END_REVIEW"),
+			category: TerminationResultValidationFailure, phase: PhaseResultValidation,
 		},
 		"reviewer unavailable": {
-			outcome:  AttemptReviewerUnavailable,
-			category: TerminationReviewerUnavailable, phase: PhaseHarnessLaunch,
+			execution: failedExecution(AttemptReviewerUnavailable, TerminationReviewerUnavailable, PhaseHarnessLaunch, ""),
+			outcome:   AttemptReviewerUnavailable,
+			category:  TerminationReviewerUnavailable, phase: PhaseHarnessLaunch,
 		},
 		"unknown": {
-			outcome:  AttemptUnknownFailure,
-			category: TerminationUnknownFailure, phase: PhaseReviewerExecution,
+			execution: failedExecution(AttemptUnknownFailure, TerminationUnknownFailure, PhaseReviewerExecution, ""),
+			outcome:   AttemptUnknownFailure,
+			category:  TerminationUnknownFailure, phase: PhaseReviewerExecution,
 		},
 	}
 
