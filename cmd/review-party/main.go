@@ -935,7 +935,7 @@ func printUsage(output io.Writer) {
 	fmt.Fprintln(output, "  review-party config path|show [--config PATH]")
 	fmt.Fprintf(output, "  review-party explain PROFILE [--repo PATH] [--reviewer %s] [--model MODEL] [--effort EFFORT] [--format human|json]\n", strings.Join(engine.SupportedReviewers(), "|"))
 	fmt.Fprintf(output, "  review-party review [PROFILE] [--reviewer %s] [--model MODEL] [--effort EFFORT] [--config PATH] [--repo PATH] [--base COMMIT --head COMMIT] [--format human|json]\n", strings.Join(engine.SupportedReviewers(), "|"))
-	fmt.Fprintf(output, "  review-party party run PARTY [--reviewer %s] [--model MODEL] [--effort EFFORT] [--concurrency N] [--config PATH] [--repo PATH] [--base COMMIT --head COMMIT] [--deadline DURATION] [--format human|json]\n", strings.Join(engine.SupportedReviewers(), "|"))
+	fmt.Fprintln(output, "  review-party party run [PARTY] [--reviewer ID] [--model MODEL] [--effort EFFORT] [--concurrency N] [--config PATH] [--repo PATH] [--base COMMIT --head COMMIT] [--deadline DURATION] [--format human|json]")
 	fmt.Fprintln(output, "  review-party replay REVIEW_ID [--reviewer ID] [--model MODEL] [--effort EFFORT] [--format human|json] [--config PATH]")
 	fmt.Fprintln(output, "  review-party eval run SUITE [--experiment PATH] [--profile NAME] --reviewer ID --model MODEL [--effort EFFORT] [--deadline DURATION] [--format human|json]")
 	fmt.Fprintln(output, "  review-party eval compare --baseline AR_ID --candidate AR_ID [--format human|json]")

@@ -34,9 +34,11 @@ ${XDG_CONFIG_HOME:-$HOME/.config}/review-party/
 
 Packaged defaults use the same Markdown representation and are embedded in the
 binary. Personal and Repository `config.json` documents share schema version 1
-and use `schema_version`, `defaults.profile`, `defaults.reviewer`, and
-`reviewers.<id>.enabled|model|allowed_models`. Repository reviewer values win
-per field; fields absent there may still come from Personal Configuration.
+and use `schema_version`, `defaults.profile`, `defaults.reviewer`,
+`defaults.party`, and `reviewers.<id>.enabled|model|allowed_models`. Profile and
+Party references use lowercase names matching `[a-z0-9][a-z0-9-]*`.
+Repository reviewer values win per field; fields absent there may still come
+from Personal Configuration.
 Document validation enforces shape, scope, and known Reviewer names in
 isolation. Repository scope cannot author Personal-only state or Eval settings.
 Unknown fields, unsupported schemas, unsafe names, invalid UTF-8, empty Profiles,
@@ -66,18 +68,20 @@ the caller must create and review a fresh plan before publishing.
 
 ## Resolution
 
-Profile and Reviewer selection precedence is:
+Profile, Reviewer, and Party selection precedence is:
 
 1. explicit caller selection;
-2. repository config;
-3. personal config;
-4. packaged/program defaults.
+2. Repository Configuration (`defaults.profile`, `defaults.reviewer`, or
+   `defaults.party`);
+3. Personal Configuration for the same field;
+4. packaged defaults (`bugs`, the packaged Reviewer, and `standard`).
 
 A named Profile is searched in repository, personal, then packaged scope. The
-first existing file wins as a whole definition. There is no inheritance,
-fragment concatenation, environment interpolation, remote include, or script
-execution. A malformed higher-precedence file is an error, never permission to
-fall through.
+first existing Profile file wins as a whole definition. Profiles do not support
+inheritance, fragment concatenation, environment interpolation, remote include,
+or script execution. Party definitions may compose parents through `extends` as
+defined in [`party-v1.md`](party-v1.md). A malformed higher-precedence file is
+an error, never permission to fall through.
 
 Review Party compiles user-authored judgment instructions together with its
 owned capability restrictions, Context Discovery, canonical Review Result

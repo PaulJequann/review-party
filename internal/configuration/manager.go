@@ -59,8 +59,10 @@ type Options struct {
 	PackagedDefaultReviewer string
 	// PackagedDefaultProfile is the effective default profile when nothing is authored.
 	PackagedDefaultProfile string
-	// ValidateProfileName validates an authored profile reference; nil skips the check.
-	ValidateProfileName func(string) error
+	// PackagedDefaultParty is the effective default Party when nothing is authored.
+	PackagedDefaultParty string
+	// ValidateName validates authored Profile and Party references; nil skips the check.
+	ValidateName func(string) error
 }
 
 // Manager owns Personal and Repository Configuration paths, resolution,
@@ -70,13 +72,14 @@ type Manager struct {
 	personalConfigPath string
 	reviewers          map[string]string
 	packaged           packagedDefaults
-	profiles           func(string) error
+	nameValidator      func(string) error
 	publishWrite       func(*pendingWrite) error
 }
 
 type packagedDefaults struct {
 	defaultReviewer string
 	defaultProfile  string
+	defaultParty    string
 }
 
 // NewManager constructs a Manager. The personal root may be empty when the
@@ -98,9 +101,13 @@ func NewManager(options Options) *Manager {
 		personalRoot:       options.PersonalRoot,
 		personalConfigPath: options.PersonalConfigPath,
 		reviewers:          reviewers,
-		packaged:           packagedDefaults{defaultReviewer: options.PackagedDefaultReviewer, defaultProfile: options.PackagedDefaultProfile},
-		profiles:           options.ValidateProfileName,
-		publishWrite:       writeAtomically,
+		packaged: packagedDefaults{
+			defaultReviewer: options.PackagedDefaultReviewer,
+			defaultProfile:  options.PackagedDefaultProfile,
+			defaultParty:    options.PackagedDefaultParty,
+		},
+		nameValidator: options.ValidateName,
+		publishWrite:  writeAtomically,
 	}
 }
 
@@ -180,9 +187,9 @@ func (manager *Manager) validateReviewer(id string) error {
 	return nil
 }
 
-func (manager *Manager) validateProfileName(name string) error {
-	if manager.profiles == nil {
+func (manager *Manager) validateName(name string) error {
+	if manager.nameValidator == nil {
 		return nil
 	}
-	return manager.profiles(name)
+	return manager.nameValidator(name)
 }

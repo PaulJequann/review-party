@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 
 	"reviewparty/internal/artifact"
+	"reviewparty/internal/configuration"
 	"reviewparty/internal/model"
 	"reviewparty/internal/store"
 	"time"
@@ -25,6 +26,7 @@ type Config struct {
 type Conductor struct {
 	store           recordStore
 	reviewers       reviewerCatalog
+	configuration   *configuration.Manager
 	profiles        profileLibrary
 	attemptDeadline time.Duration
 	now             func() time.Time
@@ -77,6 +79,7 @@ func newConductorWithProfiles(store recordStore, reviewers reviewerCatalog, prof
 	return &Conductor{
 		store:           store,
 		reviewers:       reviewers,
+		configuration:   profiles.manager(),
 		profiles:        profiles,
 		attemptDeadline: deadline,
 		now:             time.Now,

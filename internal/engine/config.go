@@ -8,26 +8,35 @@ import (
 	"reviewparty/internal/configuration"
 )
 
-// packagedDefaultProfileName is the effective default Profile when nothing is authored.
-const packagedDefaultProfileName = "bugs"
+const (
+	// packagedDefaultProfileName is the effective default Profile when nothing is authored.
+	packagedDefaultProfileName = "bugs"
+	// defaultPartyName is the effective default Party when nothing is authored.
+	defaultPartyName = "standard"
+)
 
 // newConfigurationManager constructs the Configuration Manager with Review
 // Party's packaged reviewer knowledge so documents validate against known
 // reviewers. An explicit path overrides the canonical Personal Configuration
 // file location.
 func newConfigurationManager(personalConfigPath string) *configuration.Manager {
-	options := configuration.Options{
-		Reviewers:               supportedReviewerIDs(),
-		PackagedReviewerModels:  packagedReviewerModels(),
-		PackagedDefaultReviewer: defaultReviewer,
-		PackagedDefaultProfile:  packagedDefaultProfileName,
-		ValidateProfileName:     validateProfileName,
-	}
+	options := reviewPartyConfigurationOptions()
 	if personalConfigPath != "" {
 		options.PersonalRoot = filepath.Dir(personalConfigPath)
 		options.PersonalConfigPath = personalConfigPath
 	}
 	return configuration.NewManager(options)
+}
+
+func reviewPartyConfigurationOptions() configuration.Options {
+	return configuration.Options{
+		Reviewers:               supportedReviewerIDs(),
+		PackagedReviewerModels:  packagedReviewerModels(),
+		PackagedDefaultReviewer: defaultReviewer,
+		PackagedDefaultProfile:  packagedDefaultProfileName,
+		PackagedDefaultParty:    defaultPartyName,
+		ValidateName:            validateAuthoredName,
+	}
 }
 
 func supportedReviewerIDs() []string {
@@ -46,7 +55,7 @@ func packagedReviewerModels() map[string]string {
 
 func selectProfileFromEffective(effective configuration.Effective, explicitReviewer string) (profileSelection, error) {
 	name := effective.DefaultProfile.Value
-	if err := validateProfileName(name); err != nil {
+	if err := validateAuthoredName(name); err != nil {
 		return profileSelection{}, fmt.Errorf("profile name %q: %w", name, err)
 	}
 	return profileSelection{name: name, reviewer: firstNonempty(explicitReviewer, effective.DefaultReviewer.Value)}, nil
@@ -58,19 +67,19 @@ type profileSelection struct {
 	reviewer string
 }
 
-func validateProfileName(name string) error {
+func validateAuthoredName(name string) error {
 	if len(name) == 0 || len(name) > 64 {
 		return errors.New("must contain 1 to 64 characters")
 	}
 	for index, character := range name {
-		if !validProfileNameCharacter(character, index) {
+		if !validAuthoredNameCharacter(character, index) {
 			return errors.New("must match [a-z0-9][a-z0-9-]*")
 		}
 	}
 	return nil
 }
 
-func validProfileNameCharacter(character rune, index int) bool {
+func validAuthoredNameCharacter(character rune, index int) bool {
 	if character >= 'a' && character <= 'z' {
 		return true
 	}

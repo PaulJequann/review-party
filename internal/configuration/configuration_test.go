@@ -11,18 +11,20 @@ import (
 
 func testManager(t *testing.T, personalRoot string) *Manager {
 	t.Helper()
+	validateName := func(name string) error {
+		if strings.ContainsAny(name, "./") {
+			return errors.New("must match [a-z0-9][a-z0-9-]*")
+		}
+		return nil
+	}
 	return NewManager(Options{
 		PersonalRoot:            personalRoot,
 		Reviewers:               []string{"grok", "opencode", "copilot", "codex"},
 		PackagedReviewerModels:  map[string]string{"grok": "grok-4.5", "copilot": "auto", "codex": "gpt-5.6-luna"},
 		PackagedDefaultReviewer: "grok",
 		PackagedDefaultProfile:  "bugs",
-		ValidateProfileName: func(name string) error {
-			if strings.ContainsAny(name, "./") {
-				return errors.New("must match [a-z0-9][a-z0-9-]*")
-			}
-			return nil
-		},
+		PackagedDefaultParty:    "standard",
+		ValidateName:            validateName,
 	})
 }
 
@@ -41,12 +43,12 @@ func TestResolvePreservesScopeProvenance(t *testing.T) {
 	repository := t.TempDir()
 	writeDocument(t, filepath.Join(root, "config.json"), `{
   "schema_version": 1,
-  "defaults": {"reviewer": "opencode"},
+  "defaults": {"reviewer": "opencode", "party": "baseline"},
   "reviewers": {"opencode": {"model": "meta/muse-spark-1.2-contributor"}}
 }`)
 	writeDocument(t, filepath.Join(repository, ".reviewparty", "config.json"), `{
   "schema_version": 1,
-  "defaults": {"profile": "security"},
+  "defaults": {"profile": "security", "party": "release-gate"},
   "reviewers": {"opencode": {"enabled": false}}
 }`)
 	manager := testManager(t, root)
@@ -60,6 +62,7 @@ func TestResolvePreservesScopeProvenance(t *testing.T) {
 
 	assertStringValue(t, "default reviewer", effective.DefaultReviewer, "opencode", true, SourcePersonal, personalPath)
 	assertStringValue(t, "default profile", effective.DefaultProfile, "security", true, SourceRepository, repositoryPath)
+	assertStringValue(t, "default party", effective.DefaultParty, "release-gate", true, SourceRepository, repositoryPath)
 	opencode := mustReviewerPolicy(t, effective, "opencode")
 	assertBoolValue(t, "opencode enabled", opencode.Enabled, false, true, SourceRepository, repositoryPath)
 	assertStringValue(t, "opencode model", opencode.Model, "meta/muse-spark-1.2-contributor", true, SourcePersonal, personalPath)
@@ -71,11 +74,12 @@ func TestResolveReportsExplicitOverrideProvenance(t *testing.T) {
 	root := t.TempDir()
 	manager := testManager(t, root)
 
-	effective, err := manager.Resolve(Request{Overrides: Overrides{Reviewer: "codex"}})
+	effective, err := manager.Resolve(Request{Overrides: Overrides{Reviewer: "codex", Party: "release-gate"}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	assertStringValue(t, "explicit reviewer", effective.DefaultReviewer, "codex", true, SourceExplicit, "")
+	assertStringValue(t, "explicit party", effective.DefaultParty, "release-gate", true, SourceExplicit, "")
 	assertStringValue(t, "packaged profile", effective.DefaultProfile, "bugs", false, SourcePackaged, "")
 }
 
@@ -95,6 +99,7 @@ func TestResolvingDefaultsCreatesNoFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertStringValue(t, "packaged reviewer", effective.DefaultReviewer, "grok", false, SourcePackaged, "")
+	assertStringValue(t, "packaged party", effective.DefaultParty, "standard", false, SourcePackaged, "")
 	if _, err := os.Stat(filepath.Join(root, "config.json")); !os.IsNotExist(err) {
 		t.Fatalf("personal configuration was created: %v", err)
 	}
@@ -188,11 +193,13 @@ func TestPublishedTypedReviewerIntentsUpdateEffectiveValues(t *testing.T) {
 	manager := testManager(t, root)
 	requireConfirmedPlan(t, manager, []Intent{
 		SetDefaultProfile{Target: ScopePersonal, Profile: "security"},
+		SetDefaultParty{Target: ScopePersonal, Party: "release-gate"},
 		SetReviewerEnabled{Target: ScopePersonal, Reviewer: "opencode", Enabled: false},
 		SetReviewerAllowedModels{Target: ScopePersonal, Reviewer: "opencode", Models: []string{"model-a", "model-b"}},
 	})
 	effective := requireEffective(t, manager)
 	assertStringValue(t, "default profile", effective.DefaultProfile, "security", true, SourcePersonal, filepath.Join(root, "config.json"))
+	assertStringValue(t, "default party", effective.DefaultParty, "release-gate", true, SourcePersonal, filepath.Join(root, "config.json"))
 	opencode := mustReviewerPolicy(t, effective, "opencode")
 	assertBoolValue(t, "opencode enabled", opencode.Enabled, false, true, SourcePersonal, filepath.Join(root, "config.json"))
 	if !reflect.DeepEqual(opencode.AllowedModels.Value, []string{"model-a", "model-b"}) || !opencode.AllowedModels.Authored {

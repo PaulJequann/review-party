@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"time"
 
+	"reviewparty/internal/configuration"
 	"reviewparty/internal/model"
 	"reviewparty/internal/store"
 )
@@ -99,18 +100,25 @@ func (conductor *Conductor) prepareParty(selection model.PartySelection) (prepar
 }
 
 func (conductor *Conductor) planParty(selection model.PartySelection) (partyPlan, error) {
-	lookup := partyLookup{repository: selection.Repository, name: selection.Name}
-	definition, source, err := conductor.resolveParty(lookup)
-	if err != nil {
-		return partyPlan{}, err
-	}
-	effective := effectivePartyDefinition(definition, selection)
-	if err := validatePartyDefinition(effective); err != nil {
-		return partyPlan{}, InvalidPartyDefinitionError{Name: definition.Name, Reason: err.Error()}
+	if selection.ConcurrencyLimit < 0 {
+		return partyPlan{}, errors.New("party concurrency override must not be negative")
 	}
 	repository, err := resolveRepositoryRoot(selection.Repository)
 	if err != nil {
 		return partyPlan{}, err
+	}
+	selection.Repository = repository
+	lookup, err := conductor.resolvePartyLookup(selection)
+	if err != nil {
+		return partyPlan{}, err
+	}
+	composed, err := conductor.composeParty(lookup)
+	if err != nil {
+		return partyPlan{}, err
+	}
+	effective := effectivePartyDefinition(composed.definition, selection)
+	if err := validatePartyDefinition(effective); err != nil {
+		return partyPlan{}, InvalidPartyDefinitionError{Name: effective.Name, Reason: err.Error()}
 	}
 	subject, subjectResolutionMS, err := conductor.resolveSharedSubject(selection.Subject, repository)
 	if err != nil {
@@ -120,7 +128,23 @@ func (conductor *Conductor) planParty(selection model.PartySelection) (partyPlan
 	if err != nil {
 		return partyPlan{}, err
 	}
-	return partyPlan{effective: effective, source: source, repository: repository, subject: subject, members: members}, nil
+	return partyPlan{effective: effective, source: composed.source, repository: repository, subject: subject, members: members}, nil
+}
+
+// resolvePartyLookup resolves the explicit or configured default Party through
+// the same Configuration Manager that owns Profile and Reviewer precedence.
+func (conductor *Conductor) resolvePartyLookup(selection model.PartySelection) (partyLookup, error) {
+	if conductor.configuration == nil {
+		return partyLookup{}, errors.New("party resolution requires a configuration manager")
+	}
+	effective, err := conductor.configuration.Resolve(configuration.Request{
+		Repository: configuration.Repository(selection.Repository),
+		Overrides:  configuration.Overrides{Party: selection.Name},
+	})
+	if err != nil {
+		return partyLookup{}, err
+	}
+	return partyLookup{repository: selection.Repository, name: effective.DefaultParty.Value}, nil
 }
 
 // resolveSharedSubject freezes the one Review Subject every member will review,

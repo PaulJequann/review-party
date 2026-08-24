@@ -66,7 +66,7 @@ func addAvailablePackagedProfileNames(names, seen map[string]struct{}) {
 
 func isAvailableProfileCandidate(name string, seen map[string]struct{}) bool {
 	_, alreadySeen := seen[name]
-	return validateProfileName(name) == nil && !alreadySeen
+	return validateAuthoredName(name) == nil && !alreadySeen
 }
 
 func listOrNone(values []string) string {

@@ -108,7 +108,7 @@ func addAuthoredProfiles(winners map[string]ProfileSummary, authored configurati
 		if _, exists := winners[name]; exists {
 			continue
 		}
-		if err := validateProfileName(name); err != nil {
+		if err := validateAuthoredName(name); err != nil {
 			winners[name] = invalidProfileSummary(location, err)
 			continue
 		}
@@ -141,7 +141,7 @@ func summarizePackagedProfile(entry profileLocation, winners map[string]ProfileS
 	if _, exists := winners[entry.name]; exists {
 		return ProfileSummary{}, false
 	}
-	if err := validateProfileName(entry.name); err != nil {
+	if err := validateAuthoredName(entry.name); err != nil {
 		return invalidProfileSummary(entry, err), true
 	}
 	if _, found, err := readPackagedProfile(entry); err != nil {
