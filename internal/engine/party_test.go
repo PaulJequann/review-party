@@ -2,8 +2,6 @@ package engine
 
 import (
 	"context"
-	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -368,27 +366,5 @@ func TestPartyListingShadowsPackagedWithRepositoryDefinition(t *testing.T) {
 
 func writeTestParty(t *testing.T, repository string, definition model.PartyDefinition) {
 	t.Helper()
-	payload := fmt.Sprintf(`{"schema_version":%d,"name":%q,"description":"test party","concurrency_limit":%d,"profiles":[`, definition.SchemaVersion, definition.Name, definition.ConcurrencyLimit)
-	for index, member := range definition.Profiles {
-		if index > 0 {
-			payload += ","
-		}
-		payload += fmt.Sprintf(`{"profile":%q`, member.Profile)
-		if member.Reviewer != "" {
-			payload += fmt.Sprintf(`,"reviewer":%q`, member.Reviewer)
-		}
-		if member.Model != "" {
-			payload += fmt.Sprintf(`,"model":%q`, member.Model)
-		}
-		if member.Effort != "" {
-			payload += fmt.Sprintf(`,"effort":%q`, member.Effort)
-		}
-		payload += "}"
-	}
-	payload += "]}"
-	directory := filepath.Join(repository, ".reviewparty", "parties")
-	if err := os.MkdirAll(directory, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	writeTestFile(t, filepath.Join(directory, definition.Name+".json"), payload)
+	writeTestPartyAt(t, filepath.Join(repository, ".reviewparty", "parties"), definition)
 }

@@ -324,7 +324,7 @@ func TestLedgerRejectsObsoleteSchema(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec("ALTER TABLE reviews ADD COLUMN incomplete_cause TEXT NOT NULL DEFAULT ''; UPDATE schema_migrations SET version=8"); err != nil {
+	if _, err := db.Exec("UPDATE schema_migrations SET version=8"); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Close(); err != nil {

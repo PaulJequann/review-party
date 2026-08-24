@@ -10,6 +10,7 @@ import (
 type Overrides struct {
 	Reviewer string
 	Profile  string
+	Party    string
 }
 
 // Request describes one effective-resolution query.
@@ -40,6 +41,7 @@ type ReviewerSettings struct {
 type Effective struct {
 	DefaultProfile  Value[string]
 	DefaultReviewer Value[string]
+	DefaultParty    Value[string]
 	StateDirectory  Value[string]
 	Eval            Value[EvalPolicy]
 	reviewers       map[string]ReviewerSettings
@@ -107,6 +109,7 @@ func (manager *Manager) Resolve(request Request) (Effective, error) {
 	effective := Effective{
 		DefaultProfile:  resolveDefault(loaded, defaultChoice(request.Overrides.Profile), profileDefault, defaultChoice(manager.packaged.defaultProfile)),
 		DefaultReviewer: resolveDefault(loaded, defaultChoice(request.Overrides.Reviewer), reviewerDefault, defaultChoice(manager.packaged.defaultReviewer)),
+		DefaultParty:    resolveDefault(loaded, defaultChoice(request.Overrides.Party), partyDefault, defaultChoice(manager.packaged.defaultParty)),
 		StateDirectory:  personalValue(loaded, stateDirectoryValue),
 		Eval:            evalValue(loaded),
 	}
@@ -162,6 +165,10 @@ func profileDefault(document Document) (string, bool) {
 
 func reviewerDefault(document Document) (string, bool) {
 	return authoredString(configurationText(document.Defaults.Reviewer))
+}
+
+func partyDefault(document Document) (string, bool) {
+	return authoredString(configurationText(document.Defaults.Party))
 }
 
 func resolveDefault(loaded Loaded, override defaultChoice, read documentDefault, fallback defaultChoice) Value[string] {

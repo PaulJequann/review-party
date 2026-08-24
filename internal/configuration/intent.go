@@ -22,10 +22,16 @@ type SetDefaultReviewer struct {
 	Reviewer string
 }
 
-// SetDefaultProfile selects or clears (empty Profile) the default profile in one scope.
+// SetDefaultProfile selects or clears (empty Profile) the default Profile in one scope.
 type SetDefaultProfile struct {
 	Target  Scope
 	Profile string
+}
+
+// SetDefaultParty selects or clears (empty Party) the default Party in one scope.
+type SetDefaultParty struct {
+	Target Scope
+	Party  string
 }
 
 // SetReviewerEnabled enables or disables one reviewer in one scope.
@@ -89,6 +95,17 @@ func (intent SetDefaultProfile) applyIntent(document *Document) {
 }
 func (intent SetDefaultProfile) readIntent(document Document) (string, bool) {
 	return authoredString(configurationText(document.Defaults.Profile))
+}
+
+func (intent SetDefaultParty) intentScope() Scope { return intent.Target }
+func (intent SetDefaultParty) intentField() string {
+	return "defaults.party"
+}
+func (intent SetDefaultParty) applyIntent(document *Document) {
+	document.Defaults.Party = intent.Party
+}
+func (intent SetDefaultParty) readIntent(document Document) (string, bool) {
+	return authoredString(configurationText(document.Defaults.Party))
 }
 
 func (intent SetReviewerEnabled) intentScope() Scope { return intent.Target }

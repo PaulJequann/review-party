@@ -65,14 +65,16 @@ slice status and this checklist when the acceptance evidence is committed.
 - [x] Slice 20 — seeded controlled defects (implemented locally).
 - [x] Slice 26 — Party composition and Review Bundles (implemented locally;
   user-directed out of order ahead of Slices 21-25).
+- [x] Slice 26a — layered Party composition: `extends` chains and
+  `defaults.party` selection (implemented locally).
 - [ ] Slice 21 — ACPX transport adapter.
 - [ ] Slice 22 — native-versus-ACP adapter experiments.
 - [ ] Slice 23 — fix verification and bounded continuation.
 - [ ] Slice 24 — thin skill integration and migration.
 - [ ] Slice 25 — supported local delivery baseline.
 
-Current state: Slices 10 through 20, Slice 17a, Slice 26, DEV-56 through
-DEV-60, and DEV-66 through DEV-69 are complete or implemented locally. Linear
+Current state: Slices 10 through 20, Slice 17a, Slices 26 and 26a, DEV-56
+through DEV-60, and DEV-66 through DEV-69 are complete or implemented locally. Linear
 owns future work selection; use Ready issues there before the older roadmap
 below as execution authority.
 
@@ -1829,7 +1831,7 @@ member Record's provenance and completeness.
 
 - [x] Refine the party test-intent rows before tests.
 - [x] Strict version-1 Party definitions in `.reviewparty/parties/` and the
-  global library with repository shadowing global shadowing packaged
+  Personal library with Repository shadowing Personal shadowing packaged
   `standard`; name must match file name; duplicates, unknown fields, and empty
   member lists rejected.
 - [x] Per-member reviewer/model/effort pins; explicit caller flags narrow every
@@ -1881,6 +1883,50 @@ member Record's provenance and completeness.
   behavior. The sequential/concurrent orchestration split remains two readable
   loops sharing absorb/finalize/stop helpers rather than one conditional
   machine; no test-visible defect.
+
+## Slice 26a — Layered party composition
+
+Status: **Implemented locally**
+
+Depends on: Slice 26. User-directed.
+
+### Goal
+
+Let a global (personal or org) baseline Party and repository-local Parties
+compose into one seamless run: one command, one frozen Subject, one Review
+Bundle containing the inherited baseline members plus local additions, with
+recorded definition-time overrides.
+
+### Implementation checklist
+
+- [x] `extends`: ordered parent names on schema-1 definitions; parents resolve
+  through normal shadowing; self/duplicate/invalid names rejected at parse.
+- [x] Composition folds the chain into one effective definition: inherited
+  members first in declared order, redefined profiles replaced at position with
+  local settings, new locals appended; inherited concurrency_limit applies when
+  the extending definition omits it.
+- [x] Cycles and unknown parents fail closed before any launch.
+- [x] `defaults.party` in Repository and Personal Configuration; Party
+  selection resolves Explicit > Repository > Personal > packaged `standard`.
+- [x] `parties` listing shows declared extends chains (human + JSON).
+- [x] Regression tests: consolidation into one bundle, override semantics,
+  cycle/missing-parent fail-closed, default-party chain and packaged fallback,
+  packaged-standard extension, inherited concurrency bound. The
+  concurrency-inheritance test caught a real merge defect during development
+  and was fixed in the same change set.
+
+### Acceptance evidence
+
+Focused engine tests pass including race verification; full sweep (vet, gofmt,
+focused packages) clean. Code Health: party_library.go restored to 10.0 after
+splitting definition validation into focused helpers; party.go remains 10.0.
+
+Live layered evidence (2026-08-21): an isolated Personal library provided
+org-baseline (bugs + documentation); a fixture repository defined gate extending
+it with a codex-pinned code-quality member plus default Party configuration.
+Bare `party run --repo …` consolidated both layers into one Bundle
+rb_1787338518111_9d9dfebf0f6eb065, Completed 3/3 (party revision d9f9e2aa…),
+with inherited members listed before the local addition.
 
 ## Deferred beyond the active roadmap
 

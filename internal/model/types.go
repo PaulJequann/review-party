@@ -172,6 +172,7 @@ type PartyDefinition struct {
 	SchemaVersion    int           `json:"schema_version"`
 	Name             string        `json:"name"`
 	Description      string        `json:"description,omitempty"`
+	Extends          []string      `json:"extends,omitempty"`
 	Profiles         []PartyMember `json:"profiles"`
 	ConcurrencyLimit int           `json:"concurrency_limit,omitempty"`
 }
@@ -189,6 +190,7 @@ type PartySelection struct {
 type PartySummary struct {
 	Name        string   `json:"name"`
 	Description string   `json:"description"`
+	Extends     []string `json:"extends,omitempty"`
 	Members     []string `json:"members"`
 	Source      string   `json:"source"`
 	Error       string   `json:"error,omitempty"`
@@ -547,7 +549,7 @@ const (
 type ReviewResult struct {
 	Status   ResultStatus `json:"status"`
 	Summary  string       `json:"summary"`
-	Findings []Finding    `json:"findings,omitempty"`
+	Findings []Finding    `json:"findings"`
 	Raw      string       `json:"raw"`
 }
 

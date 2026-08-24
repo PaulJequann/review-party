@@ -1,49 +1,30 @@
 package main
 
 import (
-	"context"
-	"flag"
 	"fmt"
 	"io"
 
 	"reviewparty/internal/engine"
 )
 
-func runProfile(ctx context.Context, arguments []string, stdout, stderr io.Writer) int {
-	if len(arguments) == 0 {
-		fmt.Fprintln(stderr, "review-party: profile requires: explain PROFILE or create NAME")
-		return 2
-	}
-	switch arguments[0] {
-	case "explain":
-		return runExplain(ctx, arguments[1:], stdout, stderr)
-	case "create":
-		return runProfileCreate(arguments[1:], stdout, stderr)
-	case "install-defaults":
-		return runProfileInstallDefaults(arguments[1:], stdout, stderr)
-	default:
-		fmt.Fprintln(stderr, "review-party: profile requires: explain PROFILE or create NAME")
-		return 2
-	}
+type profileScopeOptions struct {
+	repository string
+	global     bool
 }
 
-func runProfileInstallDefaults(arguments []string, stdout, stderr io.Writer) int {
-	flags := flag.NewFlagSet("profile install-defaults", flag.ContinueOnError)
-	flags.SetOutput(stderr)
-	repository := flags.String("repo", ".", "Git repository that will own the Profiles")
-	global := flags.Bool("global", false, "Install starter Profiles in Personal Configuration")
-	if err := flags.Parse(arguments); err != nil {
-		return 2
-	}
-	if flags.NArg() != 0 {
+type profileCreateOptions struct {
+	profileScopeOptions
+	name     string
+	blank    bool
+	packaged string
+}
+
+func executeProfileInstallDefaults(options profileScopeOptions, stdout, stderr io.Writer) int {
+	if options.global && options.repository != "." {
 		fmt.Fprintln(stderr, "review-party: profile install-defaults accepts one scope: --repo PATH or --global")
-		return 2
+		return usageExitCode
 	}
-	if *global && *repository != "." {
-		fmt.Fprintln(stderr, "review-party: profile install-defaults accepts one scope: --repo PATH or --global")
-		return 2
-	}
-	result, err := engine.InitializeProfiles(engine.ProfileInitialization{Repository: *repository, Global: *global})
+	result, err := engine.InitializeProfiles(engine.ProfileInitialization{Repository: options.repository, Global: options.global})
 	if err != nil {
 		fmt.Fprintf(stderr, "review-party: %v\n", err)
 		return 1
@@ -53,30 +34,12 @@ func runProfileInstallDefaults(arguments []string, stdout, stderr io.Writer) int
 	return 0
 }
 
-func runProfileCreate(arguments []string, stdout, stderr io.Writer) int {
-	name, arguments := takeLeadingValue(arguments)
-	flags := flag.NewFlagSet("profile create", flag.ContinueOnError)
-	flags.SetOutput(stderr)
-	repository := flags.String("repo", ".", "Git repository that will own the Profile")
-	global := flags.Bool("global", false, "Create a personal Profile in Personal Configuration")
-	blank := flags.Bool("blank", false, "Start from a minimal blank Profile")
-	packaged := flags.String("from-packaged", "", "Start from a packaged Profile")
-	if err := flags.Parse(arguments); err != nil {
-		return 2
-	}
-	if name == "" {
+func executeProfileCreate(options profileCreateOptions, stdout, stderr io.Writer) int {
+	if options.global && options.repository != "." {
 		fmt.Fprintln(stderr, "review-party: profile create requires NAME, exactly one of --blank or --from-packaged PROFILE, and one scope")
-		return 2
+		return usageExitCode
 	}
-	if flags.NArg() != 0 {
-		fmt.Fprintln(stderr, "review-party: profile create requires NAME, exactly one of --blank or --from-packaged PROFILE, and one scope")
-		return 2
-	}
-	if *global && *repository != "." {
-		fmt.Fprintln(stderr, "review-party: profile create requires NAME, exactly one of --blank or --from-packaged PROFILE, and one scope")
-		return 2
-	}
-	result, err := engine.CreateProfile(engine.ProfileCreation{Name: name, Repository: *repository, Global: *global, Blank: *blank, PackagedProfile: *packaged})
+	result, err := engine.CreateProfile(engine.ProfileCreation{Name: options.name, Repository: options.repository, Global: options.global, Blank: options.blank, PackagedProfile: options.packaged})
 	if err != nil {
 		fmt.Fprintf(stderr, "review-party: %v\n", err)
 		return 1
@@ -91,24 +54,18 @@ func runProfileCreate(arguments []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-func runInit(arguments []string, stdout, stderr io.Writer) int {
-	flags := flag.NewFlagSet("init", flag.ContinueOnError)
-	flags.SetOutput(stderr)
-	repository := flags.String("repo", ".", "Git repository to initialize")
-	stateDirectory := flags.String("state-dir", "", "Advanced per-user state location")
-	configuration := flags.String("config", defaultUserConfigurationPath(), "User configuration path")
-	if err := flags.Parse(arguments); err != nil {
-		return 2
-	}
-	if flags.NArg() != 0 {
-		fmt.Fprintln(stderr, "review-party: init accepts no positional arguments")
-		return 2
-	}
+type initOptions struct {
+	repository     string
+	stateDirectory string
+	configuration  string
+}
+
+func executeInit(options initOptions, stdout, stderr io.Writer) int {
 	result, err := engine.InitializeReviewParty(engine.ReviewPartyInitialization{
-		Repository:              *repository,
-		StateDirectory:          *stateDirectory,
-		UserConfigurationPath:   *configuration,
-		UseDefaultConfiguration: *configuration == defaultUserConfigurationPath(),
+		Repository:              options.repository,
+		StateDirectory:          options.stateDirectory,
+		UserConfigurationPath:   options.configuration,
+		UseDefaultConfiguration: options.configuration == defaultUserConfigurationPath(),
 	})
 	if err != nil {
 		fmt.Fprintf(stderr, "review-party: %v\n", err)

@@ -59,7 +59,10 @@ func builtinPartyDefinitions() []model.PartyDefinition {
 }
 
 func (conductor *Conductor) authoredPartyLibrary(repository string) (configuration.AuthoredLibrary, error) {
-	return conductor.profiles.manager().AuthoredLibrary(configuration.LibraryParties, configuration.Repository(repository))
+	if conductor.configuration == nil {
+		return configuration.AuthoredLibrary{}, errors.New("party library requires a configuration manager")
+	}
+	return conductor.configuration.AuthoredLibrary(configuration.LibraryParties, configuration.Repository(repository))
 }
 
 type partyLookup struct {
@@ -80,6 +83,81 @@ func (conductor *Conductor) resolveParty(lookup partyLookup) (model.PartyDefinit
 	}
 	available := conductor.partyNames(lookup.repository)
 	return model.PartyDefinition{}, "", UnknownPartyError{Name: lookup.name, Available: available}
+}
+
+type composedParty struct {
+	definition model.PartyDefinition
+	source     string
+}
+
+// composeParty resolves one Party and folds its parent definitions into one
+// effective member list before any Profile compiles or Reviewer launches.
+func (conductor *Conductor) composeParty(lookup partyLookup) (composedParty, error) {
+	return conductor.composePartyPath(lookup, nil)
+}
+
+func (conductor *Conductor) composePartyPath(lookup partyLookup, path []string) (composedParty, error) {
+	if start := partyPathIndex(path, lookup.name); start >= 0 {
+		cycle := append(append([]string(nil), path[start:]...), lookup.name)
+		return composedParty{}, fmt.Errorf("party %q extends cycle: %s", lookup.name, strings.Join(cycle, " -> "))
+	}
+	raw, source, err := conductor.resolveParty(lookup)
+	if err != nil {
+		return composedParty{}, err
+	}
+	path = append(append([]string(nil), path...), lookup.name)
+	parents := make([]model.PartyDefinition, 0, len(raw.Extends))
+	for _, parent := range raw.Extends {
+		inherited, err := conductor.composePartyPath(partyLookup{repository: lookup.repository, name: parent}, path)
+		if err != nil {
+			return composedParty{}, fmt.Errorf("party %q extends %q: %w", lookup.name, parent, err)
+		}
+		parents = append(parents, inherited.definition)
+	}
+	if raw.ConcurrencyLimit == 0 {
+		raw.ConcurrencyLimit = inheritedPartyConcurrency(parents)
+	}
+	raw.Profiles = mergePartyMembers(parents, raw.Profiles)
+	return composedParty{definition: raw, source: source}, nil
+}
+
+func partyPathIndex(path []string, name string) int {
+	for index, candidate := range path {
+		if candidate == name {
+			return index
+		}
+	}
+	return -1
+}
+
+func inheritedPartyConcurrency(parents []model.PartyDefinition) int {
+	for _, parent := range parents {
+		if parent.ConcurrencyLimit > 0 {
+			return parent.ConcurrencyLimit
+		}
+	}
+	return 0
+}
+
+func mergePartyMembers(parents []model.PartyDefinition, local []model.PartyMember) []model.PartyMember {
+	members := make([]model.PartyMember, 0, len(local))
+	positions := make(map[string]int, len(local))
+	for _, parent := range parents {
+		members = upsertPartyMembers(members, positions, parent.Profiles)
+	}
+	return upsertPartyMembers(members, positions, local)
+}
+
+func upsertPartyMembers(members []model.PartyMember, positions map[string]int, additions []model.PartyMember) []model.PartyMember {
+	for _, member := range additions {
+		if position, exists := positions[member.Profile]; exists {
+			members[position] = member
+			continue
+		}
+		positions[member.Profile] = len(members)
+		members = append(members, member)
+	}
+	return members
 }
 
 func (conductor *Conductor) resolveFilesystemParty(lookup partyLookup) (model.PartyDefinition, string, bool, error) {
@@ -123,7 +201,7 @@ func readPartyDefinition(library configuration.AuthoredLibrary, lookup partyLook
 
 func decodePartyDefinition(payload []byte, name string) (model.PartyDefinition, error) {
 	var definition model.PartyDefinition
-	if err := decodeStrictObject(payload, &definition, "party definition "+name, "schema_version", "name", "description", "profiles"); err != nil {
+	if err := decodeStrictObject(payload, &definition, "party definition "+name, "schema_version", "name", "description", "extends", "profiles", "concurrency_limit"); err != nil {
 		return model.PartyDefinition{}, InvalidPartyDefinitionError{Name: name, Reason: err.Error()}
 	}
 	if err := validatePartyDefinition(definition); err != nil {
@@ -139,14 +217,27 @@ func validatePartyDefinition(definition model.PartyDefinition) error {
 	if definition.SchemaVersion != partyDefinitionSchema {
 		return fmt.Errorf("unsupported schema_version %d", definition.SchemaVersion)
 	}
-	if err := validateProfileName(definition.Name); err != nil {
+	if err := validateAuthoredName(definition.Name); err != nil {
 		return fmt.Errorf("name %s", err)
 	}
-	if len(definition.Profiles) == 0 {
+	if err := validatePartyMembers(definition.Profiles); err != nil {
+		return err
+	}
+	if err := validatePartyParents(definition); err != nil {
+		return err
+	}
+	if definition.ConcurrencyLimit < 0 {
+		return errors.New("concurrency_limit must be positive")
+	}
+	return nil
+}
+
+func validatePartyMembers(profiles []model.PartyMember) error {
+	if len(profiles) == 0 {
 		return errors.New("profiles must contain at least one member")
 	}
-	seen := make(map[string]struct{}, len(definition.Profiles))
-	for index, member := range definition.Profiles {
+	seen := make(map[string]struct{}, len(profiles))
+	for index, member := range profiles {
 		if strings.TrimSpace(member.Profile) == "" {
 			return fmt.Errorf("profiles[%d] requires a profile", index)
 		}
@@ -155,8 +246,22 @@ func validatePartyDefinition(definition model.PartyDefinition) error {
 		}
 		seen[member.Profile] = struct{}{}
 	}
-	if definition.ConcurrencyLimit < 0 {
-		return errors.New("concurrency_limit must be positive")
+	return nil
+}
+
+func validatePartyParents(definition model.PartyDefinition) error {
+	seen := make(map[string]struct{}, len(definition.Extends))
+	for index, parent := range definition.Extends {
+		if err := validateAuthoredName(parent); err != nil {
+			return fmt.Errorf("extends[%d] %s", index, err)
+		}
+		if parent == definition.Name {
+			return fmt.Errorf("extends[%d] %q cannot extend itself", index, parent)
+		}
+		if _, exists := seen[parent]; exists {
+			return fmt.Errorf("extends contains duplicate party %q", parent)
+		}
+		seen[parent] = struct{}{}
 	}
 	return nil
 }
@@ -228,6 +333,15 @@ func (conductor *Conductor) PartiesForRepository(repository string) ([]PartySumm
 		return nil, err
 	}
 	addPackagedParties(&summaries, seen)
+	for index := range summaries {
+		if summaries[index].Error != "" {
+			continue
+		}
+		_, composeErr := conductor.composeParty(partyLookup{repository: root, name: summaries[index].Name})
+		if composeErr != nil {
+			summaries[index].Error = composeErr.Error()
+		}
+	}
 	sort.Slice(summaries, func(left, right int) bool { return summaries[left].Name < summaries[right].Name })
 	return summaries, nil
 }
@@ -286,6 +400,7 @@ func authoredPartySummary(library configuration.AuthoredLibrary, entry configura
 			summary.Error = decodeErr.Error()
 		} else {
 			summary.Description = definition.Description
+			summary.Extends = append([]string(nil), definition.Extends...)
 			summary.Members = partyMemberNames(definition)
 		}
 	}

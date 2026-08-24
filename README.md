@@ -13,6 +13,13 @@ The accepted first implementation slice is documented in
 
 ## Current CLI
 
+Run `review-party` with no arguments for task-oriented help. Every command and
+nested command supports `--help`, and `review-party completion
+bash|fish|powershell|zsh` generates a shell completion script. Profile and Party
+completion reads local configuration and packaged definitions. Reviewer
+completion lists the supported adapters. Completion never launches an Agent
+Harness.
+
 Initialize Review Party once for the repository before the first Review. This
 prepares managed per-user state without creating repository files or Profile
 copies:
@@ -103,8 +110,8 @@ existing Reviews; it does not rerun or replay them.
 Review Party loads Personal Configuration from
 `${XDG_CONFIG_HOME:-$HOME/.config}/review-party/config.json` and Repository
 Configuration from `<repo>/.reviewparty/config.json`. Both use schema version 1
-and may select default Reviewer and Profile choices or enable, disable, select,
-and restrict models for supported Reviewers. Repository values take precedence
+and may select default Reviewer, Profile, and Party choices or enable, disable,
+select, and restrict models for supported Reviewers. Repository values take precedence
 in Effective Configuration. Only Personal Configuration accepts
 `state_directory` and `eval`; ordinary callers should let `review-party init`
 manage the state directory.
@@ -114,7 +121,7 @@ Personal Configuration may include `eval` and `state_directory`:
 ```json
 {
   "schema_version": 1,
-  "defaults": {"reviewer": "grok"},
+  "defaults": {"reviewer": "grok", "party": "standard"},
   "reviewers": {
     "grok": {"enabled": true, "model": "grok-4.5"},
     "opencode": {
@@ -342,10 +349,51 @@ configuration library:
 ```
 
 Repository files shadow personal files with the same name, which shadow packaged
-definitions; a definition never inherits or concatenates another Party.
-Explicit `--reviewer`, `--model`, `--effort`, and `--concurrency` flags narrow
-every member to that choice and freeze a distinct recorded Party Revision into
-the Bundle. Members may pin their own Reviewer/model/effort instead.
+definitions; a definition never silently merges with the definition it shadows.
+To compose a shared baseline with repository-specific steps, a Party declares
+`extends`: an ordered list of other Party names resolved through the same
+Repository, Personal, then packaged precedence. Inherited members run first in
+their declared order; a local member redefining an inherited Profile replaces
+that member's settings at its position. Every extending definition must still
+declare at least one local Profile. If it omits `concurrency_limit` or sets it
+to zero, the first parent in `extends` order with a nonzero limit supplies the
+bound; without one, execution remains sequential. Explicit `null` and negative
+limits are invalid. Cycles and unknown parents fail before launch:
+
+```json
+{
+  "schema_version": 1,
+  "name": "release-gate",
+  "extends": ["org-baseline"],
+  "profiles": [
+    {"profile": "code-quality", "reviewer": "codex", "effort": "high"}
+  ]
+}
+```
+
+With this definition stored as the Personal `org-baseline` Party, a repository
+`release-gate` can consolidate the baseline and local additions into one
+Bundle. To make it the repository default, author:
+
+```json
+{
+  "schema_version": 1,
+  "defaults": {"party": "release-gate"}
+}
+```
+
+A bare command then resolves the explicit, Repository, Personal, and packaged
+`standard` choices in order:
+
+```sh
+review-party party run --repo .
+```
+
+`review-party parties` lists each definition's declared `extends` and local
+`profiles`; the persisted Bundle from `party run` records the flattened effective
+members. Explicit `--reviewer`, `--model`, `--effort`, and `--concurrency` flags
+narrow every consolidated member and freeze the effective composition into the
+Party Revision.
 
 Preflight compiles every member Profile Revision before any Agent Harness
 launches, so one incompatible member fails the whole Party with zero attempts.
