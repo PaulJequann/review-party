@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"strings"
@@ -14,22 +13,7 @@ import (
 	"reviewparty/internal/model"
 )
 
-func runParty(ctx context.Context, arguments []string, stdout, stderr io.Writer) int {
-	subcommand, remaining := takeLeadingValue(arguments)
-	switch subcommand {
-	case "run":
-		return runPartyRun(ctx, remaining, stdout, stderr)
-	default:
-		fmt.Fprintln(stderr, "review-party: party requires run")
-		return 2
-	}
-}
-
-func runPartyRun(ctx context.Context, arguments []string, stdout, stderr io.Writer) int {
-	options, ok := parsePartyRunOptions(arguments, stderr)
-	if !ok {
-		return 2
-	}
+func executePartyRun(ctx context.Context, options partyRunOptions, stdout, stderr io.Writer) int {
 	conductor, err := engine.New(engine.Config{
 		AttemptDeadline:       options.deadline,
 		UserConfigurationPath: options.configuration,
@@ -74,74 +58,28 @@ type partyRunOptions struct {
 	configuration string
 }
 
-func parsePartyRunOptions(arguments []string, stderr io.Writer) (partyRunOptions, bool) {
-	name, remaining := takeLeadingValue(arguments)
-	flags := flag.NewFlagSet("party run", flag.ContinueOnError)
-	flags.SetOutput(stderr)
-	repository := flags.String("repo", ".", "Git repository to review")
-	format := flags.String("format", "human", "Output format: human or json")
-	deadline := flags.Duration("deadline", 10*time.Minute, "Attempt deadline")
-	configuration := flags.String("config", defaultUserConfigurationPath(), "User configuration path")
-	reviewer := flags.String("reviewer", "", "Reviewer adapter override applied to every member")
-	modelName := flags.String("model", "", "Explicit model override applied to every member")
-	effort := flags.String("effort", "", "Explicit reasoning effort override applied to every member")
-	concurrency := flags.Int("concurrency", 0, "Maximum active Reviewer executions; default uses the Party definition")
-	base := flags.String("base", "", "Committed-range base revision")
-	head := flags.String("head", "", "Committed-range head revision")
-	if err := flags.Parse(remaining); err != nil {
-		return partyRunOptions{}, false
-	}
-	if flags.NArg() != 0 {
-		fmt.Fprintln(stderr, "review-party: party run accepts one party name")
-		return partyRunOptions{}, false
-	}
-	subjectReference, err := reviewSubjectReference(*base, *head)
-	if err != nil {
-		fmt.Fprintf(stderr, "review-party: %v\n", err)
-		return partyRunOptions{}, false
-	}
-	return partyRunOptions{
-		name:          name,
-		repository:    *repository,
-		subject:       subjectReference,
-		reviewer:      *reviewer,
-		model:         *modelName,
-		effort:        *effort,
-		concurrency:   *concurrency,
-		deadline:      *deadline,
-		format:        *format,
-		configuration: *configuration,
-	}, true
+type partiesOptions struct {
+	repository    string
+	format        string
+	configuration string
 }
 
-func runParties(ctx context.Context, arguments []string, stdout, stderr io.Writer) int {
-	flags := flag.NewFlagSet("parties", flag.ContinueOnError)
-	flags.SetOutput(stderr)
-	repository := flags.String("repo", ".", "Git repository whose Parties should be listed")
-	format := flags.String("format", "human", "Output format: human or json")
-	configuration := flags.String("config", defaultUserConfigurationPath(), "User configuration path")
-	if err := flags.Parse(arguments); err != nil {
-		return 2
-	}
-	if flags.NArg() != 0 {
-		fmt.Fprintln(stderr, "review-party: parties accepts no positional arguments")
-		return 2
-	}
-	conductor, err := engine.New(engine.Config{UserConfigurationPath: *configuration})
+func executeParties(ctx context.Context, options partiesOptions, stdout, stderr io.Writer) int {
+	conductor, err := engine.New(engine.Config{UserConfigurationPath: options.configuration})
 	if err != nil {
 		fmt.Fprintf(stderr, "review-party: %v\n", err)
 		return 1
 	}
-	summaries, err := conductor.PartiesForRepository(*repository)
+	summaries, err := conductor.PartiesForRepository(options.repository)
 	if err != nil {
 		fmt.Fprintf(stderr, "review-party: %v\n", err)
 		return 1
 	}
-	if *format != "json" && *format != "human" {
-		fmt.Fprintf(stderr, "review-party: unknown output format %q\n", *format)
-		return 2
+	if options.format != "json" && options.format != "human" {
+		fmt.Fprintf(stderr, "review-party: unknown output format %q\n", options.format)
+		return usageExitCode
 	}
-	return printPartySummaries(stdout, summaries, *format)
+	return printPartySummaries(stdout, summaries, options.format)
 }
 
 func printPartySummaries(stdout io.Writer, summaries []model.PartySummary, format string) int {

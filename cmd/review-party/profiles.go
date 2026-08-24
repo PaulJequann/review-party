@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"io"
 	"strings"
@@ -13,40 +12,28 @@ import (
 	"reviewparty/internal/model"
 )
 
-func runProfiles(ctx context.Context, arguments []string, stdout, stderr io.Writer) int {
-	flags := flag.NewFlagSet("profiles", flag.ContinueOnError)
-	flags.SetOutput(stderr)
-	format := flags.String("format", "human", "Output format: human or json")
-	repository := flags.String("repo", ".", "Git repository whose Profiles should be listed")
-	configuration := flags.String("config", defaultUserConfigurationPath(), "User configuration path")
-	if err := flags.Parse(arguments); err != nil {
-		return 2
-	}
-	if flags.NArg() != 0 {
-		fmt.Fprintln(stderr, "review-party: profiles accepts no arguments")
-		return 2
-	}
+type profilesOptions struct {
+	format        string
+	repository    string
+	configuration string
+}
 
-	conductor, err := engine.New(engine.Config{UserConfigurationPath: *configuration})
+func executeProfiles(ctx context.Context, options profilesOptions, stdout, stderr io.Writer) int {
+	conductor, err := engine.New(engine.Config{UserConfigurationPath: options.configuration})
 	if err != nil {
 		return printFailure(stderr, err)
 	}
-	profiles, err := conductor.ProfilesForRepository(ctx, *repository)
+	profiles, err := conductor.ProfilesForRepository(ctx, options.repository)
 	if err != nil {
 		return printFailure(stderr, err)
 	}
-	if err := printProfiles(stdout, profiles, *format); err != nil {
+	if err := printProfiles(stdout, profiles, options.format); err != nil {
 		return printFailure(stderr, err)
 	}
 	return 0
 }
 
-func runExplain(ctx context.Context, arguments []string, stdout, stderr io.Writer) int {
-	options, exitCode := parseExplainOptions(arguments, stderr)
-	if exitCode != 0 {
-		return exitCode
-	}
-
+func executeExplain(ctx context.Context, options explainOptions, stdout, stderr io.Writer) int {
 	conductor, err := engine.New(engine.Config{AttemptDeadline: options.deadline, UserConfigurationPath: options.configuration})
 	if err != nil {
 		return printFailure(stderr, err)
@@ -70,45 +57,6 @@ type explainOptions struct {
 	model         string
 	effort        string
 	repository    string
-}
-
-func parseExplainOptions(arguments []string, stderr io.Writer) (explainOptions, int) {
-	profile, remaining, ok := requiredLeadingArgument(arguments)
-	if !ok {
-		fmt.Fprintln(stderr, "review-party: explain requires a profile name")
-		return explainOptions{}, 2
-	}
-	flags := flag.NewFlagSet("explain", flag.ContinueOnError)
-	flags.SetOutput(stderr)
-	format := flags.String("format", "human", "Output format: human or json")
-	deadline := flags.Duration("deadline", 10*time.Minute, "Attempt deadline")
-	configuration := flags.String("config", defaultUserConfigurationPath(), "User configuration path")
-	reviewer := flags.String("reviewer", "", "Reviewer: "+strings.Join(engine.SupportedReviewers(), ", ")+"; empty uses configured/Profile default")
-	modelName := flags.String("model", "", "Explicit model for the selected Reviewer")
-	effort := flags.String("effort", "", "Explicit reasoning effort for the selected Reviewer")
-	repository := flags.String("repo", ".", "Git repository whose Profile should be explained")
-	if err := flags.Parse(remaining); err != nil {
-		return explainOptions{}, 2
-	}
-	if flags.NArg() != 0 {
-		fmt.Fprintln(stderr, "review-party: explain accepts one profile name")
-		return explainOptions{}, 2
-	}
-	return explainOptions{profile: profile, format: *format, deadline: *deadline, configuration: *configuration, reviewer: *reviewer, model: *modelName, effort: *effort, repository: *repository}, 0
-}
-
-func requiredLeadingArgument(arguments []string) (string, []string, bool) {
-	if len(arguments) == 0 {
-		return "", nil, false
-	}
-	value := arguments[0]
-	if value == "" {
-		return "", nil, false
-	}
-	if value[0] == '-' {
-		return "", nil, false
-	}
-	return value, arguments[1:], true
 }
 
 func printProfiles(output io.Writer, profiles []model.ProfileSummary, format string) error {

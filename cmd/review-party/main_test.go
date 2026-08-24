@@ -121,7 +121,7 @@ func TestHistoryRejectsRemovedRecordsFlag(t *testing.T) {
 	if exit := run(context.Background(), []string{"history", "--records", t.TempDir()}, &stdout, &stderr); exit != 2 {
 		t.Fatalf("exit = %d, stderr = %q", exit, stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "flag provided but not defined: -records") {
+	if !strings.Contains(stderr.String(), "unknown flag: --records") {
 		t.Fatalf("stderr = %q", stderr.String())
 	}
 }
@@ -170,12 +170,14 @@ func TestHistoryParsesFiltersAndRendersEquivalentSummaries(t *testing.T) {
 	}
 }
 
-func TestUsageListsEverySupportedReviewer(t *testing.T) {
-	var output bytes.Buffer
-	printUsage(&output)
+func TestReviewHelpListsEverySupportedReviewer(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if exit := run(context.Background(), []string{"review", "--help"}, &stdout, &stderr); exit != 0 {
+		t.Fatalf("exit = %d, stderr = %q", exit, stderr.String())
+	}
 	for _, reviewer := range engine.SupportedReviewers() {
-		if !strings.Contains(output.String(), reviewer) {
-			t.Fatalf("usage omits supported reviewer %q:\n%s", reviewer, output.String())
+		if !strings.Contains(stdout.String(), reviewer) {
+			t.Fatalf("help omits supported reviewer %q:\n%s", reviewer, stdout.String())
 		}
 	}
 }
@@ -477,8 +479,14 @@ func TestPrintRecordJSONIncludesStructuredFindings(t *testing.T) {
 	if err := json.Unmarshal(output.Bytes(), &inspected); err != nil {
 		t.Fatal(err)
 	}
-	if inspected.Result == nil || len(inspected.Result.Findings) != 1 || inspected.Result.Findings[0].Evidence != record.Result.Findings[0].Evidence {
-		t.Fatalf("inspected result = %#v, want structured finding", inspected.Result)
+	if inspected.Result == nil {
+		t.Fatal("JSON omitted the structured result")
+	}
+	if len(inspected.Result.Findings) != 1 {
+		t.Fatalf("findings = %#v, want one structured finding", inspected.Result.Findings)
+	}
+	if inspected.Result.Findings[0].Evidence != record.Result.Findings[0].Evidence {
+		t.Fatalf("finding = %#v, want evidence %q", inspected.Result.Findings[0], record.Result.Findings[0].Evidence)
 	}
 }
 
