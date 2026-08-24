@@ -243,10 +243,6 @@ func initializationDirectory(initialization ProfileInitialization) (string, fs.F
 	return filepath.Join(root, ".reviewparty"), 0o755, nil
 }
 
-func writeNewProfileFile(path string, payload []byte, permissions fs.FileMode) (bool, error) {
-	return writeNewProfileFileWith(path, payload, permissions, writeProfilePayload)
-}
-
 func writeNewProfileFileWith(path string, payload []byte, permissions fs.FileMode, write func(*os.File, []byte) error) (bool, error) {
 	operations := profileFileOperations{
 		open:    func() (*os.File, error) { return os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, permissions) },
