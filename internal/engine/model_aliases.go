@@ -36,7 +36,6 @@ type ReviewRecord = model.ReviewRecord
 
 // Constants
 const (
-	LegacyReviewRecordSchemaVersion  = model.LegacyReviewRecordSchemaVersion
 	CurrentReviewRecordSchemaVersion = model.CurrentReviewRecordSchemaVersion
 
 	LifecyclePending    = model.LifecyclePending
@@ -81,8 +80,6 @@ const (
 	ResultFindings = model.ResultFindings
 )
 
-// Lower-case backward-compat aliases for code that still uses private constant names
-const legacyReviewRecordSchemaVersion = model.LegacyReviewRecordSchemaVersion
 const currentReviewRecordSchemaVersion = model.CurrentReviewRecordSchemaVersion
 
 // Functions / vars that were in model

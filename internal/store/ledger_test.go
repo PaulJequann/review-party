@@ -314,7 +314,7 @@ func historyReviewerQueryPlan(t *testing.T, ledger *LedgerRecordStore) []string 
 	return details
 }
 
-func TestLedgerPreparationMigratesVersionOneHistoryState(t *testing.T) {
+func TestLedgerRejectsObsoleteSchema(t *testing.T) {
 	directory := t.TempDir()
 	ledger := newTestLedger(t, directory)
 	if err := ledger.Close(); err != nil {
@@ -324,20 +324,14 @@ func TestLedgerPreparationMigratesVersionOneHistoryState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec("DROP TABLE adjudication_revisions; DROP TABLE eval_runs; DROP TABLE eval_suite_runs; DROP INDEX IF EXISTS review_bundles_party_history; DROP TABLE IF EXISTS review_bundles; ALTER TABLE attempts DROP COLUMN retry_after_ms; DROP INDEX reviews_replay_source; ALTER TABLE reviews DROP COLUMN replays_review_id; DROP INDEX reviews_history_order; DROP INDEX reviews_history_reviewer; DELETE FROM schema_migrations WHERE version>=2"); err != nil {
+	if _, err := db.Exec("ALTER TABLE reviews ADD COLUMN incomplete_cause TEXT NOT NULL DEFAULT ''; UPDATE schema_migrations SET version=8"); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
-	migrated := newTestLedger(t, directory)
-	defer migrated.Close()
-	var count int
-	if err := migrated.db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name LIKE 'reviews_history_%'").Scan(&count); err != nil {
-		t.Fatal(err)
-	}
-	if count != 2 {
-		t.Fatalf("history index count = %d, want 2", count)
+	if _, err := ReviewRecordStatePrepared(directory); !errors.Is(err, ErrReviewRecordStateRequiresPreparation) {
+		t.Fatalf("error = %v", err)
 	}
 }
 

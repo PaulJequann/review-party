@@ -1,1 +1,0 @@
-ALTER TABLE attempts ADD COLUMN retry_after_ms INTEGER NOT NULL DEFAULT 0;

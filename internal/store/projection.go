@@ -47,8 +47,8 @@ func writeReview(tx *sql.Tx, record model.ReviewRecord) error {
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(`INSERT INTO reviews(id,replays_review_id,lifecycle,subject,profile_revision,profile_snapshot,result_status,result_summary,result_raw,result_finding_count,termination,runtime,timings,incomplete_cause,created_at,updated_at)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET replays_review_id=excluded.replays_review_id, lifecycle=excluded.lifecycle, subject=excluded.subject, profile_revision=excluded.profile_revision, profile_snapshot=excluded.profile_snapshot, result_status=excluded.result_status, result_summary=excluded.result_summary, result_raw=excluded.result_raw, result_finding_count=excluded.result_finding_count, termination=excluded.termination, runtime=excluded.runtime, timings=excluded.timings, incomplete_cause=excluded.incomplete_cause, updated_at=excluded.updated_at`, values...)
+	_, err = tx.Exec(`INSERT INTO reviews(id,replays_review_id,lifecycle,subject,profile_revision,profile_snapshot,result_status,result_summary,result_raw,result_finding_count,termination,runtime,timings,created_at,updated_at)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET replays_review_id=excluded.replays_review_id, lifecycle=excluded.lifecycle, subject=excluded.subject, profile_revision=excluded.profile_revision, profile_snapshot=excluded.profile_snapshot, result_status=excluded.result_status, result_summary=excluded.result_summary, result_raw=excluded.result_raw, result_finding_count=excluded.result_finding_count, termination=excluded.termination, runtime=excluded.runtime, timings=excluded.timings, updated_at=excluded.updated_at`, values...)
 	return err
 }
 
@@ -78,7 +78,7 @@ func projectionValues(record model.ReviewRecord) ([]any, error) {
 		return nil, fmt.Errorf("encode review timings: %w", err)
 	}
 	status, summary, raw, count := projectedResult(record.Result)
-	return []any{string(record.ID), record.ReplaysReviewID, record.Lifecycle, subject, profile, snapshot, status, summary, raw, count, termination, runtime, timings, record.IncompleteCause, record.CreatedAt, record.UpdatedAt}, nil
+	return []any{string(record.ID), record.ReplaysReviewID, record.Lifecycle, subject, profile, snapshot, status, summary, raw, count, termination, runtime, timings, record.CreatedAt, record.UpdatedAt}, nil
 }
 
 func encodeNullable(value any) ([]byte, error) {
@@ -185,22 +185,21 @@ type reviewValues struct {
 	subject, profile, snapshot, termination, runtime, timings []byte
 	status, summary, raw                                      sql.NullString
 	findingCount                                              int
-	incompleteCause                                           string
 	createdAt, updatedAt                                      time.Time
 	replaysReviewID                                           sql.NullString
 }
 
 func (p reviewRecordProjection) loadReviewValues(id model.ReviewID) (reviewValues, error) {
-	row := p.db.QueryRow("SELECT lifecycle,subject,profile_revision,profile_snapshot,result_status,result_summary,result_raw,result_finding_count,termination,runtime,timings,incomplete_cause,created_at,updated_at,replays_review_id FROM reviews WHERE id = ?", id)
+	row := p.db.QueryRow("SELECT lifecycle,subject,profile_revision,profile_snapshot,result_status,result_summary,result_raw,result_finding_count,termination,runtime,timings,created_at,updated_at,replays_review_id FROM reviews WHERE id = ?", id)
 	var values reviewValues
-	if err := row.Scan(&values.lifecycle, &values.subject, &values.profile, &values.snapshot, &values.status, &values.summary, &values.raw, &values.findingCount, &values.termination, &values.runtime, &values.timings, &values.incompleteCause, &values.createdAt, &values.updatedAt, &values.replaysReviewID); err != nil {
+	if err := row.Scan(&values.lifecycle, &values.subject, &values.profile, &values.snapshot, &values.status, &values.summary, &values.raw, &values.findingCount, &values.termination, &values.runtime, &values.timings, &values.createdAt, &values.updatedAt, &values.replaysReviewID); err != nil {
 		return values, fmt.Errorf("read review record %q: %w", id, err)
 	}
 	return values, nil
 }
 
 func (values reviewValues) record(id model.ReviewID) (model.ReviewRecord, error) {
-	record := model.ReviewRecord{ID: id, SchemaVersion: model.CurrentReviewRecordSchemaVersion, Lifecycle: values.lifecycle, IncompleteCause: values.incompleteCause, CreatedAt: values.createdAt, UpdatedAt: values.updatedAt}
+	record := model.ReviewRecord{ID: id, SchemaVersion: model.CurrentReviewRecordSchemaVersion, Lifecycle: values.lifecycle, CreatedAt: values.createdAt, UpdatedAt: values.updatedAt}
 	if values.replaysReviewID.Valid {
 		replayed := model.ReviewID(values.replaysReviewID.String)
 		record.ReplaysReviewID = &replayed

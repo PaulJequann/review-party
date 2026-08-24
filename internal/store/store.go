@@ -18,6 +18,12 @@ import (
 
 const ledgerFilename = "ledger.sqlite"
 
+// currentLedgerSchemaVersion identifies the single schema used by this pre-release product.
+const currentLedgerSchemaVersion = 1
+
+// maxObsoleteLedgerSchemaVersion covers the last schema before the direct replacement.
+const maxObsoleteLedgerSchemaVersion = 8
+
 var ErrReviewRecordStateNotInitialized = errors.New("Review Party is not initialized")
 var ErrReviewRecordStateRequiresPreparation = errors.New("Review Party state requires preparation")
 
@@ -325,12 +331,14 @@ func (s *LedgerRecordStore) requirePreparedSchema() error {
 	if err := s.db.QueryRow("SELECT COALESCE(MAX(version), 0) FROM schema_migrations").Scan(&version); err != nil {
 		return fmt.Errorf("read review ledger schema: %w", err)
 	}
-	const current = 8
-	if version > current {
-		return fmt.Errorf("review ledger schema %d is newer than supported schema %d", version, current)
+	if version > currentLedgerSchemaVersion {
+		if version <= maxObsoleteLedgerSchemaVersion {
+			return fmt.Errorf("%w: review ledger schema %d requires state preparation for schema %d", ErrReviewRecordStateRequiresPreparation, version, currentLedgerSchemaVersion)
+		}
+		return fmt.Errorf("review ledger schema %d is newer than supported schema %d", version, currentLedgerSchemaVersion)
 	}
-	if version < current {
-		return fmt.Errorf("%w: review ledger schema %d requires state preparation for schema %d", ErrReviewRecordStateRequiresPreparation, version, current)
+	if version < currentLedgerSchemaVersion {
+		return fmt.Errorf("%w: review ledger schema %d requires state preparation for schema %d", ErrReviewRecordStateRequiresPreparation, version, currentLedgerSchemaVersion)
 	}
 	return nil
 }
@@ -363,7 +371,6 @@ func (s *LedgerRecordStore) migrate() error {
 	if _, err := s.db.Exec("CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY)"); err != nil {
 		return fmt.Errorf("create migration table: %w", err)
 	}
-	const current = 8
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
@@ -373,10 +380,10 @@ func (s *LedgerRecordStore) migrate() error {
 	if err != nil {
 		return err
 	}
-	if version > current {
-		return fmt.Errorf("review ledger schema %d is newer than supported schema %d", version, current)
+	if version > currentLedgerSchemaVersion {
+		return fmt.Errorf("review ledger schema %d is newer than supported schema %d", version, currentLedgerSchemaVersion)
 	}
-	for version < current {
+	for version < currentLedgerSchemaVersion {
 		if err := applyKnownMigration(tx, version+1); err != nil {
 			return err
 		}
@@ -386,7 +393,7 @@ func (s *LedgerRecordStore) migrate() error {
 }
 
 func applyKnownMigration(tx *sql.Tx, version int) error {
-	paths := map[int]string{1: "migrations/001_initial.sql", 2: "migrations/002_history_indexes.sql", 3: "migrations/003_replay_lineage.sql", 4: "migrations/004_eval_runs.sql", 5: "migrations/005_adjudication_revisions.sql", 6: "migrations/006_eval_lifecycle.sql", 7: "migrations/007_attempt_retry_delay.sql", 8: "migrations/008_review_bundles.sql"}
+	paths := map[int]string{currentLedgerSchemaVersion: "migrations/initial.sql"}
 	path, exists := paths[version]
 	if !exists {
 		return fmt.Errorf("no migration for review ledger schema %d", version)
