@@ -160,8 +160,9 @@ func TestRecordSaveFailureRemovesPublishedAttemptArtifacts(t *testing.T) {
 }
 
 func TestOverflowedExecutionMarksAssistantArtifactTruncated(t *testing.T) {
-	conductor := &Conductor{artifacts: mustNewArtifactStore(t, t.TempDir())}
-	attempt, err := conductor.buildAttempt("rp_1723200000000_0123456789abcdef", "prompt", reviewerCandidate{}, attemptExecution{AssistantText: "captured prefix", ArtifactTruncated: true}, AttemptInvalidResult, time.Time{}, time.Time{})
+	publisher := newArtifactPublisher(mustNewArtifactStore(t, t.TempDir()))
+	runner := &reviewRunner{publisher: publisher}
+	attempt, err := runner.buildAttempt("rp_1723200000000_0123456789abcdef", "prompt", reviewerCandidate{}, attemptExecution{AssistantText: "captured prefix", ArtifactTruncated: true}, AttemptInvalidResult, time.Time{}, time.Time{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -250,7 +251,7 @@ func TestUnavailableReviewerLaunchesNoAttempt(t *testing.T) {
 		availability: availability{Diagnostic: "grok is not installed"},
 		execute: func(context.Context, attemptSpec) attemptExecution {
 			t.Fatal("unavailable reviewer was executed")
-			return attemptExecution{}
+			return failedExecution(AttemptUnknownFailure, TerminationUnknownFailure, PhaseReviewerExecution, "unreachable")
 		},
 	}
 	conductor := testConductor(t, executor, time.Second)
@@ -277,7 +278,7 @@ func TestExplicitReviewerRoutesToMatchingAdapter(t *testing.T) {
 		availability: availability{Available: true},
 		execute: func(context.Context, attemptSpec) attemptExecution {
 			t.Fatal("grok executed for an opencode selection")
-			return attemptExecution{}
+			return failedExecution(AttemptUnknownFailure, TerminationUnknownFailure, PhaseReviewerExecution, "unreachable")
 		},
 	}
 	opencode := successfulExecutor(cleanReview)
@@ -329,7 +330,7 @@ func TestUnavailableReviewerDoesNotFallBack(t *testing.T) {
 		availability: availability{Diagnostic: "grok login required"},
 		execute: func(context.Context, attemptSpec) attemptExecution {
 			t.Fatal("unavailable grok reviewer executed")
-			return attemptExecution{}
+			return failedExecution(AttemptUnknownFailure, TerminationUnknownFailure, PhaseReviewerExecution, "unreachable")
 		},
 	}
 	opencode := successfulExecutor(cleanReview)

@@ -6,8 +6,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"time"
-
-	"reviewparty/internal/artifact"
 )
 
 // reviewRunner owns the single-Review lifecycle: pending → availability →
@@ -19,18 +17,15 @@ type reviewRunner struct {
 	store           recordStore
 	now             func() time.Time
 	buildProvenance func() RuntimeProvenance
-	artifacts       func() *artifact.Store
+	publisher       *artifactPublisher
 }
 
-func newReviewRunner(store recordStore, now func() time.Time, buildProvenance func() RuntimeProvenance, artifacts func() *artifact.Store) *reviewRunner {
-	if artifacts == nil {
-		artifacts = func() *artifact.Store { return nil }
-	}
+func newReviewRunner(store recordStore, now func() time.Time, buildProvenance func() RuntimeProvenance, publisher *artifactPublisher) *reviewRunner {
 	return &reviewRunner{
 		store:           store,
 		now:             now,
 		buildProvenance: buildProvenance,
-		artifacts:       artifacts,
+		publisher:       publisher,
 	}
 }
 
@@ -139,7 +134,7 @@ func (runner *reviewRunner) executePass(ctx context.Context, pass passExecution)
 	record.Passes[0].Attempts = append(record.Passes[0].Attempts, attempt)
 	runner.finalizeOperationalRecord(&record, pass.reviewStarted)
 	if err := runner.store.Save(record); err != nil {
-		runner.removeArtifacts(attempt.Artifacts)
+		runner.publisher.removeArtifacts(attempt.Artifacts)
 		return record, err
 	}
 	if cleanupErr != nil {
@@ -157,7 +152,16 @@ func applyAttemptResult(record *ReviewRecord, result ReviewResult, execution att
 	}
 	if outcome == AttemptCompleted {
 		outcome = AttemptInvalidResult
-	} else if outcome == "" {
+		record.Lifecycle = LifecycleIncomplete
+		termination := ReviewTermination{
+			Category: TerminationResultValidationFailure,
+			Phase:    PhaseResultValidation,
+			Message:  attemptTerminationMessage(outcome, execution.Diagnostic, parseErr),
+		}
+		record.Termination = &termination
+		return outcome
+	}
+	if outcome == "" {
 		outcome = AttemptUnknownFailure
 	}
 	record.Lifecycle = LifecycleIncomplete
@@ -195,10 +199,10 @@ func (runner *reviewRunner) buildAttempt(id ReviewID, prompt string, candidate r
 		StartedAt:    started,
 		CompletedAt:  completed,
 	}
-	if runner.artifacts() == nil {
+	if runner.publisher == nil || runner.publisher.store == nil {
 		return attempt, nil
 	}
-	references, err := runner.publishAttemptArtifacts(id, attempt.Number, prompt, execution)
+	references, err := runner.publisher.publishAttemptArtifacts(id, attempt.Number, prompt, execution)
 	if err != nil {
 		return AttemptRecord{}, err
 	}
@@ -207,55 +211,11 @@ func (runner *reviewRunner) buildAttempt(id ReviewID, prompt string, candidate r
 	return attempt, nil
 }
 
-func (runner *reviewRunner) publishAttemptArtifacts(id ReviewID, number int, prompt string, execution attemptExecution) ([]ArtifactReference, error) {
-	inputs := []struct {
-		kind      string
-		contents  []byte
-		truncated bool
-	}{
-		{kind: "constructed-prompt", contents: []byte(prompt), truncated: len(prompt) > maxHarnessStdout},
-		{kind: "assistant-text", contents: []byte(execution.AssistantText), truncated: execution.ArtifactTruncated || len(execution.AssistantText) > maxHarnessStdout},
-	}
-	references := make([]ArtifactReference, 0, len(inputs))
-	for _, input := range inputs {
-		contents := boundedArtifactContents(input.contents)
-		reference, err := runner.artifacts().Publish(id, number, input.kind, contents, input.truncated)
-		if err != nil {
-			runner.removeArtifacts(references)
-			return nil, err
-		}
-		references = append(references, reference)
-	}
-	return references, nil
-}
-
-func boundedArtifactContents(contents []byte) []byte {
-	if len(contents) <= maxHarnessStdout {
-		return contents
-	}
-	return contents[:maxHarnessStdout]
-}
-
-func (runner *reviewRunner) removeArtifacts(references []ArtifactReference) {
-	for _, reference := range references {
-		_ = runner.artifacts().Remove(reference)
-	}
-}
-
 func (runner *reviewRunner) VerifyArtifacts(record ReviewRecord) error {
-	if runner.artifacts() == nil {
+	if runner.publisher == nil {
 		return nil
 	}
-	for _, pass := range record.Passes {
-		for _, attempt := range pass.Attempts {
-			for _, reference := range attempt.Artifacts {
-				if _, err := runner.artifacts().Read(reference); err != nil {
-					return err
-				}
-			}
-		}
-	}
-	return nil
+	return runner.publisher.verifyArtifacts(record)
 }
 
 func terminationForAvailability(diagnostic string) ReviewTermination {
@@ -268,23 +228,7 @@ func terminationForAvailability(diagnostic string) ReviewTermination {
 
 func terminationForAttempt(execution attemptExecution, outcome AttemptOutcome, parseErr error) ReviewTermination {
 	message := attemptTerminationMessage(outcome, execution.Diagnostic, parseErr)
-	if execution.FailureCategory != "" {
-		return ReviewTermination{Category: execution.FailureCategory, Phase: execution.FailurePhase, Message: message}
-	}
-	switch {
-	case execution.Outcome == AttemptCompleted && parseErr != nil:
-		return ReviewTermination{Category: TerminationResultValidationFailure, Phase: PhaseResultValidation, Message: message}
-	case outcome == AttemptInvalidResult:
-		return ReviewTermination{Category: TerminationMalformedOutput, Phase: PhaseOutputDecode, Message: message}
-	case outcome == AttemptReviewerUnavailable:
-		return ReviewTermination{Category: TerminationReviewerUnavailable, Phase: PhaseHarnessLaunch, Message: message}
-	case outcome == AttemptTransientFailure:
-		return ReviewTermination{Category: TerminationTransportFailure, Phase: PhaseReviewerExecution, Message: message}
-	case outcome == AttemptCancelled:
-		return ReviewTermination{Category: TerminationCancelled, Phase: PhaseReviewerExecution, Message: message}
-	default:
-		return ReviewTermination{Category: TerminationUnknownFailure, Phase: PhaseReviewerExecution, Message: message}
-	}
+	return ReviewTermination{Category: execution.FailureCategory, Phase: execution.FailurePhase, Message: message}
 }
 
 func boundedAttemptOutput(output string) string {

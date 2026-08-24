@@ -58,6 +58,7 @@ func New(config Config) (*Conductor, error) {
 	if err != nil {
 		return nil, err
 	}
+	conductor.runner.publisher = newArtifactPublisher(conductor.artifacts)
 	return conductor, nil
 }
 
@@ -83,7 +84,7 @@ func newConductorWithProfiles(store recordStore, reviewers reviewerCatalog, prof
 		retryDelay:      retryDelay,
 		wait:            waitForRetry,
 	}
-	conductor.runner = newReviewRunner(store, func() time.Time { return conductor.now() }, func() RuntimeProvenance { return conductor.buildProvenance() }, func() *artifact.Store { return conductor.artifacts })
+	conductor.runner = newReviewRunner(store, func() time.Time { return conductor.now() }, func() RuntimeProvenance { return conductor.buildProvenance() }, newArtifactPublisher(nil))
 	return conductor, nil
 }
 
@@ -286,37 +287,15 @@ func (conductor *Conductor) History(_ context.Context, query store.HistoryQuery)
 }
 
 // lifecycle delegation — the deep Review module owns these seams.
-// getRunner is race-free: runner is immutable after construction; artifacts
-// are read via closure so per-call sync and racy writes are eliminated.
+// getRunner provides the single Review seam; runner is eagerly constructed
+// and immutable after New, so concurrent Party/Eval callers share it without
+// racy per-call writes. The trailing lazy branch supports literal
+// &Conductor{artifacts: ...} in tests.
 func (conductor *Conductor) getRunner() *reviewRunner {
 	if conductor.runner == nil {
-		conductor.runner = newReviewRunner(conductor.store, func() time.Time { return conductor.now() }, func() RuntimeProvenance { return conductor.buildProvenance() }, func() *artifact.Store { return conductor.artifacts })
+		conductor.runner = newReviewRunner(conductor.store, func() time.Time { return conductor.now() }, func() RuntimeProvenance { return conductor.buildProvenance() }, newArtifactPublisher(conductor.artifacts))
 	}
 	return conductor.runner
-}
-
-func (conductor *Conductor) executePass(ctx context.Context, pass passExecution) (ReviewRecord, error) {
-	return conductor.getRunner().executePass(ctx, pass)
-}
-
-func (conductor *Conductor) finishIncomplete(record ReviewRecord, termination ReviewTermination, reviewStarted time.Time) (ReviewRecord, error) {
-	return conductor.getRunner().finishIncomplete(record, termination, reviewStarted)
-}
-
-func (conductor *Conductor) finalizeOperationalRecord(record *ReviewRecord, reviewStarted time.Time) {
-	conductor.getRunner().finalizeOperationalRecord(record, reviewStarted)
-}
-
-func (conductor *Conductor) buildAttempt(id ReviewID, prompt string, candidate reviewerCandidate, execution attemptExecution, outcome AttemptOutcome, started, completed time.Time) (AttemptRecord, error) {
-	return conductor.getRunner().buildAttempt(id, prompt, candidate, execution, outcome, started, completed)
-}
-
-func (conductor *Conductor) publishAttemptArtifacts(id ReviewID, number int, prompt string, execution attemptExecution) ([]ArtifactReference, error) {
-	return conductor.getRunner().publishAttemptArtifacts(id, number, prompt, execution)
-}
-
-func (conductor *Conductor) removeArtifacts(references []ArtifactReference) {
-	conductor.getRunner().removeArtifacts(references)
 }
 
 func (conductor *Conductor) VerifyArtifacts(record ReviewRecord) error {
