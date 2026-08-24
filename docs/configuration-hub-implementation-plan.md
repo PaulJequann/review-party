@@ -1,6 +1,6 @@
 # Configuration Hub implementation plan
 
-Status: Slice 2 complete; remaining slices pending
+Status: Slice 3 complete; remaining slices pending
 Last reconciled: 2026-08-23
 
 This plan replaces Review Party's fragmented personal configuration experience
@@ -342,7 +342,7 @@ publication.
 
 ## Slice 3 — Cobra command tree
 
-Status: **Pending**
+Status: **Complete**
 
 Depends on: the completed Slice 2 Interface.
 
@@ -372,11 +372,33 @@ with a coherent Cobra tree without changing Review Party's execution semantics.
 
 ### Acceptance
 
-- Existing focused CLI tests pass against Cobra-backed commands.
-- Root and nested help are readable and task-oriented.
-- Unknown commands receive useful suggestions.
-- Review, inspect, history, Eval, Profile, and Party JSON outputs remain
+- [x] Existing focused CLI tests pass against Cobra-backed commands.
+- [x] Root and nested help are readable and task-oriented.
+- [x] Unknown commands receive useful suggestions.
+- [x] Review, inspect, history, Eval, Profile, and Party JSON outputs remain
   contract-compatible.
+
+### Verification evidence
+
+- `go test ./internal/configuration ./internal/engine ./cmd/review-party`
+- `go vet ./internal/configuration ./internal/engine ./cmd/review-party`
+- `go build -o scratch/slice3/review-party ./cmd/review-party`
+- `go mod verify`
+- `git diff --check`
+- The isolated XDG CLI exercise covered successful root help, initialization,
+  Profile and history JSON, generated Bash completion, and an unknown-command
+  suggestion with exit code 2.
+- Command-tree tests cover successful root help, concise usage errors, typed
+  flag rejection, suggestions, and dynamic Profile, Party, and Reviewer
+  completion.
+- Bounded OpenCode Muse dogfood found and drove removal of duplicate flag
+  parsing, an untyped command-operation bag, string-based Eval override
+  tracking, and inconsistent command-output types. It also corrected an
+  overstated README completion claim. The final `bugs`, `code-quality`, and
+  `documentation` Reviews ran against unchanged Subject
+  `11c89827ade564bc2d3982aba563d9e4e4367c75dc714863fa9b6072d1297a97`.
+  All three persisted Records are Completed and clean with the requested
+  OpenCode Muse model and `canonical-v2` result contract.
 
 ## Slice 4 — Agent-facing configuration commands
 
@@ -590,6 +612,9 @@ are written.
 | A confirmed draft publishes atomically | One Profile file changes while `config.json` remains old | Real filesystem publication | Forced failure restores or preserves the complete prior configuration |
 | Defaults remain zero-write | Opening the Hub creates a config that later masks packaged updates | Public Hub over isolated XDG dirs | Open and exit leaves no files |
 | Cobra preserves automation | Framework migration changes JSON shape or usage exit codes | Public CLI | Golden semantic JSON and exit behavior remain stable |
+| Root help is a successful starting point | Manual-dispatch behavior survives and treats no arguments as misuse | Public CLI | No-argument execution exits 0 and points to `review-party config` |
+| Completion remains local and bounded | Name completion launches a Reviewer or omits packaged choices | Cobra completion entry point | Profile, Party, and Reviewer names complete without a Review Record |
+| Cobra parses typed flags once | Help and execution drift because a second parser owns another flag definition | Public CLI | Invalid typed values fail at Cobra and execution consumes the same parsed values shown in help |
 | Discovery is bounded and isolated | One hanging harness freezes all Reviewer configuration | Discovery Module and Hub update loop | Other screens remain responsive and cancellation reaps the process |
 | Discovery remains observational | Refresh launches login or writes another tool's settings | Scripted harness fixture | No auth or configuration change occurs before explicit action |
 | Manual model entry remains available | Incomplete discovery prevents selection of a valid new model | Reviewer editor | Warning can be confirmed and selected ID is saved |

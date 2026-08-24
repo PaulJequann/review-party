@@ -13,6 +13,13 @@ The accepted first implementation slice is documented in
 
 ## Current CLI
 
+Run `review-party` with no arguments for task-oriented help. Every command and
+nested command supports `--help`, and `review-party completion
+bash|fish|powershell|zsh` generates a shell completion script. Profile and Party
+completion reads local configuration and packaged definitions. Reviewer
+completion lists the supported adapters. Completion never launches an Agent
+Harness.
+
 Initialize Review Party once for the repository before the first Review. This
 prepares managed per-user state without creating repository files or Profile
 copies:

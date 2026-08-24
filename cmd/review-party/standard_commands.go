@@ -1,0 +1,305 @@
+package main
+
+import (
+	"context"
+	"strings"
+
+	"github.com/spf13/cobra"
+
+	"reviewparty/internal/engine"
+	"reviewparty/internal/model"
+	"reviewparty/internal/store"
+)
+
+func newReviewCommand(streams commandIO) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:               "review [PROFILE]",
+		Short:             "Review working changes or a committed range",
+		Example:           "  review-party review bugs --repo .\n  review-party review code-quality --base main --head HEAD --format json",
+		Args:              cobra.MaximumNArgs(1),
+		ValidArgsFunction: completeProfileNames,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			profile := ""
+			if len(args) == 1 {
+				profile = args[0]
+			}
+			options := reviewOptions{
+				profile: profile, repository: stringFlag(cmd, "repo"), format: stringFlag(cmd, "format"),
+				deadline: durationFlag(cmd, "deadline"), configuration: stringFlag(cmd, "config"),
+				reviewer: stringFlag(cmd, "reviewer"), model: stringFlag(cmd, "model"), effort: stringFlag(cmd, "effort"),
+				base: stringFlag(cmd, "base"), head: stringFlag(cmd, "head"),
+			}
+			return commandResult(executeReview(cmd.Context(), options, streams.output, streams.errors))
+		},
+	}
+	addReviewFlags(cmd)
+	return cmd
+}
+
+func newReplayCommand(streams commandIO) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:     "replay REVIEW_ID",
+		Short:   "Replay a recorded committed Review",
+		Example: "  review-party replay rp_... --reviewer opencode --model MODEL",
+		Args:    cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			options := replayOptions{
+				id: model.ReviewID(args[0]), format: stringFlag(cmd, "format"), configuration: stringFlag(cmd, "config"),
+				reviewer: stringFlag(cmd, "reviewer"), model: stringFlag(cmd, "model"), effort: stringFlag(cmd, "effort"),
+			}
+			return commandResult(executeReplay(cmd.Context(), options, streams.output, streams.errors))
+		},
+	}
+	addFormatFlag(cmd)
+	addConfigurationFlag(cmd)
+	addCommonSelectionFlags(cmd)
+	return cmd
+}
+
+func newInspectCommand(streams commandIO) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:     "inspect REVIEW_OR_BUNDLE_ID",
+		Short:   "Inspect a Review Record or Review Bundle",
+		Example: "  review-party inspect rp_... --format json\n  review-party inspect rb_...",
+		Args:    cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			options := inspectOptions{id: model.ReviewID(args[0]), format: stringFlag(cmd, "format"), verifyArtifacts: boolFlag(cmd, "verify-artifacts"), configuration: stringFlag(cmd, "config")}
+			return commandResult(executeInspect(cmd.Context(), options, streams.output, streams.errors))
+		},
+	}
+	addFormatFlag(cmd)
+	addConfigurationFlag(cmd)
+	cmd.Flags().Bool("verify-artifacts", false, "Verify referenced artifact files")
+	return cmd
+}
+
+func newHistoryCommand(streams commandIO) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:     "history",
+		Short:   "Query recorded Reviews",
+		Example: "  review-party history --reviewer opencode --profile bugs\n  review-party history --format json",
+		Args:    cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			query := store.HistoryQuery{
+				Repository: stringFlag(cmd, "repo"), Reviewer: stringFlag(cmd, "reviewer"), Profile: stringFlag(cmd, "profile"),
+				Lifecycle: model.Lifecycle(stringFlag(cmd, "lifecycle")), Termination: model.TerminationCategory(stringFlag(cmd, "termination")),
+				Subject: stringFlag(cmd, "subject"), Limit: intFlag(cmd, "limit"),
+			}
+			options := historyOptions{query: query, format: stringFlag(cmd, "format"), configuration: stringFlag(cmd, "config"), sinceText: stringFlag(cmd, "since")}
+			return commandResult(executeHistory(cmd.Context(), options, streams.output, streams.errors))
+		},
+	}
+	addFormatFlag(cmd)
+	addConfigurationFlag(cmd)
+	cmd.Flags().String("repo", "", "Git repository identity to match")
+	cmd.Flags().String("reviewer", "", "Recorded Reviewer to match")
+	cmd.Flags().String("profile", "", "Recorded Profile to match")
+	cmd.Flags().String("lifecycle", "", "Lifecycle to match")
+	cmd.Flags().String("termination", "", "Termination category to match")
+	cmd.Flags().String("subject", "", "Subject identity to match")
+	cmd.Flags().String("since", "", "Include Reviews at or after this RFC3339 timestamp")
+	cmd.Flags().Int("limit", 20, "Maximum Reviews to show")
+	return cmd
+}
+
+func newProfilesCommand(streams commandIO) *cobra.Command {
+	return newLibraryListCommand(profileListSpec(), streams)
+}
+
+func newExplainCommand(use string, streams commandIO) *cobra.Command {
+	cmd := &cobra.Command{
+		Use: use + " PROFILE", Short: "Explain a compiled Review Profile without launching a Reviewer",
+		Example: "  review-party " + use + " bugs --reviewer opencode --model MODEL", Args: cobra.ExactArgs(1),
+		ValidArgsFunction: completeProfileNames,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			options := explainOptions{
+				profile: args[0], format: stringFlag(cmd, "format"), deadline: durationFlag(cmd, "deadline"), configuration: stringFlag(cmd, "config"),
+				reviewer: stringFlag(cmd, "reviewer"), model: stringFlag(cmd, "model"), effort: stringFlag(cmd, "effort"), repository: stringFlag(cmd, "repo"),
+			}
+			return commandResult(executeExplain(cmd.Context(), options, streams.output, streams.errors))
+		},
+	}
+	addRepositoryFlag(cmd, "Git repository whose Profile should be explained")
+	addFormatFlag(cmd)
+	addExecutionFlags(cmd)
+	addCommonSelectionFlags(cmd)
+	return cmd
+}
+
+func newProfileCommand(streams commandIO) *cobra.Command {
+	cmd := &cobra.Command{Use: "profile", Short: "Manage one Review Profile", Args: cobra.NoArgs, RunE: showCommandHelp}
+	create := &cobra.Command{
+		Use: "create NAME", Short: "Create an owned Review Profile", Example: "  review-party profile create security --blank --repo .", Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			options := profileCreateOptions{profileScopeOptions: profileScopeOptions{repository: stringFlag(cmd, "repo"), global: boolFlag(cmd, "global")}, name: args[0], blank: boolFlag(cmd, "blank"), packaged: stringFlag(cmd, "from-packaged")}
+			return commandResult(executeProfileCreate(options, streams.output, streams.errors))
+		},
+	}
+	addRepositoryFlag(create, "Git repository that will own the Profile")
+	create.Flags().Bool("global", false, "Create a personal Profile")
+	create.Flags().Bool("blank", false, "Start from a minimal blank Profile")
+	create.Flags().String("from-packaged", "", "Start from a packaged Profile")
+	install := &cobra.Command{
+		Use: "install-defaults", Short: "Copy packaged Profiles into one owned scope", Example: "  review-party profile install-defaults --repo .", Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			options := profileScopeOptions{repository: stringFlag(cmd, "repo"), global: boolFlag(cmd, "global")}
+			return commandResult(executeProfileInstallDefaults(options, streams.output, streams.errors))
+		},
+	}
+	addRepositoryFlag(install, "Git repository that will own the Profiles")
+	install.Flags().Bool("global", false, "Install starter Profiles in Personal Configuration")
+	cmd.AddCommand(newExplainCommand("explain", streams), create, install)
+	return cmd
+}
+
+func newPartiesCommand(streams commandIO) *cobra.Command {
+	return newLibraryListCommand(partyListSpec(), streams)
+}
+
+type libraryListOptions struct {
+	repository    string
+	format        string
+	configuration string
+}
+
+type libraryListSpec struct {
+	use     string
+	label   string
+	execute func(context.Context, libraryListOptions, commandIO) int
+}
+
+func profileListSpec() libraryListSpec {
+	return libraryListSpec{use: "profiles", label: "Review Profiles", execute: func(ctx context.Context, options libraryListOptions, streams commandIO) int {
+		return executeProfiles(ctx, profilesOptions{format: options.format, repository: options.repository, configuration: options.configuration}, streams.output, streams.errors)
+	}}
+}
+
+func partyListSpec() libraryListSpec {
+	return libraryListSpec{use: "parties", label: "Review Parties", execute: func(ctx context.Context, options libraryListOptions, streams commandIO) int {
+		return executeParties(ctx, partiesOptions{repository: options.repository, format: options.format, configuration: options.configuration}, streams.output, streams.errors)
+	}}
+}
+
+func newLibraryListCommand(spec libraryListSpec, streams commandIO) *cobra.Command {
+	cmd := &cobra.Command{
+		Use: spec.use, Short: "List available " + spec.label, Example: "  review-party " + spec.use + " --repo . --format json", Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			options := libraryListOptions{repository: stringFlag(cmd, "repo"), format: stringFlag(cmd, "format"), configuration: stringFlag(cmd, "config")}
+			return commandResult(spec.execute(cmd.Context(), options, streams))
+		},
+	}
+	addRepositoryFlag(cmd, "Git repository whose "+spec.label+" should be listed")
+	addFormatFlag(cmd)
+	addConfigurationFlag(cmd)
+	return cmd
+}
+
+func newPartyCommand(streams commandIO) *cobra.Command {
+	cmd := &cobra.Command{Use: "party", Short: "Run or manage a Review Party", Args: cobra.NoArgs, RunE: showCommandHelp}
+	run := &cobra.Command{
+		Use: "run [PARTY]", Short: "Run every member of a Review Party over one Subject", Example: "  review-party party run standard --repo . --concurrency 2",
+		Args: cobra.MaximumNArgs(1), ValidArgsFunction: completePartyNames,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name := ""
+			if len(args) == 1 {
+				name = args[0]
+			}
+			subjectReference, err := reviewSubjectReference(stringFlag(cmd, "base"), stringFlag(cmd, "head"))
+			if err != nil {
+				return err
+			}
+			options := partyRunOptions{
+				name: name, repository: stringFlag(cmd, "repo"), subject: subjectReference,
+				reviewer: stringFlag(cmd, "reviewer"), model: stringFlag(cmd, "model"), effort: stringFlag(cmd, "effort"),
+				concurrency: intFlag(cmd, "concurrency"), deadline: durationFlag(cmd, "deadline"), format: stringFlag(cmd, "format"), configuration: stringFlag(cmd, "config"),
+			}
+			return commandResult(executePartyRun(cmd.Context(), options, streams.output, streams.errors))
+		},
+	}
+	addReviewFlags(run)
+	run.Flags().Int("concurrency", 0, "Maximum active Reviewer executions")
+	cmd.AddCommand(run)
+	return cmd
+}
+
+func newConfigCommand(streams commandIO) *cobra.Command {
+	cmd := &cobra.Command{Use: "config", Short: "Inspect or manage Review Party configuration", Args: cobra.NoArgs, RunE: showCommandHelp}
+	path := &cobra.Command{Use: "path", Short: "Print the Personal Configuration path", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		return printConfigurationPath(stringFlag(cmd, "config"), streams.output)
+	}}
+	show := &cobra.Command{Use: "show", Short: "Print the authored Personal Configuration", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		if err := showConfiguration(stringFlag(cmd, "config"), streams.output); err != nil {
+			return commandExitError{code: printFailure(streams.errors, err)}
+		}
+		return nil
+	}}
+	addConfigurationFlag(path)
+	addConfigurationFlag(show)
+	cmd.AddCommand(path, show)
+	return cmd
+}
+
+func newInitCommand(streams commandIO) *cobra.Command {
+	cmd := &cobra.Command{
+		Use: "init", Short: "Prepare managed state for a repository", Example: "  review-party init --repo .", Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			options := initOptions{repository: stringFlag(cmd, "repo"), stateDirectory: stringFlag(cmd, "state-dir"), configuration: stringFlag(cmd, "config")}
+			return commandResult(executeInit(options, streams.output, streams.errors))
+		},
+	}
+	addRepositoryFlag(cmd, "Git repository to initialize")
+	cmd.Flags().String("state-dir", "", "Advanced per-user state location")
+	addConfigurationFlag(cmd)
+	return cmd
+}
+
+func showCommandHelp(cmd *cobra.Command, _ []string) error { return cmd.Help() }
+
+type libraryNameLoader func(context.Context, *engine.Conductor, string) ([]string, error)
+
+var completeProfileNames = completeLibraryNames(loadProfileNames)
+var completePartyNames = completeLibraryNames(loadPartyNames)
+
+func completeLibraryNames(load libraryNameLoader) cobra.CompletionFunc {
+	return func(cmd *cobra.Command, _ []string, prefix string) ([]string, cobra.ShellCompDirective) {
+		conductor, err := engine.New(engine.Config{UserConfigurationPath: stringFlag(cmd, "config")})
+		if err != nil {
+			return nil, cobra.ShellCompDirectiveError
+		}
+		names, err := load(cmd.Context(), conductor, stringFlag(cmd, "repo"))
+		if err != nil {
+			return nil, cobra.ShellCompDirectiveError
+		}
+		matches := make([]string, 0, len(names))
+		for _, name := range names {
+			if strings.HasPrefix(name, prefix) {
+				matches = append(matches, name)
+			}
+		}
+		return matches, cobra.ShellCompDirectiveNoFileComp
+	}
+}
+
+func loadProfileNames(ctx context.Context, conductor *engine.Conductor, repository string) ([]string, error) {
+	profiles, err := conductor.ProfilesForRepository(ctx, repository)
+	if err != nil {
+		return nil, err
+	}
+	return collectNames(profiles, func(profile model.ProfileSummary) string { return profile.Name }), nil
+}
+
+func loadPartyNames(_ context.Context, conductor *engine.Conductor, repository string) ([]string, error) {
+	parties, err := conductor.PartiesForRepository(repository)
+	if err != nil {
+		return nil, err
+	}
+	return collectNames(parties, func(party model.PartySummary) string { return party.Name }), nil
+}
+
+func collectNames[T any](items []T, name func(T) string) []string {
+	names := make([]string, len(items))
+	for index, item := range items {
+		names[index] = name(item)
+	}
+	return names
+}
