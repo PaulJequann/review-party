@@ -3,10 +3,6 @@ module reviewparty
 go 1.26
 
 require (
-	charm.land/bubbles/v2 v2.2.0
-	charm.land/bubbletea/v2 v2.0.9
-	charm.land/huh/v2 v2.0.3
-	charm.land/lipgloss/v2 v2.0.6
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
