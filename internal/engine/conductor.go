@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reviewparty/internal/provenance"
+	"reviewparty/internal/subject"
 
 	"reviewparty/internal/artifact"
 	"reviewparty/internal/model"
@@ -21,12 +23,12 @@ type Config struct {
 }
 
 type Conductor struct {
-	store           recordStore
+	store           store.RecordStore
 	reviewers       reviewerCatalog
 	profiles        profileLibrary
 	attemptDeadline time.Duration
 	now             func() time.Time
-	buildProvenance func() RuntimeProvenance
+	buildProvenance func() model.RuntimeProvenance
 	artifacts       *artifact.Store
 	retryDelay      func(model.RetryPolicy, int, time.Duration) time.Duration
 	wait            func(context.Context, time.Duration) error
@@ -43,7 +45,7 @@ func New(config Config) (*Conductor, error) {
 		return nil, err
 	}
 	stateDirectory := firstNonempty(configuredState.Value, defaultStateDirectory())
-	store, err := newDeferredLedgerRecordStore(stateDirectory)
+	store, err := store.NewDeferredLedgerRecordStore(stateDirectory)
 	if err != nil {
 		return nil, err
 	}
@@ -62,15 +64,15 @@ func New(config Config) (*Conductor, error) {
 	return conductor, nil
 }
 
-func newConductor(store recordStore, executors map[string]attemptExecutor, deadline time.Duration) (*Conductor, error) {
+func newConductor(store store.RecordStore, executors map[string]attemptExecutor, deadline time.Duration) (*Conductor, error) {
 	return newConductorWithCatalog(store, catalogWithExecutors(executors), deadline)
 }
 
-func newConductorWithCatalog(store recordStore, reviewers reviewerCatalog, deadline time.Duration) (*Conductor, error) {
+func newConductorWithCatalog(store store.RecordStore, reviewers reviewerCatalog, deadline time.Duration) (*Conductor, error) {
 	return newConductorWithProfiles(store, reviewers, newProfileLibrary(""), deadline)
 }
 
-func newConductorWithProfiles(store recordStore, reviewers reviewerCatalog, profiles profileLibrary, deadline time.Duration) (*Conductor, error) {
+func newConductorWithProfiles(store store.RecordStore, reviewers reviewerCatalog, profiles profileLibrary, deadline time.Duration) (*Conductor, error) {
 	if profiles.configuration == nil {
 		return nil, errProfileLibraryNotConfigured
 	}
@@ -80,11 +82,11 @@ func newConductorWithProfiles(store recordStore, reviewers reviewerCatalog, prof
 		profiles:        profiles,
 		attemptDeadline: deadline,
 		now:             time.Now,
-		buildProvenance: currentRuntimeProvenance,
+		buildProvenance: provenance.CurrentRuntimeProvenance,
 		retryDelay:      retryDelay,
 		wait:            waitForRetry,
 	}
-	conductor.runner = newReviewRunner(store, func() time.Time { return conductor.now() }, func() RuntimeProvenance { return conductor.buildProvenance() }, newArtifactPublisher(nil))
+	conductor.runner = newReviewRunner(store, func() time.Time { return conductor.now() }, func() model.RuntimeProvenance { return conductor.buildProvenance() }, newArtifactPublisher(nil))
 	return conductor, nil
 }
 
@@ -102,17 +104,17 @@ func waitForRetry(ctx context.Context, delay time.Duration) error {
 	}
 }
 
-func (conductor *Conductor) Review(ctx context.Context, selection ReviewSelection) (ReviewRecord, error) {
+func (conductor *Conductor) Review(ctx context.Context, selection model.ReviewSelection) (model.ReviewRecord, error) {
 	if err := ctx.Err(); err != nil {
-		return ReviewRecord{}, err
+		return model.ReviewRecord{}, err
 	}
 	if err := conductor.requirePreparedState(selection.Repository); err != nil {
-		return ReviewRecord{}, err
+		return model.ReviewRecord{}, err
 	}
 	reviewStarted := conductor.now().UTC()
 	prepared, err := conductor.prepareReview(selection)
 	if err != nil {
-		return ReviewRecord{}, err
+		return model.ReviewRecord{}, err
 	}
 	return conductor.runPreparedReview(ctx, prepared, nil, reviewStarted)
 }
@@ -120,28 +122,28 @@ func (conductor *Conductor) Review(ctx context.Context, selection ReviewSelectio
 // runPreparedReview is the deep lifecycle seam: one place owns pending →
 // availability → execution → validation → persistence. Tests and Party/Eval
 // cross this seam instead of duplicating the sequence.
-func (conductor *Conductor) runPreparedReview(ctx context.Context, prepared preparedReview, replaysReviewID *ReviewID, reviewStarted time.Time) (ReviewRecord, error) {
+func (conductor *Conductor) runPreparedReview(ctx context.Context, prepared preparedReview, replaysReviewID *model.ReviewID, reviewStarted time.Time) (model.ReviewRecord, error) {
 	return conductor.getRunner().runPreparedReview(ctx, prepared, replaysReviewID, reviewStarted)
 }
 
-func (conductor *Conductor) Replay(ctx context.Context, selection ReplaySelection) (ReviewRecord, error) {
+func (conductor *Conductor) Replay(ctx context.Context, selection model.ReplaySelection) (model.ReviewRecord, error) {
 	if err := ctx.Err(); err != nil {
-		return ReviewRecord{}, err
+		return model.ReviewRecord{}, err
 	}
 	if !validReviewID(selection.SourceReviewID) {
-		return ReviewRecord{}, fmt.Errorf("invalid source review id %q", selection.SourceReviewID)
+		return model.ReviewRecord{}, fmt.Errorf("invalid source review id %q", selection.SourceReviewID)
 	}
 	if err := conductor.requirePreparedState("."); err != nil {
-		return ReviewRecord{}, err
+		return model.ReviewRecord{}, err
 	}
 	source, err := conductor.store.Load(selection.SourceReviewID)
 	if err != nil {
-		return ReviewRecord{}, fmt.Errorf("load replay source %q: %w", selection.SourceReviewID, err)
+		return model.ReviewRecord{}, fmt.Errorf("load replay source %q: %w", selection.SourceReviewID, err)
 	}
 	reviewStarted := conductor.now().UTC()
 	prepared, err := conductor.prepareReplay(source, selection)
 	if err != nil {
-		return ReviewRecord{}, err
+		return model.ReviewRecord{}, err
 	}
 	sourceID := source.ID
 	return conductor.runPreparedReview(ctx, prepared, &sourceID, reviewStarted)
@@ -169,15 +171,15 @@ func (conductor *Conductor) requirePreparedState(repository string) error {
 }
 
 type preparedReview struct {
-	subject  ReviewSubject
+	subject  model.ReviewSubject
 	profile  compiledProfile
-	timings  ReviewTimings
+	timings  model.ReviewTimings
 	deadline time.Duration
 }
 
-func (conductor *Conductor) prepareReview(selection ReviewSelection) (preparedReview, error) {
+func (conductor *Conductor) prepareReview(selection model.ReviewSelection) (preparedReview, error) {
 	profileSelection := selection.ProfileSelection()
-	timings := ReviewTimings{}
+	timings := model.ReviewTimings{}
 	subjectStarted := conductor.now().UTC()
 	repository, repositoryErr := resolveReviewRepository(selection)
 	timings.SubjectResolutionMS += elapsedMilliseconds(subjectStarted, conductor.now().UTC())
@@ -200,7 +202,7 @@ func (conductor *Conductor) prepareReview(selection ReviewSelection) (preparedRe
 		return preparedReview{}, err
 	}
 	subjectStarted = conductor.now().UTC()
-	subject, err := resolveSubject(repository, selection.Subject)
+	subject, err := subject.ResolveSubject(repository, selection.Subject)
 	timings.SubjectResolutionMS += elapsedMilliseconds(subjectStarted, conductor.now().UTC())
 	if err != nil {
 		return preparedReview{}, err
@@ -208,66 +210,66 @@ func (conductor *Conductor) prepareReview(selection ReviewSelection) (preparedRe
 	return preparedReview{subject: subject, profile: profile, timings: timings, deadline: conductor.attemptDeadline}, nil
 }
 
-func resolveReviewRepository(selection ReviewSelection) (string, error) {
-	if selection.Subject.Kind == SubjectCapturedChange {
+func resolveReviewRepository(selection model.ReviewSelection) (string, error) {
+	if selection.Subject.Kind == model.SubjectCapturedChange {
 		return selection.Repository, nil
 	}
-	return resolveRepositoryRoot(selection.Repository)
+	return subject.ResolveRepositoryRoot(selection.Repository)
 }
 
-func (conductor *Conductor) Profiles(ctx context.Context) ([]ProfileSummary, error) {
+func (conductor *Conductor) Profiles(ctx context.Context) ([]model.ProfileSummary, error) {
 	return conductor.profilesAt(ctx, "")
 }
 
-func (conductor *Conductor) ProfilesForRepository(ctx context.Context, repository string) ([]ProfileSummary, error) {
-	root, err := resolveRepositoryRoot(repository)
+func (conductor *Conductor) ProfilesForRepository(ctx context.Context, repository string) ([]model.ProfileSummary, error) {
+	root, err := subject.ResolveRepositoryRoot(repository)
 	if err != nil {
 		return nil, err
 	}
 	return conductor.profilesAt(ctx, root)
 }
 
-func (conductor *Conductor) profilesAt(ctx context.Context, repository string) ([]ProfileSummary, error) {
+func (conductor *Conductor) profilesAt(ctx context.Context, repository string) ([]model.ProfileSummary, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	return conductor.profileSummaries(repository)
 }
 
-func (conductor *Conductor) Explain(ctx context.Context, selection ProfileSelection) (ProfileExplanation, error) {
+func (conductor *Conductor) Explain(ctx context.Context, selection model.ProfileSelection) (model.ProfileExplanation, error) {
 	return conductor.explainAt(ctx, selection, "")
 }
 
-func (conductor *Conductor) ExplainForRepository(ctx context.Context, selection ProfileSelection, repository string) (ProfileExplanation, error) {
-	root, err := resolveRepositoryRoot(repository)
+func (conductor *Conductor) ExplainForRepository(ctx context.Context, selection model.ProfileSelection, repository string) (model.ProfileExplanation, error) {
+	root, err := subject.ResolveRepositoryRoot(repository)
 	if err != nil {
-		return ProfileExplanation{}, err
+		return model.ProfileExplanation{}, err
 	}
 	return conductor.explainAt(ctx, selection, root)
 }
 
-func (conductor *Conductor) explainAt(ctx context.Context, selection ProfileSelection, repository string) (ProfileExplanation, error) {
+func (conductor *Conductor) explainAt(ctx context.Context, selection model.ProfileSelection, repository string) (model.ProfileExplanation, error) {
 	if err := ctx.Err(); err != nil {
-		return ProfileExplanation{}, err
+		return model.ProfileExplanation{}, err
 	}
 	profile, err := conductor.compileFilesystemProfile(selection, repository)
 	if err != nil {
-		return ProfileExplanation{}, err
+		return model.ProfileExplanation{}, err
 	}
-	return ProfileExplanation{
+	return model.ProfileExplanation{
 		ProfileRevision:    profile.revision,
 		ReviewerWasDefault: profile.reviewerWasDefault,
 		Instructions:       profile.snapshot.Instructions,
 	}, nil
 }
 
-func (conductor *Conductor) Inspect(_ context.Context, id ReviewID) (ReviewRecord, error) {
+func (conductor *Conductor) Inspect(_ context.Context, id model.ReviewID) (model.ReviewRecord, error) {
 	if !validReviewID(id) {
-		return ReviewRecord{}, fmt.Errorf("invalid review id %q", id)
+		return model.ReviewRecord{}, fmt.Errorf("invalid review id %q", id)
 	}
 	record, err := conductor.store.Load(id)
 	if errors.Is(err, store.ErrReviewRecordStateNotInitialized) {
-		return ReviewRecord{}, InitializationRequiredError{Repository: "."}
+		return model.ReviewRecord{}, InitializationRequiredError{Repository: "."}
 	}
 	return record, err
 }
@@ -293,12 +295,12 @@ func (conductor *Conductor) History(_ context.Context, query store.HistoryQuery)
 // &Conductor{artifacts: ...} in tests.
 func (conductor *Conductor) getRunner() *reviewRunner {
 	if conductor.runner == nil {
-		conductor.runner = newReviewRunner(conductor.store, func() time.Time { return conductor.now() }, func() RuntimeProvenance { return conductor.buildProvenance() }, newArtifactPublisher(conductor.artifacts))
+		conductor.runner = newReviewRunner(conductor.store, func() time.Time { return conductor.now() }, func() model.RuntimeProvenance { return conductor.buildProvenance() }, newArtifactPublisher(conductor.artifacts))
 	}
 	return conductor.runner
 }
 
-func (conductor *Conductor) VerifyArtifacts(record ReviewRecord) error {
+func (conductor *Conductor) VerifyArtifacts(record model.ReviewRecord) error {
 	return conductor.getRunner().VerifyArtifacts(record)
 }
 

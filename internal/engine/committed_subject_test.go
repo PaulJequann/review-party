@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reviewparty/internal/model"
 	"strings"
 	"testing"
 	"time"
@@ -19,9 +20,9 @@ func TestCommittedReviewExecutesAtRecordedHeadAndCleansCheckout(t *testing.T) {
 	executor := &scriptedExecutor{availability: availability{Available: true}, execute: func(_ context.Context, spec attemptSpec) attemptExecution {
 		executionPath = spec.Repository
 		assertCommittedExecutionView(t, spec.Repository)
-		return attemptExecution{AssistantText: cleanReview, Outcome: AttemptCompleted}
+		return attemptExecution{AssistantText: cleanReview, Outcome: model.AttemptCompleted}
 	}}
-	record, err := testConductor(t, executor, time.Second).Review(context.Background(), ReviewSelection{Repository: repository, Subject: CommittedRange(base, head), Profile: "bugs"})
+	record, err := testConductor(t, executor, time.Second).Review(context.Background(), model.ReviewSelection{Repository: repository, Subject: model.CommittedRange(base, head), Profile: "bugs"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,7 +40,7 @@ func TestCommittedReviewExecutesAtRecordedHeadAndCleansCheckout(t *testing.T) {
 func TestInvalidCommittedRangePreventsHarnessLaunch(t *testing.T) {
 	repository := testRepository(t)
 	executor := successfulExecutor(cleanReview)
-	_, err := testConductor(t, executor, time.Second).Review(context.Background(), ReviewSelection{Repository: repository, Subject: CommittedRange("missing-base", "HEAD"), Profile: "bugs"})
+	_, err := testConductor(t, executor, time.Second).Review(context.Background(), model.ReviewSelection{Repository: repository, Subject: model.CommittedRange("missing-base", "HEAD"), Profile: "bugs"})
 	if err == nil {
 		t.Fatal("expected invalid base error")
 	}
@@ -54,7 +55,7 @@ func TestInvalidCommittedRangePreventsHarnessLaunch(t *testing.T) {
 func TestCommittedReviewCleansCheckoutAfterIncompleteAndDeadline(t *testing.T) {
 	cases := map[string]func(context.Context) attemptExecution{
 		"launch failure": func(context.Context) attemptExecution {
-			return failedExecution(AttemptReviewerUnavailable, TerminationReviewerUnavailable, PhaseHarnessLaunch, "launch failed")
+			return failedExecution(model.AttemptReviewerUnavailable, model.TerminationReviewerUnavailable, model.PhaseHarnessLaunch, "launch failed")
 		},
 		"deadline": func(ctx context.Context) attemptExecution { <-ctx.Done(); return contextExecution(ctx.Err()) },
 	}
@@ -82,11 +83,11 @@ func assertIncompleteCheckoutCleanup(t *testing.T, run func(context.Context) att
 		executionPath = spec.Repository
 		return run(ctx)
 	}}
-	record, err := testConductor(t, executor, 10*time.Millisecond).Review(context.Background(), ReviewSelection{Repository: repository, Subject: CommittedRange(base, "HEAD"), Profile: "bugs"})
+	record, err := testConductor(t, executor, 10*time.Millisecond).Review(context.Background(), model.ReviewSelection{Repository: repository, Subject: model.CommittedRange(base, "HEAD"), Profile: "bugs"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if record.Lifecycle != LifecycleIncomplete {
+	if record.Lifecycle != model.LifecycleIncomplete {
 		t.Fatalf("lifecycle = %s", record.Lifecycle)
 	}
 	assertPathAbsent(t, executionPath)
@@ -104,7 +105,7 @@ func assertCommittedExecutionView(t *testing.T, repository string) {
 	assertPathAbsent(t, filepath.Join(repository, ".env"))
 }
 
-func assertCommittedRecord(t *testing.T, record ReviewRecord, base, head string) {
+func assertCommittedRecord(t *testing.T, record model.ReviewRecord, base, head string) {
 	t.Helper()
 	if record.Subject.BaseObject != base {
 		t.Fatalf("base = %s, want %s", record.Subject.BaseObject, base)
@@ -112,7 +113,7 @@ func assertCommittedRecord(t *testing.T, record ReviewRecord, base, head string)
 	if record.Subject.HeadObject != head {
 		t.Fatalf("head = %s, want %s", record.Subject.HeadObject, head)
 	}
-	if record.Lifecycle != LifecycleCompleted {
+	if record.Lifecycle != model.LifecycleCompleted {
 		t.Fatalf("lifecycle = %s", record.Lifecycle)
 	}
 }

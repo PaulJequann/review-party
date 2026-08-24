@@ -5,6 +5,10 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"reviewparty/internal/model"
+	"reviewparty/internal/result"
+	"reviewparty/internal/store"
+	"reviewparty/internal/subject"
 	"time"
 )
 
@@ -14,13 +18,13 @@ import (
 // It concentrates timing, termination, and attempt construction behind a deep
 // interface; Conductor remains a coordinator for subject + profile concerns.
 type reviewRunner struct {
-	store           recordStore
+	store           store.RecordStore
 	now             func() time.Time
-	buildProvenance func() RuntimeProvenance
+	buildProvenance func() model.RuntimeProvenance
 	publisher       *artifactPublisher
 }
 
-func newReviewRunner(store recordStore, now func() time.Time, buildProvenance func() RuntimeProvenance, publisher *artifactPublisher) *reviewRunner {
+func newReviewRunner(store store.RecordStore, now func() time.Time, buildProvenance func() model.RuntimeProvenance, publisher *artifactPublisher) *reviewRunner {
 	return &reviewRunner{
 		store:           store,
 		now:             now,
@@ -29,22 +33,22 @@ func newReviewRunner(store recordStore, now func() time.Time, buildProvenance fu
 	}
 }
 
-func (runner *reviewRunner) pendingRecord(subject ReviewSubject, profile compiledProfile, timings ReviewTimings, replaysReviewID *ReviewID) (ReviewRecord, error) {
+func (runner *reviewRunner) pendingRecord(subject model.ReviewSubject, profile compiledProfile, timings model.ReviewTimings, replaysReviewID *model.ReviewID) (model.ReviewRecord, error) {
 	id, err := newReviewID(runner.now())
 	if err != nil {
-		return ReviewRecord{}, err
+		return model.ReviewRecord{}, err
 	}
 	now := runner.now().UTC()
 	runtime := runner.buildProvenance()
-	passes := make([]PassRecord, 0, len(profile.revision.Passes))
+	passes := make([]model.PassRecord, 0, len(profile.revision.Passes))
 	for _, planned := range profile.revision.Passes {
-		passes = append(passes, PassRecord{Name: planned.Name, Required: planned.Required, Attempts: []AttemptRecord{}})
+		passes = append(passes, model.PassRecord{Name: planned.Name, Required: planned.Required, Attempts: []model.AttemptRecord{}})
 	}
-	return ReviewRecord{
-		SchemaVersion:   currentReviewRecordSchemaVersion,
+	return model.ReviewRecord{
+		SchemaVersion:   model.CurrentReviewRecordSchemaVersion,
 		ID:              id,
 		ReplaysReviewID: replaysReviewID,
-		Lifecycle:       LifecyclePending,
+		Lifecycle:       model.LifecyclePending,
 		Subject:         subject,
 		ProfileRevision: profile.revision,
 		ProfileSnapshot: profile.snapshot,
@@ -56,16 +60,16 @@ func (runner *reviewRunner) pendingRecord(subject ReviewSubject, profile compile
 	}, nil
 }
 
-func (runner *reviewRunner) runPreparedReview(ctx context.Context, prepared preparedReview, replaysReviewID *ReviewID, reviewStarted time.Time) (ReviewRecord, error) {
+func (runner *reviewRunner) runPreparedReview(ctx context.Context, prepared preparedReview, replaysReviewID *model.ReviewID, reviewStarted time.Time) (model.ReviewRecord, error) {
 	record, err := runner.pendingRecord(prepared.subject, prepared.profile, prepared.timings, replaysReviewID)
 	if err != nil {
-		return ReviewRecord{}, err
+		return model.ReviewRecord{}, err
 	}
 	if err := runner.store.Save(record); err != nil {
-		return ReviewRecord{}, err
+		return model.ReviewRecord{}, err
 	}
 
-	record.Lifecycle = LifecycleRunning
+	record.Lifecycle = model.LifecycleRunning
 	record.UpdatedAt = runner.now().UTC()
 	if err := runner.store.Save(record); err != nil {
 		return record, err
@@ -88,8 +92,8 @@ func (runner *reviewRunner) runPreparedReview(ctx context.Context, prepared prep
 	})
 }
 
-func (runner *reviewRunner) finishIncomplete(record ReviewRecord, termination ReviewTermination, reviewStarted time.Time) (ReviewRecord, error) {
-	record.Lifecycle = LifecycleIncomplete
+func (runner *reviewRunner) finishIncomplete(record model.ReviewRecord, termination model.ReviewTermination, reviewStarted time.Time) (model.ReviewRecord, error) {
+	record.Lifecycle = model.LifecycleIncomplete
 	record.Termination = &termination
 	runner.finalizeOperationalRecord(&record, reviewStarted)
 	if err := runner.store.Save(record); err != nil {
@@ -98,21 +102,21 @@ func (runner *reviewRunner) finishIncomplete(record ReviewRecord, termination Re
 	return record, nil
 }
 
-func (runner *reviewRunner) finalizeOperationalRecord(record *ReviewRecord, reviewStarted time.Time) {
+func (runner *reviewRunner) finalizeOperationalRecord(record *model.ReviewRecord, reviewStarted time.Time) {
 	completed := runner.now().UTC()
 	record.UpdatedAt = completed
 	record.Timings.TotalMS = elapsedMilliseconds(reviewStarted, completed)
 }
 
 type passExecution struct {
-	record        ReviewRecord
+	record        model.ReviewRecord
 	profile       compiledProfile
 	executor      attemptExecutor
 	reviewStarted time.Time
 	deadline      time.Duration
 }
 
-func (runner *reviewRunner) executePass(ctx context.Context, pass passExecution) (ReviewRecord, error) {
+func (runner *reviewRunner) executePass(ctx context.Context, pass passExecution) (model.ReviewRecord, error) {
 	record := pass.record
 	started := runner.now().UTC()
 	attemptContext, cancel := context.WithTimeout(ctx, pass.deadline)
@@ -123,7 +127,7 @@ func (runner *reviewRunner) executePass(ctx context.Context, pass passExecution)
 	record.Timings.AttemptExecutionMS = elapsedMilliseconds(started, completed)
 
 	validationStarted := runner.now().UTC()
-	result, parseErr := canonicalReviewResultContract.Parse(execution.AssistantText)
+	result, parseErr := result.CanonicalReviewResultContract.Parse(execution.AssistantText)
 	record.Timings.ResultValidationMS = elapsedMilliseconds(validationStarted, runner.now().UTC())
 	outcome := applyAttemptResult(&record, result, execution, parseErr)
 	attempt, artifactErr := runner.buildAttempt(record.ID, prompt, pass.profile.reviewer.candidate, execution, outcome, started, completed)
@@ -143,37 +147,37 @@ func (runner *reviewRunner) executePass(ctx context.Context, pass passExecution)
 	return record, nil
 }
 
-func applyAttemptResult(record *ReviewRecord, result ReviewResult, execution attemptExecution, parseErr error) AttemptOutcome {
+func applyAttemptResult(record *model.ReviewRecord, result model.ReviewResult, execution attemptExecution, parseErr error) model.AttemptOutcome {
 	outcome := execution.Outcome
-	if outcome == AttemptCompleted && parseErr == nil {
+	if outcome == model.AttemptCompleted && parseErr == nil {
 		record.Result = &result
-		record.Lifecycle = LifecycleCompleted
+		record.Lifecycle = model.LifecycleCompleted
 		return outcome
 	}
-	if outcome == AttemptCompleted {
-		outcome = AttemptInvalidResult
-		record.Lifecycle = LifecycleIncomplete
-		termination := ReviewTermination{
-			Category: TerminationResultValidationFailure,
-			Phase:    PhaseResultValidation,
+	if outcome == model.AttemptCompleted {
+		outcome = model.AttemptInvalidResult
+		record.Lifecycle = model.LifecycleIncomplete
+		termination := model.ReviewTermination{
+			Category: model.TerminationResultValidationFailure,
+			Phase:    model.PhaseResultValidation,
 			Message:  attemptTerminationMessage(outcome, execution.Diagnostic, parseErr),
 		}
 		record.Termination = &termination
 		return outcome
 	}
 	if outcome == "" {
-		outcome = AttemptUnknownFailure
+		outcome = model.AttemptUnknownFailure
 	}
-	record.Lifecycle = LifecycleIncomplete
+	record.Lifecycle = model.LifecycleIncomplete
 	termination := terminationForAttempt(execution, outcome, parseErr)
 	record.Termination = &termination
 	return outcome
 }
 
-func (runner *reviewRunner) executeAttempt(ctx context.Context, record ReviewRecord, pass passExecution, prompt string) (attemptExecution, error) {
-	checkout, err := prepareSubjectExecution(record.Subject, string(record.ID)+"-1")
+func (runner *reviewRunner) executeAttempt(ctx context.Context, record model.ReviewRecord, pass passExecution, prompt string) (attemptExecution, error) {
+	checkout, err := subject.PrepareExecution(record.Subject, string(record.ID)+"-1")
 	if err != nil {
-		return failedExecution(AttemptUnknownFailure, TerminationTransportFailure, PhaseHarnessLaunch, err.Error()), nil
+		return failedExecution(model.AttemptUnknownFailure, model.TerminationTransportFailure, model.PhaseHarnessLaunch, err.Error()), nil
 	}
 	defer checkout.Close()
 	if gate := attemptGateFromContext(ctx); gate != nil {
@@ -188,8 +192,8 @@ func (runner *reviewRunner) executeAttempt(ctx context.Context, record ReviewRec
 	return execution, checkout.Close()
 }
 
-func (runner *reviewRunner) buildAttempt(id ReviewID, prompt string, candidate reviewerCandidate, execution attemptExecution, outcome AttemptOutcome, started, completed time.Time) (AttemptRecord, error) {
-	attempt := AttemptRecord{
+func (runner *reviewRunner) buildAttempt(id model.ReviewID, prompt string, candidate reviewerCandidate, execution attemptExecution, outcome model.AttemptOutcome, started, completed time.Time) (model.AttemptRecord, error) {
+	attempt := model.AttemptRecord{
 		Number:       1,
 		Outcome:      outcome,
 		Provenance:   resolvedProvenance(candidate, execution),
@@ -204,41 +208,41 @@ func (runner *reviewRunner) buildAttempt(id ReviewID, prompt string, candidate r
 	}
 	references, err := runner.publisher.publishAttemptArtifacts(id, attempt.Number, prompt, execution)
 	if err != nil {
-		return AttemptRecord{}, err
+		return model.AttemptRecord{}, err
 	}
 	attempt.Artifacts = references
 	attempt.RawOutput = ""
 	return attempt, nil
 }
 
-func (runner *reviewRunner) VerifyArtifacts(record ReviewRecord) error {
+func (runner *reviewRunner) VerifyArtifacts(record model.ReviewRecord) error {
 	if runner.publisher == nil {
 		return nil
 	}
 	return runner.publisher.verifyArtifacts(record)
 }
 
-func terminationForAvailability(diagnostic string) ReviewTermination {
-	category := TerminationReviewerUnavailable
-	if diagnosticFailureCategory(diagnostic) == TerminationAuthenticationFailure {
-		category = TerminationAuthenticationFailure
+func terminationForAvailability(diagnostic string) model.ReviewTermination {
+	category := model.TerminationReviewerUnavailable
+	if diagnosticFailureCategory(diagnostic) == model.TerminationAuthenticationFailure {
+		category = model.TerminationAuthenticationFailure
 	}
-	return ReviewTermination{Category: category, Phase: PhaseAvailabilityCheck, Message: diagnostic}
+	return model.ReviewTermination{Category: category, Phase: model.PhaseAvailabilityCheck, Message: diagnostic}
 }
 
-func terminationForAttempt(execution attemptExecution, outcome AttemptOutcome, parseErr error) ReviewTermination {
+func terminationForAttempt(execution attemptExecution, outcome model.AttemptOutcome, parseErr error) model.ReviewTermination {
 	message := attemptTerminationMessage(outcome, execution.Diagnostic, parseErr)
-	return ReviewTermination{Category: execution.FailureCategory, Phase: execution.FailurePhase, Message: message}
+	return model.ReviewTermination{Category: execution.FailureCategory, Phase: execution.FailurePhase, Message: message}
 }
 
 func boundedAttemptOutput(output string) string {
-	if len(output) <= maxResultSize {
+	if len(output) <= result.MaxResultSize {
 		return output
 	}
-	return "[truncated to final bytes]\n" + output[len(output)-maxResultSize:]
+	return "[truncated to final bytes]\n" + output[len(output)-result.MaxResultSize:]
 }
 
-func resolvedProvenance(candidate reviewerCandidate, execution attemptExecution) ReviewerProvenance {
+func resolvedProvenance(candidate reviewerCandidate, execution attemptExecution) model.ReviewerProvenance {
 	provenance := candidate.provenance()
 	if execution.ResolvedModel != "" {
 		provenance.Model = execution.ResolvedModel
@@ -256,8 +260,8 @@ func elapsedMilliseconds(started, completed time.Time) int64 {
 	return completed.Sub(started).Milliseconds()
 }
 
-func attemptTerminationMessage(outcome AttemptOutcome, diagnostic string, parseErr error) string {
-	if outcome == AttemptInvalidResult && parseErr != nil {
+func attemptTerminationMessage(outcome model.AttemptOutcome, diagnostic string, parseErr error) string {
+	if outcome == model.AttemptInvalidResult && parseErr != nil {
 		if diagnostic == "" {
 			return parseErr.Error()
 		}
@@ -269,15 +273,15 @@ func attemptTerminationMessage(outcome AttemptOutcome, diagnostic string, parseE
 	return fmt.Sprintf("attempt ended with %s", outcome)
 }
 
-func newReviewID(now time.Time) (ReviewID, error) {
+func newReviewID(now time.Time) (model.ReviewID, error) {
 	random := make([]byte, 8)
 	if _, err := rand.Read(random); err != nil {
 		return "", fmt.Errorf("generate review id: %w", err)
 	}
-	return ReviewID(fmt.Sprintf("rp_%d_%s", now.UTC().UnixMilli(), hex.EncodeToString(random))), nil
+	return model.ReviewID(fmt.Sprintf("rp_%d_%s", now.UTC().UnixMilli(), hex.EncodeToString(random))), nil
 }
 
-func validReviewID(id ReviewID) bool {
+func validReviewID(id model.ReviewID) bool {
 	if len(id) < 24 || len(id) > 64 {
 		return false
 	}

@@ -51,8 +51,8 @@ func TestEvalRecordsOrdinaryReviewsForEachExecutionCategory(t *testing.T) {
 func TestEvalRetriesTransientFailureInsideSameReview(t *testing.T) {
 	suite := writeEvalTestSuite(t, []testEvalCase{{id: "retry"}})
 	executor := &scriptedEvalExecutor{executions: []attemptExecution{
-		{Outcome: AttemptTransientFailure, FailureCategory: TerminationTransportFailure, FailurePhase: PhaseReviewerExecution, Diagnostic: "temporary transport failure"},
-		{Outcome: AttemptCompleted, AssistantText: cleanReview},
+		{Outcome: model.AttemptTransientFailure, FailureCategory: model.TerminationTransportFailure, FailurePhase: model.PhaseReviewerExecution, Diagnostic: "temporary transport failure"},
+		{Outcome: model.AttemptCompleted, AssistantText: cleanReview},
 	}}
 	conductor := testEvalConductor(t, executor)
 	conductor.wait = func(context.Context, time.Duration) error { return nil }
@@ -73,9 +73,9 @@ func TestEvalRetriesTransientFailureInsideSameReview(t *testing.T) {
 	assertRetriedReview(t, review, evalRun)
 }
 
-func assertRetriedReview(t *testing.T, review ReviewRecord, evalRun model.EvalRun) {
+func assertRetriedReview(t *testing.T, review model.ReviewRecord, evalRun model.EvalRun) {
 	t.Helper()
-	if review.Lifecycle != LifecycleCompleted {
+	if review.Lifecycle != model.LifecycleCompleted {
 		t.Fatalf("review lifecycle = %s", review.Lifecycle)
 	}
 	if review.AttemptCount() != 2 {
@@ -84,17 +84,17 @@ func assertRetriedReview(t *testing.T, review ReviewRecord, evalRun model.EvalRu
 	if evalRun.ExecutionState != model.EvalCompletedClean {
 		t.Fatalf("Eval state = %s", evalRun.ExecutionState)
 	}
-	if review.Passes[0].Attempts[0].Outcome != AttemptTransientFailure {
+	if review.Passes[0].Attempts[0].Outcome != model.AttemptTransientFailure {
 		t.Fatalf("first attempt = %#v", review.Passes[0].Attempts[0])
 	}
-	if review.Passes[0].Attempts[1].Outcome != AttemptCompleted {
+	if review.Passes[0].Attempts[1].Outcome != model.AttemptCompleted {
 		t.Fatalf("second attempt = %#v", review.Passes[0].Attempts[1])
 	}
 }
 
 func TestEvalDoesNotRetryAuthenticationFailure(t *testing.T) {
 	suite := writeEvalTestSuite(t, []testEvalCase{{id: "authentication"}})
-	executor := &scriptedEvalExecutor{executions: []attemptExecution{{Outcome: AttemptUnknownFailure, FailureCategory: TerminationAuthenticationFailure, FailurePhase: PhaseReviewerExecution, Diagnostic: "invalid credential"}}}
+	executor := &scriptedEvalExecutor{executions: []attemptExecution{{Outcome: model.AttemptUnknownFailure, FailureCategory: model.TerminationAuthenticationFailure, FailurePhase: model.PhaseReviewerExecution, Diagnostic: "invalid credential"}}}
 	conductor := testEvalConductor(t, executor)
 	conductor.wait = func(context.Context, time.Duration) error { return nil }
 	selection := evalSelection(suite)
@@ -113,9 +113,9 @@ func TestEvalDoesNotRetryAuthenticationFailure(t *testing.T) {
 func TestEvalContinuesAfterRetryExhaustion(t *testing.T) {
 	suite := writeEvalTestSuite(t, []testEvalCase{{id: "exhausted"}, {id: "later"}})
 	executor := &scriptedEvalExecutor{executions: []attemptExecution{
-		{Outcome: AttemptTransientFailure, FailureCategory: TerminationTransportFailure, FailurePhase: PhaseReviewerExecution, Diagnostic: "temporary one"},
-		{Outcome: AttemptTransientFailure, FailureCategory: TerminationTransportFailure, FailurePhase: PhaseReviewerExecution, Diagnostic: "temporary two"},
-		{Outcome: AttemptCompleted, AssistantText: cleanReview},
+		{Outcome: model.AttemptTransientFailure, FailureCategory: model.TerminationTransportFailure, FailurePhase: model.PhaseReviewerExecution, Diagnostic: "temporary one"},
+		{Outcome: model.AttemptTransientFailure, FailureCategory: model.TerminationTransportFailure, FailurePhase: model.PhaseReviewerExecution, Diagnostic: "temporary two"},
+		{Outcome: model.AttemptCompleted, AssistantText: cleanReview},
 	}}
 	conductor := testEvalConductor(t, executor)
 	conductor.wait = func(context.Context, time.Duration) error { return nil }
@@ -200,7 +200,7 @@ func (executor *boundedEvalExecutor) Execute(context.Context, attemptSpec) attem
 	executor.mu.Lock()
 	executor.active--
 	executor.mu.Unlock()
-	return attemptExecution{Outcome: AttemptCompleted, AssistantText: cleanReview}
+	return attemptExecution{Outcome: model.AttemptCompleted, AssistantText: cleanReview}
 }
 
 type scriptedEvalExecutor struct {
@@ -259,9 +259,9 @@ func assertPersistedEvalRun(t *testing.T, assertion persistedEvalAssertion) {
 	}
 }
 
-func assertSyntheticSubject(t *testing.T, suite string, index int, subject ReviewSubject) {
+func assertSyntheticSubject(t *testing.T, suite string, index int, subject model.ReviewSubject) {
 	t.Helper()
-	if subject.Kind != SubjectCapturedChange {
+	if subject.Kind != model.SubjectCapturedChange {
 		t.Fatalf("case %d kind = %s", index, subject.Kind)
 	}
 	if subject.Repository != "eval://"+subject.Identity {
@@ -421,7 +421,7 @@ func (executor *evalSequenceExecutor) Execute(_ context.Context, spec attemptSpe
 	executor.sawGoModule = executor.sawGoModule || goModule
 	output := executor.outputs[0]
 	executor.outputs = executor.outputs[1:]
-	return attemptExecution{AssistantText: output, Outcome: AttemptCompleted}
+	return attemptExecution{AssistantText: output, Outcome: model.AttemptCompleted}
 }
 
 func inspectReviewerRepository(repository string) (int, bool, bool) {

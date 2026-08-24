@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	"reviewparty/internal/model"
 	"sort"
 	"strings"
 
@@ -12,7 +13,7 @@ const defaultReviewer = "grok"
 
 type reviewerRegistration struct {
 	candidate                reviewerCandidate
-	capabilities             []Capability
+	capabilities             []model.Capability
 	validateCandidate        func(reviewerCandidate) error
 	enabled                  configuration.Value[bool]
 	allowedModels            []string
@@ -38,7 +39,7 @@ func defaultReviewerCatalog() reviewerCatalog {
 func newReviewerCatalog(registrations []reviewerRegistration) reviewerCatalog {
 	catalog := reviewerCatalog{registrations: make(map[string]reviewerRegistration, len(registrations))}
 	for _, registration := range registrations {
-		registration.capabilities = append([]Capability(nil), registration.capabilities...)
+		registration.capabilities = append([]model.Capability(nil), registration.capabilities...)
 		registration.allowedModels = append([]string(nil), registration.allowedModels...)
 		catalog.registrations[registration.candidate.ID] = registration
 	}
@@ -67,7 +68,7 @@ func (catalog reviewerCatalog) resolve(id string) (reviewerRegistration, error) 
 	if registration.isDisabled() {
 		return reviewerRegistration{}, DisabledReviewerError{Name: id, Source: string(registration.enabled.Source), Path: registration.enabled.Path}
 	}
-	registration.capabilities = append([]Capability(nil), registration.capabilities...)
+	registration.capabilities = append([]model.Capability(nil), registration.capabilities...)
 	registration.allowedModels = append([]string(nil), registration.allowedModels...)
 	return registration, nil
 }
@@ -118,12 +119,12 @@ func (failure UnknownReviewerError) Error() string {
 	return fmt.Sprintf("unknown reviewer %q; expected %s", failure.Name, strings.Join(failure.Available, ", "))
 }
 
-func restrictedReviewCapabilities() []Capability {
-	return []Capability{
-		CapabilityRepositoryRead,
-		CapabilityRepositorySearch,
-		CapabilityRepositoryMutationDenied,
-		CapabilityShellDenied,
-		CapabilityWebDenied,
+func restrictedReviewCapabilities() []model.Capability {
+	return []model.Capability{
+		model.CapabilityRepositoryRead,
+		model.CapabilityRepositorySearch,
+		model.CapabilityRepositoryMutationDenied,
+		model.CapabilityShellDenied,
+		model.CapabilityWebDenied,
 	}
 }

@@ -8,10 +8,10 @@ import (
 	"reviewparty/internal/model"
 )
 
-func (conductor *Conductor) reviewEvalCase(ctx context.Context, selection model.ReviewSelection, policy model.RetryPolicy) (ReviewRecord, error) {
+func (conductor *Conductor) reviewEvalCase(ctx context.Context, selection model.ReviewSelection, policy model.RetryPolicy) (model.ReviewRecord, error) {
 	prepared, started, err := conductor.prepareEvalReview(ctx, selection, policy)
 	if err != nil {
-		return ReviewRecord{}, err
+		return model.ReviewRecord{}, err
 	}
 	record, err := conductor.runPreparedReview(ctx, prepared, nil, started)
 	record, err = conductor.recordAvailabilityFailure(record, prepared, err)
@@ -47,16 +47,16 @@ func (conductor *Conductor) prepareEvalReview(ctx context.Context, selection mod
 	return prepared, started, nil
 }
 
-func shouldRetryEval(record ReviewRecord, err error, attempts int, policy model.RetryPolicy) bool {
-	return err == nil && record.Lifecycle == LifecycleIncomplete && attempts < policy.MaxAttempts && retryableTermination(record.Termination)
+func shouldRetryEval(record model.ReviewRecord, err error, attempts int, policy model.RetryPolicy) bool {
+	return err == nil && record.Lifecycle == model.LifecycleIncomplete && attempts < policy.MaxAttempts && retryableTermination(record.Termination)
 }
 
-func (conductor *Conductor) retryEvalReview(execution retryReviewExecution, record ReviewRecord) (ReviewRecord, error) {
+func (conductor *Conductor) retryEvalReview(execution retryReviewExecution, record model.ReviewRecord) (model.ReviewRecord, error) {
 	providerDelay := time.Duration(lastRetryAfterMS(record)) * time.Millisecond
 	if err := conductor.wait(execution.context, conductor.retryDelay(execution.policy, execution.attempt, providerDelay)); err != nil {
 		return record, err
 	}
-	record.Lifecycle, record.Termination, record.Result = LifecycleRunning, nil, nil
+	record.Lifecycle, record.Termination, record.Result = model.LifecycleRunning, nil, nil
 	record.UpdatedAt = conductor.now().UTC()
 	if err := conductor.store.Save(record); err != nil {
 		return record, err
@@ -65,27 +65,27 @@ func (conductor *Conductor) retryEvalReview(execution retryReviewExecution, reco
 	return conductor.recordAvailabilityFailure(next, execution.prepared, err)
 }
 
-func (conductor *Conductor) recordAvailabilityFailure(record ReviewRecord, prepared preparedReview, err error) (ReviewRecord, error) {
+func (conductor *Conductor) recordAvailabilityFailure(record model.ReviewRecord, prepared preparedReview, err error) (model.ReviewRecord, error) {
 	if err != nil || !isUnrecordedAvailabilityFailure(record, prepared) {
 		return record, err
 	}
 	now := conductor.now().UTC()
-	outcome := AttemptReviewerUnavailable
-	if record.Termination.Category == TerminationAuthenticationFailure {
-		outcome = AttemptUnknownFailure
+	outcome := model.AttemptReviewerUnavailable
+	if record.Termination.Category == model.TerminationAuthenticationFailure {
+		outcome = model.AttemptUnknownFailure
 	}
-	record.Passes[0].Attempts = append(record.Passes[0].Attempts, AttemptRecord{Number: record.AttemptCount() + 1, Outcome: outcome, Provenance: prepared.profile.reviewer.candidate.provenance(), Diagnostic: record.Termination.Message, StartedAt: now, CompletedAt: now})
+	record.Passes[0].Attempts = append(record.Passes[0].Attempts, model.AttemptRecord{Number: record.AttemptCount() + 1, Outcome: outcome, Provenance: prepared.profile.reviewer.candidate.provenance(), Diagnostic: record.Termination.Message, StartedAt: now, CompletedAt: now})
 	return record, conductor.store.Save(record)
 }
 
-func isUnrecordedAvailabilityFailure(record ReviewRecord, prepared preparedReview) bool {
-	if record.Termination == nil || record.Termination.Phase != PhaseAvailabilityCheck {
+func isUnrecordedAvailabilityFailure(record model.ReviewRecord, prepared preparedReview) bool {
+	if record.Termination == nil || record.Termination.Phase != model.PhaseAvailabilityCheck {
 		return false
 	}
 	return record.AttemptCount() < prepared.profile.revision.AttemptLimit
 }
 
-func (conductor *Conductor) resumePreparedReview(ctx context.Context, record ReviewRecord, prepared preparedReview, reviewStarted time.Time) (ReviewRecord, error) {
+func (conductor *Conductor) resumePreparedReview(ctx context.Context, record model.ReviewRecord, prepared preparedReview, reviewStarted time.Time) (model.ReviewRecord, error) {
 	executor := prepared.profile.reviewer.executor
 	check := executor.Check(ctx, prepared.profile.reviewer.candidate)
 	if !check.Available {
@@ -94,19 +94,19 @@ func (conductor *Conductor) resumePreparedReview(ctx context.Context, record Rev
 	return conductor.getRunner().executePass(ctx, passExecution{record: record, profile: prepared.profile, executor: executor, reviewStarted: reviewStarted, deadline: prepared.deadline})
 }
 
-func retryableTermination(termination *ReviewTermination) bool {
+func retryableTermination(termination *model.ReviewTermination) bool {
 	if termination == nil {
 		return false
 	}
 	switch termination.Category {
-	case TerminationReviewerUnavailable, TerminationDeadlineExceeded, TerminationTransportFailure, TerminationMalformedOutput, TerminationResultValidationFailure:
+	case model.TerminationReviewerUnavailable, model.TerminationDeadlineExceeded, model.TerminationTransportFailure, model.TerminationMalformedOutput, model.TerminationResultValidationFailure:
 		return true
 	default:
 		return false
 	}
 }
 
-func lastRetryAfterMS(record ReviewRecord) int64 {
+func lastRetryAfterMS(record model.ReviewRecord) int64 {
 	if len(record.Passes) == 0 || len(record.Passes[0].Attempts) == 0 {
 		return 0
 	}

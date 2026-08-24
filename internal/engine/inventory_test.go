@@ -2,6 +2,7 @@ package engine
 
 import (
 	"path/filepath"
+	"reviewparty/internal/model"
 	"strings"
 	"testing"
 )
@@ -10,7 +11,7 @@ func TestMissingProfileErrorIsNotReplacedByInvalidPeerProfile(t *testing.T) {
 	repository := testRepository(t)
 	writeProfileFixture(t, filepath.Join(repository, ".reviewparty", "profiles", "broken.md"), "  \n")
 
-	_, err := compileTestProfile(newProfileLibrary(t.TempDir()), "architecture", "grok", ReviewSubject{Repository: repository})
+	_, err := compileTestProfile(newProfileLibrary(t.TempDir()), "architecture", "grok", model.ReviewSubject{Repository: repository})
 	if err == nil || !strings.Contains(err.Error(), `profile "architecture" was not found`) {
 		t.Fatalf("error = %v", err)
 	}
@@ -30,7 +31,7 @@ func TestProfilesReturnsValidEntriesAndMarksInvalidEntries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	byName := make(map[string]ProfileSummary, len(profiles))
+	byName := make(map[string]model.ProfileSummary, len(profiles))
 	for _, profile := range profiles {
 		byName[profile.Name] = profile
 	}
@@ -52,7 +53,7 @@ func TestProfilesReturnsValidEntriesAndMarksUnsafeNames(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	byName := make(map[string]ProfileSummary, len(profiles))
+	byName := make(map[string]model.ProfileSummary, len(profiles))
 	for _, profile := range profiles {
 		byName[profile.Name] = profile
 	}

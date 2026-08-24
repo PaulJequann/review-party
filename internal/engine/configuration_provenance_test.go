@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"reviewparty/internal/model"
 	"strings"
 	"testing"
 )
@@ -14,7 +15,7 @@ func TestDisabledReviewerSelectionPreservesWinningConfigurationProvenance(t *tes
   "reviewers": {"grok": {"enabled": false}}
 }`)
 
-	_, err := conductor.Explain(context.Background(), ProfileSelection{Profile: "bugs", Reviewer: "grok"})
+	_, err := conductor.Explain(context.Background(), model.ProfileSelection{Profile: "bugs", Reviewer: "grok"})
 	var disabled DisabledReviewerError
 	if !errors.As(err, &disabled) {
 		t.Fatalf("error = %v, want DisabledReviewerError", err)

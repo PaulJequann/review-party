@@ -5,17 +5,19 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"reviewparty/internal/model"
+	"reviewparty/internal/result"
 	"sort"
 	"strings"
 	"time"
 )
 
 type compiledProfile struct {
-	revision           ProfileRevision
-	snapshot           ProfileSnapshot
+	revision           model.ProfileRevision
+	snapshot           model.ProfileSnapshot
 	reviewer           reviewerRegistration
 	reviewerWasDefault bool
-	buildPrompt        func(ReviewSubject) string
+	buildPrompt        func(model.ReviewSubject) string
 }
 
 type profileDefinition struct {
@@ -24,8 +26,8 @@ type profileDefinition struct {
 	purpose              string
 	materialityThreshold string
 	defaultReviewer      string
-	pass                 ReviewPassRevision
-	requiredCapabilities []Capability
+	pass                 model.ReviewPassRevision
+	requiredCapabilities []model.Capability
 }
 
 type UnknownProfileError struct {
@@ -40,7 +42,7 @@ func (failure UnknownProfileError) Error() string {
 type UnsupportedCapabilitiesError struct {
 	Profile  string
 	Reviewer string
-	Missing  []Capability
+	Missing  []model.Capability
 }
 
 func (failure UnsupportedCapabilitiesError) Error() string {
@@ -51,7 +53,7 @@ func (failure UnsupportedCapabilitiesError) Error() string {
 	return fmt.Sprintf("review profile %q requires capabilities unavailable from reviewer %q: %s", failure.Profile, failure.Reviewer, strings.Join(missing, ", "))
 }
 
-func compileProfileDefinition(catalog reviewerCatalog, selection ProfileSelection, deadline time.Duration, definition profileDefinition) (compiledProfile, error) {
+func compileProfileDefinition(catalog reviewerCatalog, selection model.ProfileSelection, deadline time.Duration, definition profileDefinition) (compiledProfile, error) {
 	registration, reviewerWasDefault, err := resolveProfileReviewer(catalog, definition, selection)
 	if err != nil {
 		return compiledProfile{}, err
@@ -62,7 +64,7 @@ func compileProfileDefinition(catalog reviewerCatalog, selection ProfileSelectio
 	}
 	candidate := registration.candidate
 	provenance := candidate.provenance()
-	revision := ProfileRevision{
+	revision := model.ProfileRevision{
 		Name:                 definition.name,
 		Description:          definition.description,
 		Purpose:              definition.purpose,
@@ -71,11 +73,11 @@ func compileProfileDefinition(catalog reviewerCatalog, selection ProfileSelectio
 		Model:                candidate.Model,
 		Effort:               candidate.Effort,
 		Reviewer:             provenance,
-		Passes:               []ReviewPassRevision{definition.pass},
+		Passes:               []model.ReviewPassRevision{definition.pass},
 		RequiredCapabilities: canonicalCapabilities(definition.requiredCapabilities),
 		AttemptLimit:         1,
 		ExecutionDeadline:    deadline.String(),
-		ResultContract:       canonicalReviewResultContract.Revision(),
+		ResultContract:       result.CanonicalReviewResultContract.Revision(),
 	}
 	revision.Revision = profileRevisionIdentity(revision)
 
@@ -86,7 +88,7 @@ func compileProfileDefinition(catalog reviewerCatalog, selection ProfileSelectio
 	}, nil
 }
 
-func validateReviewerSelection(registration reviewerRegistration, selection ProfileSelection, required []Capability, profileName string) (reviewerRegistration, error) {
+func validateReviewerSelection(registration reviewerRegistration, selection model.ProfileSelection, required []model.Capability, profileName string) (reviewerRegistration, error) {
 	missing := missingCapabilities(required, registration.capabilities)
 	if len(missing) > 0 {
 		return reviewerRegistration{}, UnsupportedCapabilitiesError{Profile: profileName, Reviewer: registration.candidate.ID, Missing: missing}
@@ -94,7 +96,7 @@ func validateReviewerSelection(registration reviewerRegistration, selection Prof
 	return resolveReviewerSelection(registration, selection)
 }
 
-func resolveReviewerSelection(registration reviewerRegistration, selection ProfileSelection) (reviewerRegistration, error) {
+func resolveReviewerSelection(registration reviewerRegistration, selection model.ProfileSelection) (reviewerRegistration, error) {
 	registration, err := resolveReviewerModel(registration, selection.Model)
 	if err != nil {
 		return reviewerRegistration{}, err
@@ -110,7 +112,7 @@ func resolveReviewerSelection(registration reviewerRegistration, selection Profi
 	return registration, nil
 }
 
-func resolveProfileReviewer(catalog reviewerCatalog, definition profileDefinition, selection ProfileSelection) (reviewerRegistration, bool, error) {
+func resolveProfileReviewer(catalog reviewerCatalog, definition profileDefinition, selection model.ProfileSelection) (reviewerRegistration, bool, error) {
 	reviewerWasDefault := selection.Reviewer == ""
 	reviewer := selection.Reviewer
 	if reviewer == "" {
@@ -139,7 +141,7 @@ func resolveReviewerModel(registration reviewerRegistration, model string) (revi
 	return registration, nil
 }
 
-func profileRevisionIdentity(revision ProfileRevision) string {
+func profileRevisionIdentity(revision model.ProfileRevision) string {
 	revision.Revision = ""
 	payload, err := json.Marshal(revision)
 	if err != nil {
@@ -158,7 +160,7 @@ func builtInProfileDefinitions() []profileDefinition {
 			purpose:              "Find material defects in the Review Subject.",
 			materialityThreshold: "A concrete actionable regression in behavior or an applicable Project Rule.",
 			defaultReviewer:      defaultReviewer,
-			pass:                 ReviewPassRevision{Name: "bug-review", Required: true, Purpose: "Evaluate material correctness and delivery-risk defects.", PromptRevision: "bugs-v4"},
+			pass:                 model.ReviewPassRevision{Name: "bug-review", Required: true, Purpose: "Evaluate material correctness and delivery-risk defects.", PromptRevision: "bugs-v4"},
 			requiredCapabilities: capabilities,
 		},
 		{
@@ -167,7 +169,7 @@ func builtInProfileDefinitions() []profileDefinition {
 			purpose:              "Find material maintainability regressions and concrete opportunities to simplify the implementation.",
 			materialityThreshold: "A concrete structural regression or high-conviction simplification that materially affects maintainability, change safety, or local architecture.",
 			defaultReviewer:      defaultReviewer,
-			pass:                 ReviewPassRevision{Name: "code-quality-review", Required: true, Purpose: "Evaluate material structural and maintainability defects.", PromptRevision: "code-quality-v1"},
+			pass:                 model.ReviewPassRevision{Name: "code-quality-review", Required: true, Purpose: "Evaluate material structural and maintainability defects.", PromptRevision: "code-quality-v1"},
 			requiredCapabilities: capabilities,
 		},
 		{
@@ -176,7 +178,7 @@ func builtInProfileDefinitions() []profileDefinition {
 			purpose:              "Evaluate documentation accuracy, omissions, consistency, and project language.",
 			materialityThreshold: "Documentation that would materially mislead a Caller or maintainer.",
 			defaultReviewer:      defaultReviewer,
-			pass:                 ReviewPassRevision{Name: "documentation-review", Required: true, Purpose: "Evaluate material documentation defects.", PromptRevision: "documentation-v1"},
+			pass:                 model.ReviewPassRevision{Name: "documentation-review", Required: true, Purpose: "Evaluate material documentation defects.", PromptRevision: "documentation-v1"},
 			requiredCapabilities: capabilities,
 		},
 	}
@@ -185,7 +187,7 @@ func builtInProfileDefinitions() []profileDefinition {
 func findProfileDefinition(name string) (profileDefinition, error) {
 	for _, definition := range builtInProfileDefinitions() {
 		if definition.name == name {
-			definition.requiredCapabilities = append([]Capability(nil), definition.requiredCapabilities...)
+			definition.requiredCapabilities = append([]model.Capability(nil), definition.requiredCapabilities...)
 			return definition, nil
 		}
 	}
@@ -202,12 +204,12 @@ func SupportedProfiles() []string {
 	return names
 }
 
-func missingCapabilities(required, available []Capability) []Capability {
-	provided := make(map[Capability]struct{}, len(available))
+func missingCapabilities(required, available []model.Capability) []model.Capability {
+	provided := make(map[model.Capability]struct{}, len(available))
 	for _, capability := range available {
 		provided[capability] = struct{}{}
 	}
-	missing := make([]Capability, 0)
+	missing := make([]model.Capability, 0)
 	for _, capability := range required {
 		if _, exists := provided[capability]; !exists {
 			missing = append(missing, capability)
@@ -216,13 +218,13 @@ func missingCapabilities(required, available []Capability) []Capability {
 	return canonicalCapabilities(missing)
 }
 
-func canonicalCapabilities(capabilities []Capability) []Capability {
-	canonical := append([]Capability(nil), capabilities...)
+func canonicalCapabilities(capabilities []model.Capability) []model.Capability {
+	canonical := append([]model.Capability(nil), capabilities...)
 	sort.Slice(canonical, func(left, right int) bool { return canonical[left] < canonical[right] })
 	return canonical
 }
 
-func (profile compiledProfile) prompt(subject ReviewSubject) string {
+func (profile compiledProfile) prompt(subject model.ReviewSubject) string {
 	return profile.buildPrompt(subject)
 }
 

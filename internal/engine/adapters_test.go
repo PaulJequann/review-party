@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"reviewparty/internal/model"
+	"reviewparty/internal/result"
 	"strings"
 	"testing"
 	"time"
@@ -57,7 +59,7 @@ func TestCopilotDecoderPreservesAssistantMessageBoundaries(t *testing.T) {
 
 func TestCopilotUnavailableModelIsClassifiedWithoutRetry(t *testing.T) {
 	execution := classifyCopilotFailure(`Error: Model "gpt-5.6-luna" from --model flag is not available.`, context.Canceled)
-	if execution.Outcome != AttemptReviewerUnavailable {
+	if execution.Outcome != model.AttemptReviewerUnavailable {
 		t.Fatalf("outcome = %q", execution.Outcome)
 	}
 }
@@ -70,11 +72,11 @@ func TestReviewerSelectionChangesProfileRevision(t *testing.T) {
 		{candidate: reviewerCandidate{ID: "reviewer-a", Model: "same-model", Effort: "same-effort", Harness: "same-harness", Transport: "same-transport"}, capabilities: capabilities, executor: executor},
 		{candidate: reviewerCandidate{ID: "reviewer-b", Model: "same-model", Effort: "same-effort", Harness: "same-harness", Transport: "same-transport"}, capabilities: capabilities, executor: executor},
 	})
-	first, err := compileSelectedTestProfile(catalog, ProfileSelection{Profile: "bugs", Reviewer: "reviewer-a"}, time.Second)
+	first, err := compileSelectedTestProfile(catalog, model.ProfileSelection{Profile: "bugs", Reviewer: "reviewer-a"}, time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := compileSelectedTestProfile(catalog, ProfileSelection{Profile: "bugs", Reviewer: "reviewer-b"}, time.Second)
+	second, err := compileSelectedTestProfile(catalog, model.ProfileSelection{Profile: "bugs", Reviewer: "reviewer-b"}, time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +87,7 @@ func TestReviewerSelectionChangesProfileRevision(t *testing.T) {
 
 func TestCompiledBugProfileIncludesPromisedPass(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	profile, err := compileSelectedTestProfile(defaultReviewerCatalog(), ProfileSelection{Profile: "bugs", Reviewer: "grok"}, time.Second)
+	profile, err := compileSelectedTestProfile(defaultReviewerCatalog(), model.ProfileSelection{Profile: "bugs", Reviewer: "grok"}, time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,22 +212,22 @@ func assertReviewWithPreamble(t *testing.T, assistantText string, err error) {
 	if assistantText != "Inspecting files.\n"+cleanReview {
 		t.Fatalf("assistant text = %q", assistantText)
 	}
-	if _, err := parseReviewResult(assistantText); err != nil {
+	if _, err := result.CanonicalReviewResultContract.Parse(assistantText); err != nil {
 		t.Fatalf("parse review result: %v", err)
 	}
 }
 
 func TestOpenCodeAuthenticationFailureIsUnavailable(t *testing.T) {
 	execution := classifyHarnessFailure("Token refresh failed: 401", context.Canceled)
-	assertAttemptOutcome(t, execution, AttemptReviewerUnavailable)
-	assertFailureLocation(t, execution, TerminationAuthenticationFailure, PhaseReviewerExecution)
+	assertAttemptOutcome(t, execution, model.AttemptReviewerUnavailable)
+	assertFailureLocation(t, execution, model.TerminationAuthenticationFailure, model.PhaseReviewerExecution)
 }
 
 func TestDecodeFailurePreservesHarnessFailureClassification(t *testing.T) {
 	run := commandRun{Stdout: []byte("not-json"), Stderr: "authentication failed", WaitErr: errors.New("exit status 1")}
 	execution := decodedRunFailure(run, errors.New("decode event"), "opencode")
-	assertAttemptOutcome(t, execution, AttemptReviewerUnavailable)
-	assertFailureLocation(t, execution, TerminationAuthenticationFailure, PhaseReviewerExecution)
+	assertAttemptOutcome(t, execution, model.AttemptReviewerUnavailable)
+	assertFailureLocation(t, execution, model.TerminationAuthenticationFailure, model.PhaseReviewerExecution)
 	if execution.AssistantText != "not-json" {
 		t.Fatalf("assistant text = %q", execution.AssistantText)
 	}

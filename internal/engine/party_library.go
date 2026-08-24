@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"reviewparty/internal/subject"
 	"sort"
 	"strings"
 
@@ -235,7 +236,7 @@ func resolvePartyRepositoryRoot(repository string) (string, error) {
 	if repository == "" {
 		return "", nil
 	}
-	return resolveRepositoryRoot(repository)
+	return subject.ResolveRepositoryRoot(repository)
 }
 
 func addPackagedParties(summaries *[]PartySummary, seen map[string]struct{}) {

@@ -2,6 +2,10 @@ package engine
 
 import "reviewparty/internal/artifact"
 
+import (
+	"reviewparty/internal/model"
+)
+
 // artifactPublisher owns artifact I/O: truncation, publishing, removal, and
 // verification. It keeps artifact concerns local so lifecycle orchestration
 // in review.go stays focused on pending → availability → execution →
@@ -15,7 +19,7 @@ func newArtifactPublisher(store *artifact.Store) *artifactPublisher {
 	return &artifactPublisher{store: store}
 }
 
-func (publisher *artifactPublisher) publishAttemptArtifacts(id ReviewID, number int, prompt string, execution attemptExecution) ([]ArtifactReference, error) {
+func (publisher *artifactPublisher) publishAttemptArtifacts(id model.ReviewID, number int, prompt string, execution attemptExecution) ([]model.ArtifactReference, error) {
 	inputs := []struct {
 		kind      string
 		contents  []byte
@@ -24,7 +28,7 @@ func (publisher *artifactPublisher) publishAttemptArtifacts(id ReviewID, number 
 		{kind: "constructed-prompt", contents: []byte(prompt), truncated: len(prompt) > maxHarnessStdout},
 		{kind: "assistant-text", contents: []byte(execution.AssistantText), truncated: execution.ArtifactTruncated || len(execution.AssistantText) > maxHarnessStdout},
 	}
-	references := make([]ArtifactReference, 0, len(inputs))
+	references := make([]model.ArtifactReference, 0, len(inputs))
 	for _, input := range inputs {
 		contents := boundedArtifactContents(input.contents)
 		reference, err := publisher.store.Publish(id, number, input.kind, contents, input.truncated)
@@ -37,7 +41,7 @@ func (publisher *artifactPublisher) publishAttemptArtifacts(id ReviewID, number 
 	return references, nil
 }
 
-func (publisher *artifactPublisher) removeArtifacts(references []ArtifactReference) {
+func (publisher *artifactPublisher) removeArtifacts(references []model.ArtifactReference) {
 	if publisher.store == nil {
 		return
 	}
@@ -46,7 +50,7 @@ func (publisher *artifactPublisher) removeArtifacts(references []ArtifactReferen
 	}
 }
 
-func (publisher *artifactPublisher) verifyArtifacts(record ReviewRecord) error {
+func (publisher *artifactPublisher) verifyArtifacts(record model.ReviewRecord) error {
 	if publisher.store == nil {
 		return nil
 	}
