@@ -335,6 +335,87 @@ func TestLedgerRejectsObsoleteSchema(t *testing.T) {
 	}
 }
 
+func TestLedgerRejectsLegacyFirstSchemaCollision(t *testing.T) {
+	directory := t.TempDir()
+	db, err := sql.Open("sqlite", filepath.Join(directory, ledgerFilename))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A ledger from the replaced migration chain's first version reports the same
+	// numeric version the old chain used, but lacks every later table and column.
+	if _, err := db.Exec("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY); INSERT INTO schema_migrations(version) VALUES(1); CREATE TABLE reviews (id TEXT PRIMARY KEY)"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReviewRecordStatePrepared(directory); !errors.Is(err, ErrReviewRecordStateRequiresPreparation) {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestPrepareReplacesObsoleteLedgersInPlace(t *testing.T) {
+	for name, seed := range map[string]func(sql.Tx) error{
+		"obsolete-chain-schema": func(tx sql.Tx) error {
+			_, err := tx.Exec("UPDATE schema_migrations SET version=8")
+			return err
+		},
+		"legacy-first-version": func(tx sql.Tx) error {
+			_, err := tx.Exec("DROP TABLE reviews; UPDATE schema_migrations SET version=1; CREATE TABLE reviews (id TEXT PRIMARY KEY)")
+			return err
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			directory := t.TempDir()
+			ledger := newTestLedger(t, directory)
+			review := ledgerFixture(model.LifecycleCompleted)
+			if err := ledger.Save(review); err != nil {
+				t.Fatal(err)
+			}
+			if err := ledger.Close(); err != nil {
+				t.Fatal(err)
+			}
+			db, err := sql.Open("sqlite", filepath.Join(directory, ledgerFilename))
+			if err != nil {
+				t.Fatal(err)
+			}
+			tx, err := db.Begin()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := seed(*tx); err != nil {
+				t.Fatal(err)
+			}
+			if err := tx.Commit(); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Close(); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := PrepareReviewRecordState(directory); err != nil {
+				t.Fatalf("prepare = %v", err)
+			}
+			reopened, err := NewLedgerRecordStore(directory)
+			if err != nil {
+				t.Fatalf("reopen = %v", err)
+			}
+			defer reopened.Close()
+			loaded, err := reopened.Load(review.ID)
+			if err == nil {
+				t.Fatalf("loaded obsolete record %q after replacement", loaded.ID)
+			}
+			fresh := ledgerFixture(model.LifecycleCompleted)
+			if err := reopened.Save(fresh); err != nil {
+				t.Fatalf("save on replaced ledger = %v", err)
+			}
+			if _, err := reopened.History(HistoryQuery{Limit: 5}); err != nil {
+				t.Fatalf("history on replaced ledger = %v", err)
+			}
+		})
+	}
+}
+
 func TestAdjudicationCorrectionsPreserveImmutableRevisions(t *testing.T) {
 	ledger := newTestLedger(t, t.TempDir())
 	defer ledger.Close()

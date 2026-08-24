@@ -18,10 +18,13 @@ import (
 
 const ledgerFilename = "ledger.sqlite"
 
-// currentLedgerSchemaVersion identifies the single schema used by this pre-release product.
-const currentLedgerSchemaVersion = 1
+// currentLedgerSchemaVersion identifies the single schema used by this pre-release
+// product. It deliberately continues the historical numbering past the last
+// released migration so no obsolete ledger can collide with the replacement.
+const currentLedgerSchemaVersion = 9
 
-// maxObsoleteLedgerSchemaVersion covers the last schema before the direct replacement.
+// maxObsoleteLedgerSchemaVersion is the highest schema from the replaced
+// pre-release migration chain that explicit preparation may reset in place.
 const maxObsoleteLedgerSchemaVersion = 8
 
 var ErrReviewRecordStateNotInitialized = errors.New("Review Party is not initialized")
@@ -332,12 +335,9 @@ func (s *LedgerRecordStore) requirePreparedSchema() error {
 		return fmt.Errorf("read review ledger schema: %w", err)
 	}
 	if version > currentLedgerSchemaVersion {
-		if version <= maxObsoleteLedgerSchemaVersion {
-			return fmt.Errorf("%w: review ledger schema %d requires state preparation for schema %d", ErrReviewRecordStateRequiresPreparation, version, currentLedgerSchemaVersion)
-		}
 		return fmt.Errorf("review ledger schema %d is newer than supported schema %d", version, currentLedgerSchemaVersion)
 	}
-	if version < currentLedgerSchemaVersion {
+	if version != currentLedgerSchemaVersion {
 		return fmt.Errorf("%w: review ledger schema %d requires state preparation for schema %d", ErrReviewRecordStateRequiresPreparation, version, currentLedgerSchemaVersion)
 	}
 	return nil
@@ -367,6 +367,14 @@ func (s *LedgerRecordStore) configure() error {
 	return nil
 }
 
+// obsoleteLedgerTables lists every table a replaced pre-release ledger could own,
+// ordered so foreign-key children are dropped before their parents.
+var obsoleteLedgerTables = []string{
+	"artifacts", "findings", "attempts", "passes",
+	"eval_runs", "adjudication_revisions", "review_bundles",
+	"eval_suite_runs", "reviews", "schema_migrations",
+}
+
 func (s *LedgerRecordStore) migrate() error {
 	if _, err := s.db.Exec("CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY)"); err != nil {
 		return fmt.Errorf("create migration table: %w", err)
@@ -380,14 +388,26 @@ func (s *LedgerRecordStore) migrate() error {
 	if err != nil {
 		return err
 	}
-	if version > currentLedgerSchemaVersion {
+	if version > maxObsoleteLedgerSchemaVersion && version != currentLedgerSchemaVersion {
 		return fmt.Errorf("review ledger schema %d is newer than supported schema %d", version, currentLedgerSchemaVersion)
 	}
-	for version < currentLedgerSchemaVersion {
-		if err := applyKnownMigration(tx, version+1); err != nil {
+	if version != currentLedgerSchemaVersion {
+		// Explicit preparation replaces a recognized pre-release ledger in place
+		// (a zero version means a fresh database); it never upgrades or preserves
+		// obsolete state.
+		for _, table := range obsoleteLedgerTables {
+			if _, err := tx.Exec("DROP TABLE IF EXISTS " + table); err != nil {
+				return fmt.Errorf("replace obsolete review ledger schema %d: %w", version, err)
+			}
+		}
+		if _, err := tx.Exec("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY)"); err != nil {
+			return fmt.Errorf("recreate migration table: %w", err)
+		}
+	}
+	if version != currentLedgerSchemaVersion {
+		if err := applyKnownMigration(tx, currentLedgerSchemaVersion); err != nil {
 			return err
 		}
-		version++
 	}
 	return tx.Commit()
 }
