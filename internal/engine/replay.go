@@ -3,13 +3,16 @@ package engine
 import (
 	"errors"
 	"fmt"
+	"reviewparty/internal/model"
+	"reviewparty/internal/result"
+	"reviewparty/internal/subject"
 	"time"
 )
 
 var ErrWorkingChangesReplayUnsupported = errors.New("working-changes Reviews cannot be replayed; replay requires a committed-range Subject")
 
-func (conductor *Conductor) prepareReplay(source ReviewRecord, selection ReplaySelection) (preparedReview, error) {
-	timings := ReviewTimings{}
+func (conductor *Conductor) prepareReplay(source model.ReviewRecord, selection model.ReplaySelection) (preparedReview, error) {
+	timings := model.ReviewTimings{}
 	subjectStarted := conductor.now().UTC()
 	subject, err := replaySubject(source.Subject)
 	timings.SubjectResolutionMS = elapsedMilliseconds(subjectStarted, conductor.now().UTC())
@@ -29,21 +32,21 @@ func (conductor *Conductor) prepareReplay(source ReviewRecord, selection ReplayS
 	return preparedReview{subject: subject, profile: profile, timings: timings, deadline: deadline}, nil
 }
 
-func replaySubject(recorded ReviewSubject) (ReviewSubject, error) {
-	if recorded.Kind != SubjectCommittedRange {
-		return ReviewSubject{}, ErrWorkingChangesReplayUnsupported
+func replaySubject(recorded model.ReviewSubject) (model.ReviewSubject, error) {
+	if recorded.Kind != model.SubjectCommittedRange {
+		return model.ReviewSubject{}, ErrWorkingChangesReplayUnsupported
 	}
-	resolved, err := resolveSubject(recorded.Repository, CommittedRange(recorded.BaseObject, recorded.HeadObject))
+	resolved, err := subject.ResolveSubject(recorded.Repository, model.CommittedRange(recorded.BaseObject, recorded.HeadObject))
 	if err != nil {
-		return ReviewSubject{}, fmt.Errorf("reconstruct replay Subject: %w", err)
+		return model.ReviewSubject{}, fmt.Errorf("reconstruct replay Subject: %w", err)
 	}
 	if resolved.Identity != recorded.Identity {
-		return ReviewSubject{}, errors.New("reconstructed replay Subject does not match the recorded identity")
+		return model.ReviewSubject{}, errors.New("reconstructed replay Subject does not match the recorded identity")
 	}
 	return recorded, nil
 }
 
-func (conductor *Conductor) replayProfile(source ReviewRecord, selection ReplaySelection) (compiledProfile, error) {
+func (conductor *Conductor) replayProfile(source model.ReviewRecord, selection model.ReplaySelection) (compiledProfile, error) {
 	revision := source.ProfileRevision
 	if err := validateReplayProfile(revision); err != nil {
 		return compiledProfile{}, err
@@ -58,8 +61,8 @@ func (conductor *Conductor) replayProfile(source ReviewRecord, selection ReplayS
 	return replayCompiledProfile(revision, source.ProfileSnapshot, registration), nil
 }
 
-func validateReplayProfile(revision ProfileRevision) error {
-	if revision.ResultContract != canonicalReviewResultContract.Revision() {
+func validateReplayProfile(revision model.ProfileRevision) error {
+	if revision.ResultContract != result.CanonicalReviewResultContract.Revision() {
 		return fmt.Errorf("replay Profile uses unsupported result contract %q", revision.ResultContract)
 	}
 	if len(revision.Passes) != 1 || revision.AttemptLimit != 1 {
@@ -68,7 +71,7 @@ func validateReplayProfile(revision ProfileRevision) error {
 	return nil
 }
 
-func (conductor *Conductor) resolveReplayReviewer(revision ProfileRevision, selection ReplaySelection) (reviewerRegistration, bool, error) {
+func (conductor *Conductor) resolveReplayReviewer(revision model.ProfileRevision, selection model.ReplaySelection) (reviewerRegistration, bool, error) {
 	overridden := selection.Reviewer != "" || selection.Model != "" || selection.Effort != ""
 	reviewerID := firstNonempty(selection.Reviewer, revision.ReviewerID)
 	registration, err := conductor.reviewers.resolve(reviewerID)
@@ -82,26 +85,26 @@ func (conductor *Conductor) resolveReplayReviewer(revision ProfileRevision, sele
 	if err := validateReplayCapabilities(revision, reviewerID, registration); err != nil {
 		return reviewerRegistration{}, false, err
 	}
-	registration, err = resolveReviewerSelection(registration, ProfileSelection{Reviewer: reviewerID, Model: selection.Model, Effort: selection.Effort})
+	registration, err = resolveReviewerSelection(registration, model.ProfileSelection{Reviewer: reviewerID, Model: selection.Model, Effort: selection.Effort})
 	if err != nil {
 		return reviewerRegistration{}, false, err
 	}
 	return registration, overridden, nil
 }
 
-func completeReplaySelection(selection ReplaySelection, revision ProfileRevision, registration reviewerRegistration) (ReplaySelection, error) {
+func completeReplaySelection(selection model.ReplaySelection, revision model.ProfileRevision, registration reviewerRegistration) (model.ReplaySelection, error) {
 	if selection.Reviewer != "" {
 		return selection, nil
 	}
 	if err := validateRecordedTransport(registration, revision); err != nil {
-		return ReplaySelection{}, err
+		return model.ReplaySelection{}, err
 	}
 	selection.Model = firstNonempty(selection.Model, revision.Model)
 	selection.Effort = firstNonempty(selection.Effort, revision.Effort)
 	return selection, nil
 }
 
-func validateReplayCapabilities(revision ProfileRevision, reviewerID string, registration reviewerRegistration) error {
+func validateReplayCapabilities(revision model.ProfileRevision, reviewerID string, registration reviewerRegistration) error {
 	missing := missingCapabilities(revision.RequiredCapabilities, registration.capabilities)
 	if len(missing) == 0 {
 		return nil
@@ -109,14 +112,14 @@ func validateReplayCapabilities(revision ProfileRevision, reviewerID string, reg
 	return UnsupportedCapabilitiesError{Profile: revision.Name, Reviewer: reviewerID, Missing: missing}
 }
 
-func validateRecordedTransport(registration reviewerRegistration, revision ProfileRevision) error {
+func validateRecordedTransport(registration reviewerRegistration, revision model.ProfileRevision) error {
 	if registration.candidate.Harness == revision.Reviewer.Harness && registration.candidate.Transport == revision.Reviewer.Transport {
 		return nil
 	}
 	return fmt.Errorf("recorded reviewer transport %s/%s is unavailable", revision.Reviewer.Harness, revision.Reviewer.Transport)
 }
 
-func replayRevisionWithReviewer(revision ProfileRevision, registration reviewerRegistration) ProfileRevision {
+func replayRevisionWithReviewer(revision model.ProfileRevision, registration reviewerRegistration) model.ProfileRevision {
 	revision.ReviewerID = registration.candidate.ID
 	revision.Model = registration.candidate.Model
 	revision.Effort = registration.candidate.Effort
@@ -125,13 +128,13 @@ func replayRevisionWithReviewer(revision ProfileRevision, registration reviewerR
 	return revision
 }
 
-func replayCompiledProfile(revision ProfileRevision, snapshot ProfileSnapshot, registration reviewerRegistration) compiledProfile {
+func replayCompiledProfile(revision model.ProfileRevision, snapshot model.ProfileSnapshot, registration reviewerRegistration) compiledProfile {
 	resolved := resolvedProfile{name: snapshot.Name, instructions: snapshot.Instructions, source: snapshot.Source, digest: snapshot.SourceDigest}
 	return compiledProfile{
 		revision: revision,
 		snapshot: snapshot,
 		reviewer: registration,
-		buildPrompt: func(subject ReviewSubject) string {
+		buildPrompt: func(subject model.ReviewSubject) string {
 			return renderReviewPrompt(resolved, subject)
 		},
 	}

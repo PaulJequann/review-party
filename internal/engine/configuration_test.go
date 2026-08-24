@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"reviewparty/internal/model"
+	"reviewparty/internal/store"
 	"strings"
 	"testing"
 
@@ -29,7 +31,7 @@ const configuredReviewers = `{
 func TestUserConfigurationControlsDefaultReviewerAndModel(t *testing.T) {
 	conductor := configuredTestConductor(t, configuredReviewers)
 
-	explanation, err := conductor.Explain(context.Background(), ProfileSelection{Profile: "bugs"})
+	explanation, err := conductor.Explain(context.Background(), model.ProfileSelection{Profile: "bugs"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +39,7 @@ func TestUserConfigurationControlsDefaultReviewerAndModel(t *testing.T) {
 		t.Fatal("configured default was reported as explicit")
 	}
 	got := explanation.ProfileRevision.Reviewer
-	want := ReviewerProvenance{ReviewerID: "opencode", Model: "meta/muse-spark-1.2-contributor", Effort: "default", Harness: "opencode-cli", Transport: "direct-cli"}
+	want := model.ReviewerProvenance{ReviewerID: "opencode", Model: "meta/muse-spark-1.2-contributor", Effort: "default", Harness: "opencode-cli", Transport: "direct-cli"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("reviewer = %#v, want %#v", got, want)
 	}
@@ -46,9 +48,9 @@ func TestUserConfigurationControlsDefaultReviewerAndModel(t *testing.T) {
 func TestDisabledReviewerFailsBeforeSubjectResolution(t *testing.T) {
 	conductor := configuredTestConductor(t, configuredReviewers)
 
-	_, err := conductor.Review(context.Background(), ReviewSelection{
+	_, err := conductor.Review(context.Background(), model.ReviewSelection{
 		Repository: "/repository-must-not-be-resolved",
-		Subject:    WorkingChanges(),
+		Subject:    model.WorkingChanges(),
 		Profile:    "security",
 		Reviewer:   "copilot",
 	})
@@ -74,7 +76,7 @@ func TestRepositoryDefaultReviewerOwnsExplicitModelValidation(t *testing.T) {
 	repository := changedTestRepository(t)
 	writeProfileConfigFixture(t, filepath.Join(repository, ".reviewparty", "config.json"), `{"schema_version":1,"defaults":{"reviewer":"opencode"}}`)
 
-	record, err := conductor.Review(context.Background(), ReviewSelection{Repository: repository, Subject: WorkingChanges(), Model: "model-m"})
+	record, err := conductor.Review(context.Background(), model.ReviewSelection{Repository: repository, Subject: model.WorkingChanges(), Model: "model-m"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +101,7 @@ func TestRepositoryEffectiveReviewerOverridesPersonalPolicy(t *testing.T) {
   "reviewers": {"grok": {"model": "repository-grok"}}
 }`)
 
-	explanation, err := conductor.ExplainForRepository(context.Background(), ProfileSelection{Profile: "bugs"}, repository)
+	explanation, err := conductor.ExplainForRepository(context.Background(), model.ProfileSelection{Profile: "bugs"}, repository)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +115,7 @@ func TestPackagedReviewerModelAllowedByConfiguration(t *testing.T) {
   "schema_version": 1,
   "reviewers": {"grok": {"allowed_models": ["grok-4.5"]}}
 }`)
-	explanation, err := conductor.Explain(context.Background(), ProfileSelection{Profile: "bugs", Reviewer: "grok"})
+	explanation, err := conductor.Explain(context.Background(), model.ProfileSelection{Profile: "bugs", Reviewer: "grok"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +127,7 @@ func TestPackagedReviewerModelAllowedByConfiguration(t *testing.T) {
 func TestOpenCodeModelOverrideMustBeAllowed(t *testing.T) {
 	conductor := configuredTestConductor(t, configuredReviewers)
 
-	explanation, err := conductor.Explain(context.Background(), ProfileSelection{
+	explanation, err := conductor.Explain(context.Background(), model.ProfileSelection{
 		Profile:  "bugs",
 		Reviewer: "opencode",
 		Model:    "opencode-go/deepseek-v4-flash",
@@ -137,7 +139,7 @@ func TestOpenCodeModelOverrideMustBeAllowed(t *testing.T) {
 		t.Fatalf("model = %q", explanation.ProfileRevision.Model)
 	}
 
-	_, err = conductor.Explain(context.Background(), ProfileSelection{
+	_, err = conductor.Explain(context.Background(), model.ProfileSelection{
 		Profile:  "bugs",
 		Reviewer: "opencode",
 		Model:    "unapproved/model",
@@ -154,7 +156,7 @@ func TestExplainRejectsUnsupportedExplicitEffort(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tests := map[string]ProfileSelection{
+	tests := map[string]model.ProfileSelection{
 		"copilot auto model": {Profile: "bugs", Reviewer: "copilot", Effort: "high"},
 		"opencode auto effort": {
 			Profile:  "bugs",
@@ -184,7 +186,7 @@ func TestOmittedModelAllowlistAllowsExplicitModel(t *testing.T) {
 }`
 	conductor := configuredTestConductor(t, configuration)
 
-	explanation, err := conductor.Explain(context.Background(), ProfileSelection{
+	explanation, err := conductor.Explain(context.Background(), model.ProfileSelection{
 		Profile:  "bugs",
 		Reviewer: "opencode",
 		Model:    "caller-selected/model",
@@ -221,7 +223,7 @@ func TestExplicitEmptyModelAllowlistRejectsExplicitModel(t *testing.T) {
 }`
 	conductor := configuredTestConductor(t, configuration)
 
-	_, err := conductor.Explain(context.Background(), ProfileSelection{
+	_, err := conductor.Explain(context.Background(), model.ProfileSelection{
 		Profile:  "bugs",
 		Reviewer: "opencode",
 		Model:    "caller-selected/model",
@@ -374,7 +376,7 @@ func TestRepositoryCanRepairUnusablePersonalDefault(t *testing.T) {
   "defaults": {"reviewer": "opencode"}
 }`)
 
-	explanation, err := conductor.ExplainForRepository(context.Background(), ProfileSelection{Profile: "bugs"}, repository)
+	explanation, err := conductor.ExplainForRepository(context.Background(), model.ProfileSelection{Profile: "bugs"}, repository)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -394,7 +396,7 @@ func TestDisabledReviewerIgnoresInactiveModelAllowlist(t *testing.T) {
 }`
 	conductor := configuredTestConductor(t, configuration)
 
-	explanation, err := conductor.Explain(context.Background(), ProfileSelection{Profile: "bugs"})
+	explanation, err := conductor.Explain(context.Background(), model.ProfileSelection{Profile: "bugs"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -411,7 +413,7 @@ func TestMissingUserConfigurationPreservesBuiltInDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	explanation, err := conductor.Explain(context.Background(), ProfileSelection{Profile: "bugs"})
+	explanation, err := conductor.Explain(context.Background(), model.ProfileSelection{Profile: "bugs"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -427,7 +429,7 @@ func TestOpenCodeRequiresCallerOwnedModelWithoutConfiguration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = conductor.Explain(context.Background(), ProfileSelection{Profile: "bugs", Reviewer: "opencode"})
+	_, err = conductor.Explain(context.Background(), model.ProfileSelection{Profile: "bugs", Reviewer: "opencode"})
 	var required ReviewerModelRequiredError
 	if !errors.As(err, &required) {
 		t.Fatalf("error = %v, want ReviewerModelRequiredError", err)
@@ -451,7 +453,7 @@ func conductorFromConfiguration(t *testing.T, configuration string) (*Conductor,
 	}
 	stateHome := t.TempDir()
 	t.Setenv("XDG_STATE_HOME", stateHome)
-	ledger, err := newLedgerRecordStore(filepath.Join(stateHome, "review-party"))
+	ledger, err := store.NewLedgerRecordStore(filepath.Join(stateHome, "review-party"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -466,7 +468,7 @@ func invalidConfigurationFromPayload(t *testing.T, payload string) (string, erro
 	t.Helper()
 	conductor, path, err := conductorFromConfiguration(t, payload)
 	if err == nil {
-		_, err = conductor.Explain(context.Background(), ProfileSelection{Profile: "bugs"})
+		_, err = conductor.Explain(context.Background(), model.ProfileSelection{Profile: "bugs"})
 	}
 	if err == nil {
 		t.Fatal("configuration payload was accepted")

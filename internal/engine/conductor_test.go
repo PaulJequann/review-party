@@ -8,6 +8,9 @@ import (
 	"path/filepath"
 	"reflect"
 	"reviewparty/internal/artifact"
+	"reviewparty/internal/model"
+	"reviewparty/internal/store"
+	"reviewparty/internal/subject"
 	"strings"
 	"sync"
 	"testing"
@@ -78,7 +81,7 @@ func TestReviewFreezesWorkingChangesBeforeExecution(t *testing.T) {
 		availability: availability{Available: true},
 		execute: func(_ context.Context, _ attemptSpec) attemptExecution {
 			writeTestFile(t, filepath.Join(repository, "review.go"), "package demo\n\nconst state = \"later change\"\n")
-			return attemptExecution{AssistantText: cleanReview, Outcome: AttemptCompleted}
+			return attemptExecution{AssistantText: cleanReview, Outcome: model.AttemptCompleted}
 		},
 	}
 	conductor := testConductor(t, executor, time.Second)
@@ -103,13 +106,13 @@ func TestReviewCompletesOnlyWithValidCleanResult(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if record.Lifecycle != LifecycleCompleted {
-		t.Fatalf("lifecycle = %q, want %q", record.Lifecycle, LifecycleCompleted)
+	if record.Lifecycle != model.LifecycleCompleted {
+		t.Fatalf("lifecycle = %q, want %q", record.Lifecycle, model.LifecycleCompleted)
 	}
-	if record.Result == nil || record.Result.Status != ResultClean {
+	if record.Result == nil || record.Result.Status != model.ResultClean {
 		t.Fatalf("result = %#v, want clean", record.Result)
 	}
-	if record.AttemptCount() != 1 || record.Passes[0].Attempts[0].Outcome != AttemptCompleted {
+	if record.AttemptCount() != 1 || record.Passes[0].Attempts[0].Outcome != model.AttemptCompleted {
 		t.Fatalf("attempts = %#v, want one completed attempt", record.Passes[0].Attempts)
 	}
 }
@@ -122,13 +125,13 @@ func TestReviewPreservesValidFindings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if record.Lifecycle != LifecycleCompleted {
-		t.Fatalf("lifecycle = %q, want %q", record.Lifecycle, LifecycleCompleted)
+	if record.Lifecycle != model.LifecycleCompleted {
+		t.Fatalf("lifecycle = %q, want %q", record.Lifecycle, model.LifecycleCompleted)
 	}
 	if record.Result == nil {
 		t.Fatal("result is nil")
 	}
-	if record.Result.Status != ResultFindings {
+	if record.Result.Status != model.ResultFindings {
 		t.Fatalf("status = %q", record.Result.Status)
 	}
 	if record.Result.FindingCount() != 1 {
@@ -160,8 +163,9 @@ func TestRecordSaveFailureRemovesPublishedAttemptArtifacts(t *testing.T) {
 }
 
 func TestOverflowedExecutionMarksAssistantArtifactTruncated(t *testing.T) {
-	conductor := &Conductor{artifacts: mustNewArtifactStore(t, t.TempDir())}
-	attempt, err := conductor.buildAttempt("rp_1723200000000_0123456789abcdef", "prompt", reviewerCandidate{}, attemptExecution{AssistantText: "captured prefix", ArtifactTruncated: true}, AttemptInvalidResult, time.Time{}, time.Time{})
+	publisher := newArtifactPublisher(mustNewArtifactStore(t, t.TempDir()))
+	runner := &reviewRunner{publisher: publisher}
+	attempt, err := runner.buildAttempt("rp_1723200000000_0123456789abcdef", "prompt", reviewerCandidate{}, attemptExecution{AssistantText: "captured prefix", ArtifactTruncated: true}, model.AttemptInvalidResult, time.Time{}, time.Time{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +182,7 @@ func TestOverflowedExecutionMarksAssistantArtifactTruncated(t *testing.T) {
 
 type failFinalRecordStore struct{ saves int }
 
-func (store *failFinalRecordStore) Save(ReviewRecord) error {
+func (store *failFinalRecordStore) Save(model.ReviewRecord) error {
 	store.saves++
 	if store.saves == 3 {
 		return errors.New("final record save failed")
@@ -186,8 +190,8 @@ func (store *failFinalRecordStore) Save(ReviewRecord) error {
 	return nil
 }
 
-func (*failFinalRecordStore) Load(ReviewID) (ReviewRecord, error) {
-	return ReviewRecord{}, errors.New("not found")
+func (*failFinalRecordStore) Load(model.ReviewID) (model.ReviewRecord, error) {
+	return model.ReviewRecord{}, errors.New("not found")
 }
 
 func mustNewArtifactStore(t *testing.T, root string) *artifact.Store {
@@ -208,13 +212,13 @@ func TestMalformedOutputIsIncompleteNeverClean(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if record.Lifecycle != LifecycleIncomplete || record.Result != nil {
+	if record.Lifecycle != model.LifecycleIncomplete || record.Result != nil {
 		t.Fatalf("record = %#v, want incomplete without result", record)
 	}
-	if record.Passes[0].Attempts[0].Outcome != AttemptInvalidResult {
-		t.Fatalf("outcome = %q, want %q", record.Passes[0].Attempts[0].Outcome, AttemptInvalidResult)
+	if record.Passes[0].Attempts[0].Outcome != model.AttemptInvalidResult {
+		t.Fatalf("outcome = %q, want %q", record.Passes[0].Attempts[0].Outcome, model.AttemptInvalidResult)
 	}
-	assertTermination(t, record, TerminationResultValidationFailure, PhaseResultValidation)
+	assertTermination(t, record, model.TerminationResultValidationFailure, model.PhaseResultValidation)
 }
 
 func TestFailedExecutionCannotBeCompletedByValidPayload(t *testing.T) {
@@ -222,11 +226,9 @@ func TestFailedExecutionCannotBeCompletedByValidPayload(t *testing.T) {
 	executor := &scriptedExecutor{
 		availability: availability{Available: true},
 		execute: func(context.Context, attemptSpec) attemptExecution {
-			return attemptExecution{
-				AssistantText: cleanReview,
-				Outcome:       AttemptTransientFailure,
-				Diagnostic:    "reviewer connection closed",
-			}
+			execution := failedExecution(model.AttemptTransientFailure, model.TerminationTransportFailure, model.PhaseReviewerExecution, "reviewer connection closed")
+			execution.AssistantText = cleanReview
+			return execution
 		},
 	}
 	conductor := testConductor(t, executor, time.Second)
@@ -235,13 +237,13 @@ func TestFailedExecutionCannotBeCompletedByValidPayload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if record.Lifecycle != LifecycleIncomplete || record.Result != nil {
+	if record.Lifecycle != model.LifecycleIncomplete || record.Result != nil {
 		t.Fatalf("record = %#v, want incomplete without a result", record)
 	}
-	if record.Passes[0].Attempts[0].Outcome != AttemptTransientFailure {
-		t.Fatalf("outcome = %q, want %q", record.Passes[0].Attempts[0].Outcome, AttemptTransientFailure)
+	if record.Passes[0].Attempts[0].Outcome != model.AttemptTransientFailure {
+		t.Fatalf("outcome = %q, want %q", record.Passes[0].Attempts[0].Outcome, model.AttemptTransientFailure)
 	}
-	assertTermination(t, record, TerminationTransportFailure, PhaseReviewerExecution)
+	assertTermination(t, record, model.TerminationTransportFailure, model.PhaseReviewerExecution)
 }
 
 func TestUnavailableReviewerLaunchesNoAttempt(t *testing.T) {
@@ -250,7 +252,7 @@ func TestUnavailableReviewerLaunchesNoAttempt(t *testing.T) {
 		availability: availability{Diagnostic: "grok is not installed"},
 		execute: func(context.Context, attemptSpec) attemptExecution {
 			t.Fatal("unavailable reviewer was executed")
-			return attemptExecution{}
+			return failedExecution(model.AttemptUnknownFailure, model.TerminationUnknownFailure, model.PhaseReviewerExecution, "unreachable")
 		},
 	}
 	conductor := testConductor(t, executor, time.Second)
@@ -259,7 +261,7 @@ func TestUnavailableReviewerLaunchesNoAttempt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if record.Lifecycle != LifecycleIncomplete {
+	if record.Lifecycle != model.LifecycleIncomplete {
 		t.Fatalf("lifecycle = %q", record.Lifecycle)
 	}
 	if executor.attemptCount() != 0 {
@@ -268,7 +270,7 @@ func TestUnavailableReviewerLaunchesNoAttempt(t *testing.T) {
 	if record.AttemptCount() != 0 {
 		t.Fatalf("record = %#v, launches = %d; want incomplete with no attempts", record, executor.attemptCount())
 	}
-	assertTermination(t, record, TerminationReviewerUnavailable, PhaseAvailabilityCheck)
+	assertTermination(t, record, model.TerminationReviewerUnavailable, model.PhaseAvailabilityCheck)
 }
 
 func TestExplicitReviewerRoutesToMatchingAdapter(t *testing.T) {
@@ -277,7 +279,7 @@ func TestExplicitReviewerRoutesToMatchingAdapter(t *testing.T) {
 		availability: availability{Available: true},
 		execute: func(context.Context, attemptSpec) attemptExecution {
 			t.Fatal("grok executed for an opencode selection")
-			return attemptExecution{}
+			return failedExecution(model.AttemptUnknownFailure, model.TerminationUnknownFailure, model.PhaseReviewerExecution, "unreachable")
 		},
 	}
 	opencode := successfulExecutor(cleanReview)
@@ -329,7 +331,7 @@ func TestUnavailableReviewerDoesNotFallBack(t *testing.T) {
 		availability: availability{Diagnostic: "grok login required"},
 		execute: func(context.Context, attemptSpec) attemptExecution {
 			t.Fatal("unavailable grok reviewer executed")
-			return attemptExecution{}
+			return failedExecution(model.AttemptUnknownFailure, model.TerminationUnknownFailure, model.PhaseReviewerExecution, "unreachable")
 		},
 	}
 	opencode := successfulExecutor(cleanReview)
@@ -342,7 +344,7 @@ func TestUnavailableReviewerDoesNotFallBack(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if record.Lifecycle != LifecycleIncomplete {
+	if record.Lifecycle != model.LifecycleIncomplete {
 		t.Fatalf("lifecycle = %q", record.Lifecycle)
 	}
 	if record.AttemptCount() != 0 {
@@ -360,10 +362,10 @@ func TestAttemptDeadlineProducesInspectableIncompleteRecord(t *testing.T) {
 		execute: func(ctx context.Context, _ attemptSpec) attemptExecution {
 			<-ctx.Done()
 			return attemptExecution{
-				Outcome:         AttemptTransientFailure,
+				Outcome:         model.AttemptTransientFailure,
 				Diagnostic:      ctx.Err().Error(),
-				FailureCategory: TerminationDeadlineExceeded,
-				FailurePhase:    PhaseReviewerExecution,
+				FailureCategory: model.TerminationDeadlineExceeded,
+				FailurePhase:    model.PhaseReviewerExecution,
 			}
 		},
 	}
@@ -373,7 +375,7 @@ func TestAttemptDeadlineProducesInspectableIncompleteRecord(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if record.Lifecycle != LifecycleIncomplete {
+	if record.Lifecycle != model.LifecycleIncomplete {
 		t.Fatalf("lifecycle = %q, want incomplete", record.Lifecycle)
 	}
 	stored, err := conductor.Inspect(context.Background(), record.ID)
@@ -383,7 +385,7 @@ func TestAttemptDeadlineProducesInspectableIncompleteRecord(t *testing.T) {
 	if !reflect.DeepEqual(record, stored) {
 		t.Fatalf("stored record differs\nrecord: %#v\nstored: %#v", record, stored)
 	}
-	assertTermination(t, record, TerminationDeadlineExceeded, PhaseReviewerExecution)
+	assertTermination(t, record, model.TerminationDeadlineExceeded, model.PhaseReviewerExecution)
 	if !strings.Contains(record.Termination.Message, context.DeadlineExceeded.Error()) {
 		t.Fatalf("termination message = %q", record.Termination.Message)
 	}
@@ -398,8 +400,8 @@ func TestReviewRecordsCoherentOperationalTimingAndBuildProvenance(t *testing.T) 
 		return instant
 	}
 	modified := false
-	conductor.buildProvenance = func() RuntimeProvenance {
-		return RuntimeProvenance{Version: "0.4.0", VCSRevision: "abc123", VCSModified: &modified}
+	conductor.buildProvenance = func() model.RuntimeProvenance {
+		return model.RuntimeProvenance{Version: "0.4.0", VCSRevision: "abc123", VCSModified: &modified}
 	}
 
 	record, err := conductor.Review(context.Background(), testSelection(repository))
@@ -410,9 +412,9 @@ func TestReviewRecordsCoherentOperationalTimingAndBuildProvenance(t *testing.T) 
 	assertCoherentTimings(t, record)
 }
 
-func assertOperationalSchemaAndRuntime(t *testing.T, record ReviewRecord) {
+func assertOperationalSchemaAndRuntime(t *testing.T, record model.ReviewRecord) {
 	t.Helper()
-	if record.SchemaVersion != currentReviewRecordSchemaVersion {
+	if record.SchemaVersion != model.CurrentReviewRecordSchemaVersion {
 		t.Fatalf("schema version = %d", record.SchemaVersion)
 	}
 	if record.Runtime.Version != "0.4.0" {
@@ -429,7 +431,7 @@ func assertOperationalSchemaAndRuntime(t *testing.T, record ReviewRecord) {
 	}
 }
 
-func assertCoherentTimings(t *testing.T, record ReviewRecord) {
+func assertCoherentTimings(t *testing.T, record model.ReviewRecord) {
 	t.Helper()
 	phaseTotal := record.Timings.SubjectResolutionMS + record.Timings.ProfileCompilationMS +
 		record.Timings.AvailabilityCheckMS + record.Timings.AttemptExecutionMS +
@@ -454,7 +456,7 @@ func TestWorkingChangesIncludesUntrackedFilesWithoutHead(t *testing.T) {
 	runTestCommand(t, repository, "git", "init", "--quiet")
 	writeTestFile(t, filepath.Join(repository, "new.go"), "package demo\n")
 
-	subject, err := resolveWorkingChanges(repository)
+	subject, err := subject.ResolveWorkingChanges(repository)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -470,7 +472,7 @@ func successfulExecutor(output string) *scriptedExecutor {
 	return &scriptedExecutor{
 		availability: availability{Available: true},
 		execute: func(context.Context, attemptSpec) attemptExecution {
-			return attemptExecution{AssistantText: output, Outcome: AttemptCompleted}
+			return attemptExecution{AssistantText: output, Outcome: model.AttemptCompleted}
 		},
 	}
 }
@@ -481,7 +483,7 @@ func testConductor(t *testing.T, executor attemptExecutor, deadline time.Duratio
 
 func testConductorWithExecutors(t *testing.T, executors map[string]attemptExecutor, deadline time.Duration) *Conductor {
 	t.Helper()
-	store, err := newLedgerRecordStore(t.TempDir())
+	store, err := store.NewLedgerRecordStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -492,8 +494,8 @@ func testConductorWithExecutors(t *testing.T, executors map[string]attemptExecut
 	return conductor
 }
 
-func testSelection(repository string) ReviewSelection {
-	return ReviewSelection{Repository: repository, Subject: WorkingChanges(), Profile: "bugs"}
+func testSelection(repository string) model.ReviewSelection {
+	return model.ReviewSelection{Repository: repository, Subject: model.WorkingChanges(), Profile: "bugs"}
 }
 
 func changedTestRepository(t *testing.T) string {
@@ -547,7 +549,7 @@ func slicesContainPrefix(values []string, prefix string) bool {
 	return false
 }
 
-func assertTermination(t *testing.T, record ReviewRecord, category TerminationCategory, phase ExecutionPhase) {
+func assertTermination(t *testing.T, record model.ReviewRecord, category model.TerminationCategory, phase model.ExecutionPhase) {
 	t.Helper()
 	if record.Termination == nil {
 		t.Fatal("termination is nil")

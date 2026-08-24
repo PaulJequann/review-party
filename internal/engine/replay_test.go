@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"reviewparty/internal/model"
 	"strings"
 	"testing"
 	"time"
@@ -17,12 +18,12 @@ func TestReplayUsesFrozenProfileAndCreatesIndependentLineage(t *testing.T) {
 	repository, base, head := committedReviewFixture(t)
 	executor := successfulExecutor(cleanReview)
 	conductor := testConductor(t, executor, time.Second)
-	original, err := conductor.Review(context.Background(), ReviewSelection{Repository: repository, Subject: CommittedRange(base, head), Profile: "bugs"})
+	original, err := conductor.Review(context.Background(), model.ReviewSelection{Repository: repository, Subject: model.CommittedRange(base, head), Profile: "bugs"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	installChangedBugsProfile(t, repository)
-	replay, err := conductor.Replay(context.Background(), ReplaySelection{SourceReviewID: original.ID})
+	replay, err := conductor.Replay(context.Background(), model.ReplaySelection{SourceReviewID: original.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +38,7 @@ func TestReplayUsesFrozenProfileAndCreatesIndependentLineage(t *testing.T) {
 	assertReplayLineage(t, page.Entries[0].ReplaysReviewID, original.ID)
 }
 
-func assertFrozenReplay(t *testing.T, original, replay ReviewRecord) {
+func assertFrozenReplay(t *testing.T, original, replay model.ReviewRecord) {
 	t.Helper()
 	if !reflect.DeepEqual(replay.ProfileRevision, original.ProfileRevision) {
 		t.Fatalf("replay revision changed\noriginal: %#v\nreplay: %#v", original.ProfileRevision, replay.ProfileRevision)
@@ -54,7 +55,7 @@ func assertFrozenReplay(t *testing.T, original, replay ReviewRecord) {
 	}
 }
 
-func assertReplayLineage(t *testing.T, source *ReviewID, expected ReviewID) {
+func assertReplayLineage(t *testing.T, source *model.ReviewID, expected model.ReviewID) {
 	t.Helper()
 	if source == nil {
 		t.Fatal("replay lineage is nil")
@@ -69,11 +70,11 @@ func TestReplayRecordsExplicitReviewerOverride(t *testing.T) {
 	grok := successfulExecutor(cleanReview)
 	opencode := successfulExecutor(cleanReview)
 	conductor := testConductorWithExecutors(t, map[string]attemptExecutor{"grok": grok, "opencode": opencode}, time.Second)
-	original, err := conductor.Review(context.Background(), ReviewSelection{Repository: repository, Subject: CommittedRange(base, head), Profile: "bugs", Reviewer: "grok"})
+	original, err := conductor.Review(context.Background(), model.ReviewSelection{Repository: repository, Subject: model.CommittedRange(base, head), Profile: "bugs", Reviewer: "grok"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	replay, err := conductor.Replay(context.Background(), ReplaySelection{SourceReviewID: original.ID, Reviewer: "opencode", Model: "meta/muse-spark-1.2-contributor", Effort: "high"})
+	replay, err := conductor.Replay(context.Background(), model.ReplaySelection{SourceReviewID: original.ID, Reviewer: "opencode", Model: "meta/muse-spark-1.2-contributor", Effort: "high"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,16 +96,16 @@ func TestReplayOriginalReviewerUnavailabilityRemainsIncomplete(t *testing.T) {
 	repository, base, head := committedReviewFixture(t)
 	executor := successfulExecutor(cleanReview)
 	conductor := testConductor(t, executor, time.Second)
-	original, err := conductor.Review(context.Background(), ReviewSelection{Repository: repository, Subject: CommittedRange(base, head), Profile: "bugs"})
+	original, err := conductor.Review(context.Background(), model.ReviewSelection{Repository: repository, Subject: model.CommittedRange(base, head), Profile: "bugs"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	executor.availability = availability{Available: false, Diagnostic: "recorded Reviewer unavailable"}
-	replay, err := conductor.Replay(context.Background(), ReplaySelection{SourceReviewID: original.ID})
+	replay, err := conductor.Replay(context.Background(), model.ReplaySelection{SourceReviewID: original.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if replay.Lifecycle != LifecycleIncomplete || replay.ProfileRevision.ReviewerID != original.ProfileRevision.ReviewerID {
+	if replay.Lifecycle != model.LifecycleIncomplete || replay.ProfileRevision.ReviewerID != original.ProfileRevision.ReviewerID {
 		t.Fatalf("replay = %#v", replay)
 	}
 	if executor.attemptCount() != 1 {
@@ -120,7 +121,7 @@ func TestReplayRejectsWorkingChangesBeforeLaunch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = conductor.Replay(context.Background(), ReplaySelection{SourceReviewID: original.ID})
+	_, err = conductor.Replay(context.Background(), model.ReplaySelection{SourceReviewID: original.ID})
 	if !errors.Is(err, ErrWorkingChangesReplayUnsupported) {
 		t.Fatalf("error = %v", err)
 	}
@@ -133,7 +134,7 @@ func TestReplayRejectsMissingCommitBeforeLaunch(t *testing.T) {
 	repository, base, head := committedReviewFixture(t)
 	executor := successfulExecutor(cleanReview)
 	conductor := testConductor(t, executor, time.Second)
-	original, err := conductor.Review(context.Background(), ReviewSelection{Repository: repository, Subject: CommittedRange(base, head), Profile: "bugs"})
+	original, err := conductor.Review(context.Background(), model.ReviewSelection{Repository: repository, Subject: model.CommittedRange(base, head), Profile: "bugs"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +142,7 @@ func TestReplayRejectsMissingCommitBeforeLaunch(t *testing.T) {
 	if err := conductor.store.Save(original); err != nil {
 		t.Fatal(err)
 	}
-	_, err = conductor.Replay(context.Background(), ReplaySelection{SourceReviewID: original.ID})
+	_, err = conductor.Replay(context.Background(), model.ReplaySelection{SourceReviewID: original.ID})
 	if err == nil {
 		t.Fatal("expected missing commit error")
 	}

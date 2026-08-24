@@ -98,12 +98,12 @@ func assertSeedRevision(t *testing.T, revision model.EvalCaseRevision) {
 	}
 }
 
-func assertSeededReview(t *testing.T, review ReviewRecord) {
+func assertSeededReview(t *testing.T, review model.ReviewRecord) {
 	t.Helper()
 	if !strings.Contains(review.Subject.Patch, "return nil") {
 		t.Fatalf("ordinary Review did not contain seed: %s", review.Subject.Patch)
 	}
-	if review.Lifecycle != LifecycleCompleted {
+	if review.Lifecycle != model.LifecycleCompleted {
 		t.Fatalf("review lifecycle = %s", review.Lifecycle)
 	}
 }

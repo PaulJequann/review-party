@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"reviewparty/internal/model"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -72,7 +73,7 @@ func resolvedProfileFrom(location profileLocation, instructions string) resolved
 	}
 }
 
-func (library profileLibrary) list(repository string) ([]ProfileSummary, error) {
+func (library profileLibrary) list(repository string) ([]model.ProfileSummary, error) {
 	manager := library.manager()
 	if _, err := manager.Resolve(configuration.Request{Repository: configuration.Repository(repository)}); err != nil {
 		return nil, err
@@ -85,7 +86,7 @@ func (library profileLibrary) list(repository string) ([]ProfileSummary, error) 
 	if err != nil {
 		return nil, err
 	}
-	winners := make(map[string]ProfileSummary)
+	winners := make(map[string]model.ProfileSummary)
 	if err := addAuthoredProfiles(winners, authored, entries); err != nil {
 		return nil, err
 	}
@@ -101,7 +102,7 @@ func (library profileLibrary) list(repository string) ([]ProfileSummary, error) 
 	return sortedProfileSummaries(winners), nil
 }
 
-func addAuthoredProfiles(winners map[string]ProfileSummary, authored configuration.AuthoredLibrary, entries []configuration.AuthoredEntry) error {
+func addAuthoredProfiles(winners map[string]model.ProfileSummary, authored configuration.AuthoredLibrary, entries []configuration.AuthoredEntry) error {
 	for _, entry := range entries {
 		name := entry.Name
 		location := profileLocationFrom(entry)
@@ -118,17 +119,17 @@ func addAuthoredProfiles(winners map[string]ProfileSummary, authored configurati
 		} else if !found {
 			continue
 		}
-		winners[name] = ProfileSummary{Name: location.name, Source: location.source, Path: location.path}
+		winners[name] = model.ProfileSummary{Name: location.name, Source: location.source, Path: location.path}
 	}
 	return nil
 }
 
-func packagedProfileSummaries(winners map[string]ProfileSummary) (map[string]ProfileSummary, error) {
+func packagedProfileSummaries(winners map[string]model.ProfileSummary) (map[string]model.ProfileSummary, error) {
 	entries, err := packagedProfileEntries()
 	if err != nil {
 		return nil, err
 	}
-	summaries := make(map[string]ProfileSummary)
+	summaries := make(map[string]model.ProfileSummary)
 	for _, entry := range entries {
 		if summary, found := summarizePackagedProfile(entry, winners); found {
 			summaries[summary.Name] = summary
@@ -137,9 +138,9 @@ func packagedProfileSummaries(winners map[string]ProfileSummary) (map[string]Pro
 	return summaries, nil
 }
 
-func summarizePackagedProfile(entry profileLocation, winners map[string]ProfileSummary) (ProfileSummary, bool) {
+func summarizePackagedProfile(entry profileLocation, winners map[string]model.ProfileSummary) (model.ProfileSummary, bool) {
 	if _, exists := winners[entry.name]; exists {
-		return ProfileSummary{}, false
+		return model.ProfileSummary{}, false
 	}
 	if err := validateAuthoredName(entry.name); err != nil {
 		return invalidProfileSummary(entry, err), true
@@ -147,17 +148,17 @@ func summarizePackagedProfile(entry profileLocation, winners map[string]ProfileS
 	if _, found, err := readPackagedProfile(entry); err != nil {
 		return invalidProfileSummary(entry, err), true
 	} else if found {
-		return ProfileSummary{Name: entry.name, Source: entry.source, Path: entry.path}, true
+		return model.ProfileSummary{Name: entry.name, Source: entry.source, Path: entry.path}, true
 	}
-	return ProfileSummary{}, false
+	return model.ProfileSummary{}, false
 }
 
-func invalidProfileSummary(location profileLocation, err error) ProfileSummary {
-	return ProfileSummary{Name: location.name, Source: location.source, Path: location.path, Error: err.Error()}
+func invalidProfileSummary(location profileLocation, err error) model.ProfileSummary {
+	return model.ProfileSummary{Name: location.name, Source: location.source, Path: location.path, Error: err.Error()}
 }
 
-func sortedProfileSummaries(winners map[string]ProfileSummary) []ProfileSummary {
-	profiles := make([]ProfileSummary, 0, len(winners))
+func sortedProfileSummaries(winners map[string]model.ProfileSummary) []model.ProfileSummary {
+	profiles := make([]model.ProfileSummary, 0, len(winners))
 	for _, summary := range winners {
 		profiles = append(profiles, summary)
 	}

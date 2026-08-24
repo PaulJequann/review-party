@@ -17,7 +17,7 @@ func attemptGateFromContext(ctx context.Context) chan struct{} {
 type concurrentEvalResult struct {
 	index   int
 	evalRun model.EvalRun
-	review  ReviewRecord
+	review  model.ReviewRecord
 	err     error
 }
 

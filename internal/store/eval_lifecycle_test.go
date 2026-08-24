@@ -1,18 +1,16 @@
 package store
 
 import (
-	"database/sql"
 	"errors"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"reviewparty/internal/model"
 )
 
-func TestEvalLifecycleMigrationRequiresPreparation(t *testing.T) {
+func TestOlderSchemaRequiresPreparation(t *testing.T) {
 	directory := t.TempDir()
-	writeEvalSchemaV4(t, directory)
+	writeSchemaVersion(t, directory, 0)
 	_, err := ReviewRecordStatePrepared(directory)
 	if !errors.Is(err, ErrReviewRecordStateRequiresPreparation) {
 		t.Fatalf("error = %v", err)
@@ -40,30 +38,6 @@ func TestEvalCheckpointRollsBackChildWhenParentUpdateFails(t *testing.T) {
 	}
 	assertPendingEvalCheckpoint(t, ledger, suite.ID, run.ID)
 }
-
-func writeEvalSchemaV4(t *testing.T, directory string) {
-	t.Helper()
-	ledger := newTestLedger(t, directory)
-	if err := ledger.Close(); err != nil {
-		t.Fatal(err)
-	}
-	db, err := sql.Open("sqlite", filepath.Join(directory, ledgerFilename))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	if _, err := db.Exec("DROP TABLE adjudication_revisions; DROP TABLE eval_runs; DROP TABLE eval_suite_runs; DROP INDEX IF EXISTS review_bundles_party_history; DROP TABLE IF EXISTS review_bundles; ALTER TABLE attempts DROP COLUMN retry_after_ms; DELETE FROM schema_migrations WHERE version>=4"); err != nil {
-		t.Fatal(err)
-	}
-	evalSchema, err := migrationFiles.ReadFile("migrations/004_eval_runs.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec(string(evalSchema) + "; INSERT INTO schema_migrations(version) VALUES(4)"); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func pendingEvalRecords(now time.Time) (model.EvalSuiteRun, model.EvalRun) {
 	suite := model.EvalSuiteRun{
 		ID: "esr_1723200000000_0123456789abcdef", Suite: "suite", SuiteRevision: "v1",

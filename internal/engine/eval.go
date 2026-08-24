@@ -82,7 +82,7 @@ func (conductor *Conductor) validateEvalSelection(experiment model.ExperimentCon
 	if err := validateExperiment(experiment, conductor.attemptDeadline); err != nil {
 		return err
 	}
-	selection := ProfileSelection{Profile: experiment.Profile, Reviewer: experiment.Reviewer, Model: experiment.Model, Effort: experiment.Effort}
+	selection := model.ProfileSelection{Profile: experiment.Profile, Reviewer: experiment.Reviewer, Model: experiment.Model, Effort: experiment.Effort}
 	_, err := conductor.compileFilesystemProfile(selection, "")
 	return err
 }
@@ -149,7 +149,7 @@ func (conductor *Conductor) executeEvalCase(ctx context.Context, execution evalC
 	return nextSuite, nil
 }
 
-func (conductor *Conductor) executeEvalReview(ctx context.Context, experiment model.ExperimentConfiguration, evalCase preparedEvalCase) (ReviewRecord, error) {
+func (conductor *Conductor) executeEvalReview(ctx context.Context, experiment model.ExperimentConfiguration, evalCase preparedEvalCase) (model.ReviewRecord, error) {
 	return conductor.reviewEvalCase(ctx, model.ReviewSelection{Subject: model.CapturedChange(evalCase.base, evalCase.head), Profile: experiment.Profile, Reviewer: experiment.Reviewer, Model: experiment.Model, Effort: experiment.Effort}, experiment.RetryPolicy)
 }
 
@@ -159,7 +159,7 @@ type evalTransition struct {
 	completed time.Time
 }
 
-func completedEvalCase(transition evalTransition, review ReviewRecord) (model.EvalSuiteRun, model.EvalRun) {
+func completedEvalCase(transition evalTransition, review model.ReviewRecord) (model.EvalSuiteRun, model.EvalRun) {
 	transition.evalRun.ReviewID = review.ID
 	transition.evalRun.ExecutionState = evalExecutionState(review)
 	transition.evalRun.AdjudicationState = model.EvalAwaitingAdjudication
@@ -289,11 +289,11 @@ func validateRetryPolicy(policy model.RetryPolicy) error {
 	return nil
 }
 
-func evalExecutionState(review ReviewRecord) model.EvalExecutionState {
-	if review.Lifecycle == LifecycleIncomplete {
+func evalExecutionState(review model.ReviewRecord) model.EvalExecutionState {
+	if review.Lifecycle == model.LifecycleIncomplete {
 		return model.EvalIncomplete
 	}
-	if review.Result != nil && review.Result.Status == ResultFindings {
+	if review.Result != nil && review.Result.Status == model.ResultFindings {
 		return model.EvalCompletedFindings
 	}
 	return model.EvalCompletedClean

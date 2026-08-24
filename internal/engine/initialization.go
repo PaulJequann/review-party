@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reviewparty/internal/subject"
 
 	"reviewparty/internal/configuration"
 	"reviewparty/internal/store"
@@ -48,7 +49,7 @@ type resolvedInitialization struct {
 }
 
 func resolveInitialization(request ReviewPartyInitialization) (resolvedInitialization, error) {
-	repository, err := resolveRepositoryRoot(request.Repository)
+	repository, err := subject.ResolveRepositoryRoot(request.Repository)
 	if err != nil {
 		return resolvedInitialization{}, err
 	}

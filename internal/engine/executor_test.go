@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os/exec"
+	"reviewparty/internal/model"
 	"testing"
 	"time"
 )
@@ -40,8 +41,8 @@ func TestDirectExecutorHandlesStartFailureBeforeDecoding(t *testing.T) {
 
 	execution := executor.Execute(context.Background(), attemptSpec{})
 
-	assertAttemptOutcome(t, execution, AttemptReviewerUnavailable)
-	assertFailureLocation(t, execution, TerminationReviewerUnavailable, PhaseHarnessLaunch)
+	assertAttemptOutcome(t, execution, model.AttemptReviewerUnavailable)
+	assertFailureLocation(t, execution, model.TerminationReviewerUnavailable, model.PhaseHarnessLaunch)
 	if decoded {
 		t.Fatal("decoder ran after command start failure")
 	}
@@ -61,8 +62,8 @@ func TestDirectExecutorRejectsOverflowBeforeDecoding(t *testing.T) {
 
 	execution := executor.Execute(context.Background(), attemptSpec{})
 
-	assertAttemptOutcome(t, execution, AttemptInvalidResult)
-	assertFailureLocation(t, execution, TerminationMalformedOutput, PhaseOutputCapture)
+	assertAttemptOutcome(t, execution, model.AttemptInvalidResult)
+	assertFailureLocation(t, execution, model.TerminationMalformedOutput, model.PhaseOutputCapture)
 	if execution.Diagnostic != "stub output exceeded the capture limit" {
 		t.Fatalf("diagnostic = %q", execution.Diagnostic)
 	}
@@ -74,8 +75,8 @@ func TestDirectExecutorRejectsOverflowBeforeDecoding(t *testing.T) {
 func TestNonzeroHarnessExitCannotCompleteValidPayload(t *testing.T) {
 	run := commandRun{WaitErr: errors.New("exit status 1")}
 	execution := finalizeHarnessRun(run, decodedHarnessOutput{assistantText: cleanReview, diagnostic: "authentication failed", model: "model", effort: "high"}, "reviewer")
-	assertAttemptOutcome(t, execution, AttemptReviewerUnavailable)
-	assertFailureLocation(t, execution, TerminationAuthenticationFailure, PhaseReviewerExecution)
+	assertAttemptOutcome(t, execution, model.AttemptReviewerUnavailable)
+	assertFailureLocation(t, execution, model.TerminationAuthenticationFailure, model.PhaseReviewerExecution)
 	if execution.AssistantText != cleanReview {
 		t.Fatalf("assistant text = %q", execution.AssistantText)
 	}
@@ -84,8 +85,8 @@ func TestNonzeroHarnessExitCannotCompleteValidPayload(t *testing.T) {
 func TestEmptyAssistantTextPreservesUnknownDiagnostic(t *testing.T) {
 	execution := finalizeHarnessRun(commandRun{}, decodedHarnessOutput{diagnostic: "provider internal error"}, "reviewer")
 
-	assertAttemptOutcome(t, execution, AttemptUnknownFailure)
-	assertFailureLocation(t, execution, TerminationUnknownFailure, PhaseReviewerExecution)
+	assertAttemptOutcome(t, execution, model.AttemptUnknownFailure)
+	assertFailureLocation(t, execution, model.TerminationUnknownFailure, model.PhaseReviewerExecution)
 	if execution.Diagnostic != "provider internal error" {
 		t.Fatalf("diagnostic = %q", execution.Diagnostic)
 	}
@@ -94,14 +95,14 @@ func TestEmptyAssistantTextPreservesUnknownDiagnostic(t *testing.T) {
 func TestContextTerminationClassificationSurvivesRecordTranslation(t *testing.T) {
 	tests := map[string]struct {
 		err      error
-		outcome  AttemptOutcome
-		category TerminationCategory
+		outcome  model.AttemptOutcome
+		category model.TerminationCategory
 	}{
 		"deadline": {
-			err: context.DeadlineExceeded, outcome: AttemptTransientFailure, category: TerminationDeadlineExceeded,
+			err: context.DeadlineExceeded, outcome: model.AttemptTransientFailure, category: model.TerminationDeadlineExceeded,
 		},
 		"caller cancellation": {
-			err: context.Canceled, outcome: AttemptCancelled, category: TerminationCancelled,
+			err: context.Canceled, outcome: model.AttemptCancelled, category: model.TerminationCancelled,
 		},
 	}
 
@@ -109,10 +110,10 @@ func TestContextTerminationClassificationSurvivesRecordTranslation(t *testing.T)
 		t.Run(name, func(t *testing.T) {
 			execution := finalizeHarnessRun(commandRun{ContextErr: test.err}, decodedHarnessOutput{}, "reviewer")
 			assertAttemptOutcome(t, execution, test.outcome)
-			assertFailureLocation(t, execution, test.category, PhaseReviewerExecution)
+			assertFailureLocation(t, execution, test.category, model.PhaseReviewerExecution)
 
 			termination := terminationForAttempt(execution, execution.Outcome, nil)
-			if termination.Category != test.category || termination.Phase != PhaseReviewerExecution {
+			if termination.Category != test.category || termination.Phase != model.PhaseReviewerExecution {
 				t.Fatalf("termination = %#v", termination)
 			}
 		})
@@ -127,23 +128,23 @@ func TestDiagnosticFailureCategoryRecognizesTransportFailures(t *testing.T) {
 		"upstream request timed out",
 		"HTTP 503 Service Unavailable",
 	} {
-		if got := diagnosticFailureCategory(diagnostic); got != TerminationTransportFailure {
+		if got := diagnosticFailureCategory(diagnostic); got != model.TerminationTransportFailure {
 			t.Errorf("diagnostic %q classified as %q", diagnostic, got)
 		}
 	}
-	if got := diagnosticFailureCategory("provider internal bookkeeping failed"); got != TerminationUnknownFailure {
+	if got := diagnosticFailureCategory("provider internal bookkeeping failed"); got != model.TerminationUnknownFailure {
 		t.Fatalf("unknown diagnostic classified as %q", got)
 	}
 }
 
-func assertAttemptOutcome(t *testing.T, execution attemptExecution, want AttemptOutcome) {
+func assertAttemptOutcome(t *testing.T, execution attemptExecution, want model.AttemptOutcome) {
 	t.Helper()
 	if execution.Outcome != want {
 		t.Fatalf("outcome = %q, want %q", execution.Outcome, want)
 	}
 }
 
-func assertFailureLocation(t *testing.T, execution attemptExecution, category TerminationCategory, phase ExecutionPhase) {
+func assertFailureLocation(t *testing.T, execution attemptExecution, category model.TerminationCategory, phase model.ExecutionPhase) {
 	t.Helper()
 	if execution.FailureCategory != category {
 		t.Fatalf("failure category = %q, want %q", execution.FailureCategory, category)

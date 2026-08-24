@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reviewparty/internal/subject"
 	"time"
 
 	"reviewparty/internal/configuration"
@@ -72,7 +73,7 @@ type partyPlan struct {
 	effective  model.PartyDefinition
 	source     string
 	repository string
-	subject    ReviewSubject
+	subject    model.ReviewSubject
 	members    []compiledPartyMember
 }
 
@@ -103,7 +104,7 @@ func (conductor *Conductor) planParty(selection model.PartySelection) (partyPlan
 	if selection.ConcurrencyLimit < 0 {
 		return partyPlan{}, errors.New("party concurrency override must not be negative")
 	}
-	repository, err := resolveRepositoryRoot(selection.Repository)
+	repository, err := subject.ResolveRepositoryRoot(selection.Repository)
 	if err != nil {
 		return partyPlan{}, err
 	}
@@ -149,9 +150,9 @@ func (conductor *Conductor) resolvePartyLookup(selection model.PartySelection) (
 
 // resolveSharedSubject freezes the one Review Subject every member will review,
 // before any Profile Revision compiles or any harness launches.
-func (conductor *Conductor) resolveSharedSubject(reference model.SubjectReference, repository string) (ReviewSubject, int64, error) {
+func (conductor *Conductor) resolveSharedSubject(reference model.SubjectReference, repository string) (model.ReviewSubject, int64, error) {
 	started := conductor.now().UTC()
-	subject, err := resolveSubject(repository, reference)
+	subject, err := subject.ResolveSubject(repository, reference)
 	return subject, elapsedMilliseconds(started, conductor.now().UTC()), err
 }
 
@@ -161,12 +162,12 @@ func (conductor *Conductor) compilePartyMembers(repository string, effective mod
 	members := make([]compiledPartyMember, 0, len(effective.Profiles))
 	for _, member := range effective.Profiles {
 		compiledStarted := conductor.now().UTC()
-		selection := ProfileSelection{Profile: member.Profile, Reviewer: member.Reviewer, Model: member.Model, Effort: member.Effort}
+		selection := model.ProfileSelection{Profile: member.Profile, Reviewer: member.Reviewer, Model: member.Model, Effort: member.Effort}
 		profile, err := conductor.compileFilesystemProfile(selection, repository)
 		if err != nil {
 			return nil, fmt.Errorf("party %q member %q: %w", effective.Name, member.Profile, err)
 		}
-		timings := ReviewTimings{SubjectResolutionMS: subjectResolutionMS, ProfileCompilationMS: elapsedMilliseconds(compiledStarted, conductor.now().UTC())}
+		timings := model.ReviewTimings{SubjectResolutionMS: subjectResolutionMS, ProfileCompilationMS: elapsedMilliseconds(compiledStarted, conductor.now().UTC())}
 		members = append(members, compiledPartyMember{profile: profile, timings: timings})
 	}
 	return members, nil
@@ -174,7 +175,7 @@ func (conductor *Conductor) compilePartyMembers(repository string, effective mod
 
 type compiledPartyMember struct {
 	profile compiledProfile
-	timings ReviewTimings
+	timings model.ReviewTimings
 }
 
 func newPendingBundle(created time.Time, plan partyPlan) (model.ReviewBundle, error) {
@@ -262,7 +263,7 @@ func (conductor *Conductor) executePartySequential(ctx context.Context, ledger s
 
 type concurrentPartyResult struct {
 	index  int
-	record ReviewRecord
+	record model.ReviewRecord
 	err    error
 }
 
@@ -347,7 +348,7 @@ func (conductor *Conductor) finalizeParty(ledger store.BundleStore, bundle model
 	bundle.UpdatedAt = bundle.CompletedAt
 	bundle.Lifecycle = model.LifecycleCompleted
 	for _, member := range bundle.Members {
-		if member.ReviewID == "" || member.Lifecycle != LifecycleCompleted {
+		if member.ReviewID == "" || member.Lifecycle != model.LifecycleCompleted {
 			bundle.Lifecycle = model.LifecycleIncomplete
 			break
 		}

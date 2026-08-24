@@ -182,7 +182,7 @@ func TestBarePartyRunUsesDefaultPartyConfigurationChain(t *testing.T) {
 		Profiles:      []model.PartyMember{{Profile: "code-quality"}},
 	})
 
-	bundle, err := conductor.RunParty(context.Background(), model.PartySelection{Repository: repository, Subject: WorkingChanges()})
+	bundle, err := conductor.RunParty(context.Background(), model.PartySelection{Repository: repository, Subject: model.WorkingChanges()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,7 +196,7 @@ func TestBarePartyRunFallsBackToPackagedStandard(t *testing.T) {
 	executor := successfulExecutor(cleanReview)
 	conductor := testPartyConductor(t, map[string]attemptExecutor{defaultReviewer: executor})
 
-	bundle, err := conductor.RunParty(context.Background(), model.PartySelection{Repository: repository, Subject: WorkingChanges()})
+	bundle, err := conductor.RunParty(context.Background(), model.PartySelection{Repository: repository, Subject: model.WorkingChanges()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -229,7 +229,7 @@ func TestInheritedConcurrencyLimitDrivesExecution(t *testing.T) {
 			probe.enter()
 			defer probe.exit()
 			time.Sleep(20 * time.Millisecond)
-			return attemptExecution{AssistantText: cleanReview, Outcome: AttemptCompleted}
+			return attemptExecution{AssistantText: cleanReview, Outcome: model.AttemptCompleted}
 		},
 	}
 	conductor := testPartyConductor(t, map[string]attemptExecutor{defaultReviewer: executor})

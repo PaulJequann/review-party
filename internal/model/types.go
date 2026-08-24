@@ -1,14 +1,10 @@
 package model
 
-import (
-	"encoding/json"
-	"time"
-)
+import "time"
 
 type ReviewID string
 
 const (
-	LegacyReviewRecordSchemaVersion  = 1
 	CurrentReviewRecordSchemaVersion = 3
 )
 
@@ -553,10 +549,8 @@ const (
 type ReviewResult struct {
 	Status   ResultStatus `json:"status"`
 	Summary  string       `json:"summary"`
-	Findings []Finding    `json:"findings,omitempty"`
+	Findings []Finding    `json:"findings"`
 	Raw      string       `json:"raw"`
-
-	legacyFindingCount int
 }
 
 type Finding struct {
@@ -571,58 +565,7 @@ type Finding struct {
 }
 
 func (result ReviewResult) FindingCount() int {
-	if result.Findings != nil {
-		return len(result.Findings)
-	}
-	return result.legacyFindingCount
-}
-
-func (result ReviewResult) MarshalJSON() ([]byte, error) {
-	type reviewResultJSON struct {
-		Status       ResultStatus `json:"status"`
-		Summary      string       `json:"summary"`
-		FindingCount int          `json:"finding_count"`
-		Findings     *[]Finding   `json:"findings,omitempty"`
-		Raw          string       `json:"raw"`
-	}
-	var findings *[]Finding
-	if result.Findings != nil {
-		findings = &result.Findings
-	}
-	return json.Marshal(reviewResultJSON{
-		Status:       result.Status,
-		Summary:      result.Summary,
-		FindingCount: result.FindingCount(),
-		Findings:     findings,
-		Raw:          result.Raw,
-	})
-}
-
-func (result *ReviewResult) UnmarshalJSON(payload []byte) error {
-	type reviewResultJSON struct {
-		Status       ResultStatus    `json:"status"`
-		Summary      string          `json:"summary"`
-		FindingCount int             `json:"finding_count"`
-		Findings     json.RawMessage `json:"findings"`
-		Raw          string          `json:"raw"`
-	}
-	var decoded reviewResultJSON
-	if err := json.Unmarshal(payload, &decoded); err != nil {
-		return err
-	}
-	result.Status = decoded.Status
-	result.Summary = decoded.Summary
-	result.Raw = decoded.Raw
-	if decoded.Findings == nil || string(decoded.Findings) == "null" {
-		result.Findings = nil
-		result.legacyFindingCount = decoded.FindingCount
-		return nil
-	}
-	if err := json.Unmarshal(decoded.Findings, &result.Findings); err != nil {
-		return err
-	}
-	result.legacyFindingCount = 0
-	return nil
+	return len(result.Findings)
 }
 
 type ReviewRecord struct {
@@ -638,10 +581,8 @@ type ReviewRecord struct {
 	Termination     *ReviewTermination `json:"termination,omitempty"`
 	Runtime         *RuntimeProvenance `json:"runtime,omitempty"`
 	Timings         *ReviewTimings     `json:"timings,omitempty"`
-	// IncompleteCause is retained only when loading schema-v1 Review Records.
-	IncompleteCause string    `json:"incomplete_cause,omitempty"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	CreatedAt       time.Time          `json:"created_at"`
+	UpdatedAt       time.Time          `json:"updated_at"`
 }
 
 func (r ReviewRecord) AttemptCount() int {

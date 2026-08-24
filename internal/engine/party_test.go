@@ -16,7 +16,7 @@ func testPartyConductor(t *testing.T, executors map[string]attemptExecutor) *Con
 }
 
 func partySelection(repository, name string) model.PartySelection {
-	return model.PartySelection{Name: name, Repository: repository, Subject: WorkingChanges()}
+	return model.PartySelection{Name: name, Repository: repository, Subject: model.WorkingChanges()}
 }
 
 func TestPartyPreflightFailsClosedBeforeAnyLaunch(t *testing.T) {
@@ -27,7 +27,7 @@ func TestPartyPreflightFailsClosedBeforeAnyLaunch(t *testing.T) {
 	_, err := conductor.RunParty(context.Background(), model.PartySelection{
 		Name:       "broken",
 		Repository: repository,
-		Subject:    WorkingChanges(),
+		Subject:    model.WorkingChanges(),
 	})
 	if err == nil || !strings.Contains(err.Error(), "unknown review party") {
 		t.Fatalf("error = %v, want unknown review party", err)
@@ -73,7 +73,7 @@ func TestPartyMembersShareOneFrozenSubject(t *testing.T) {
 		availability: availability{Available: true},
 		execute: func(_ context.Context, _ attemptSpec) attemptExecution {
 			writeTestFile(t, filepath.Join(repository, "review.go"), "package demo\n\nconst state = \"mutated mid-party\"\n")
-			return attemptExecution{AssistantText: findingsReview, Outcome: AttemptCompleted}
+			return attemptExecution{AssistantText: findingsReview, Outcome: model.AttemptCompleted}
 		},
 	}
 	conductor := testPartyConductor(t, map[string]attemptExecutor{defaultReviewer: executor})
@@ -125,7 +125,7 @@ func assertCompletedFindingMember(t *testing.T, member model.BundleMember, expec
 	if member.Lifecycle != model.LifecycleCompleted {
 		t.Fatalf("member = %#v, want completed", member)
 	}
-	if member.Status != string(ResultFindings) {
+	if member.Status != string(model.ResultFindings) {
 		t.Fatalf("member status = %q, want findings", member.Status)
 	}
 	if member.FindingCount != expectedFindingCount {
@@ -161,7 +161,7 @@ func assertVisibleCompletedMember(t *testing.T, member model.BundleMember) {
 	if member.ReviewID == "" || member.Lifecycle != model.LifecycleCompleted {
 		t.Fatalf("member = %#v, want a persisted completed review", member)
 	}
-	if member.Status != string(ResultFindings) || member.FindingCount != 1 {
+	if member.Status != string(model.ResultFindings) || member.FindingCount != 1 {
 		t.Fatalf("member = %#v, want its finding preserved", member)
 	}
 }
@@ -175,7 +175,7 @@ func assertInspectableIncompleteMember(t *testing.T, conductor *Conductor, membe
 	if err != nil {
 		t.Fatal(err)
 	}
-	if record.Lifecycle != LifecycleIncomplete || record.Termination == nil {
+	if record.Lifecycle != model.LifecycleIncomplete || record.Termination == nil {
 		t.Fatalf("child record lifecycle = %s, want honest incomplete termination", record.Lifecycle)
 	}
 }
@@ -207,9 +207,9 @@ func delayedExecutor(output string, delay time.Duration) *scriptedExecutor {
 		execute: func(ctx context.Context, _ attemptSpec) attemptExecution {
 			select {
 			case <-ctx.Done():
-				return attemptExecution{Outcome: AttemptCancelled}
+				return attemptExecution{Outcome: model.AttemptCancelled}
 			case <-time.After(delay):
-				return attemptExecution{AssistantText: output, Outcome: AttemptCompleted}
+				return attemptExecution{AssistantText: output, Outcome: model.AttemptCompleted}
 			}
 		},
 	}
@@ -276,7 +276,7 @@ func TestPartyConcurrencyLimitBoundsActiveReviewers(t *testing.T) {
 			probe.enter()
 			defer probe.exit()
 			time.Sleep(20 * time.Millisecond)
-			return attemptExecution{AssistantText: cleanReview, Outcome: AttemptCompleted}
+			return attemptExecution{AssistantText: cleanReview, Outcome: model.AttemptCompleted}
 		},
 	}
 	conductor := testPartyConductor(t, map[string]attemptExecutor{defaultReviewer: executor})
@@ -284,7 +284,7 @@ func TestPartyConcurrencyLimitBoundsActiveReviewers(t *testing.T) {
 	bundle, err := conductor.RunParty(context.Background(), model.PartySelection{
 		Name:             "standard",
 		Repository:       repository,
-		Subject:          WorkingChanges(),
+		Subject:          model.WorkingChanges(),
 		ConcurrencyLimit: limit,
 	})
 	if err != nil {
@@ -310,7 +310,7 @@ func TestPartyDefinitionConcurrencyLimitDrivesExecution(t *testing.T) {
 			probe.enter()
 			defer probe.exit()
 			time.Sleep(20 * time.Millisecond)
-			return attemptExecution{AssistantText: cleanReview, Outcome: AttemptCompleted}
+			return attemptExecution{AssistantText: cleanReview, Outcome: model.AttemptCompleted}
 		},
 	}
 	conductor := testPartyConductor(t, map[string]attemptExecutor{defaultReviewer: executor})

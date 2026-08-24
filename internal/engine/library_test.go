@@ -4,6 +4,8 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reviewparty/internal/model"
+	"reviewparty/internal/store"
 	"strings"
 	"testing"
 	"time"
@@ -15,11 +17,11 @@ func TestRepositoryProfileShadowsGlobalAsWholeDefinition(t *testing.T) {
 	writeProfileFixture(t, filepath.Join(globalDirectory, "profiles", "bugs.md"), "GLOBAL UNIQUE GUIDANCE")
 	writeProfileFixture(t, filepath.Join(repository, ".reviewparty", "profiles", "bugs.md"), "REPOSITORY UNIQUE GUIDANCE")
 
-	profile, err := compileTestProfile(newProfileLibrary(globalDirectory), "bugs", "grok", ReviewSubject{Repository: repository})
+	profile, err := compileTestProfile(newProfileLibrary(globalDirectory), "bugs", "grok", model.ReviewSubject{Repository: repository})
 	if err != nil {
 		t.Fatal(err)
 	}
-	prompt := profile.prompt(ReviewSubject{Repository: repository})
+	prompt := profile.prompt(model.ReviewSubject{Repository: repository})
 	if !strings.Contains(prompt, "REPOSITORY UNIQUE GUIDANCE") || strings.Contains(prompt, "GLOBAL UNIQUE GUIDANCE") {
 		t.Fatalf("compiled prompt did not use the repository definition as a whole:\n%s", prompt)
 	}
@@ -47,7 +49,7 @@ func TestGlobalDefaultsSelectProfileAndReviewer(t *testing.T) {
 		},
 	}
 	copilot := successfulExecutor(cleanReview)
-	store, err := newLedgerRecordStore(t.TempDir())
+	store, err := store.NewLedgerRecordStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +61,7 @@ func TestGlobalDefaultsSelectProfileAndReviewer(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	record, err := conductor.Review(context.Background(), ReviewSelection{Repository: repository, Subject: WorkingChanges()})
+	record, err := conductor.Review(context.Background(), model.ReviewSelection{Repository: repository, Subject: model.WorkingChanges()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +75,7 @@ func TestInvalidRepositoryProfileFailsBeforeLaunchWithoutFallback(t *testing.T) 
 	writeProfileFixture(t, filepath.Join(repository, ".reviewparty", "profiles", "security.md"), "   \n")
 	writeProfileFixture(t, filepath.Join(globalDirectory, "profiles", "security.md"), "VALID GLOBAL FALLBACK THAT MUST NOT RUN")
 	executor := successfulExecutor(cleanReview)
-	store, err := newLedgerRecordStore(t.TempDir())
+	store, err := store.NewLedgerRecordStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +84,7 @@ func TestInvalidRepositoryProfileFailsBeforeLaunchWithoutFallback(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	_, err = conductor.Review(context.Background(), ReviewSelection{Repository: repository, Subject: WorkingChanges()})
+	_, err = conductor.Review(context.Background(), model.ReviewSelection{Repository: repository, Subject: model.WorkingChanges()})
 	if err == nil {
 		t.Fatalf("error = %v", err)
 	}
@@ -96,7 +98,7 @@ func TestInvalidRepositoryProfileFailsBeforeLaunchWithoutFallback(t *testing.T) 
 	}
 }
 
-func assertGlobalDefaultReview(t *testing.T, record ReviewRecord, grok, copilot *scriptedExecutor) {
+func assertGlobalDefaultReview(t *testing.T, record model.ReviewRecord, grok, copilot *scriptedExecutor) {
 	t.Helper()
 	if record.ProfileRevision.Name != "security" || record.ProfileRevision.ReviewerID != "copilot" {
 		t.Fatalf("revision = %#v", record.ProfileRevision)
@@ -122,7 +124,7 @@ func TestRepositoryProfileSymlinkFailsWithoutFallback(t *testing.T) {
 		t.Skipf("symlinks unavailable: %v", err)
 	}
 
-	_, err := compileTestProfile(newProfileLibrary(globalDirectory), "security", "grok", ReviewSubject{Repository: repository})
+	_, err := compileTestProfile(newProfileLibrary(globalDirectory), "security", "grok", model.ReviewSubject{Repository: repository})
 	if err == nil || !strings.Contains(err.Error(), "must be a regular file") {
 		t.Fatalf("error = %v", err)
 	}
@@ -133,7 +135,7 @@ func TestMissingProfileExplainsSearchAndAvailableNames(t *testing.T) {
 	globalDirectory := t.TempDir()
 	writeProfileFixture(t, filepath.Join(globalDirectory, "profiles", "security.md"), "Security guidance")
 
-	_, err := compileTestProfile(newProfileLibrary(globalDirectory), "architecture", "grok", ReviewSubject{Repository: repository})
+	_, err := compileTestProfile(newProfileLibrary(globalDirectory), "architecture", "grok", model.ReviewSubject{Repository: repository})
 	if err == nil {
 		t.Fatal("missing Profile compiled")
 	}
@@ -157,9 +159,9 @@ func TestExplicitReviewerMissingProfileReturnsResolutionError(t *testing.T) {
 		defaultReviewer: executor,
 	}), time.Minute)
 
-	_, err := conductor.Review(context.Background(), ReviewSelection{
+	_, err := conductor.Review(context.Background(), model.ReviewSelection{
 		Repository: repository,
-		Subject:    WorkingChanges(),
+		Subject:    model.WorkingChanges(),
 		Profile:    "does-not-exist",
 		Reviewer:   defaultReviewer,
 	})
@@ -177,7 +179,7 @@ func TestProfileConfigRejectsUnknownFieldsAndUnsafeNames(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			globalDirectory := t.TempDir()
 			writeProfileConfigFixture(t, filepath.Join(globalDirectory, "config.json"), payload)
-			_, err := compileTestProfile(newProfileLibrary(globalDirectory), "", "", ReviewSubject{})
+			_, err := compileTestProfile(newProfileLibrary(globalDirectory), "", "", model.ReviewSubject{})
 			if err == nil || !strings.Contains(err.Error(), "invalid personal configuration") {
 				t.Fatalf("error = %v", err)
 			}
@@ -190,14 +192,14 @@ func TestProfileRevisionChangesWithMarkdown(t *testing.T) {
 	path := filepath.Join(repository, ".reviewparty", "profiles", "bugs.md")
 	writeProfileFixture(t, path, "FIRST GUIDANCE")
 	library := newProfileLibrary(t.TempDir())
-	first, err := compileTestProfile(library, "bugs", "grok", ReviewSubject{Repository: repository})
+	first, err := compileTestProfile(library, "bugs", "grok", model.ReviewSubject{Repository: repository})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(path, []byte("SECOND GUIDANCE\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	second, err := compileTestProfile(library, "bugs", "grok", ReviewSubject{Repository: repository})
+	second, err := compileTestProfile(library, "bugs", "grok", model.ReviewSubject{Repository: repository})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,14 +209,14 @@ func TestProfileRevisionChangesWithMarkdown(t *testing.T) {
 }
 
 func TestPackagedBugsProfileRemainsZeroConfigurationDefault(t *testing.T) {
-	profile, err := compileTestProfile(newProfileLibrary(t.TempDir()), "", "", ReviewSubject{})
+	profile, err := compileTestProfile(newProfileLibrary(t.TempDir()), "", "", model.ReviewSubject{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if profile.revision.Name != "bugs" || profile.revision.Source != "packaged:profiles/bugs.md" {
 		t.Fatalf("revision = %#v", profile.revision)
 	}
-	assertPromptContains(t, profile.prompt(ReviewSubject{}),
+	assertPromptContains(t, profile.prompt(model.ReviewSubject{}),
 		"Report only the highest-risk Findings that could justify changing or delaying",
 		"Report a pre-existing defect only when",
 		"Identify a concrete failing path or violated invariant",
@@ -255,13 +257,13 @@ func writeProfileConfigFixture(t *testing.T, path, content string) {
 	writeProfileFixture(t, path, content)
 }
 
-func compileTestProfile(library profileLibrary, name, reviewer string, subject ReviewSubject) (compiledProfile, error) {
+func compileTestProfile(library profileLibrary, name, reviewer string, subject model.ReviewSubject) (compiledProfile, error) {
 	conductor := Conductor{reviewers: defaultReviewerCatalog(), profiles: library, attemptDeadline: 10 * time.Minute}
-	selection := ProfileSelection{Profile: name, Reviewer: reviewer}
+	selection := model.ProfileSelection{Profile: name, Reviewer: reviewer}
 	return conductor.compileFilesystemProfile(selection, subject.Repository)
 }
 
-func compileSelectedTestProfile(catalog reviewerCatalog, selection ProfileSelection, deadline time.Duration) (compiledProfile, error) {
+func compileSelectedTestProfile(catalog reviewerCatalog, selection model.ProfileSelection, deadline time.Duration) (compiledProfile, error) {
 	conductor := Conductor{reviewers: catalog, profiles: newProfileLibrary(""), attemptDeadline: deadline}
 	return conductor.compileFilesystemProfile(selection, "")
 }

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"path"
+	"reviewparty/internal/model"
+	"reviewparty/internal/result"
 	"strings"
 
 	"reviewparty/internal/configuration"
@@ -89,7 +91,7 @@ func newProfileLibrary(personalRoot string) profileLibrary {
 	return profileLibrary{configuration: configuration.NewManager(options)}
 }
 
-func (conductor *Conductor) compileFilesystemProfile(selection ProfileSelection, repository string) (compiledProfile, error) {
+func (conductor *Conductor) compileFilesystemProfile(selection model.ProfileSelection, repository string) (compiledProfile, error) {
 	resolved, err := conductor.profiles.resolve(profileRequest{repository: repository, name: selection.Profile, reviewer: selection.Reviewer})
 	if err != nil {
 		return compiledProfile{}, err
@@ -97,7 +99,7 @@ func (conductor *Conductor) compileFilesystemProfile(selection ProfileSelection,
 	return conductor.compileProfile(selection, resolved)
 }
 
-func (conductor *Conductor) compileProfile(selection ProfileSelection, resolved resolvedProfile) (compiledProfile, error) {
+func (conductor *Conductor) compileProfile(selection model.ProfileSelection, resolved resolvedProfile) (compiledProfile, error) {
 	reviewers := applyEffectiveReviewerPolicies(conductor.reviewers, resolved.effective)
 	reviewerWasDefault := selection.Reviewer == ""
 	selection.Profile = resolved.name
@@ -116,9 +118,9 @@ func (conductor *Conductor) compileProfile(selection ProfileSelection, resolved 
 	profile.revision.SourceDigest = resolved.digest
 	profile.revision.CompilerRevision = profileCompilerRevision
 	profile.revision.Revision = profileRevisionIdentity(profile.revision)
-	profile.snapshot = ProfileSnapshot{Name: resolved.name, Source: resolved.source, SourceDigest: resolved.digest, Instructions: resolved.instructions}
+	profile.snapshot = model.ProfileSnapshot{Name: resolved.name, Source: resolved.source, SourceDigest: resolved.digest, Instructions: resolved.instructions}
 	profile.reviewerWasDefault = reviewerWasDefault
-	profile.buildPrompt = func(subject ReviewSubject) string { return renderReviewPrompt(resolved, subject) }
+	profile.buildPrompt = func(subject model.ReviewSubject) string { return renderReviewPrompt(resolved, subject) }
 	return profile, nil
 }
 
@@ -135,7 +137,7 @@ func profileDefinitionFor(profile resolvedProfile) (profileDefinition, error) {
 		purpose:              "Apply the authored review instructions to the Review Subject.",
 		materialityThreshold: "A concrete actionable issue under the authored Profile instructions.",
 		defaultReviewer:      defaultReviewer,
-		pass:                 ReviewPassRevision{Name: filesystemPassName(profile.name), Required: true, Purpose: "Apply the authored Profile.", PromptRevision: profileCompilerRevision + ":" + profile.digest},
+		pass:                 model.ReviewPassRevision{Name: filesystemPassName(profile.name), Required: true, Purpose: "Apply the authored Profile.", PromptRevision: profileCompilerRevision + ":" + profile.digest},
 		requiredCapabilities: restrictedReviewCapabilities(),
 	}, nil
 }
@@ -147,7 +149,7 @@ func filesystemPassName(profileName string) string {
 	return profileName + "-review"
 }
 
-func (conductor *Conductor) profileSummaries(repository string) ([]ProfileSummary, error) {
+func (conductor *Conductor) profileSummaries(repository string) ([]model.ProfileSummary, error) {
 	summaries, err := conductor.profiles.list(repository)
 	if err != nil {
 		return nil, err
@@ -170,7 +172,7 @@ func (conductor *Conductor) profileSummaries(repository string) ([]ProfileSummar
 		}
 		summaries[index].Description = definition.description
 		summaries[index].DefaultReviewer = registration.candidate.provenance()
-		summaries[index].Passes = []ReviewPassRevision{definition.pass}
+		summaries[index].Passes = []model.ReviewPassRevision{definition.pass}
 		summaries[index].RequiredCapabilities = canonicalCapabilities(definition.requiredCapabilities)
 	}
 	return summaries, nil
@@ -202,7 +204,7 @@ func (library profileLibrary) resolve(request profileRequest) (resolvedProfile, 
 	return profile, nil
 }
 
-func (library profileLibrary) validateExplicitReviewer(selection ProfileSelection, repository string, catalog reviewerCatalog) error {
+func (library profileLibrary) validateExplicitReviewer(selection model.ProfileSelection, repository string, catalog reviewerCatalog) error {
 	request := profileRequest{repository: repository, name: selection.Profile, reviewer: selection.Reviewer}
 	effective, resolvedSelection, err := library.resolveConfiguration(request)
 	if err != nil {
@@ -225,7 +227,7 @@ func (library profileLibrary) validateExplicitReviewer(selection ProfileSelectio
 	return err
 }
 
-func renderReviewPrompt(profile resolvedProfile, subject ReviewSubject) string {
+func renderReviewPrompt(profile resolvedProfile, subject model.ReviewSubject) string {
 	return fmt.Sprintf(`%s
 
 Use repository-scoped read and search tools only. Do not use shell, terminal,
@@ -247,5 +249,5 @@ Changed paths:
 %s
 
 --- PATCH ---
-%s`, profile.instructions, canonicalReviewResultContract.Instructions(), subject.Identity, joinLines(subject.ChangedPaths), subject.Patch)
+%s`, profile.instructions, result.CanonicalReviewResultContract.Instructions(), subject.Identity, joinLines(subject.ChangedPaths), subject.Patch)
 }

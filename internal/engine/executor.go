@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"reviewparty/internal/model"
 	"strings"
 	"time"
 )
@@ -43,8 +44,8 @@ type reviewerCandidate struct {
 	Transport string
 }
 
-func (candidate reviewerCandidate) provenance() ReviewerProvenance {
-	return ReviewerProvenance{
+func (candidate reviewerCandidate) provenance() model.ReviewerProvenance {
+	return model.ReviewerProvenance{
 		ReviewerID: candidate.ID,
 		Model:      candidate.Model,
 		Effort:     candidate.Effort,
@@ -67,12 +68,12 @@ type attemptSpec struct {
 type attemptExecution struct {
 	AssistantText     string
 	ArtifactTruncated bool
-	Outcome           AttemptOutcome
+	Outcome           model.AttemptOutcome
 	Diagnostic        string
 	ResolvedModel     string
 	ResolvedEffort    string
-	FailureCategory   TerminationCategory
-	FailurePhase      ExecutionPhase
+	FailureCategory   model.TerminationCategory
+	FailurePhase      model.ExecutionPhase
 	RetryAfter        time.Duration
 }
 
@@ -116,10 +117,10 @@ func (executor directExecutor) Check(ctx context.Context, candidate reviewerCand
 func (executor directExecutor) Execute(ctx context.Context, spec attemptSpec) attemptExecution {
 	prepared, err := executor.adapter.Prepare(spec)
 	if err != nil {
-		return failedExecution(AttemptUnknownFailure, TerminationUnknownFailure, PhaseHarnessLaunch, err.Error())
+		return failedExecution(model.AttemptUnknownFailure, model.TerminationUnknownFailure, model.PhaseHarnessLaunch, err.Error())
 	}
 	if prepared.command == nil {
-		return failedExecution(AttemptUnknownFailure, TerminationUnknownFailure, PhaseHarnessLaunch, executor.adapter.Name()+" prepared no command")
+		return failedExecution(model.AttemptUnknownFailure, model.TerminationUnknownFailure, model.PhaseHarnessLaunch, executor.adapter.Name()+" prepared no command")
 	}
 	if prepared.cleanup != nil {
 		defer prepared.cleanup()
@@ -253,18 +254,18 @@ func stopTimer(timer *time.Timer) {
 }
 
 func contextExecution(err error) attemptExecution {
-	outcome := AttemptCancelled
-	category := TerminationCancelled
+	outcome := model.AttemptCancelled
+	category := model.TerminationCancelled
 	if errors.Is(err, context.DeadlineExceeded) {
-		outcome = AttemptTransientFailure
-		category = TerminationDeadlineExceeded
+		outcome = model.AttemptTransientFailure
+		category = model.TerminationDeadlineExceeded
 	}
-	return failedExecution(outcome, category, PhaseReviewerExecution, err.Error())
+	return failedExecution(outcome, category, model.PhaseReviewerExecution, err.Error())
 }
 
 func finalizeHarnessRun(run commandRun, decoded decodedHarnessOutput, harness string) attemptExecution {
 	if run.StartErr != nil {
-		return failedExecution(AttemptReviewerUnavailable, TerminationReviewerUnavailable, PhaseHarnessLaunch, run.StartErr.Error())
+		return failedExecution(model.AttemptReviewerUnavailable, model.TerminationReviewerUnavailable, model.PhaseHarnessLaunch, run.StartErr.Error())
 	}
 	if run.ContextErr != nil {
 		execution := contextExecution(run.ContextErr)
@@ -282,11 +283,11 @@ func finalizeHarnessRun(run commandRun, decoded decodedHarnessOutput, harness st
 		if strings.TrimSpace(decoded.diagnostic) != "" {
 			return classifyHarnessFailure(decoded.diagnostic, errors.New(harness+" produced no assistant text"))
 		}
-		return failedExecution(AttemptInvalidResult, TerminationMalformedOutput, PhaseOutputDecode, harness+" produced no assistant text")
+		return failedExecution(model.AttemptInvalidResult, model.TerminationMalformedOutput, model.PhaseOutputDecode, harness+" produced no assistant text")
 	}
 	return attemptExecution{
 		AssistantText:  decoded.assistantText,
-		Outcome:        AttemptCompleted,
+		Outcome:        model.AttemptCompleted,
 		Diagnostic:     compactDiagnostic(decoded.diagnostic),
 		ResolvedModel:  decoded.model,
 		ResolvedEffort: decoded.effort,
@@ -294,7 +295,7 @@ func finalizeHarnessRun(run commandRun, decoded decodedHarnessOutput, harness st
 }
 
 func overflowExecution(run commandRun, harness string) attemptExecution {
-	execution := failedExecution(AttemptInvalidResult, TerminationMalformedOutput, PhaseOutputCapture, harness+" output exceeded the capture limit")
+	execution := failedExecution(model.AttemptInvalidResult, model.TerminationMalformedOutput, model.PhaseOutputCapture, harness+" output exceeded the capture limit")
 	execution.AssistantText = string(run.Stdout)
 	execution.ArtifactTruncated = true
 	return execution
@@ -305,7 +306,7 @@ func decodedRunFailure(run commandRun, decodeErr error, harness string) attemptE
 	if run.WaitErr != nil || run.ContextErr != nil {
 		return finalizeHarnessRun(run, decodedHarnessOutput{assistantText: string(run.Stdout), diagnostic: diagnostic}, harness)
 	}
-	execution := failedExecution(AttemptInvalidResult, TerminationMalformedOutput, PhaseOutputDecode, compactDiagnostic(diagnostic))
+	execution := failedExecution(model.AttemptInvalidResult, model.TerminationMalformedOutput, model.PhaseOutputDecode, compactDiagnostic(diagnostic))
 	execution.AssistantText = string(run.Stdout)
 	return execution
 }
@@ -317,10 +318,10 @@ func classifyHarnessFailure(diagnostic string, waitErr error) attemptExecution {
 	if message == "" && waitErr != nil {
 		message = waitErr.Error()
 	}
-	return failedExecution(outcome, category, PhaseReviewerExecution, message)
+	return failedExecution(outcome, category, model.PhaseReviewerExecution, message)
 }
 
-func diagnosticFailureCategory(diagnostic string) TerminationCategory {
+func diagnosticFailureCategory(diagnostic string) model.TerminationCategory {
 	normalized := strings.ToLower(diagnostic)
 	switch {
 	case strings.Contains(normalized, "unauthorized"),
@@ -328,13 +329,13 @@ func diagnosticFailureCategory(diagnostic string) TerminationCategory {
 		strings.Contains(normalized, "not logged in"),
 		strings.Contains(normalized, "authentication"),
 		strings.Contains(normalized, "token refresh failed"):
-		return TerminationAuthenticationFailure
+		return model.TerminationAuthenticationFailure
 	case strings.Contains(normalized, "model") && strings.Contains(normalized, "not available"):
-		return TerminationReviewerUnavailable
+		return model.TerminationReviewerUnavailable
 	case isTransportDiagnostic(normalized):
-		return TerminationTransportFailure
+		return model.TerminationTransportFailure
 	default:
-		return TerminationUnknownFailure
+		return model.TerminationUnknownFailure
 	}
 }
 
@@ -355,22 +356,22 @@ func isTransportDiagnostic(normalized string) bool {
 	return false
 }
 
-func attemptOutcomeForTermination(category TerminationCategory) AttemptOutcome {
+func attemptOutcomeForTermination(category model.TerminationCategory) model.AttemptOutcome {
 	switch category {
-	case TerminationAuthenticationFailure, TerminationReviewerUnavailable:
-		return AttemptReviewerUnavailable
-	case TerminationTransportFailure, TerminationDeadlineExceeded:
-		return AttemptTransientFailure
-	case TerminationCancelled:
-		return AttemptCancelled
-	case TerminationMalformedOutput, TerminationResultValidationFailure:
-		return AttemptInvalidResult
+	case model.TerminationAuthenticationFailure, model.TerminationReviewerUnavailable:
+		return model.AttemptReviewerUnavailable
+	case model.TerminationTransportFailure, model.TerminationDeadlineExceeded:
+		return model.AttemptTransientFailure
+	case model.TerminationCancelled:
+		return model.AttemptCancelled
+	case model.TerminationMalformedOutput, model.TerminationResultValidationFailure:
+		return model.AttemptInvalidResult
 	default:
-		return AttemptUnknownFailure
+		return model.AttemptUnknownFailure
 	}
 }
 
-func failedExecution(outcome AttemptOutcome, category TerminationCategory, phase ExecutionPhase, diagnostic string) attemptExecution {
+func failedExecution(outcome model.AttemptOutcome, category model.TerminationCategory, phase model.ExecutionPhase, diagnostic string) attemptExecution {
 	return attemptExecution{
 		Outcome:         outcome,
 		Diagnostic:      diagnostic,

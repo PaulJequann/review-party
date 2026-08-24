@@ -189,8 +189,6 @@ func printHumanRecord(output io.Writer, record model.ReviewRecord, configuration
 	printArtifactReferences(output, record)
 	if record.Termination != nil {
 		fmt.Fprintf(output, "incomplete: %s at %s: %s\n", record.Termination.Category, record.Termination.Phase, record.Termination.Message)
-	} else if record.IncompleteCause != "" {
-		fmt.Fprintf(output, "incomplete: %s\n", record.IncompleteCause)
 	}
 	fmt.Fprintf(output, "inspect: review-party inspect %s", record.ID)
 	if configuration != defaultUserConfigurationPath() {

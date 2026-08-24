@@ -314,7 +314,7 @@ func historyReviewerQueryPlan(t *testing.T, ledger *LedgerRecordStore) []string 
 	return details
 }
 
-func TestLedgerPreparationMigratesVersionOneHistoryState(t *testing.T) {
+func TestLedgerRejectsObsoleteSchema(t *testing.T) {
 	directory := t.TempDir()
 	ledger := newTestLedger(t, directory)
 	if err := ledger.Close(); err != nil {
@@ -324,20 +324,95 @@ func TestLedgerPreparationMigratesVersionOneHistoryState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec("DROP TABLE adjudication_revisions; DROP TABLE eval_runs; DROP TABLE eval_suite_runs; DROP INDEX IF EXISTS review_bundles_party_history; DROP TABLE IF EXISTS review_bundles; ALTER TABLE attempts DROP COLUMN retry_after_ms; DROP INDEX reviews_replay_source; ALTER TABLE reviews DROP COLUMN replays_review_id; DROP INDEX reviews_history_order; DROP INDEX reviews_history_reviewer; DELETE FROM schema_migrations WHERE version>=2"); err != nil {
+	if _, err := db.Exec("UPDATE schema_migrations SET version=8"); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
-	migrated := newTestLedger(t, directory)
-	defer migrated.Close()
-	var count int
-	if err := migrated.db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name LIKE 'reviews_history_%'").Scan(&count); err != nil {
+	if _, err := ReviewRecordStatePrepared(directory); !errors.Is(err, ErrReviewRecordStateRequiresPreparation) {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestLedgerRejectsLegacyFirstSchemaCollision(t *testing.T) {
+	directory := t.TempDir()
+	db, err := sql.Open("sqlite", filepath.Join(directory, ledgerFilename))
+	if err != nil {
 		t.Fatal(err)
 	}
-	if count != 2 {
-		t.Fatalf("history index count = %d, want 2", count)
+	// A ledger from the replaced migration chain's first version reports the same
+	// numeric version the old chain used, but lacks every later table and column.
+	if _, err := db.Exec("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY); INSERT INTO schema_migrations(version) VALUES(1); CREATE TABLE reviews (id TEXT PRIMARY KEY)"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReviewRecordStatePrepared(directory); !errors.Is(err, ErrReviewRecordStateRequiresPreparation) {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestPrepareReplacesObsoleteLedgersInPlace(t *testing.T) {
+	for name, seed := range map[string]func(sql.Tx) error{
+		"obsolete-chain-schema": func(tx sql.Tx) error {
+			_, err := tx.Exec("UPDATE schema_migrations SET version=8")
+			return err
+		},
+		"legacy-first-version": func(tx sql.Tx) error {
+			_, err := tx.Exec("DROP TABLE reviews; UPDATE schema_migrations SET version=1; CREATE TABLE reviews (id TEXT PRIMARY KEY)")
+			return err
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			directory := t.TempDir()
+			ledger := newTestLedger(t, directory)
+			review := ledgerFixture(model.LifecycleCompleted)
+			if err := ledger.Save(review); err != nil {
+				t.Fatal(err)
+			}
+			if err := ledger.Close(); err != nil {
+				t.Fatal(err)
+			}
+			db, err := sql.Open("sqlite", filepath.Join(directory, ledgerFilename))
+			if err != nil {
+				t.Fatal(err)
+			}
+			tx, err := db.Begin()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := seed(*tx); err != nil {
+				t.Fatal(err)
+			}
+			if err := tx.Commit(); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Close(); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := PrepareReviewRecordState(directory); err != nil {
+				t.Fatalf("prepare = %v", err)
+			}
+			reopened, err := NewLedgerRecordStore(directory)
+			if err != nil {
+				t.Fatalf("reopen = %v", err)
+			}
+			defer reopened.Close()
+			loaded, err := reopened.Load(review.ID)
+			if err == nil {
+				t.Fatalf("loaded obsolete record %q after replacement", loaded.ID)
+			}
+			fresh := ledgerFixture(model.LifecycleCompleted)
+			if err := reopened.Save(fresh); err != nil {
+				t.Fatalf("save on replaced ledger = %v", err)
+			}
+			if _, err := reopened.History(HistoryQuery{Limit: 5}); err != nil {
+				t.Fatalf("history on replaced ledger = %v", err)
+			}
+		})
 	}
 }
 

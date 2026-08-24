@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reviewparty/internal/subject"
 	"strings"
 
 	"reviewparty/internal/configuration"
@@ -236,15 +237,11 @@ func initializationDirectory(initialization ProfileInitialization) (string, fs.F
 		}
 		return absolute, 0o700, nil
 	}
-	root, err := resolveRepositoryRoot(initialization.Repository)
+	root, err := subject.ResolveRepositoryRoot(initialization.Repository)
 	if err != nil {
 		return "", 0, err
 	}
 	return filepath.Join(root, ".reviewparty"), 0o755, nil
-}
-
-func writeNewProfileFile(path string, payload []byte, permissions fs.FileMode) (bool, error) {
-	return writeNewProfileFileWith(path, payload, permissions, writeProfilePayload)
 }
 
 func writeNewProfileFileWith(path string, payload []byte, permissions fs.FileMode, write func(*os.File, []byte) error) (bool, error) {
