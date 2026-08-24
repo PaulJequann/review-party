@@ -284,6 +284,31 @@ func terminationForAttempt(execution attemptExecution, outcome AttemptOutcome, p
 	}
 }
 
+func boundedAttemptOutput(output string) string {
+	if len(output) <= maxResultSize {
+		return output
+	}
+	return "[truncated to final bytes]\n" + output[len(output)-maxResultSize:]
+}
+
+func resolvedProvenance(candidate reviewerCandidate, execution attemptExecution) ReviewerProvenance {
+	provenance := candidate.provenance()
+	if execution.ResolvedModel != "" {
+		provenance.Model = execution.ResolvedModel
+	}
+	if execution.ResolvedEffort != "" {
+		provenance.Effort = execution.ResolvedEffort
+	}
+	return provenance
+}
+
+func elapsedMilliseconds(started, completed time.Time) int64 {
+	if completed.Before(started) {
+		return 0
+	}
+	return completed.Sub(started).Milliseconds()
+}
+
 func attemptTerminationMessage(outcome AttemptOutcome, diagnostic string, parseErr error) string {
 	if outcome == AttemptInvalidResult && parseErr != nil {
 		if diagnostic == "" {

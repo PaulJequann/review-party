@@ -121,12 +121,7 @@ func (conductor *Conductor) Review(ctx context.Context, selection ReviewSelectio
 // availability → execution → validation → persistence. Tests and Party/Eval
 // cross this seam instead of duplicating the sequence.
 func (conductor *Conductor) runPreparedReview(ctx context.Context, prepared preparedReview, replaysReviewID *ReviewID, reviewStarted time.Time) (ReviewRecord, error) {
-	if conductor.runner == nil {
-		runner := newReviewRunner(conductor.store, func() time.Time { return conductor.now() }, func() RuntimeProvenance { return conductor.buildProvenance() }, conductor.artifacts)
-		return runner.runPreparedReview(ctx, prepared, replaysReviewID, reviewStarted)
-	}
-	conductor.runner.artifacts = conductor.artifacts
-	return conductor.runner.runPreparedReview(ctx, prepared, replaysReviewID, reviewStarted)
+	return conductor.getRunner().runPreparedReview(ctx, prepared, replaysReviewID, reviewStarted)
 }
 
 func (conductor *Conductor) Replay(ctx context.Context, selection ReplaySelection) (ReviewRecord, error) {
@@ -292,97 +287,44 @@ func (conductor *Conductor) History(_ context.Context, query store.HistoryQuery)
 }
 
 // lifecycle delegation — the deep Review module owns these seams.
-// Conductor keeps thin wrappers so existing callers (party, eval, tests) cross
-// one seam without duplication.
+// getRunner is the single sync point: lazy-init and keep store/artifacts in sync
+// so callers cross one seam instead of seven duplicated nil-guard + sync branches.
+func (conductor *Conductor) getRunner() *reviewRunner {
+	if conductor.runner == nil {
+		conductor.runner = newReviewRunner(conductor.store, func() time.Time { return conductor.now() }, func() RuntimeProvenance { return conductor.buildProvenance() }, conductor.artifacts)
+		return conductor.runner
+	}
+	conductor.runner.store = conductor.store
+	conductor.runner.artifacts = conductor.artifacts
+	return conductor.runner
+}
 
 func (conductor *Conductor) executePass(ctx context.Context, pass passExecution) (ReviewRecord, error) {
-	if conductor.runner == nil {
-		runner := newReviewRunner(conductor.store, func() time.Time { return conductor.now() }, func() RuntimeProvenance { return conductor.buildProvenance() }, conductor.artifacts)
-		return runner.executePass(ctx, pass)
-	}
-	conductor.runner.artifacts = conductor.artifacts
-	return conductor.runner.executePass(ctx, pass)
+	return conductor.getRunner().executePass(ctx, pass)
 }
 
 func (conductor *Conductor) finishIncomplete(record ReviewRecord, termination ReviewTermination, reviewStarted time.Time) (ReviewRecord, error) {
-	if conductor.runner == nil {
-		runner := newReviewRunner(conductor.store, func() time.Time { return conductor.now() }, func() RuntimeProvenance { return conductor.buildProvenance() }, conductor.artifacts)
-		return runner.finishIncomplete(record, termination, reviewStarted)
-	}
-	conductor.runner.artifacts = conductor.artifacts
-	return conductor.runner.finishIncomplete(record, termination, reviewStarted)
+	return conductor.getRunner().finishIncomplete(record, termination, reviewStarted)
 }
 
 func (conductor *Conductor) finalizeOperationalRecord(record *ReviewRecord, reviewStarted time.Time) {
-	if conductor.runner == nil {
-		runner := newReviewRunner(conductor.store, func() time.Time { return conductor.now() }, func() RuntimeProvenance { return conductor.buildProvenance() }, conductor.artifacts)
-		runner.finalizeOperationalRecord(record, reviewStarted)
-		return
-	}
-	conductor.runner.artifacts = conductor.artifacts
-	conductor.runner.finalizeOperationalRecord(record, reviewStarted)
+	conductor.getRunner().finalizeOperationalRecord(record, reviewStarted)
 }
 
 func (conductor *Conductor) buildAttempt(id ReviewID, prompt string, candidate reviewerCandidate, execution attemptExecution, outcome AttemptOutcome, started, completed time.Time) (AttemptRecord, error) {
-	if conductor.runner == nil {
-		runner := &reviewRunner{artifacts: conductor.artifacts}
-		return runner.buildAttempt(id, prompt, candidate, execution, outcome, started, completed)
-	}
-	conductor.runner.artifacts = conductor.artifacts
-	return conductor.runner.buildAttempt(id, prompt, candidate, execution, outcome, started, completed)
+	return conductor.getRunner().buildAttempt(id, prompt, candidate, execution, outcome, started, completed)
 }
 
 func (conductor *Conductor) publishAttemptArtifacts(id ReviewID, number int, prompt string, execution attemptExecution) ([]ArtifactReference, error) {
-	if conductor.runner == nil {
-		runner := &reviewRunner{artifacts: conductor.artifacts}
-		return runner.publishAttemptArtifacts(id, number, prompt, execution)
-	}
-	conductor.runner.artifacts = conductor.artifacts
-	return conductor.runner.publishAttemptArtifacts(id, number, prompt, execution)
+	return conductor.getRunner().publishAttemptArtifacts(id, number, prompt, execution)
 }
 
 func (conductor *Conductor) removeArtifacts(references []ArtifactReference) {
-	if conductor.runner == nil {
-		runner := &reviewRunner{artifacts: conductor.artifacts}
-		runner.removeArtifacts(references)
-		return
-	}
-	conductor.runner.artifacts = conductor.artifacts
-	conductor.runner.removeArtifacts(references)
+	conductor.getRunner().removeArtifacts(references)
 }
 
 func (conductor *Conductor) VerifyArtifacts(record ReviewRecord) error {
-	if conductor.runner == nil {
-		runner := &reviewRunner{artifacts: conductor.artifacts}
-		return runner.VerifyArtifacts(record)
-	}
-	conductor.runner.artifacts = conductor.artifacts
-	return conductor.runner.VerifyArtifacts(record)
-}
-
-func boundedAttemptOutput(output string) string {
-	if len(output) <= maxResultSize {
-		return output
-	}
-	return "[truncated to final bytes]\n" + output[len(output)-maxResultSize:]
-}
-
-func resolvedProvenance(candidate reviewerCandidate, execution attemptExecution) ReviewerProvenance {
-	provenance := candidate.provenance()
-	if execution.ResolvedModel != "" {
-		provenance.Model = execution.ResolvedModel
-	}
-	if execution.ResolvedEffort != "" {
-		provenance.Effort = execution.ResolvedEffort
-	}
-	return provenance
-}
-
-func elapsedMilliseconds(started, completed time.Time) int64 {
-	if completed.Before(started) {
-		return 0
-	}
-	return completed.Sub(started).Milliseconds()
+	return conductor.getRunner().VerifyArtifacts(record)
 }
 
 func defaultStateDirectory() string {
