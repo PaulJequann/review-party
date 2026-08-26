@@ -37,7 +37,8 @@ The canonical language and distinctions are defined in [`../CONTEXT.md`](../CONT
 
 ### Caller
 
-- Identifies what should be reviewed and selects a Profile or Party.
+- Identifies what should be reviewed and selects a saved Profile, Party, or the
+  repository's saved default review selection.
 - Supplies explicit authority for a Substitution when required.
 - Consumes the Review Record or Review Bundle.
 - Decides whether to remediate, defer, accept risk, or deliver.
@@ -121,9 +122,11 @@ Recovery distinguishes:
 - substitution: using an undeclared agent, model, transport, profile, or weaker
   capability contract, which requires Caller authority.
 
-Profiles and Parties provide opinionated Recovery Policy defaults. Advanced
-Caller overrides produce recorded effective revisions. Reviewer Preference may
-reorder declared candidates; Reviewer Requirement narrows them.
+A saved Profile contains the complete ordinary execution choice, including its
+Reviewer, model, reasoning effort, and Execution Deadline. Ordinary runs do not
+override those choices. Eval experiments test alternatives before a Caller
+saves another Profile. Parties group Profile references and provide the
+Concurrency Limit for their Review Pipeline.
 
 Independent ready work may execute concurrently up to a finite Party limit.
 Review Dependencies impose ordering, and all Attempts for one Pass remain
@@ -131,13 +134,18 @@ sequential. Fallback is recovery, not an extra peer opinion.
 
 ## Configuration and observability
 
-Routine callers select a Profile, a named Party, or an ad hoc Profile
-composition. They do not need to configure every model, transport, retry,
-fallback, or timeout.
+Global Configuration makes reusable Profiles and Parties available to every
+repository without enabling them. Repository Configuration selects the ordered
+Global and Repository Profiles or Parties that `review-party run` uses by
+default. An explicit Profile or Party replaces that default for one run.
 
-Every effective Profile or Party change is retained as a distinct revision so
-prompt, model, reasoning, harness, recovery, and composition experiments can be
-compared. This provides reproducibility of inputs and execution provenance, not
+Packaged Review Profile Templates provide starting instructions but cannot run.
+A Caller creates a complete executable Profile by choosing a Template or blank
+instructions and saving the Reviewer, model, reasoning effort, and Execution
+Deadline.
+
+Every Profile or Party change is retained as a distinct revision so prompt,
+model, reasoning, harness, and composition experiments can be compared. This provides reproducibility of inputs and execution provenance, not
 deterministic model output.
 
 Every Review creates a retrievable Review Record. Normal output favors the

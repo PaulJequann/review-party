@@ -13,6 +13,12 @@ The accepted first implementation slice is documented in
 
 ## Current CLI
 
+> The accepted Configuration Hub plan directly replaces executable packaged
+> Profiles, Personal Configuration terminology, Party `extends`, and the
+> separate `review` and `party run` entry points. The behavior below remains the
+> shipped CLI until Configuration Hub Slices 4-5 land. See
+> [`docs/configuration-hub-implementation-plan.md`](docs/configuration-hub-implementation-plan.md).
+
 Run `review-party` with no arguments for task-oriented help. Every command and
 nested command supports `--help`, and `review-party completion
 bash|fish|powershell|zsh` generates a shell completion script. Profile and Party
@@ -31,8 +37,10 @@ review-party init --repo .
 Advanced callers may select a state location during initialization with
 `--state-dir PATH`; Review Party remembers that choice in the selected user
 configuration. Pass `--config PATH` consistently to init, Review, inspect, and
-history when using a non-default configuration. Initialization is idempotent,
-and Review, inspect, and history refuse to create or migrate state.
+history when using a non-default configuration. Initialization is idempotent
+for current state. Review, inspect, and history refuse to create state. Review Party is pre-release and does not upgrade retired
+ledger schemas; select a fresh `XDG_STATE_HOME` or `--state-dir` and run
+`review-party init` when an old ledger is incompatible.
 
 List and explain the built-in Review Profiles without launching an Agent
 Harness or creating a Review Record:
@@ -422,7 +430,9 @@ validation failures, and unknown failures without requiring callers to parse a
 diagnostic string. Review Records are persisted in the managed SQLite ledger at
 `$XDG_STATE_HOME/review-party/ledger.sqlite` (or the corresponding
 `$HOME/.local/state` fallback). The CLI intentionally exposes no storage-path
-selector; isolate tests and experiments with `XDG_STATE_HOME`.
+selector; isolate tests and experiments with `XDG_STATE_HOME`. The ledger uses
+one pre-release initial schema. Review Party fails on retired or colliding state
+instead of importing or rewriting it.
 
 ## Artifact evidence
 

@@ -17,8 +17,12 @@ The exact change, code, plan, or repository state whose evaluation a review desc
 _Avoid_: Target, mutable branch, current changes
 
 **Review Profile**:
-A named, versioned definition of a repeatable kind of review. It captures the purpose and review recipe, but not the Review Trigger, Review Subject, or project delivery policy.
-_Avoid_: Prompt template, untracked configuration bundle
+A named, versioned, executable definition of a repeatable kind of review. It packages the review purpose and judgment instructions with the selected Reviewer, model, reasoning effort, and Execution Deadline. It does not contain the Review Trigger, Review Subject, Party membership, or project delivery policy.
+_Avoid_: Review Profile Template, prompt alone, temporary model override, untracked configuration bundle
+
+**Review Profile Template**:
+A packaged, non-executable starting point for Review Profile judgment instructions. A Caller creates a Review Profile by copying or authoring instructions and selecting the complete execution configuration. Template updates never mutate saved Profiles automatically.
+_Avoid_: Review Profile, executable built-in, inherited prompt fragment
 
 **Review Pass**:
 One intentionally scoped, independently meaningful reviewer contribution within a review. Retrying the same contribution does not create another independent pass.
@@ -45,7 +49,7 @@ The normalized result of one observable Agent Harness execution, paired with its
 _Avoid_: Provider response, Review Result, raw exit code
 
 **Recovery Policy**:
-The recorded rules that bound retries, fallback, deadlines, and stopping behavior for a Review Pass. Profile and Party Revisions provide ordinary defaults while explicit Caller overrides produce a distinct effective revision.
+The recorded rules that bound retries, fallback, deadlines, and stopping behavior for a Review Pass. Ordinary saved Profiles fix their Execution Deadline; Eval experiments may test different finite recovery choices without mutating those Profiles.
 _Avoid_: Invocation flags, retry forever, hidden defaults
 
 **Concurrency Limit**:
@@ -141,16 +145,16 @@ _Avoid_: Profile initialization, first Review
 The interactive control center for inspecting and changing Review Party configuration over time. It serves recurring customization as Reviewers, models, Profiles, and preferences change; first-use guidance is one journey through the Hub rather than its defining purpose.
 _Avoid_: Setup wizard, onboarding screen, web UI
 
-**Personal Configuration**:
-A Caller’s configuration that applies across repositories, including Reviewer and model preferences, personal Profile and Party definitions, evaluation defaults, and managed-state choices. It is one coherent scope regardless of how its contents are organized internally.
-_Avoid_: User policy, global Profile defaults, repository configuration
+**Global Configuration**:
+Caller-owned configuration available to every repository, including reusable Review Profiles and Parties, evaluation defaults, and managed-state choices. Global availability does not cause a Profile or Party to run; each Repository Configuration selects its own defaults.
+_Avoid_: Automatically enabled baseline, organization configuration, repository configuration
 
 **Repository Configuration**:
-Shared Review Party configuration associated with one repository. It may select repository defaults or define team-owned Profiles and Parties, and remains distinct from Personal Configuration.
-_Avoid_: Personal Configuration, local user settings, project delivery policy
+Review Party configuration associated with one repository. It defines repository-owned Profiles and Parties and selects that repository's ordered default Reviews from Global and Repository Configuration.
+_Avoid_: Global Configuration, project delivery policy, Party inheritance
 
 **Configuration Scope**:
-The explicit ownership context in which a configuration value or definition applies: Personal Configuration or Repository Configuration. Effective values retain their originating scope so precedence is visible rather than implicit.
+The ownership context of a saved value or definition: Global Configuration or Repository Configuration. Effective values retain their scope so the Caller can distinguish reusable choices from repository-owned choices.
 _Avoid_: Config directory, hidden precedence, environment
 
 **Model Discovery**:
@@ -158,12 +162,12 @@ The best-effort collection of model choices reported by an available Agent Harne
 _Avoid_: Packaged model catalog, model allowlist, guaranteed availability
 
 **Effective Configuration**:
-The resolved configuration Review Party will use after applying packaged defaults, Personal Configuration, Repository Configuration, and explicit Caller choices in precedence order. Every effective value retains visible provenance identifying the choice and Configuration Scope that supplied it.
+The complete configuration Review Party will use for one operation after resolving the selected Global and Repository definitions and any explicit Profile or Party choice. It preserves the authored selection, expanded ordered Reviews, deduplication, execution settings, and provenance. Templates are not Effective Configuration because they cannot run.
 _Avoid_: Configuration file, merged JSON, implicit defaults
 
 **Profile Creation**:
-The operation that creates the editable local material for one named Review Profile. It is separate from Review Party Initialization.
-_Avoid_: Profile init, unnamed profile material
+The operation that saves one complete executable Review Profile from a Review Profile Template or blank instructions plus a Reviewer, model, reasoning effort, and Execution Deadline. It is separate from Review Party Initialization.
+_Avoid_: Profile init, template selection alone, unnamed profile material
 
 **Incomplete Review**:
 A review that ended without fulfilling its Profile Revision. Evidence from completed Passes remains available, but the review cannot claim that no actionable findings were found.
@@ -238,12 +242,12 @@ The aggregate output of a Review Pipeline, preserving each constituent Review Re
 _Avoid_: Review Result, merged Findings, log archive
 
 **Party**:
-A Caller-selected composition of Review Profiles applied to one Review Subject. A Party may be reusable or ad hoc, and its effective composition is fixed before it becomes a Review Pipeline.
-_Avoid_: Review, Review Pipeline, mandatory multi-review workflow
+A named, reusable, ordered group of Review Profile references with one Concurrency Limit. A Party does not contain other Parties or alter a Profile's Reviewer, model, reasoning effort, deadline, or instructions.
+_Avoid_: Review, Review Pipeline, Profile variant, inherited Party
 
 **Party Revision**:
-One exact effective version of a reusable Party, including its concurrency limit, ordered member selections, and their selected Profile Revisions. Authored `extends` chains that flatten to the same effective composition share a Party Revision; declared parent lineage remains part of the authored Party definition and listing. A Party name may evolve while each Review Bundle retains the effective composition it used.
-_Avoid_: Party name, mutable profile list
+One exact version of a Party, including its Configuration Scope, Concurrency Limit, ordered scoped Profile references, and selected Profile Revisions. Each Review Bundle retains the Party Revision it used even when a referenced Global Profile later changes.
+_Avoid_: Party name, mutable profile list, nested Party graph
 
 **Review Dependency**:
 An explicit relationship that supplies selected upstream Review Results as attributable context to a downstream Review. Reviews remain independent by default, and every consumed result is retained in the downstream Review Record.

@@ -1,605 +1,529 @@
 # Configuration Hub implementation plan
 
-Status: Slice 3 complete; remaining slices pending
-Last reconciled: 2026-08-23
+<!-- Stashbox: https://stashbox.local.bysliek.com/0XZZMwVbSdKL -->
 
-This plan replaces Review Party's fragmented personal configuration experience
-with one recurring Configuration Hub while retaining explicit Personal and
-Repository Configuration scopes. The accepted language lives in
-[`../CONTEXT.md`](../CONTEXT.md).
+Status: Slices 1-3 complete; Slice 4 is next
+Last reconciled: 2026-08-24
 
-## Outcome
+This plan replaces Review Party's current configuration and execution model with
+the accepted Global and Repository Configuration model in [`../CONTEXT.md`](../CONTEXT.md).
+It incorporates the Configuration Manager and Cobra work delivered in PRs #8
+and #10, then directly replaces the Party inheritance behavior delivered in PR
+#9. Review Party is pre-release. Do not add compatibility readers, migrations,
+or aliases for the superseded model.
 
-An interactive terminal user runs:
+## Product outcome
+
+Humans primarily configure Review Party through the recurring terminal Hub:
 
 ```sh
 review-party config
 ```
 
-and receives a persistent, searchable Configuration Hub for Reviewers, models,
-Profiles, Parties, repository settings, and advanced execution settings. Agents
-and automation use explicit domain-oriented subcommands beneath the same
-`config` command. Both interfaces call the same configuration Module and produce
-the same Effective Configuration.
+Agents and automation use explicit machine-readable commands under `config`.
+Both interfaces call the same Configuration Manager operations.
 
-Personal Configuration has one canonical home:
+An ordinary run uses the repository's saved review selection:
+
+```sh
+review-party run
+```
+
+An explicit selection replaces the repository default for one run:
+
+```sh
+review-party run --profile code-quality
+review-party run --party baseline
+```
+
+Bare `review-party` continues to print help. It must never launch paid external
+work by surprise.
+
+## Configuration scopes
+
+Global Configuration is available to every repository but enables nothing by
+itself:
 
 ```text
 ${XDG_CONFIG_HOME:-$HOME/.config}/review-party/
 ├── config.json
 ├── profiles/
-│   └── <name>.md
+│   └── <name>/
+│       ├── profile.json
+│       └── instructions.md
 └── parties/
     └── <name>.json
 ```
 
-Repository Configuration remains team-owned under:
+Repository Configuration owns that repository's executable default selection:
 
 ```text
 <repository>/.reviewparty/
 ├── config.json
 ├── profiles/
-│   └── <name>.md
+│   └── <name>/
+│       ├── profile.json
+│       └── instructions.md
 └── parties/
     └── <name>.json
 ```
 
 Managed state, Review Records, artifacts, and disposable Model Discovery cache
-remain outside configuration. Review Party is pre-release: replace the old
-`~/.reviewparty/` personal library directly rather than adding migration,
-backfill, or legacy-read paths.
+remain outside configuration. Packaged Review Profile Templates are immutable
+binary content, not executable Global or Repository Profiles.
 
 ## Locked product decisions
 
-- Cobra owns command routing, flags, argument validation, help, errors, and
-  shell completion.
-- Bubble Tea owns the persistent Hub and asynchronous state transitions.
-- Huh owns focused forms embedded in the Hub.
-- Bubbles supplies standard searchable lists, status indicators, help, and
-  viewports where useful.
-- Lip Gloss supplies restrained styling with readable no-color behavior.
-- The Hub is recurring configuration management, not a first-run wizard.
-- A non-TTY `review-party config` prints concise guidance and performs no
-  configuration change.
-- Human users primarily use the Hub. Agent-facing intents remain explicit,
-  composable, and machine-readable.
-- Hub changes are staged in memory and saved as one reviewed transaction.
-  Cancellation before confirmation writes nothing.
-- Effective values always expose packaged, Personal, Repository, or explicit
-  provenance.
-- Model Discovery queries Agent Harnesses dynamically, remains observational,
-  and never authenticates implicitly.
-- Searchable discovery always retains manual model entry with a warning when a
-  model was not discovered.
-- Review Party never stores provider credentials. Explicit sign-in actions may
-  launch a harness's documented authentication flow.
-- Substantive Review Profile editing uses `$EDITOR`; the Hub owns naming,
-  copying, selection, validation, and post-edit summaries.
-- Human help and diagnostics may improve. Existing command names, practical
-  exit semantics, and machine-readable Review/Eval output contracts remain
-  stable.
+### Review Profiles
+
+- A Review Profile is a complete executable package: judgment instructions,
+  Reviewer, model, reasoning effort, and Attempt deadline.
+- A Profile runs exactly as saved. Ordinary Reviews do not override its Reviewer,
+  model, effort, deadline, or instructions.
+- Different cost and quality choices are separately named Profiles, such as
+  `code-quality-small`, `code-quality`, and `code-quality-large`. Do not add a
+  variants system in this plan.
+- Eval benchmarking remains the place to test alternative execution choices.
+  A useful result can then be saved as a Profile.
+- Profiles use a directory containing strict `profile.json` metadata and
+  editable `instructions.md`. The Configuration Manager treats both files as
+  one publication unit.
+- Global and Repository Profiles may share a name. An unqualified explicit
+  reference resolves Repository before Global. Qualified references remain
+  available for exact selection.
+- Global Profile references are live. Editing one affects future runs in every
+  repository that selects it. Existing Review Records retain their exact
+  Profile Revisions.
+- V1 does not rename Profiles or Parties. Copy under a new name instead. This
+  avoids breaking repositories and autonomous workflows that hold live
+  references.
+
+### Review Profile Templates
+
+- Packaged `bugs`, `code-quality`, and `documentation` content becomes
+  non-executable Review Profile Templates.
+- A Template may seed Profile instructions but never supplies a guessed
+  Reviewer, model, effort, or deadline.
+- Profile Creation may start from a Template or blank instructions. Saving
+  copies the instructions; Profiles do not inherit later Template changes.
+- Each created Profile records its source Template ID and revision when one was
+  used.
+- The Hub and `doctor --format json` report Template drift without blocking an
+  otherwise compatible Review.
+- Applying a Template update is explicit. It replaces `instructions.md`, keeps
+  the Profile's execution settings, warns about overwritten customizations, and
+  creates a new Profile Revision.
+- Only a result-contract or capability incompatibility may require a Profile
+  update. A newer Template alone never blocks execution.
+
+### Parties and repository roll-up
+
+- A Party is a named ordered group of Profile references with one Concurrency
+  Limit. Naming is a convenience for reuse, not the basis of configuration
+  layering.
+- Global Parties contain Global Profile references only. Repository Parties may
+  contain Global and Repository Profile references.
+- Parties contain no other Parties and no per-member Reviewer, model, effort,
+  deadline, or instruction overrides.
+- Repository Configuration owns its complete default selection. It may select
+  Global or Repository Profiles and Parties.
+- Global selections expand first, followed by Repository selections. Array and
+  Party member order is preserved.
+- Exact scoped Profile identities are deduplicated after Party expansion. The
+  first occurrence keeps its position.
+- `global:code-quality` and `repository:code-quality` are different Profiles and
+  both run. Hub previews and CLI responses must strongly warn when same-named
+  Profiles from different scopes will both execute.
+- A missing Profile or Party, invalid Profile, unavailable saved Reviewer, or
+  rejected model fails the entire preflight before any Reviewer launches.
+- A named Party owns its Concurrency Limit. The repository default selection
+  owns a separate limit for its complete roll-up.
+- Review Bundles preserve both the authored selection and the expanded,
+  deduplicated execution list with scoped identities and Profile Revisions.
+
+Repository configuration uses an explicit scope-grouped selection:
+
+```json
+{
+  "schema_version": 1,
+  "reviews": {
+    "concurrency_limit": 3,
+    "global": [
+      {"party": "baseline"},
+      {"profile": "documentation"}
+    ],
+    "repository": [
+      {"profile": "supabase-rls"}
+    ]
+  }
+}
+```
+
+Global availability does not imply execution. A repository must select every
+Profile or Party it wants in its default run.
+
+### Hub and command behavior
+
+- Cobra owns routing, typed flags, help, errors, and completion. Completion may
+  read local and packaged names but never launches an Agent Harness.
+- Bubble Tea owns the persistent Hub and asynchronous state transitions. Huh,
+  Bubbles, and Lip Gloss provide focused forms, standard components, and
+  restrained styling.
+- Human users primarily use the Hub. Agents primarily use explicit config
+  commands with clean JSON output.
+- Every Hub operation has an equivalent typed command before that editor is
+  considered complete.
+- `config show` reports Effective Configuration: what will run, its ordered
+  expansion, warnings, and provenance.
+- `config file show --scope global|repository` reports authored storage for
+  advanced inspection. `config path` remains a path convenience.
+- Hub changes remain staged until one reviewed atomic publication. Cancellation
+  before confirmation writes nothing.
+- Non-TTY `review-party config` prints guidance and makes no change.
+- Accessible mode uses the same draft and intent state machine through ordinary
+  prompts rather than terminal redraws.
+- Model Discovery is observational and bounded. Manual undiscovered model IDs
+  remain available after an explicit warning.
+- Saving validates structural compatibility and discovered choices. A
+  temporarily unavailable harness may be saved after warning, but execution
+  still fails closed if it remains unavailable.
+- Review Party never stores provider credentials or authenticates implicitly.
+
+### Recovery and pre-release replacement
+
+- PR #11 already replaced the incremental SQL migration chain with one initial
+  schema. Retired state is not imported or upgraded.
+- Recovery backs up an incompatible ledger and its SQLite sidecars under a
+  dedicated state-root backup directory.
+- Backup and fresh initialization require separate confirmations. Review Party
+  never silently deletes, converts, or reinterprets retired state.
+- Profile and Party deletion remains deferred until backup/export recovery is
+  available.
+- The accepted model directly removes Party `extends`, nested Party composition,
+  inherited concurrency, per-member execution pins, executable packaged
+  Profiles, and the old `review` and `party run` command model.
 
 ## Architecture
 
 ```text
-Cobra commands                         Bubble Tea Configuration Hub
-      │                                          │
-      │ domain requests                          │ staged domain requests
-      └────────────────────┬─────────────────────┘
-                           ▼
-                 Configuration Manager
-       load · resolve · provenance · validate · plan · save
-                           │
-              ┌────────────┴────────────┐
-              ▼                         ▼
-     Personal Configuration    Repository Configuration
-              │
-              └──── disposable Model Discovery cache
+Cobra config commands                    Bubble Tea Configuration Hub
+         │                                           │
+         │ typed operations                          │ staged operations
+         └──────────────────┬────────────────────────┘
+                            ▼
+                  Configuration Manager
+      load · resolve · provenance · validate · plan · publish
+                            │
+             ┌──────────────┴──────────────┐
+             ▼                             ▼
+     Global Configuration        Repository Configuration
+             │                             │
+             └──────────┬──────────────────┘
+                        ▼
+           Effective Review Selection
+       expand · deduplicate · warn · preflight
+                        │
+                        ▼
+                 Review Pipeline
 ```
 
-The Configuration Manager is the deep Module. Its Interface must hide JSON
-shape, precedence, stable formatting, file permissions, temporary files,
-multi-file publication, and rollback. Cobra, Bubble Tea, Huh, the Conductor,
-and tests must not implement their own configuration rules.
+The Configuration Manager hides document shape, path rules, precedence, stable
+formatting, file permissions, temporary files, multi-file publication, stale
+plans, and rollback. The Hub and commands must not duplicate those rules.
 
-Model Discovery is a separate Module behind one small interface per Reviewer.
-Provider-specific commands and response formats stay in Reviewer adapters.
-A discovery failure affects only that Reviewer and never prevents the Hub from
-opening.
-
-## Design boundaries twice
-
-Slice 2 tested each material interface against a credible alternative before
-freezing the pre-release contract. The comparisons below record why the
-Configuration Manager exposes operations and read-only views instead of its
-document and staged-state shapes.
-
-### Effective reviewer policy
-
-The Configuration Manager needs to answer one policy question: which effective
-settings apply to each Reviewer? Two designs can answer it.
-
-| Concern | Exported mutable field graph | Validated policy access |
-| --- | --- | --- |
-| Cohesion | Callers combine defaults, Reviewer policy, and provenance, and can mutate the resolved map. | `Resolve` applies precedence and validates each effective policy before read-only access. |
-| Interface size and caller knowledge | The exported graph exposes the policy map and lets callers bypass its invariants. | Callers enumerate Reviewer IDs and request defensive policy values. Explicit model selection remains an execution concern. |
-| Dependency direction | Execution code depends on mutable configuration storage. | Execution code depends on validated policy values; document shape and precedence remain private. |
-| Testability | Tests can mutate the graph into states that `Resolve` never produced. | Table tests exercise winning values, provenance, defensive copies, and scoped errors at one seam. |
-| Failure containment | Different callers can interpret disabled policy or model restrictions in different orders. | `Resolve` either returns validated policies or a scoped error. Invalid authored policy cannot escape as executable state. |
-| Pre-release compatibility | Keeping the mutable graph preserves an interface no supported release requires. | Replacing it now breaks no supported users and leaves a smaller contract for later slices. |
-| Measured performance | No benchmark measures direct map access. | No benchmark measures defensive policy access. The choice has no performance claim. |
-
-Select validated policy access. The Configuration Manager resolves each policy
-field by precedence before interpreting the combined policy. If the effective
-`enabled` value is false, the effective model and model restriction are inert.
-An error for an active Reviewer retains the scope and path of the winning value
-that caused it. Explicit `--model` validation remains in profile compilation,
-where the Caller request and Reviewer candidate meet.
-
-`Effective` has no independent `Model`, and `Overrides` has no `Model` input.
-`Resolve` applies per-field precedence before it validates each effective
-Reviewer model and allowlist. A disabled effective policy is inert. The engine
-consumes `Effective.ReviewerPolicy` and preserves the winning disabled value's
-source and path.
-
-### Staged publication
-
-The Configuration Manager also needs to let a caller preview changes and then
-publish exactly those changes. Two designs can provide that workflow.
-
-| Concern | Exported mutable `Plan` | Opaque snapshot-bound `Plan` |
-| --- | --- | --- |
-| Cohesion | The plan mixes caller-facing preview fields with private staged documents. Exported slices invite callers to treat storage details as state. | The Configuration Manager owns the staged documents and snapshot identity. A separate preview value describes the proposed change. |
-| Interface size and caller knowledge | Callers see validity flags, reasons, paths, scopes, changes, and reserved fields, then must know which parts publication trusts. | Callers receive an opaque plan capability and an immutable preview. They only decide whether to publish that capability. |
-| Dependency direction | Publication accepts a caller-copyable value whose exported parts can diverge from its hidden state. | Callers depend on `Preview` and `Publish`; only the Configuration Manager knows the plan representation. |
-| Testability | Tests can mutate exported slices, but must inspect private state to prove what publication will write. | Tests can verify that preview mutations do not affect publication, stale snapshots fail, and a fresh plan publishes the previewed change. |
-| Failure containment | A long-lived plan can overwrite configuration changed after planning. Mutable preview data can misrepresent the staged write. | Publication rejects a plan when any source snapshot changed. Copied preview data cannot mutate staged state. |
-| Pre-release compatibility | Retaining the struct preserves an API that no supported release requires. Reserved fields such as `Warnings` enlarge that API before semantics exist. | Replacing the struct now avoids a compatibility promise and permits later warning semantics to use a deliberate result type. |
-| Measured performance | No benchmark measures copying or publishing the exported plan. | No benchmark measures snapshot comparison or defensive preview copies. The choice has no performance claim. |
-
-Select the opaque snapshot-bound `Plan`. `Plan` exposes `Valid`, `Reason`,
-`Changes`, `Scopes`, and `Paths` through read-only methods and has no `Warnings`
-field. Planning captures the baseline bytes for every publication target.
-`Publish` preflights all targets against those baselines and rejects a stale
-plan before it writes any file. The preview methods return defensive copies, so
-preview data cannot mutate the staged documents.
+Model Discovery remains a separate Module behind Reviewer-specific adapters. A
+failure for one Reviewer cannot prevent configuration of another Reviewer or
+opening the Hub.
 
 ## Dependency order
 
 ```text
-Slice 1: dependency and harness capability spike
-    │
-    ▼
-Slice 2: scoped Configuration Manager
-    │
-    ├──────────────► Slice 3: Cobra command tree
-    │                        │
-    │                        ▼
-    │               Slice 4: agent-facing config commands
-    │
-    └──────────────► Slice 5: Model Discovery and authentication actions
-                              │
-                              ▼
-                     Slice 6: Configuration Hub shell
-                              │
-                              ▼
-                     Slice 7: complete editors and atomic save
-                              │
-                              ▼
-                     Slice 8: recovery, accessibility, and release polish
+Slice 1  Dependency and harness capability spike                 Complete
+Slice 2  Scoped Configuration Manager                            Complete
+Slice 3  Cobra command tree                                      Complete
+Slice 4  Domain and storage reset                                Next
+Slice 5  Resolution and review-party run
+Slice 6  Agent-facing configuration commands
+Slice 7  Discovery and onboarding
+Slice 8  Hub shell and core editors
+Slice 9  Template updates, recovery, and release polish
 ```
 
-Slices are vertical and independently verifiable. Do not begin the visual Hub
-by duplicating configuration behavior inside a Bubble Tea model.
+Do not build Hub views against the superseded Profile or Party model. Slice 4
+must replace that foundation first.
 
 ## Slice execution protocol
 
 For each slice:
 
 1. Mark only that slice **In progress**.
-2. Inspect shipped behavior and the named touch points.
+2. Inspect shipped behavior and the named ownership boundaries.
 3. Run `purposeful-test-design` immediately before adding or revising tests and
-   record the slice's test-intent ledger.
-4. Implement through the owning Module's Interface.
-5. Run `gofmt`, focused package tests, targeted `go vet`, a targeted build,
-   `git diff --check`, and the CodeScene flow required by `AGENTS.md` for every
+   record the test-intent ledger for the slice.
+4. Implement through the owning Module's interface.
+5. Run `gofmt`, focused tests, targeted `go vet`, a targeted build,
+   `git diff --check`, and the CodeScene flow required by `AGENTS.md` for each
    touched source file.
-6. Exercise the named CLI acceptance scenario in isolated XDG configuration
-   and state directories under `scratch/`.
-7. Update this plan, README help, and durable research/design documents to match
-   shipped behavior.
-8. Request path-specific approval before deleting tracked obsolete files.
+6. Exercise the named CLI scenario in isolated XDG configuration and state
+   directories under `scratch/`.
+7. Update this plan, README help, `CONTEXT.md`, and affected design documents to
+   match shipped behavior.
+8. Request path-specific approval before deleting tracked files.
 
-## Slice 1 — Dependency and harness capability spike
-
-Status: **Complete**
-
-### Goal
-
-Select compatible major versions of the approved terminal libraries and prove
-how each current Agent Harness can report models and initiate authentication.
-
-### Work
-
-- Add direct dependencies on Cobra and Huh using current compatible releases.
-- Add direct Bubble Tea, Bubbles, and Lip Gloss dependencies when the spike
-  imports them; avoid relying on accidental transitive imports.
-- Build a scratch-only integration proving that a Huh form can participate in
-  the selected Bubble Tea version without nested terminal ownership or broken
-  cancellation.
-- Research current official commands and structured output for Grok, OpenCode,
-  Copilot, and Codex model listing and authentication.
-- Record support as `supported`, `authentication_required`, `unavailable`, or
-  `unsupported`; do not infer model names from documentation when the harness
-  can report them.
-- Define bounded deadlines, cancellation, output limits, and cache freshness for
-  discovery commands.
-- Save primary-source findings under `docs/research/`.
-
-### Acceptance
-
-- [x] Cobra `v1.10.2`, Bubble Tea `v2.0.9`, Huh `v2.0.3`, Bubbles
-  `v2.2.0`, and Lip Gloss `v2.0.6` build together under Go 1.26.
-- [x] The scratch spike demonstrated Hub-to-form transitions, cancellation,
-  narrow-terminal resize rendering, and restoration of the caller's terminal.
-- [x] Every current Reviewer has a documented discovery/authentication strategy
-  or an explicit unsupported result in
-  [`research/configuration-hub-dependencies-and-harness-discovery-2026-08-20.md`](research/configuration-hub-dependencies-and-harness-discovery-2026-08-20.md).
-- [x] No production Hub architecture was committed from the scratch spike.
-
-### Verification evidence
-
-- `go mod verify`
-- `go test ./cmd/review-party ./internal/engine`
-- `go vet ./cmd/review-party ./internal/engine`
-- `go build -o scratch/review-party ./cmd/review-party`
-- `go build -o scratch/config-hub-spike/config-hub-spike ./scratch/config-hub-spike`
-- Pseudo-terminal completion and Ctrl-C cancellation runs under a forced
-  48-column terminal both returned control without leaving the terminal in its
-  alternate screen.
-- `git diff --check`
-
-`go mod tidy` is not a repository-wide verification command here: the embedded
-Eval fixture trees intentionally contain independent example module imports and
-cause `./...` discovery to seek nonexistent `example.com` modules. The selected
-direct dependencies and checksums are explicit in `go.mod` and `go.sum`.
-
-## Slice 2 — Scoped Configuration Manager
+## Slice 1: dependency and harness capability spike
 
 Status: **Complete**
 
-Depends on: Slice 1 dependency versions, but not the Hub spike implementation.
+Selected Cobra `v1.10.2`, Bubble Tea `v2.0.9`, Huh `v2.0.3`, Bubbles `v2.2.0`,
+and Lip Gloss `v2.0.6` under Go 1.26. The scratch integration proved embedded
+form transitions, cancellation, narrow resizing, and terminal restoration.
+Reviewer discovery and authentication findings live in
+[`research/configuration-hub-dependencies-and-harness-discovery-2026-08-20.md`](research/configuration-hub-dependencies-and-harness-discovery-2026-08-20.md).
 
-### Goal
+## Slice 2: scoped Configuration Manager
 
-Create one Configuration Manager that owns Personal Configuration, Repository
-Configuration, Effective Configuration, provenance, validation, and safe
-publication.
+Status: **Complete; terminology and document shape change in Slice 4**
 
-### Work
+PR #8 delivered strict loading, provenance-aware resolution, typed intents,
+opaque snapshot-bound Plans, stale-plan rejection, atomic multi-file
+publication, private permissions, and zero-write defaults. Keep these deep
+Module properties. Slice 4 renames the Global scope and replaces Profile and
+Party document shapes without restoring engine-owned configuration rules.
 
-- Replace the split user-policy and global Profile-default concepts with one
-  Personal Configuration model.
-- Use one naming and version convention across Personal and Repository JSON.
-  Scope validation may permit different fields without inventing different
-  configuration languages.
-- Move the personal Profile and Party library roots beneath the canonical XDG
-  configuration directory.
-- Remove `~/.reviewparty/`, `REVIEW_PARTY_HOME`, and old global-library behavior
-  after obtaining path-specific deletion approval for any tracked files that
-  must be deleted.
-- Return each resolved value with provenance and distinguish absent authored
-  values from effective packaged defaults. Repository reviewer settings take
-  precedence over Personal settings. `Resolve` validates each effective
-  Reviewer model and allowlist after per-field precedence. Disabled effective
-  policies remain inert, and `Effective.ReviewerPolicy` retains the winning
-  source and path for the engine.
-- Define typed configuration intents rather than generic dotted JSON paths.
-- Keep `Intent` as a closed set of package-owned typed operations with
-  package-private mechanics. `Manager.Plan` accepts `[]Intent` and represents a
-  nil intent as an invalid opaque `Plan` with read-only `Valid` and `Reason`
-  methods.
-- Expose semantic changes, affected scopes, and affected paths through the
-  read-only `Plan.Changes`, `Plan.Scopes`, and `Plan.Paths` methods. These
-  methods return copies and cannot mutate staged state.
-- Publish a confirmed `Plan` atomically with private personal-file permissions
-  through `Manager.Publish`.
-  Multi-file failure must restore the pre-save state or leave an explicit,
-  recoverable failure without claiming success.
-  Planning captures baseline bytes, and publication preflights every target.
-  A stale target rejects the complete plan before any write begins.
-- Produce stable, readable JSON with two-space indentation, trailing newline,
-  semantic field ordering, expanded nested objects, and omitted redundant
-  defaults.
-- Preserve packaged Profiles and Parties as immutable defaults that users can
-  copy into a chosen scope before customization.
-- Update initialization and the Conductor to consume this Module rather than
-  raw configuration paths or maps.
-
-### Acceptance
-
-- One load returns effective values and exact provenance across packaged,
-  Personal, Repository, and explicit Reviewer or Profile choices.
-- A failed multi-file save does not expose a partially accepted configuration.
-- A stale plan writes no file.
-- Preview data cannot mutate the plan's staged state.
-- Opening or resolving defaults does not create a file.
-- Personal Profiles and Parties resolve only from the XDG configuration home.
-- No migration, backfill, legacy reader, or compatibility branch remains.
-
-### Verification evidence
-
-- `go test ./internal/configuration ./internal/engine ./cmd/review-party`
-- `go vet ./internal/configuration ./internal/engine ./cmd/review-party`
-- `go build -o scratch/slice2/rp ./cmd/review-party`
-- `git diff --check`
-- Isolated XDG CLI exercise covered canonical paths, zero-write reads, typed
-  advanced-state publication with `0700`/`0600` permissions, repository
-  precedence, and malformed-document fail-closed behavior.
-- Configuration Manager tests cover provenance, explicit choices, atomic
-  rollback, scope validation, stable JSON, typed-plan validation including nil
-  intent refusal, and private personal publication.
-
-## Slice 3 — Cobra command tree
+## Slice 3: Cobra command tree
 
 Status: **Complete**
 
-Depends on: the completed Slice 2 Interface.
+PR #10 delivered one Cobra-owned tree, typed flag parsing, successful root help,
+nested help, suggestions, shell completion, and local completion for Reviewer,
+Profile, and Party names. Preserve machine-readable Review and Eval contracts.
+The new `run` and configuration commands must use the same constructors and
+single-parse boundary.
+
+## Slice 4: domain and storage reset
+
+Status: **Next**
 
 ### Goal
 
-Replace manual dispatch and repeated standard-library `FlagSet` construction
-with a coherent Cobra tree without changing Review Party's execution semantics.
+Make the Configuration Manager represent the accepted Profile, Template, Party,
+and repository roll-up model before adding more interfaces.
 
 ### Work
 
-- Keep `main` limited to signal context, root-command construction, execution,
-  and exit-code mapping.
-- Build commands through constructors with injected input, output, error output,
-  environment, and owning Modules.
-- Group commands by user task and provide concise `Use`, `Short`, `Long`, and
-  `Example` text.
-- Preserve current command names and flags unless an existing behavior is
-  provably unusable.
-- Preserve JSON output schemas and keep styled human output out of machine
-  formats.
-- Add shell completion, including dynamic completion for Profile, Party, and
-  Reviewer names where it does not launch a harness.
-- Make plain `review-party` print concise help successfully and point to
-  `review-party config`.
-- Configure Cobra to avoid duplicate error/usage output and map usage errors to
-  the established exit code.
+- Rename Personal Configuration to Global Configuration in domain language,
+  APIs, help, and documentation. Keep the canonical XDG path.
+- Add non-executable packaged Review Profile Templates with stable IDs and
+  revisions.
+- Replace executable packaged Profiles with Profile Creation from Template or
+  blank instructions.
+- Replace `<name>.md` Profiles with `<name>/profile.json` plus
+  `<name>/instructions.md` and publish each aggregate atomically.
+- Require Reviewer, model, reasoning effort, and Attempt deadline in every
+  executable Profile.
+- Replace Party members with scoped Profile references only.
+- Remove `extends`, Party nesting, inherited concurrency, and member execution
+  pins.
+- Add the Repository `reviews` selection with Global and Repository arrays and
+  one Concurrency Limit.
+- Add typed intents for Profile Creation/copy, Party creation, selection editing,
+  ordering, and default publication.
+- Preserve source scope and Template provenance in read-only resolved values.
+- Update `CONTEXT.md`, Profile/Party design documents, and JSON examples.
 
 ### Acceptance
 
-- [x] Existing focused CLI tests pass against Cobra-backed commands.
-- [x] Root and nested help are readable and task-oriented.
-- [x] Unknown commands receive useful suggestions.
-- [x] Review, inspect, history, Eval, Profile, and Party JSON outputs remain
-  contract-compatible.
+- No packaged Template can execute directly.
+- A saved Profile cannot omit any required execution choice.
+- Global availability causes no Review to run without Repository selection.
+- Global Parties cannot reference Repository Profiles.
+- Parties cannot contain Parties or execution overrides.
+- Opening and resolving defaults remains zero-write.
+- No reader or migration for the superseded Profile, Party, or Personal naming
+  model remains.
 
-### Verification evidence
-
-- `go test ./internal/configuration ./internal/engine ./cmd/review-party`
-- `go vet ./internal/configuration ./internal/engine ./cmd/review-party`
-- `go build -o scratch/slice3/review-party ./cmd/review-party`
-- `go mod verify`
-- `git diff --check`
-- The isolated XDG CLI exercise covered successful root help, initialization,
-  Profile and history JSON, generated Bash completion, and an unknown-command
-  suggestion with exit code 2.
-- Command-tree tests cover successful root help, concise usage errors, typed
-  flag rejection, suggestions, and dynamic Profile, Party, and Reviewer
-  completion.
-- Bounded OpenCode Muse dogfood found and drove removal of duplicate flag
-  parsing, an untyped command-operation bag, string-based Eval override
-  tracking, and inconsistent command-output types. It also corrected an
-  overstated README completion claim. The final `bugs`, `code-quality`, and
-  `documentation` Reviews ran against unchanged Subject
-  `11c89827ade564bc2d3982aba563d9e4e4367c75dc714863fa9b6072d1297a97`.
-  All three persisted Records are Completed and clean with the requested
-  OpenCode Muse model and `canonical-v2` result contract.
-
-## Slice 4 — Agent-facing configuration commands
+## Slice 5: resolution and `review-party run`
 
 Status: **Pending**
 
-Depends on: Slices 2-3.
+### Goal
+
+Resolve one repository selection into an inspectable Review Pipeline and execute
+it through the ordinary Review path.
+
+### Work
+
+- Add `review-party run` with mutually exclusive `--profile` and `--party`.
+- Without either flag, load the repository's saved selection.
+- Replace `review` and `party run` directly; do not add aliases.
+- Resolve unqualified explicit names Repository before Global and support exact
+  qualified names.
+- Expand Global selections before Repository selections while preserving file
+  and member order.
+- Deduplicate exact scoped Profile identities at first occurrence.
+- Warn, in human and JSON output, when same-named cross-scope Profiles remain.
+- Preflight every reference and complete Profile before Subject resolution or
+  Reviewer launch.
+- Use the repository selection or explicit Party Concurrency Limit.
+- Persist authored selection, expanded list, deduplication facts, warnings,
+  Profile Revisions, and provenance in the Review Bundle.
+- Keep bare `review-party` as successful help.
+
+### Acceptance
+
+- A configured repository runs its complete saved roll-up with one command.
+- Explicit Profile or Party selection replaces the default.
+- Missing, invalid, or unavailable Profiles launch no Reviewer.
+- Exact overlaps run once without making ordinary configuration feel broken.
+- Same-named Global and Repository Profiles both run with a strong warning.
+- An interactive unconfigured run opens configuration; a noninteractive run
+  refuses without writes or Agent Harness launch.
+
+## Slice 6: agent-facing configuration commands
+
+Status: **Pending**
 
 ### Goal
 
-Expose the same configuration capabilities as explicit commands for agents,
-automation, and noninteractive recovery.
+Expose every accepted configuration operation to agents and automation through
+explicit, machine-readable commands.
 
-### Initial command families
+### Command families
 
 ```text
-review-party config show [--effective] [--scope personal|repository] [--format human|json]
-review-party config validate [--scope personal|repository] [--format human|json]
-review-party config reviewer enable REVIEWER
-review-party config reviewer disable REVIEWER
-review-party config reviewer set-default REVIEWER
-review-party config reviewer set-model REVIEWER MODEL
-review-party config reviewer restrict-models REVIEWER MODEL...
-review-party config profile set-default PROFILE [--scope ...]
-review-party config party ...
-review-party config advanced ...
+review-party config show [--repo PATH] [--format human|json]
+review-party config file show --scope global|repository [--format human|json]
+review-party config validate [--scope global|repository] [--format human|json]
+review-party config profile create NAME (--template TEMPLATE|--blank) ...
+review-party config profile copy NAME --to-scope global|repository
+review-party config party create NAME ...
+review-party config reviews add --scope global|repository (--profile NAME|--party NAME)
+review-party config reviews remove ...
+review-party config reviews move ...
+review-party config reviews set-concurrency N
 ```
 
-Exact verbs should remain domain-oriented and discoverable through Cobra help;
-do not expose arbitrary dotted-key intents.
+Exact verbs remain a slice decision, but they must express domain operations,
+not dotted JSON paths.
 
 ### Work
 
-- Show a semantic before/after plan and require confirmation for intents.
-- Support `--yes` for explicitly authorized automation.
-- Return structured changed scope, affected paths, before and after values, and
-  validation results in JSON mode.
-- Keep stdout machine-clean; prompts and diagnostics use the correct terminal or
-  error stream.
-- Refuse interactive confirmation without a controlling terminal unless
-  `--yes` is present.
+- Make `config show` report Effective Configuration, expanded Reviews,
+  deduplication, warnings, and provenance.
+- Keep authored storage under the explicit `config file` family.
+- Return semantic before/after Plans in JSON.
+- Require confirmation for mutations and `--yes` for authorized automation.
+- Keep stdout machine-clean and refuse non-TTY confirmation without `--yes`.
+- Implement commands and later Hub editors as vertical pairs over the same
+  typed operation.
 
 ### Acceptance
 
-- Every Hub intent planned for Slice 7 has a typed noninteractive operation.
-- Commands and the eventual Hub produce equivalent Plans.
-- Invalid changes write nothing.
-- Agent callers never need to parse styled terminal output.
+- Agents never parse styled terminal output or edit JSON directly.
+- Invalid or stale Plans write nothing.
+- Every operation planned for the Hub has an equivalent command before its
+  editor is complete.
 
-## Slice 5 — Model Discovery and authentication actions
+## Slice 7: discovery and onboarding
 
 Status: **Pending**
 
-Depends on: Slice 1 research and Slice 2 configuration types.
-
 ### Goal
 
-Offer searchable, provider-correct model choices without making discovery or
-authentication a prerequisite for configuration.
+Create the first complete executable Global Profile without guessing installed
+Reviewers, accessible models, effort, or cost tolerance.
 
 ### Work
 
-- Define a bounded discovery result with Reviewer, observed time, status,
-  canonical model ID, optional display metadata, and diagnostics.
-- Implement provider-specific discovery behind Reviewer adapters using argv,
-  bounded output, cancellation, deadlines, and existing environment policy.
-- Store successful results in a disposable cache under the appropriate cache
-  home, never in authored configuration.
-- Open consumers immediately with cached, configured, and packaged choices.
-- Refresh on demand and when a Reviewer screen first opens; deduplicate
-  concurrent refreshes for the same Reviewer.
-- Search model ID and trustworthy harness-reported display metadata.
-- Retain manual entry. Warn and request confirmation when discovery did not
-  report the entered model.
-- Detect authentication-required outcomes without automatically launching a
-  browser or mutating harness configuration.
-- Add an explicit sign-in action only where Slice 1 found a safe documented
-  command; otherwise show instructions.
+- Implement bounded Reviewer-specific Model Discovery and disposable caching.
+- Open consumers from cached, configured, and packaged choices before refresh
+  completes.
+- Keep manual model entry with a warning and explicit confirmation.
+- Detect authentication requirements without implicit login; expose explicit
+  documented sign-in actions only.
+- Guide interactive onboarding through Template or blank instructions, Profile
+  name, Reviewer, model, effort, deadline, validation, and reviewed save.
+- Let noninteractive initialization prepare managed state without inventing a
+  Profile.
 
 ### Acceptance
 
-- One slow or broken harness never blocks the Hub or another Reviewer's models.
-- Cache failure degrades to configured, packaged, and manual choices.
-- Discovery never changes Personal or Repository Configuration.
-- Authentication starts only after an explicit user action.
+- Interactive onboarding ends with at least one validated executable Global
+  Profile.
+- A slow or broken harness cannot block other Reviewers or the Hub.
+- Discovery never changes configuration or launches authentication implicitly.
+- `review-party run` refuses clearly when no executable repository selection
+  exists.
 
-## Slice 6 — Configuration Hub shell
+## Slice 8: Hub shell and core editors
 
 Status: **Pending**
 
-Depends on: Slices 2, 3, and 5.
-
 ### Goal
 
-Make `review-party config` a responsive persistent control center with correct
-terminal and nonterminal behavior.
+Provide recurring human configuration management without exposing storage
+mechanics.
 
 ### Work
 
-- Detect interactive terminal capability without treating redirected output as
-  a TUI.
-- In a TTY, open a Bubble Tea Hub showing Personal and current Repository
-  Configuration, provenance, dirty state, and discovery status.
-- Outside a TTY, print concise config guidance and perform no writes.
-- Establish navigation categories: Overview, Reviewers, Profiles, Parties,
-  Repository, Advanced, and Review Changes.
-- Use Bubbles for searchable lists, help, status, and viewports where they
-  reduce custom state.
-- Use restrained Lip Gloss styles that adapt to terminal color capability and
-  honor `NO_COLOR`.
-- Enable Huh's accessible mode through a documented environment variable and
-  explicit flag; accessible mode uses standard prompts rather than redraws.
-- Keep all edits in a draft that can be discarded safely.
+- Open the Bubble Tea Hub in a TTY; print guidance without writes outside a TTY.
+- Show Global and current Repository scope explicitly.
+- Provide Overview, Profiles, Parties, Repository Reviews, Advanced, and Review
+  Changes areas.
+- Search Templates, Global Profiles and Parties, and Repository Profiles and
+  Parties with visible source labels.
+- Create Profiles from Template or blank instructions; use `$EDITOR` for
+  substantive instruction editing.
+- Create flat Parties from scoped Profile references.
+- Assemble ordered Repository selections from Global and Repository Profiles or
+  Parties.
+- Preview expansion, deduplication, same-name warnings, provenance, and the
+  complete atomic Plan.
+- Support copying a Repository Profile to Global Configuration.
+- Preserve draft edits across cancelled focused forms. Exiting still offers
+  discard or return.
+- Provide accessible prompts over the same draft state machine.
 
 ### Acceptance
 
-- Open, navigate, resize, cancel, suspend/resume where supported, and exit
-  without terminal corruption.
-- The Hub opens before live discovery finishes.
-- Every displayed effective value identifies its provenance.
-- Opening and exiting without saving changes no files.
-- Non-TTY and accessible paths remain fully usable.
+- A human can create complete Profiles, Parties, and a repository default
+  without editing JSON.
+- Opening, navigating, and exiting without save changes no files.
+- Every displayed effective value and selected item identifies its scope.
+- Cancellation, resizing, and save failure leave the terminal and authored
+  configuration intact.
 
-## Slice 7 — Complete Hub editors and atomic save
+## Slice 9: Template updates, recovery, and release polish
 
 Status: **Pending**
 
-Depends on: Slices 4-6.
-
 ### Goal
 
-Complete recurring configuration management across all accepted Hub areas.
+Make drift and incompatible state recoverable before adding destructive
+configuration operations.
 
 ### Work
 
-- Reviewer editor: enablement, default, effort, discovered searchable model,
-  manual model, and advanced model restriction.
-- Profile editor: list/explain, copy packaged, create blank, rename where safe,
-  choose default, launch `$EDITOR`, validate, summarize, and remove.
-- Party editor: list/explain, create, compose ordered members, configure member
-  Reviewer/model/effort, choose concurrency, and remove.
-- Repository editor: make scope and tracked paths unmistakable and expose the
-  repository values that may override Personal Configuration.
-- Advanced editor: Eval retry/backoff/concurrency and managed-state location.
-- Review Changes: group semantic changes by scope and path, display validation
-  results, and confirm one atomic save.
-- Require ordinary confirmation for setting removal and typed-name confirmation
-  before deleting authored Profile or Party files.
-- Preserve completed editor changes in the draft when another editor is
-  cancelled; exiting the Hub still offers discard or return.
+- Report Template revision drift in the Hub and `doctor --format json`.
+- Show instruction diffs and explicitly replace `instructions.md` while keeping
+  Profile execution settings.
+- Warn before overwriting customized instructions and create a new Profile
+  Revision.
+- Back up incompatible ledgers and SQLite sidecars under a dedicated backup
+  directory.
+- Require separate confirmation before fresh initialization.
+- Add Profile and Party deletion only after export/backup recovery exists; use
+  typed-name confirmation and reviewed Plans.
+- Replace README current-CLI documentation only as each behavior ships.
+- Dogfood `bugs`, `code-quality`, and `documentation` purposes against one
+  unchanged Subject through configured executable Profiles.
 
 ### Acceptance
 
-- A user can complete every currently supported configuration change without
-  hand-editing JSON.
-- An agent can perform the equivalent change through Slice 4 commands.
-- `$EDITOR` failure or invalid Profile content returns to the Hub without
-  accepting the invalid file.
-- Save either publishes the complete reviewed Plan or reports failure
-  without partial accepted state.
-- Repository intents identify tracked-file effects before confirmation.
-
-## Slice 8 — Recovery, diagnostics, and release polish
-
-Status: **Pending**
-
-Depends on: Slice 7.
-
-### Goal
-
-Make configuration failures recoverable and the completed experience ready to
-replace manual JSON editing in documentation.
-
-### Work
-
-- Open a recovery screen when configuration is malformed or semantically
-  invalid.
-- Show the precise error, scope, path, and safe guided repairs where the
-  original intent is unambiguous.
-- Offer read-only inspection and export/backup before destructive recovery.
-  Never silently discard malformed or unknown content.
-- Add `review-party doctor` checks for configuration validity, Reviewer
-  executables, authentication status, Model Discovery support, selected-model
-  confidence, repository scope, and writable configuration/cache locations.
-- Provide equivalent structured doctor output for agents.
-- Add concise success summaries and next actions after save.
-- Replace README instructions that require ordinary users to author JSON with
-  Hub-first guidance; retain JSON documentation as an advanced and machine
-  contract reference.
-- Dogfood `bugs`, `code-quality`, and `documentation` Profiles against the same
-  unchanged Subject using the required isolated OpenCode Muse path.
-
-### Acceptance
-
-- A malformed file no longer locks the user out of configuration management.
-- Doctor distinguishes required failures, optional unavailable tools, and
-  unsupported discovery without collapsing them into one error.
-- Human documentation can reach a working configuration without teaching JSON
-  structure first.
-- Focused tests, formatter, vet, build, diff checks, CodeScene gates, and the
-  required bounded dogfood Reviews complete or are reported honestly as
-  Incomplete.
+- Template drift is visible but does not block compatible Reviews.
+- Updating from a Template never changes Reviewer, model, effort, or deadline.
+- Recovery preserves incompatible bytes and never claims migration success.
+- Human docs reach a working repository selection without teaching JSON first.
 
 ## Test-intent ledger
 
@@ -608,46 +532,40 @@ are written.
 
 | Behavior | Plausible harmful defect | Boundary | Required observation |
 | --- | --- | --- | --- |
-| Effective Configuration preserves provenance | A repository override appears personal and the user edits the wrong scope | Configuration Manager | Every resolved value identifies source and scope |
-| A confirmed draft publishes atomically | One Profile file changes while `config.json` remains old | Real filesystem publication | Forced failure restores or preserves the complete prior configuration |
-| Defaults remain zero-write | Opening the Hub creates a config that later masks packaged updates | Public Hub over isolated XDG dirs | Open and exit leaves no files |
-| Cobra preserves automation | Framework migration changes JSON shape or usage exit codes | Public CLI | Golden semantic JSON and exit behavior remain stable |
-| Root help is a successful starting point | Manual-dispatch behavior survives and treats no arguments as misuse | Public CLI | No-argument execution exits 0 and points to `review-party config` |
-| Completion remains local and bounded | Name completion launches a Reviewer or omits packaged choices | Cobra completion entry point | Profile, Party, and Reviewer names complete without a Review Record |
-| Cobra parses typed flags once | Help and execution drift because a second parser owns another flag definition | Public CLI | Invalid typed values fail at Cobra and execution consumes the same parsed values shown in help |
-| Discovery is bounded and isolated | One hanging harness freezes all Reviewer configuration | Discovery Module and Hub update loop | Other screens remain responsive and cancellation reaps the process |
-| Discovery remains observational | Refresh launches login or writes another tool's settings | Scripted harness fixture | No auth or configuration change occurs before explicit action |
-| Manual model entry remains available | Incomplete discovery prevents selection of a valid new model | Reviewer editor | Warning can be confirmed and selected ID is saved |
-| Hub cancellation is clean | Leaving a nested form writes a partially edited policy | Hub and Configuration Manager | Cancel/exit before final confirmation changes no files |
-| Destructive actions preserve intent | A misfocused key deletes authored Profile content | Hub deletion flow | Typed identity and final Plan are required |
-| Recovery preserves malformed input | Guided repair silently drops an unrecognized field | Recovery flow over real files | Original bytes remain available until explicit confirmed replacement |
-| Machine commands do not require a TTY | An agent blocks waiting for Huh confirmation | Cobra config command | Non-TTY configuration change refuses unless explicit authorization is supplied |
-| Profile editor validates external edits | `$EDITOR` writes an invalid Profile that becomes effective | Editor integration and Profile compiler | Invalid content is rejected before publication |
+| Profile publication is atomic | Metadata selects a model while instructions remain from another revision | Real Configuration Manager filesystem publication | Readers observe the complete old or complete new Profile |
+| Templates cannot execute | A packaged Template silently uses a guessed paid model | Public run preflight | Run refuses until a complete Profile exists |
+| Global availability is inert | Adding a Global Profile changes every repository's default run | Configuration resolution | Only Repository selection enables Reviews |
+| Repository roll-up preserves order | Party expansion reorders specialized Reviews | Selection resolver | Expanded Bundle order matches Global then Repository file order |
+| Exact overlap runs once | Two selected Parties duplicate cost and findings | Selection resolver | First scoped Profile occurrence remains and later exact occurrences are recorded as deduplicated |
+| Cross-scope names remain distinct | Name-only deduplication drops a Repository Profile | Resolver and CLI preview | Both scoped identities run and produce a strong warning |
+| Profile execution is stable | Ordinary flags change a benchmarked Profile's model | Public run command | Saved execution fields reach the Review Record unchanged |
+| Party membership stays flat | Nested composition reintroduces cycles and inherited policy | Party validation | Party references to Parties fail before launch |
+| Missing live references fail closed | A renamed Global Profile silently reduces coverage | Public run preflight | No Reviewer launches and the missing scoped identity is reported |
+| Bundle preserves intent and execution | A changed Global Party makes history impossible to explain | Ledger round-trip | Authored selection and expanded Profile Revisions both survive inspection |
+| Effective inspection is not authored inspection | An agent mistakes one file for what will run | Config CLI | `config show` reports expansion and provenance; `config file show` reports one document |
+| Manual model entry remains possible | Incomplete discovery blocks a valid model | Profile editor and command | Warning can be confirmed and exact model ID is saved |
+| Template updates are explicit | A product update overwrites customized judgment | Hub and Configuration Manager | No Profile changes before reviewed confirmation |
+| Recovery preserves retired state | Fresh initialization destroys an incompatible ledger | Real filesystem recovery | Ledger and sidecars exist in backup before new state preparation |
+| Hub cancellation is clean | Leaving a form publishes part of a Profile | Hub and Configuration Manager | Cancel and exit before final confirmation write nothing |
+| Machine mutation never blocks on prompts | An agent waits forever without a terminal | Config command | Mutation refuses unless `--yes` supplies authorization |
 
 ## Explicit non-goals
 
 - No web configuration UI.
-- No Viper dependency or generic environment-to-field binding layer.
-- No arbitrary dotted-key setter.
-- No credential storage.
-- No Review Party-maintained universal model catalog.
-- No automatic browser login during Model Discovery.
-- No migration or compatibility layer for `~/.reviewparty/`.
-- No full-screen TUI for ordinary Review JSON output merely for visual novelty.
-- No weakening of fail-closed Reviewer, model, capability, or incomplete-result
-  semantics.
+- No arbitrary dotted-key setter or Viper-style binding layer.
+- No credential storage or automatic browser login.
+- No executable packaged Profiles.
+- No Profile variants or ordinary execution overrides.
+- No Party inheritance, nesting, `extends`, or member execution pins.
+- No automatic Global baseline execution.
+- No Profile or Party rename in V1.
+- No migration for superseded Profile, Party, configuration, or ledger formats.
+- No silent Reviewer, model, Profile, Party, or capability substitution.
+- No full-screen TUI for ordinary Review output.
 
-## Expected obsolete behavior
+## Tracked removals
 
-Implementation is expected to make the following concepts obsolete:
-
-- the separate `~/.reviewparty/` global library;
-- `REVIEW_PARTY_HOME` as a personal-library selector;
-- separate user-policy and global Profile-default configuration models;
-- manual root command dispatch and repeated standard-library FlagSets;
-- `review-party config` as only `path|show`;
-- README-first manual JSON configuration.
-
-Before deleting any tracked source or documentation path, list the exact paths
-and request approval as required by `AGENTS.md`. Remove obsolete behavior once
-approved rather than retaining compatibility branches.
+The accepted replacement is expected to make tracked source and documentation
+obsolete. Before deleting any tracked path, list the exact path and request the
+approval required by `AGENTS.md`. Do not preserve dead readers, aliases, or
+commands to avoid requesting deletion approval.

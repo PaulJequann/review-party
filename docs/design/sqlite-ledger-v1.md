@@ -1,6 +1,6 @@
 # SQLite ledger v1
 
-Status: accepted for local implementation on 2026-08-10.
+Status: implemented; state preparation amended by PR #11 on 2026-08-24.
 
 ## Decision
 
@@ -20,7 +20,7 @@ Sources: [modernc sqlite package](https://pkg.go.dev/modernc.org/sqlite),
 ## Interface and layout
 
 `internal/store.LedgerRecordStore` owns connection lifecycle, state
-preparation, migrations, and history. Its private `reviewRecordProjection`
+preparation, schema validation, and history. Its private `reviewRecordProjection`
 module owns the complete Review Record-to-SQL mapping, transactional aggregate
 replacement, hydration traversal, child ordering, and nullable-value rules.
 The Conductor continues to
@@ -41,9 +41,8 @@ ledger is `ledger.sqlite` and filesystem artifacts are rooted beneath
 `artifacts/` in that same directory. The CLI does not expose a storage-path
 override; tests and dogfood isolate state through `XDG_STATE_HOME`.
 
-`review-party init` is the only ordinary command that prepares or migrates the
-ledger. It validates the selected repository and prepares the default managed
-root. An explicit advanced `--state-dir` choice is stored once in the normal
+`review-party init` is the only ordinary command that prepares the ledger. It
+validates the selected repository and prepares the default managed root. An explicit advanced `--state-dir` choice is stored once in the normal
 XDG user configuration; Review, inspect, and history resolve that remembered
 location but only open already prepared state. A conflicting later selection
 fails without moving, replacing, or abandoning existing state.
@@ -81,56 +80,24 @@ bounded Eval Review workers share the connection pool; SQLite serializes their
 short write transactions, and a writer that remains busy after the timeout
 returns the SQLite error rather than being retried or silently redirected.
 
-Disk-full, corruption, and migration errors are returned to the caller with no
+Disk-full, corruption, and schema errors are returned to the caller with no
 fallback store. SQLite's atomic commit protects a prior committed aggregate.
 Review Party never deletes, silently repairs, or downgrades state.
 
-## State preparation and migrations
+## State preparation and schema
 
-Migrations are versioned, embedded SQL files. Startup creates the migration
-table and applies only the next known versions in a transaction. A database
-newer than this binary fails explicitly and is never modified. Explicit
-initialization of new or supported existing state is idempotent. Review and
-read-only operations require an existing ledger and do not create a missing
-state root. Corrupt or inaccessible
-state produces a precise diagnostic without a JSON fallback or repair path.
+PR #11 replaced the eight-step pre-release migration chain with one embedded
+`initial.sql` schema. New ledgers contain the complete Review, history, replay,
+Eval, adjudication, retry-delay, and Review Bundle tables and indexes. Review
+Party does not import or upgrade retired local schemas.
 
-Migration 2 adds the two indexes justified by the first operational queries:
-one for deterministic newest-first traversal and one for effective Reviewer
-filtering in that same order. Other filters remain unindexed until measured
-fixtures demonstrate a useful access path rather than accumulating speculative
-indexes.
+Initialization creates the schema transactionally. It is idempotent for a
+ledger that already matches the current schema. A collision with an unrelated
+or retired table fails before Review Party claims the state is prepared. The
+caller must select a fresh state root and run `review-party init`; Review Party
+does not rename, delete, repair, or reinterpret the old database.
 
-Migration 3 adds nullable `replays_review_id` lineage with a foreign key to the
-source Review and a source/time/ID index. The relationship is part of the public
-aggregate projection rather than an event log; source and replay remain
-independent durable Review Records.
-
-Migration 4 adds Eval Suite Run and Eval Run relations. An Eval Run freezes its
-Eval Case Revision; that migration initially required every child to point to
-one ordinary Review Record. Migration 6 supersedes that constraint: Pending,
-Running, and no-Review Incomplete children have no Review link, while terminal
-successes and review-linked Incomplete children point to the ordinary Review
-they produced. The parent retains the suite revision/digest, effective
-Experiment Configuration, ordered Eval Run IDs, completion counts, and timing;
-adjudication and scores remain separate.
-
-Migration 7 adds `attempts.retry_after_ms`. A structured provider delay is
-durable reliability evidence and may lengthen retry backoff up to the frozen
-Retry Policy maximum; it is never an instruction to change Reviewer, model, or
-transport.
-
-Migration 5 adds immutable Adjudication Revisions. Each row transactionally
-stores the human decision document and pure derived score under a unique suite
-revision number. Publishing a correction inserts another row; it never updates
-an earlier adjudication or its source Review Results.
-
-Migration 6 adds explicit `lifecycle` and `termination` values to Eval Suite
-Runs, then rebuilds `eval_runs` so `review_id` is nullable and every child has
-an `updated_at` checkpoint timestamp. Existing child execution and
-adjudication states are preserved, and their initial `updated_at` is copied
-from `created_at`. Existing parent rows with `completed_at` are normalized to
-`completed`; parents without it become `incomplete`, because the older schema
-cannot prove that an interrupted suite is still pending or running. New writes
-use `CreateEvalSuiteRun` and `CheckpointEvalRun` so child state and parent
-progress cannot commit independently.
+Review and read-only operations require prepared state and never create a
+missing ledger. Corrupt, inaccessible, or incompatible state produces a
+specific error without a JSON fallback. This direct replacement is deliberate
+while Review Party remains pre-release.

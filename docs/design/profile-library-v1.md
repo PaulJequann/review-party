@@ -1,6 +1,15 @@
 # Filesystem-backed Review Profiles V1
 
-Status: implemented
+Status: implemented behavior; superseded for future work by Configuration Hub Slice 4
+
+> **Accepted replacement, 2026-08-24:** Review Profiles become complete
+> executable packages stored as `profile.json` plus `instructions.md`. Packaged
+> content becomes non-executable Review Profile Templates. Global replaces
+> Personal terminology, and ordinary runs no longer attach execution overrides
+> to Profiles. See
+> [`../configuration-hub-implementation-plan.md`](../configuration-hub-implementation-plan.md).
+> This document remains an accurate record of the currently shipped behavior
+> until the replacement slice lands.
 
 ## Decision
 

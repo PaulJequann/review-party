@@ -1,6 +1,6 @@
 # Review Party implementation plan
 Status: active planning ledger
-Last reconciled: 2026-08-19
+Last reconciled: 2026-08-24
 
 This document orders the work from project inception through replacement of the
 current skill-owned execution machinery. It records the shipped local CLI,
@@ -63,10 +63,13 @@ slice status and this checklist when the acceptance evidence is committed.
   - [x] DEV-69 — finite retries under a frozen Experiment Configuration.
   - [x] DEV-68 — user-controlled bounded concurrency.
 - [x] Slice 20 — seeded controlled defects (implemented locally).
-- [x] Slice 26 — Party composition and Review Bundles (implemented locally;
+- [x] Slice 26: Party composition and Review Bundles (delivered in PR #9;
   user-directed out of order ahead of Slices 21-25).
-- [x] Slice 26a — layered Party composition: `extends` chains and
-  `defaults.party` selection (implemented locally).
+- [x] Slice 26a: layered Party composition with `extends` chains and
+  `defaults.party` selection (delivered in PR #9; accepted for direct
+  replacement by Configuration Hub Slice 4).
+- [ ] Configuration Hub Slice 4: domain and storage reset. This is the next
+  user-directed slice; see `docs/configuration-hub-implementation-plan.md`.
 - [ ] Slice 21 — ACPX transport adapter.
 - [ ] Slice 22 — native-versus-ACP adapter experiments.
 - [ ] Slice 23 — fix verification and bounded continuation.
@@ -74,9 +77,14 @@ slice status and this checklist when the acceptance evidence is committed.
 - [ ] Slice 25 — supported local delivery baseline.
 
 Current state: Slices 10 through 20, Slice 17a, Slices 26 and 26a, DEV-56
-through DEV-60, and DEV-66 through DEV-69 are complete or implemented locally. Linear
-owns future work selection; use Ready issues there before the older roadmap
-below as execution authority.
+through DEV-60, and DEV-66 through DEV-69 are complete. PR #11 removed the
+pre-release Review Record compatibility paths and replaced the incremental SQL
+migration chain with one initial schema. Retired local state requires a fresh
+`review-party init`; future work must not restore legacy import or rollback
+behavior. The user has selected Configuration Hub Slice 4 as the next work;
+that focused plan overrides the older Slice 21 cursor until the replacement is
+complete. Linear otherwise owns future work selection; use Ready issues there
+before the older roadmap below as execution authority.
 
 ## Dependency order
 
@@ -779,15 +787,18 @@ New focused artifact implementation and tests, `types.go`, `executor.go`,
 
 ## Slice 12 — SQLite ledger design and dependency decision
 
-Status: **Decision gate**
+Status: **Complete; original migration design superseded by PR #11**
 
 Depends on: Slices 9-11.
 
 ### Goal
 
 Select an explicit local SQLite architecture that earns its dependency cost and
-preserves Review Party's deep Conductor Interface, local-first behavior, and
-non-destructive compatibility with existing JSON Review Records.
+preserves Review Party's deep Conductor Interface and local-first behavior.
+
+PR #11 superseded the compatibility parts of this historical design. Review
+Party is pre-release and now uses one collision-proof initial schema. It does
+not import retired JSON or SQLite formats.
 
 ### Required decisions
 
@@ -823,7 +834,10 @@ non-destructive compatibility with existing JSON Review Records.
 - Large prompts, native output, and debug material remain filesystem artifacts.
 - Foreign keys, uniqueness, and migration versioning are enabled explicitly.
 
-### Acceptance checklist
+### Historical acceptance checklist
+
+The unchecked compatibility items below record the original decision gate. PR
+#11 deliberately retired them rather than leaving them as unfinished work.
 
 - [ ] The user has approved the concrete dependency choice.
 - [ ] The design can reconstruct the public Review Record without knowledge of
@@ -841,7 +855,7 @@ different database, shell command, or in-memory history.
 
 ## Slice 13 — SQLite Review Ledger and minimal history
 
-Status: **Implemented locally**
+Status: **Complete; migration history consolidated by PR #11**
 
 Depends on: approved Slice 12.
 
@@ -859,7 +873,8 @@ artifacts on disk.
   rows, transactions, or migration concerns.
 - Use the real SQLite implementation in persistence tests. Do not create a fake
   adapter whose behavior cannot prove constraints or transactionality.
-- Import legacy JSON once, idempotently, and leave source files untouched.
+- Historical requirement, superseded by PR #11: import legacy JSON once,
+  idempotently, and leave source files untouched.
 
 ### Implementation checklist
 
@@ -1796,8 +1811,9 @@ migration without claiming hosted or distributed capabilities.
   verify inspect/history expose the effective execution configuration.
 - [ ] Run focused verification, final CodeScene safeguard, dependency/license
   audit, and the repository's CI gate.
-- [ ] Document state layout, migration/rollback, artifact sensitivity, required
-  external harnesses, diagnostics, incomplete semantics, and backup behavior.
+- [ ] Document state layout, fresh-initialization requirements, artifact
+  sensitivity, required external harnesses, diagnostics, incomplete semantics,
+  and backup behavior.
 - [ ] Create commits, tags, remote changes, and release artifacts only with
   explicit delivery authorization.
 - [ ] Request path-specific deletion approval before retiring the old runner.
@@ -1807,15 +1823,15 @@ migration without claiming hosted or distributed capabilities.
 ### Acceptance checklist
 
 - [ ] A fresh local installation can execute and diagnose every supported path.
-- [ ] Documentation, CLI help, schemas, migrations, and observed behavior agree.
-- [ ] Legacy JSON rollback remains available for the documented compatibility
-  window.
+- [ ] Documentation, CLI help, the initial schema, and observed behavior agree.
+- [ ] A fresh `review-party init` gives an explicit error for retired local
+  state rather than attempting a legacy import or rollback.
 - [ ] The old skill path is retired only with explicit approval and recovery
   evidence.
 
 ## Slice 26 — Party composition and Review Bundles
 
-Status: **Implemented locally**
+Status: **Complete; delivered in PR #9, accepted model superseded for future work**
 
 Depends on: Slices 8a, 13-15 (profiles, ledger, committed Subjects), DEV-68
 bounded concurrency. User-directed out of order ahead of Slices 21-25.
@@ -1845,8 +1861,9 @@ member Record's provenance and completeness.
   member completed; coverage incompleteness records no bundle termination while
   cancellation/hard-stop drains launched children and records a categorical
   termination.
-- [x] SQLite migration 008 (`review_bundles`) plus create/save/load with exact
-  round-trip; `inspect rb_...` dispatch.
+- [x] The original migration 008 added `review_bundles`; PR #11 later folded it
+  into the single initial schema. Create/save/load still round-trip exactly and
+  `inspect rb_...` still dispatches correctly.
 - [x] CLI `parties` listing and `party run` with human and JSON output; exit 2
   for an Incomplete Bundle.
 - [x] README section, this ledger entry, and the conductor-v1 dated update so
@@ -1886,7 +1903,7 @@ member Record's provenance and completeness.
 
 ## Slice 26a — Layered party composition
 
-Status: **Implemented locally**
+Status: **Complete; delivered in PR #9, scheduled for direct replacement**
 
 Depends on: Slice 26. User-directed.
 
@@ -1948,6 +1965,8 @@ with inherited members listed before the local addition.
 
 ## Immediate next action
 
-Proceed with Slice 21, the ACPX transport adapter. DEV-63 and DEV-64 remain
-separate investigation tracks and are not prerequisites unless implementation
-reveals a concrete ownership collision.
+Proceed with Slice 4 of
+[`configuration-hub-implementation-plan.md`](configuration-hub-implementation-plan.md):
+replace the Profile, Template, Party, scope, and repository roll-up foundations
+before adding more Hub behavior. Slice 21 remains pending until this
+user-directed replacement is complete.

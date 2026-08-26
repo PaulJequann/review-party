@@ -1,6 +1,15 @@
 # Party composition and Review Bundles v1
 
-Status: implemented locally; live dogfood evidence in the implementation plan
+Status: implemented behavior; superseded for future work by Configuration Hub Slice 4
+
+> **Accepted replacement, 2026-08-24:** Parties become flat ordered groups of
+> scoped Review Profile references. The replacement removes `extends`, nested
+> Party composition, inherited concurrency, and member Reviewer/model/effort
+> pins. Repository Configuration performs the roll-up by selecting Global and
+> Repository Profiles or Parties. See
+> [`../configuration-hub-implementation-plan.md`](../configuration-hub-implementation-plan.md).
+> This document remains an accurate record of the currently shipped PR #9
+> behavior until the replacement slice lands.
 
 A Party is a Caller-selected composition of Review Profiles applied to one
 Review Subject. Its effective composition is fixed before it becomes a Review
