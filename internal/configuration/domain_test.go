@@ -8,6 +8,30 @@ import (
 	"testing"
 )
 
+func TestIncompleteRepositoryProfilePreventsGlobalFallback(t *testing.T) {
+	globalRoot := t.TempDir()
+	repository := t.TempDir()
+	manager := testManager(t, globalRoot)
+	plan := requireProfilePlan(t, manager, ProfileDraft{
+		Target: ScopeGlobal, Name: "security", Reviewer: "opencode", Model: "muse",
+		ReasoningEffort: "high", AttemptDeadline: "2m", Instructions: "GLOBAL\n",
+	})
+	if err := manager.Publish(plan); err != nil {
+		t.Fatal(err)
+	}
+	directory := filepath.Join(repository, ".reviewparty", "profiles", "security")
+	if err := os.MkdirAll(directory, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "instructions.md"), []byte("INCOMPLETE\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := manager.ResolveProfile(Repository(repository), "security")
+	if err == nil || !strings.Contains(err.Error(), "profile.json is missing") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func TestProfilePublicationRejectsEscapingSymlink(t *testing.T) {
 	root := t.TempDir()
 	outside := t.TempDir()

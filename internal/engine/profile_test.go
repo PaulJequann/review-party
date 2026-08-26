@@ -4,9 +4,28 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"reviewparty/internal/model"
 )
+
+func TestExperimentCompilationUsesFrozenExperimentDeadline(t *testing.T) {
+	conductor := &Conductor{reviewers: defaultReviewerCatalog(), evalDefaultDeadline: 3 * time.Minute}
+	resolved := resolvedProfile{
+		name: "bugs", instructions: "Review bugs.", digest: "source", reviewer: defaultReviewer,
+		model: "grok-4.5", effort: "high", deadline: time.Minute,
+	}
+	compiled, err := conductor.compilePreparedProfile(model.ReviewSelection{Profile: "bugs"}, resolved, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if compiled.deadline != 3*time.Minute {
+		t.Fatalf("deadline = %s", compiled.deadline)
+	}
+	if compiled.revision.ExecutionDeadline != "3m0s" {
+		t.Fatalf("revision deadline = %q", compiled.revision.ExecutionDeadline)
+	}
+}
 
 func TestSavedProfileCompilesOneStablePass(t *testing.T) {
 	library := newTestProfileLibrary(t)

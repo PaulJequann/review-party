@@ -122,14 +122,39 @@ func (manager *Manager) LoadProfile(scope Scope, repository Repository, name str
 	}
 	base := filepath.Dir(entry.Path)
 	metadata, found, err := readRegularFile(anchor, filepath.Join(base, "profile.json"), "Profile metadata", MaximumDocumentBytes)
-	if err != nil || !found {
-		return Profile{}, found, err
+	if err != nil {
+		return Profile{}, false, err
+	}
+	if !found {
+		return manager.missingProfileMetadata(scope, repository, name)
 	}
 	instructions, err := readRequiredProfileInstructions(anchor, base, name)
 	if err != nil {
 		return Profile{}, false, err
 	}
 	return manager.decodeProfile(metadata, instructions, scope, name)
+}
+
+func (manager *Manager) missingProfileMetadata(scope Scope, repository Repository, name string) (Profile, bool, error) {
+	entry, anchor, err := manager.profileEntry(scope, repository, name)
+	if err != nil {
+		return Profile{}, false, err
+	}
+	root, found, err := openConfigurationRoot(anchor, "Profile library")
+	if err != nil || !found {
+		return Profile{}, false, err
+	}
+	defer root.Close()
+	directory := filepath.Dir(entry.Path)
+	relative, err := filepath.Rel(anchor, directory)
+	if err != nil {
+		return Profile{}, false, err
+	}
+	_, found, err = readRootedDirectory(root, directoryReadRequest{relative: relative, path: directory, description: "Profile directory"})
+	if err != nil || !found {
+		return Profile{}, found, err
+	}
+	return Profile{}, true, fmt.Errorf("Profile %q is incomplete: profile.json is missing", name)
 }
 
 func readRequiredProfileInstructions(anchor, base, name string) ([]byte, error) {

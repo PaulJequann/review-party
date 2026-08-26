@@ -18,6 +18,11 @@ func (conductor *Conductor) compileExperimentProfile(selection model.ProfileSele
 	if err != nil {
 		return compiledProfile{}, err
 	}
+	return conductor.compileResolvedExperimentProfile(selection, resolved)
+}
+
+func (conductor *Conductor) compileResolvedExperimentProfile(selection model.ProfileSelection, resolved resolvedProfile) (compiledProfile, error) {
+	resolved.deadline = conductor.evalDefaultDeadline
 	if selection.Reviewer == "" {
 		selection.Reviewer = resolved.reviewer
 	}

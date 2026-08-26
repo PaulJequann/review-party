@@ -218,17 +218,7 @@ func (conductor *Conductor) compilePreparedProfile(selection model.ReviewSelecti
 	if !allowExperimentOverrides {
 		return conductor.compileResolvedProfile(resolved)
 	}
-	experiment := selection.ProfileSelection()
-	if experiment.Reviewer == "" {
-		experiment.Reviewer = resolved.reviewer
-	}
-	if experiment.Model == "" {
-		experiment.Model = resolved.model
-	}
-	if experiment.Effort == "" {
-		experiment.Effort = resolved.effort
-	}
-	return conductor.compileProfile(experiment, resolved)
+	return conductor.compileResolvedExperimentProfile(selection.ProfileSelection(), resolved)
 }
 
 func resolveReviewRepository(selection model.ReviewSelection) (string, error) {
