@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"reviewparty/internal/engine"
 	"reviewparty/internal/model"
 	"reviewparty/internal/store"
 )
@@ -170,14 +169,14 @@ func TestHistoryParsesFiltersAndRendersEquivalentSummaries(t *testing.T) {
 	}
 }
 
-func TestReviewHelpListsEverySupportedReviewer(t *testing.T) {
+func TestReviewHelpOmitsExecutionOverrides(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	if exit := run(context.Background(), []string{"review", "--help"}, &stdout, &stderr); exit != 0 {
 		t.Fatalf("exit = %d, stderr = %q", exit, stderr.String())
 	}
-	for _, reviewer := range engine.SupportedReviewers() {
-		if !strings.Contains(stdout.String(), reviewer) {
-			t.Fatalf("help omits supported reviewer %q:\n%s", reviewer, stdout.String())
+	for _, flag := range []string{"--reviewer", "--model", "--effort", "--deadline"} {
+		if strings.Contains(stdout.String(), flag) {
+			t.Fatalf("help includes retired override %q:\n%s", flag, stdout.String())
 		}
 	}
 }

@@ -2,6 +2,8 @@ package configuration
 
 import (
 	"bytes"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -10,67 +12,172 @@ import (
 )
 
 const (
-	personalDirectoryPermissions   fs.FileMode = 0o700
+	globalDirectoryPermissions     fs.FileMode = 0o700
 	repositoryDirectoryPermissions fs.FileMode = 0o755
-	personalFilePermissions        fs.FileMode = 0o600
+	globalFilePermissions          fs.FileMode = 0o600
 	repositoryFilePermissions      fs.FileMode = 0o644
 )
 
+type publicationPlan struct {
+	files    []pendingWrite
+	profiles []pendingProfilePublication
+}
+
+type publicationModule struct {
+	writeFile    func(*pendingWrite) error
+	writeProfile func(*pendingProfilePublication) error
+}
+
+func newPublicationModule() *publicationModule {
+	return &publicationModule{writeFile: writeAtomically, writeProfile: writeProfileAtomically}
+}
+
+type pendingProfilePublication struct {
+	scope        Scope
+	anchor       string
+	directory    string
+	metadata     []byte
+	instructions []byte
+	complete     bool
+}
+
 type pendingWrite struct {
 	scope    Scope
+	anchor   string
 	path     string
 	payload  []byte
 	backup   []byte
 	existed  bool
 	mode     fs.FileMode
 	complete bool
+	skip     bool
 }
 
-// Publish writes every staged document of a confirmed plan atomically.
-// Personal files are private (0600, directories 0700). If any file fails to
-// publish, the previously published files are restored to their pre-save
-// contents and an error is returned; a partially accepted configuration is
-// never reported as success.
+// Publish writes a confirmed plan as one transaction. The private publication
+// module owns stale checks, rooted staging, commit, synchronization, and rollback.
 func (manager *Manager) Publish(plan Plan) error {
 	if !plan.Valid() {
 		return fmt.Errorf("refuse to publish an invalid change plan: %s", plan.Reason())
 	}
-	writes, err := manager.prepareWrites(plan)
+	return manager.publication.publish(plan.state.publication)
+}
+
+type publicationAdapter[T any] struct {
+	prepare     func(*T) error
+	commit      func(*T) error
+	rollback    func(T) error
+	description func(T) string
+}
+
+func (module *publicationModule) publish(plan publicationPlan) error {
+	files, err := publishBatch(plan.files, module.fileAdapter())
 	if err != nil {
 		return err
 	}
-	if len(writes) == 0 {
-		return nil
+	if _, err := publishBatch(plan.profiles, module.profileAdapter()); err != nil {
+		return errors.Join(err, rollbackBatch(files, module.fileAdapter()))
 	}
-	for index := range writes {
-		if err := manager.publishWrite(&writes[index]); err != nil {
-			err = fmt.Errorf("publish configuration %q: %w", writes[index].path, err)
-			return errors.Join(err, rollbackCompleted(writes[:index+1]))
+	return nil
+}
+
+func publishBatch[T any](planned []T, adapter publicationAdapter[T]) ([]T, error) {
+	items := append([]T(nil), planned...)
+	if err := prepareBatch(items, adapter); err != nil {
+		return nil, err
+	}
+	return commitBatch(items, adapter)
+}
+
+func prepareBatch[T any](items []T, adapter publicationAdapter[T]) error {
+	for index := range items {
+		if err := adapter.prepare(&items[index]); err != nil {
+			return err
 		}
 	}
 	return nil
 }
 
-func (manager *Manager) prepareWrites(plan Plan) ([]pendingWrite, error) {
-	writes := make([]pendingWrite, 0, len(plan.state.staged))
-	for _, document := range plan.state.staged {
-		payload, err := renderDocument(document.document)
-		if err != nil {
-			return nil, err
+func commitBatch[T any](items []T, adapter publicationAdapter[T]) ([]T, error) {
+	for index := range items {
+		if err := adapter.commit(&items[index]); err != nil {
+			failure := fmt.Errorf("publish %s: %w", adapter.description(items[index]), err)
+			return nil, errors.Join(failure, rollbackBatch(items[:index+1], adapter))
 		}
-		current, mode, existed, err := readCurrentContents(document.anchor, document.path)
-		if err != nil {
-			return nil, fmt.Errorf("refuse to publish stale change plan for configuration %q: %w", document.path, err)
-		}
-		if existed != document.baseline.existed || !bytes.Equal(current, document.baseline.payload) {
-			return nil, fmt.Errorf("refuse to publish stale change plan: configuration %q changed after planning", document.path)
-		}
-		if existed && bytes.Equal(current, payload) {
-			continue
-		}
-		writes = append(writes, pendingWrite{scope: document.scope, path: document.path, payload: payload, backup: current, existed: existed, mode: mode})
 	}
-	return writes, nil
+	return items, nil
+}
+
+func rollbackBatch[T any](items []T, adapter publicationAdapter[T]) error {
+	var failures []error
+	for index := len(items) - 1; index >= 0; index-- {
+		if err := adapter.rollback(items[index]); err != nil {
+			failures = append(failures, err)
+		}
+	}
+	return errors.Join(failures...)
+}
+
+func (module *publicationModule) fileAdapter() publicationAdapter[pendingWrite] {
+	return publicationAdapter[pendingWrite]{
+		prepare: (*pendingWrite).prepare,
+		commit: func(write *pendingWrite) error {
+			if write.skip {
+				return nil
+			}
+			return module.writeFile(write)
+		},
+		rollback: func(write pendingWrite) error {
+			if write.skip || !write.complete {
+				return nil
+			}
+			return restoreFile(write)
+		},
+		description: func(write pendingWrite) string { return fmt.Sprintf("configuration %q", write.path) },
+	}
+}
+
+func (module *publicationModule) profileAdapter() publicationAdapter[pendingProfilePublication] {
+	return publicationAdapter[pendingProfilePublication]{
+		prepare: (*pendingProfilePublication).prepare,
+		commit:  module.writeProfile,
+		rollback: func(profile pendingProfilePublication) error {
+			if !profile.complete {
+				return nil
+			}
+			return removeProfilePublication(profile)
+		},
+		description: func(profile pendingProfilePublication) string { return fmt.Sprintf("Profile %q", profile.directory) },
+	}
+}
+
+func (write *pendingWrite) prepare() error {
+	current, mode, existed, err := currentPlanTarget(write.anchor, write.path, fileState{existed: write.existed, payload: write.backup})
+	if err != nil {
+		return err
+	}
+	write.mode = mode
+	write.skip = existed && bytes.Equal(current, write.payload)
+	return nil
+}
+
+func (profile *pendingProfilePublication) prepare() error {
+	if _, err := os.Lstat(profile.directory); err == nil {
+		return fmt.Errorf("refuse to publish stale change plan: Profile %q changed after planning", profile.directory)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+func currentPlanTarget(anchor, path string, baseline fileState) ([]byte, fs.FileMode, bool, error) {
+	current, mode, existed, err := readCurrentContents(anchor, path)
+	if err != nil {
+		return nil, 0, false, fmt.Errorf("refuse to publish stale change plan for configuration %q: %w", path, err)
+	}
+	if existed != baseline.existed || !bytes.Equal(current, baseline.payload) {
+		return nil, 0, false, fmt.Errorf("refuse to publish stale change plan: configuration %q changed after planning", path)
+	}
+	return current, mode, existed, nil
 }
 
 func readCurrentContents(anchor, path string) ([]byte, fs.FileMode, bool, error) {
@@ -91,24 +198,109 @@ func readCurrentContents(anchor, path string) ([]byte, fs.FileMode, bool, error)
 	return payload, info.Mode().Perm(), true, nil
 }
 
-func writeAtomically(write *pendingWrite) error {
-	directory := filepath.Dir(write.path)
-	if err := os.MkdirAll(directory, directoryPermissions(write.scope)); err != nil {
-		return fmt.Errorf("create configuration directory %q: %w", directory, err)
-	}
-	temporary, err := os.CreateTemp(directory, ".review-party-config-*.tmp")
+func writeProfileAtomically(publication *pendingProfilePublication) error {
+	root, err := os.OpenRoot(publication.anchor)
 	if err != nil {
-		return fmt.Errorf("create temporary configuration: %w", err)
-	}
-	defer os.Remove(temporary.Name())
-	if err := writeTemporaryPayload(temporary, write.payload, filePermissions(write.scope)); err != nil {
 		return err
 	}
-	if err := os.Rename(temporary.Name(), write.path); err != nil {
+	defer root.Close()
+	relative, err := filepath.Rel(publication.anchor, publication.directory)
+	if err != nil {
+		return err
+	}
+	temporary, err := stageProfileDirectory(root, relative, publication)
+	if err != nil {
+		return err
+	}
+	defer root.RemoveAll(temporary)
+	if err := root.Rename(temporary, relative); err != nil {
+		return fmt.Errorf("publish Profile %q: %w", publication.directory, err)
+	}
+	publication.complete = true
+	return syncRootedDirectory(root, filepath.Dir(relative))
+}
+
+func stageProfileDirectory(root *os.Root, relative string, publication *pendingProfilePublication) (string, error) {
+	parent := filepath.Dir(relative)
+	if err := root.MkdirAll(parent, directoryPermissions(publication.scope)); err != nil {
+		return "", fmt.Errorf("create Profile parent %q: %w", filepath.Join(publication.anchor, parent), err)
+	}
+	suffix, err := randomSuffix()
+	if err != nil {
+		return "", err
+	}
+	temporary := filepath.Join(parent, ".review-party-profile-"+suffix+".tmp")
+	if err := root.Mkdir(temporary, directoryPermissions(publication.scope)); err != nil {
+		return "", err
+	}
+	if err := writeRootedProfilePart(root, filepath.Join(temporary, "profile.json"), publication.metadata, publication.scope); err != nil {
+		root.RemoveAll(temporary)
+		return "", err
+	}
+	if err := writeRootedProfilePart(root, filepath.Join(temporary, "instructions.md"), publication.instructions, publication.scope); err != nil {
+		root.RemoveAll(temporary)
+		return "", err
+	}
+	return temporary, nil
+}
+
+func randomSuffix() (string, error) {
+	var value [8]byte
+	if _, err := rand.Read(value[:]); err != nil {
+		return "", fmt.Errorf("generate temporary Profile name: %w", err)
+	}
+	return hex.EncodeToString(value[:]), nil
+}
+
+func writeRootedProfilePart(root *os.Root, path string, payload []byte, scope Scope) error {
+	file, err := root.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, filePermissions(scope))
+	if err != nil {
+		return err
+	}
+	return writeTemporaryPayload(file, payload, filePermissions(scope))
+}
+
+func syncRootedDirectory(root *os.Root, path string) error {
+	directory, err := root.Open(path)
+	if err != nil {
+		return err
+	}
+	defer directory.Close()
+	return directory.Sync()
+}
+
+func writeAtomically(write *pendingWrite) error {
+	root, err := os.OpenRoot(write.anchor)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	relative, err := filepath.Rel(write.anchor, write.path)
+	if err != nil {
+		return err
+	}
+	directory := filepath.Dir(relative)
+	if err := root.MkdirAll(directory, directoryPermissions(write.scope)); err != nil {
+		return fmt.Errorf("create configuration directory %q: %w", filepath.Join(write.anchor, directory), err)
+	}
+	suffix, err := randomSuffix()
+	if err != nil {
+		return err
+	}
+	temporary := filepath.Join(directory, ".review-party-config-"+suffix+".tmp")
+	file, err := root.OpenFile(temporary, os.O_WRONLY|os.O_CREATE|os.O_EXCL, filePermissions(write.scope))
+	if err != nil {
+		return err
+	}
+	defer root.Remove(temporary)
+	if err := writeTemporaryPayload(file, write.payload, filePermissions(write.scope)); err != nil {
+		return err
+	}
+	if err := root.Rename(temporary, relative); err != nil {
 		return fmt.Errorf("publish configuration %q: %w", write.path, err)
 	}
 	write.complete = true
-	return syncDirectory(directory)
+	return syncRootedDirectory(root, directory)
 }
 
 func writeTemporaryPayload(file *os.File, payload []byte, permissions fs.FileMode) error {
@@ -127,67 +319,76 @@ func writeTemporaryPayload(file *os.File, payload []byte, permissions fs.FileMod
 	return file.Close()
 }
 
-// rollbackCompleted restores the pre-save state after a failed publication.
-func rollbackCompleted(completed []pendingWrite) error {
-	var failures []error
-	for index := len(completed) - 1; index >= 0; index-- {
-		write := completed[index]
-		if !write.complete {
-			continue
-		}
-		if err := restoreFile(write); err != nil {
-			failures = append(failures, fmt.Errorf("restore previous configuration %q: %w", write.path, err))
-		}
-	}
-	if len(failures) > 0 {
-		return fmt.Errorf("configuration publication failed and rollback was incomplete; manual recovery is required: %w", errors.Join(failures...))
-	}
-	return nil
-}
-
-func restoreFile(write pendingWrite) error {
-	if !write.existed {
-		if err := os.Remove(write.path); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
-		return syncDirectory(filepath.Dir(write.path))
-	}
-	temporary, err := os.CreateTemp(filepath.Dir(write.path), ".review-party-rollback-*.tmp")
+func removeProfilePublication(publication pendingProfilePublication) error {
+	root, err := os.OpenRoot(publication.anchor)
 	if err != nil {
 		return err
 	}
-	defer os.Remove(temporary.Name())
-	if err := writeTemporaryPayload(temporary, write.backup, write.mode); err != nil {
+	defer root.Close()
+	relative, err := filepath.Rel(publication.anchor, publication.directory)
+	if err != nil {
 		return err
 	}
-	if err := os.Rename(temporary.Name(), write.path); err != nil {
+	if err := root.RemoveAll(relative); err != nil {
 		return err
 	}
-	return syncDirectory(filepath.Dir(write.path))
+	return syncRootedDirectory(root, filepath.Dir(relative))
+}
+
+func restoreFile(write pendingWrite) error {
+	root, err := os.OpenRoot(write.anchor)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	relative, err := filepath.Rel(write.anchor, write.path)
+	if err != nil {
+		return err
+	}
+	directory := filepath.Dir(relative)
+	if !write.existed {
+		return removeRootedWrite(root, relative, directory)
+	}
+	return restoreRootedWrite(root, relative, directory, write)
+}
+
+func removeRootedWrite(root *os.Root, relative, directory string) error {
+	if err := root.Remove(relative); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return syncRootedDirectory(root, directory)
+}
+
+func restoreRootedWrite(root *os.Root, relative, directory string, write pendingWrite) error {
+	suffix, err := randomSuffix()
+	if err != nil {
+		return err
+	}
+	temporary := filepath.Join(directory, ".review-party-rollback-"+suffix+".tmp")
+	file, err := root.OpenFile(temporary, os.O_WRONLY|os.O_CREATE|os.O_EXCL, write.mode)
+	if err != nil {
+		return err
+	}
+	defer root.Remove(temporary)
+	if err := writeTemporaryPayload(file, write.backup, write.mode); err != nil {
+		return err
+	}
+	if err := root.Rename(temporary, relative); err != nil {
+		return err
+	}
+	return syncRootedDirectory(root, directory)
 }
 
 func directoryPermissions(scope Scope) fs.FileMode {
-	if scope == ScopePersonal {
-		return personalDirectoryPermissions
+	if scope == ScopeGlobal {
+		return globalDirectoryPermissions
 	}
 	return repositoryDirectoryPermissions
 }
 
 func filePermissions(scope Scope) fs.FileMode {
-	if scope == ScopePersonal {
-		return personalFilePermissions
+	if scope == ScopeGlobal {
+		return globalFilePermissions
 	}
 	return repositoryFilePermissions
-}
-
-func syncDirectory(directory string) error {
-	opened, err := os.Open(directory)
-	if err != nil {
-		return fmt.Errorf("open configuration directory for sync: %w", err)
-	}
-	defer opened.Close()
-	if err := opened.Sync(); err != nil {
-		return fmt.Errorf("sync configuration directory: %w", err)
-	}
-	return nil
 }

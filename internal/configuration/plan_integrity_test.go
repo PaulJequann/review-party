@@ -102,32 +102,32 @@ func TestPublishAcceptsUnchangedPlan(t *testing.T) {
 }
 
 func TestPublishDoesNotWriteAnyTargetWhenOneIsStale(t *testing.T) {
-	personalRoot := t.TempDir()
+	globalRoot := t.TempDir()
 	repository := t.TempDir()
-	personalPath := filepath.Join(personalRoot, "config.json")
+	globalPath := filepath.Join(globalRoot, "config.json")
 	repositoryPath := filepath.Join(repository, ".reviewparty", "config.json")
-	personalBefore := `{"schema_version":1,"state_directory":"/before"}`
-	repositoryBefore := `{"schema_version":1,"defaults":{"profile":"bugs"}}`
-	writeIntegrityDocument(t, personalPath, personalBefore)
+	globalBefore := `{"schema_version":1,"state_directory":"/before"}`
+	repositoryBefore := `{"schema_version":1,"reviews":{"concurrency_limit":1,"global":[],"repository":[]}}`
+	writeIntegrityDocument(t, globalPath, globalBefore)
 	writeIntegrityDocument(t, repositoryPath, repositoryBefore)
-	manager := integrityManager(t, personalRoot)
+	manager := integrityManager(t, globalRoot)
 	plan := integrityPlan(t, manager, repository,
 		configuration.SetStateDirectory{Directory: "/planned"},
-		configuration.SetDefaultProfile{Target: configuration.ScopeRepository, Profile: "code-quality"},
+		configuration.SetReviewSelection{Selection: configuration.ReviewSelection{ConcurrencyLimit: 2}},
 	)
-	repositoryChanged := `{"schema_version":1,"defaults":{"profile":"changed"}}`
+	repositoryChanged := `{"schema_version":1,"reviews":{"concurrency_limit":3,"global":[],"repository":[]}}`
 	writeIntegrityDocument(t, repositoryPath, repositoryChanged)
 
 	err := manager.Publish(plan)
 
 	assertStalePlanError(t, err, repositoryPath)
-	assertIntegrityContents(t, personalPath, personalBefore)
+	assertIntegrityContents(t, globalPath, globalBefore)
 	assertIntegrityContents(t, repositoryPath, repositoryChanged)
 }
 
-func integrityManager(t *testing.T, personalRoot string) *configuration.Manager {
+func integrityManager(t *testing.T, globalRoot string) *configuration.Manager {
 	t.Helper()
-	return configuration.NewManager(configuration.Options{PersonalRoot: personalRoot})
+	return configuration.NewManager(configuration.Options{GlobalRoot: globalRoot})
 }
 
 func integrityPlan(t *testing.T, manager *configuration.Manager, repository string, intents ...configuration.Intent) configuration.Plan {

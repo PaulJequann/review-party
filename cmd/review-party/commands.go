@@ -134,7 +134,7 @@ func addRepositoryFlag(cmd *cobra.Command, usage string) {
 }
 
 func addConfigurationFlag(cmd *cobra.Command) {
-	cmd.Flags().String("config", defaultUserConfigurationPath(), "Personal Configuration path")
+	cmd.Flags().String("config", defaultUserConfigurationPath(), "Global Configuration path")
 }
 
 func addFormatFlag(cmd *cobra.Command) {
@@ -146,16 +146,10 @@ func addSubjectFlags(cmd *cobra.Command) {
 	cmd.Flags().String("head", "", "Committed-range head revision")
 }
 
-func addExecutionFlags(cmd *cobra.Command) {
-	cmd.Flags().Duration("deadline", 10*time.Minute, "Attempt deadline")
-	addConfigurationFlag(cmd)
-}
-
 func addReviewFlags(cmd *cobra.Command) {
 	addRepositoryFlag(cmd, "Git repository to review")
 	addFormatFlag(cmd)
-	addExecutionFlags(cmd)
-	addCommonSelectionFlags(cmd)
+	addConfigurationFlag(cmd)
 	addSubjectFlags(cmd)
 }
 

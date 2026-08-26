@@ -8,10 +8,10 @@ import (
 	"reviewparty/internal/configuration"
 )
 
-// defaultUserConfigurationPath returns the canonical Personal Configuration
+// defaultUserConfigurationPath returns the canonical Global Configuration
 // file, or an empty path when the platform provides no configuration home.
 func defaultUserConfigurationPath() string {
-	root := configuration.DefaultPersonalRoot()
+	root := configuration.DefaultGlobalRoot()
 	if root == "" {
 		return ""
 	}

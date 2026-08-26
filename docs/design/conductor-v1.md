@@ -38,8 +38,9 @@ The Conductor hides:
 - durable Review Record creation and inspection.
 
 The external Agent Harness is reached through one internal Attempt-execution
-seam. V1 has direct Grok, OpenCode, and Copilot adapters plus a scripted test adapter, so the seam
-represents real variation rather than speculative indirection.
+seam. V1 has direct Grok, OpenCode, Copilot, and Codex adapters plus a scripted
+test adapter, so the seam represents real variation rather than speculative
+indirection.
 
 ## First dogfooded slice
 
@@ -48,13 +49,13 @@ represents real variation rather than speculative indirection.
   in a detached, Review Party-owned worktree at the recorded head. One Subject
   execution Interface hides preparation, ownership validation, cleanup after
   process exit, and bounded inactive-leftover reconciliation.
-- Packaged Markdown `bugs`, `code-quality`, and `documentation` Profiles plus
-  repository/global Markdown Profile libraries, each compiling to one required
-  Review Pass.
-- Direct Grok, OpenCode, and Copilot Reviewer candidates selected explicitly;
-  Grok is the default.
-- Attempt Limit one and a finite deadline; retry and fallback remain modeled but
-  are not executed yet.
+- Packaged `bugs`, `code-quality`, and `documentation` Templates plus complete
+  repository/global executable Profiles resolved through the Configuration
+  Manager, each compiling to one required Review Pass.
+- Saved Profiles select one exact Grok, OpenCode, Copilot, or Codex Reviewer
+  candidate; ordinary Reviews do not override that choice.
+- Ordinary Reviews use Attempt Limit one and the saved finite deadline. Eval
+  experiments may use bounded retries; fallback remains deferred.
 - Native adapter-specific read/search-only tool availability and permission
   backstops.
 - Canonical clean/findings result validation.
@@ -64,20 +65,18 @@ represents real variation rather than speculative indirection.
 - Human output plus JSON output for agent and automation callers.
 - A real Review of Review Party's own implementation changes through the CLI.
 
-## Deferred
+## Later additions and remaining work
 
-Party execution, Review Dependencies, concurrency, retries, fallback, remote
-pull-request resolution, Verification Review, Synthesis Review, hosted workers,
-and native ACP hosting are not part of this slice. Documentation and Code
-Quality Reviews are packaged Profiles in the current slice; the remaining
-deferred review types and Party semantics remain captured in
-[`../product-model.md`](../product-model.md).
+Flat Party execution, bounded concurrency, and finite retries were added after
+the first slice. Review Dependencies, fallback, remote pull-request resolution,
+Verification Review, Synthesis Review, hosted workers, and native ACP hosting
+remain deferred. Packaged Documentation and Code Quality material is now
+non-executable Template content.
 
-2026-08-21 update: bounded concurrency (DEV-68), finite retries (DEV-69), and
-basic Party composition with persisted Review Bundles ([party
-v1](party-v1.md), Slice 26) now exist on top of this Conductor. Review
-Dependencies, Synthesis Review, conditional pipelines, and hosted execution
-remain deferred.
+Current update: bounded concurrency, finite retries, and flat scoped Party
+execution with persisted Review Bundles now exist on top of this Conductor. The
+accepted Party contract is in [`party-v1.md`](party-v1.md). Review Dependencies,
+Synthesis Review, conditional pipelines, and hosted execution remain deferred.
 
 ## Acceptance evidence
 

@@ -9,8 +9,6 @@ import (
 // precedence over every authored scope and carry explicit provenance.
 type Overrides struct {
 	Reviewer string
-	Profile  string
-	Party    string
 }
 
 // Request describes one effective-resolution query.
@@ -39,9 +37,7 @@ type ReviewerSettings struct {
 // Effective is the resolved configuration Review Party will use, with every
 // value's originating scope and file.
 type Effective struct {
-	DefaultProfile  Value[string]
 	DefaultReviewer Value[string]
-	DefaultParty    Value[string]
 	StateDirectory  Value[string]
 	Eval            Value[EvalPolicy]
 	reviewers       map[string]ReviewerSettings
@@ -100,17 +96,15 @@ func reviewerModelIsDisallowed(settings ReviewerSettings) bool {
 }
 
 // Resolve loads both scopes and returns effective values with exact
-// provenance across packaged, Personal, Repository, and explicit sources.
+// provenance across packaged, Global, Repository, and explicit sources.
 func (manager *Manager) Resolve(request Request) (Effective, error) {
 	loaded, err := manager.Load(request.Repository)
 	if err != nil {
 		return Effective{}, err
 	}
 	effective := Effective{
-		DefaultProfile:  resolveDefault(loaded, defaultChoice(request.Overrides.Profile), profileDefault, defaultChoice(manager.packaged.defaultProfile)),
 		DefaultReviewer: resolveDefault(loaded, defaultChoice(request.Overrides.Reviewer), reviewerDefault, defaultChoice(manager.packaged.defaultReviewer)),
-		DefaultParty:    resolveDefault(loaded, defaultChoice(request.Overrides.Party), partyDefault, defaultChoice(manager.packaged.defaultParty)),
-		StateDirectory:  personalValue(loaded, stateDirectoryValue),
+		StateDirectory:  globalValue(loaded, stateDirectoryValue),
 		Eval:            evalValue(loaded),
 	}
 	effective.reviewers, err = manager.resolveEffectiveReviewers(loaded)
@@ -120,14 +114,14 @@ func (manager *Manager) Resolve(request Request) (Effective, error) {
 	return effective, nil
 }
 
-// ResolveStateDirectory returns the Personal managed-state setting without
-// treating Personal reviewer policy as final before a repository is known.
+// ResolveStateDirectory returns the Global managed-state setting without
+// treating Global reviewer policy as final before a repository is known.
 func (manager *Manager) ResolveStateDirectory() (Value[string], error) {
 	loaded, err := manager.Load("")
 	if err != nil {
 		return Value[string]{}, err
 	}
-	return personalValue(loaded, stateDirectoryValue), nil
+	return globalValue(loaded, stateDirectoryValue), nil
 }
 
 func (manager *Manager) resolveEffectiveReviewers(loaded Loaded) (map[string]ReviewerSettings, error) {
@@ -159,23 +153,15 @@ type valueOrigin struct {
 	Path   string
 }
 
-func profileDefault(document Document) (string, bool) {
-	return authoredString(configurationText(document.Defaults.Profile))
-}
-
 func reviewerDefault(document Document) (string, bool) {
 	return authoredString(configurationText(document.Defaults.Reviewer))
-}
-
-func partyDefault(document Document) (string, bool) {
-	return authoredString(configurationText(document.Defaults.Party))
 }
 
 func resolveDefault(loaded Loaded, override defaultChoice, read documentDefault, fallback defaultChoice) Value[string] {
 	if override != "" {
 		return Value[string]{Value: string(override), Authored: true, Source: SourceExplicit}
 	}
-	for _, layer := range []LoadedDocument{loaded.Repository, loaded.Personal} {
+	for _, layer := range []LoadedDocument{loaded.Repository, loaded.Global} {
 		if !layer.Present {
 			continue
 		}
@@ -193,7 +179,7 @@ func resolveReviewerSettings(loaded Loaded, id reviewerID, packagedModel string)
 		AllowedModels: Value[[]string]{Source: SourcePackaged},
 	}
 	settings.apply(loaded.Repository, id)
-	settings.apply(loaded.Personal, id)
+	settings.apply(loaded.Global, id)
 	return settings
 }
 
@@ -237,7 +223,7 @@ func sourceFor(scope Scope) Source {
 	case ScopeRepository:
 		return SourceRepository
 	default:
-		return SourcePersonal
+		return SourceGlobal
 	}
 }
 
@@ -251,17 +237,17 @@ func stateDirectoryValue(document Document) (string, bool) {
 
 type documentValue[T any] func(Document) (T, bool)
 
-func personalValue[T any](loaded Loaded, read documentValue[T]) Value[T] {
-	if loaded.Personal.Present {
-		if value, authored := read(loaded.Personal.Document); authored {
-			return Value[T]{Value: value, Authored: true, Source: SourcePersonal, Path: loaded.Personal.Path}
+func globalValue[T any](loaded Loaded, read documentValue[T]) Value[T] {
+	if loaded.Global.Present {
+		if value, authored := read(loaded.Global.Document); authored {
+			return Value[T]{Value: value, Authored: true, Source: SourceGlobal, Path: loaded.Global.Path}
 		}
 	}
 	return Value[T]{Source: SourcePackaged}
 }
 
 func evalValue(loaded Loaded) Value[EvalPolicy] {
-	return personalValue(loaded, func(document Document) (EvalPolicy, bool) {
+	return globalValue(loaded, func(document Document) (EvalPolicy, bool) {
 		if document.Eval == nil {
 			return EvalPolicy{}, false
 		}

@@ -39,7 +39,7 @@ func (conductor *Conductor) prepareEvalReview(ctx context.Context, selection mod
 		return preparedReview{}, time.Time{}, err
 	}
 	started := conductor.now().UTC()
-	prepared, err := conductor.prepareReview(selection)
+	prepared, err := conductor.prepareReview(selection, true)
 	if err != nil {
 		return preparedReview{}, time.Time{}, err
 	}

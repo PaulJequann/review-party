@@ -24,20 +24,20 @@ type LoadedDocument struct {
 
 // Loaded carries both configuration scopes for one repository request.
 type Loaded struct {
-	Personal   LoadedDocument
+	Global     LoadedDocument
 	Repository LoadedDocument
 }
 
-// Load reads the authored Personal Configuration and, when a repository is
+// Load reads the authored Global Configuration and, when a repository is
 // supplied, the authored Repository Configuration. Loading never creates a
 // file. A malformed or semantically invalid document fails closed with an
 // InvalidDocumentError naming the file.
 func (manager *Manager) Load(repository Repository) (Loaded, error) {
-	personal, err := manager.loadScope(ScopePersonal, repository)
+	global, err := manager.loadScope(ScopeGlobal, repository)
 	if err != nil {
 		return Loaded{}, err
 	}
-	loaded := Loaded{Personal: personal}
+	loaded := Loaded{Global: global}
 	if repository != "" {
 		repositoryDocument, err := manager.loadScope(ScopeRepository, repository)
 		if err != nil {
@@ -50,7 +50,7 @@ func (manager *Manager) Load(repository Repository) (Loaded, error) {
 
 func (manager *Manager) loadScope(scope Scope, repository Repository) (LoadedDocument, error) {
 	path, anchor, err := manager.configPathAndAnchor(scope, repository)
-	if errors.Is(err, ErrPersonalRootUnavailable) {
+	if errors.Is(err, ErrGlobalRootUnavailable) {
 		return LoadedDocument{Scope: scope, Document: Document{SchemaVersion: SchemaVersion}}, nil
 	}
 	if err != nil {

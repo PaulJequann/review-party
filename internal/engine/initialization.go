@@ -11,37 +11,6 @@ import (
 	"reviewparty/internal/store"
 )
 
-type ReviewPartyInitialization struct {
-	Repository              string
-	StateDirectory          string
-	UserConfigurationPath   string
-	UseDefaultConfiguration bool
-}
-
-type ReviewPartyInitializationResult struct {
-	Repository     string
-	StateDirectory string
-	AdvancedState  bool
-	AlreadyReady   bool
-}
-
-func InitializeReviewParty(request ReviewPartyInitialization) (ReviewPartyInitializationResult, error) {
-	resolved, err := resolveInitialization(request)
-	if err != nil {
-		return ReviewPartyInitializationResult{}, err
-	}
-	alreadyReady, err := prepareInitializationState(resolved.manager, resolved.selection)
-	if err != nil {
-		return ReviewPartyInitializationResult{}, err
-	}
-	return ReviewPartyInitializationResult{
-		Repository:     resolved.repository,
-		StateDirectory: string(resolved.selection.directory),
-		AdvancedState:  resolved.selection.advanced,
-		AlreadyReady:   alreadyReady,
-	}, nil
-}
-
 type resolvedInitialization struct {
 	repository string
 	selection  initializationStateSelection
@@ -153,7 +122,7 @@ func absoluteOptionalPath(path string) (statePath, error) {
 }
 
 // rememberStateDirectory stages and publishes one typed intent so the
-// managed state location becomes an authored Personal Configuration value.
+// managed state location becomes an authored Global Configuration value.
 func rememberStateDirectory(manager *configuration.Manager, stateDirectory string) error {
 	plan, err := manager.Plan(configuration.Repository(""), []configuration.Intent{
 		configuration.SetStateDirectory{Directory: stateDirectory},

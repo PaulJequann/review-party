@@ -9,8 +9,8 @@ import (
 )
 
 func TestPlanOmitsScopeWhenClearIntentChangesNothing(t *testing.T) {
-	personalRoot := t.TempDir()
-	manager := testManager(t, personalRoot)
+	globalRoot := t.TempDir()
+	manager := testManager(t, globalRoot)
 
 	plan, err := manager.Plan("", []Intent{SetStateDirectory{Directory: ""}})
 	if err != nil {
@@ -23,7 +23,7 @@ func TestPlanOmitsScopeWhenClearIntentChangesNothing(t *testing.T) {
 	if err := manager.Publish(plan); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(personalRoot, "config.json")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(globalRoot, "config.json")); !os.IsNotExist(err) {
 		t.Fatalf("no-op publication created configuration: %v", err)
 	}
 }
@@ -42,11 +42,11 @@ func assertEmptyPlanPreview(t *testing.T, plan Plan) {
 }
 
 func TestLoadRejectsNullEvalRetryPolicy(t *testing.T) {
-	personalRoot := t.TempDir()
-	path := filepath.Join(personalRoot, "config.json")
+	globalRoot := t.TempDir()
+	path := filepath.Join(globalRoot, "config.json")
 	writeDocument(t, path, `{"schema_version":1,"eval":{"retry_policy":null}}`)
 
-	_, err := testManager(t, personalRoot).Load("")
+	_, err := testManager(t, globalRoot).Load("")
 	var invalid InvalidDocumentError
 	if !errors.As(err, &invalid) {
 		t.Fatalf("error = %v, want InvalidDocumentError", err)

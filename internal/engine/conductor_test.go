@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"reviewparty/internal/artifact"
+	"reviewparty/internal/configuration"
 	"reviewparty/internal/model"
 	"reviewparty/internal/store"
 	"reviewparty/internal/subject"
@@ -142,7 +143,7 @@ func TestReviewPreservesValidFindings(t *testing.T) {
 func TestRecordSaveFailureRemovesPublishedAttemptArtifacts(t *testing.T) {
 	repository := changedTestRepository(t)
 	store := &failFinalRecordStore{}
-	conductor, err := newConductorWithProfiles(store, catalogWithExecutors(map[string]attemptExecutor{defaultReviewer: successfulExecutor(cleanReview)}), newProfileLibrary(t.TempDir()), time.Second)
+	conductor, err := newConductorWithProfiles(store, catalogWithExecutors(map[string]attemptExecutor{defaultReviewer: successfulExecutor(cleanReview)}), newTestProfileLibrary(t), time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -271,58 +272,6 @@ func TestUnavailableReviewerLaunchesNoAttempt(t *testing.T) {
 		t.Fatalf("record = %#v, launches = %d; want incomplete with no attempts", record, executor.attemptCount())
 	}
 	assertTermination(t, record, model.TerminationReviewerUnavailable, model.PhaseAvailabilityCheck)
-}
-
-func TestExplicitReviewerRoutesToMatchingAdapter(t *testing.T) {
-	repository := changedTestRepository(t)
-	grok := &scriptedExecutor{
-		availability: availability{Available: true},
-		execute: func(context.Context, attemptSpec) attemptExecution {
-			t.Fatal("grok executed for an opencode selection")
-			return failedExecution(model.AttemptUnknownFailure, model.TerminationUnknownFailure, model.PhaseReviewerExecution, "unreachable")
-		},
-	}
-	opencode := successfulExecutor(cleanReview)
-	conductor := testConductorWithExecutors(t, map[string]attemptExecutor{
-		"grok":     grok,
-		"opencode": opencode,
-	}, time.Second)
-	selection := testSelection(repository)
-	selection.Reviewer = "opencode"
-	selection.Model = "meta/muse-spark-1.2-contributor"
-
-	record, err := conductor.Review(context.Background(), selection)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if grok.attemptCount() != 0 || opencode.attemptCount() != 1 {
-		t.Fatalf("grok attempts = %d, opencode attempts = %d", grok.attemptCount(), opencode.attemptCount())
-	}
-	provenance := record.Passes[0].Attempts[0].Provenance
-	if provenance.ReviewerID != "opencode" || provenance.Model != "meta/muse-spark-1.2-contributor" {
-		t.Fatalf("provenance = %#v, want selected opencode reviewer", provenance)
-	}
-}
-
-func TestReviewCarriesExplicitEffortToReviewer(t *testing.T) {
-	repository := changedTestRepository(t)
-	opencode := successfulExecutor(cleanReview)
-	conductor := testConductorWithExecutors(t, map[string]attemptExecutor{"opencode": opencode}, time.Second)
-	selection := testSelection(repository)
-	selection.Reviewer = "opencode"
-	selection.Model = "meta/muse-spark-1.2-contributor"
-	selection.Effort = "high"
-
-	record, err := conductor.Review(context.Background(), selection)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := opencode.lastAttempt().Candidate.Effort; got != "high" {
-		t.Fatalf("executed effort = %q, want high", got)
-	}
-	if got := record.ProfileRevision.Reviewer.Effort; got != "high" {
-		t.Fatalf("recorded effort = %q, want high", got)
-	}
 }
 
 func TestUnavailableReviewerDoesNotFallBack(t *testing.T) {
@@ -487,11 +436,40 @@ func testConductorWithExecutors(t *testing.T, executors map[string]attemptExecut
 	if err != nil {
 		t.Fatal(err)
 	}
-	conductor, err := newConductorWithProfiles(store, catalogWithExecutors(executors), newProfileLibrary(t.TempDir()), deadline)
+	library := newTestProfileLibraryWithDeadline(t, deadline)
+	conductor, err := newConductorWithProfiles(store, catalogWithExecutors(executors), library, deadline)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return conductor
+}
+
+func newTestProfileLibrary(t *testing.T) profileLibrary {
+	return newTestProfileLibraryWithDeadline(t, time.Second)
+}
+
+func newTestProfileLibraryWithDeadline(t *testing.T, deadline time.Duration) profileLibrary {
+	t.Helper()
+	library := newProfileLibrary(t.TempDir())
+	seedTestProfiles(t, library.manager(), deadline)
+	return library
+}
+
+func seedTestProfiles(t *testing.T, manager *configuration.Manager, deadline time.Duration) {
+	t.Helper()
+	for _, name := range []string{"bugs", "code-quality", "documentation"} {
+		plan, err := manager.PlanProfileCreation("", configuration.ProfileDraft{
+			Target: configuration.ScopeGlobal, Name: name, Reviewer: defaultReviewer,
+			Model: "grok-4.5", ReasoningEffort: "high", AttemptDeadline: deadline.String(),
+			Instructions: "Review " + name + " concerns.\n",
+		})
+		if err != nil || !plan.Valid() {
+			t.Fatalf("seed Profile %q: error %v, reason %q", name, err, plan.Reason())
+		}
+		if err := manager.Publish(plan); err != nil {
+			t.Fatal(err)
+		}
+	}
 }
 
 func testSelection(repository string) model.ReviewSelection {

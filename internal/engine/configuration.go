@@ -7,7 +7,7 @@ import (
 	"reviewparty/internal/configuration"
 )
 
-// InvalidConfigurationError reports a Personal or Repository Configuration
+// InvalidConfigurationError reports a Global or Repository Configuration
 // document that could not produce a usable effective configuration.
 type InvalidConfigurationError struct {
 	Path   string
@@ -51,7 +51,7 @@ func configureReviewerCatalog(catalog reviewerCatalog, effective configuration.E
 	return configured, nil
 }
 
-// applyEffectiveReviewerPolicies applies validated repository and Personal
+// applyEffectiveReviewerPolicies applies validated repository and Global
 // reviewer settings without requiring the caller to know their precedence.
 func applyEffectiveReviewerPolicies(catalog reviewerCatalog, effective configuration.Effective) reviewerCatalog {
 	configured := cloneReviewerCatalog(catalog)

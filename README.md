@@ -13,22 +13,24 @@ The accepted first implementation slice is documented in
 
 ## Current CLI
 
-> The accepted Configuration Hub plan directly replaces executable packaged
-> Profiles, Personal Configuration terminology, Party `extends`, and the
-> separate `review` and `party run` entry points. The behavior below remains the
-> shipped CLI until Configuration Hub Slices 4-5 land. See
+> Configuration Hub Slice 4 established Global and Repository Configuration,
+> complete two-file Profiles, non-executable Templates, flat scoped Parties,
+> and repository-owned review selection. Slice 5 will connect that foundation
+> to `review-party run` and remove the transitional `review` and `party run`
+> commands. See
 > [`docs/configuration-hub-implementation-plan.md`](docs/configuration-hub-implementation-plan.md).
 
 Run `review-party` with no arguments for task-oriented help. Every command and
 nested command supports `--help`, and `review-party completion
 bash|fish|powershell|zsh` generates a shell completion script. Profile and Party
-completion reads local configuration and packaged definitions. Reviewer
-completion lists the supported adapters. Completion never launches an Agent
-Harness.
+completion reads saved executable definitions from local configuration and
+returns no Profile or Party names when none are saved. Reviewer completion is available for Eval experiment flags. Completion never
+launches an Agent Harness.
 
 Initialize Review Party once for the repository before the first Review. This
 prepares managed per-user state without creating repository files or Profile
-copies:
+copies. Supplying `--state-dir` also records that advanced choice in Global
+Configuration:
 
 ```sh
 review-party init --repo .
@@ -42,61 +44,34 @@ for current state. Review, inspect, and history refuse to create state. Review P
 ledger schemas; select a fresh `XDG_STATE_HOME` or `--state-dir` and run
 `review-party init` when an old ledger is incompatible.
 
-List and explain the built-in Review Profiles without launching an Agent
+List and explain saved executable Review Profiles without launching an Agent
 Harness or creating a Review Record:
 
 ```sh
 review-party profiles
 review-party explain bugs
-review-party explain documentation --reviewer copilot
 review-party config path
-review-party config show
+review-party config file show
 ```
 
-Run a bug, code-quality, or Documentation Review with an explicitly selected
-direct adapter:
+Run one exact saved Profile:
 
 ```sh
-review-party review bugs --reviewer grok
-review-party review code-quality --reviewer opencode \
-  --model meta/muse-spark-1.2-contributor --effort high
-review-party review documentation --reviewer opencode \
-  --model opencode-go/deepseek-v4-flash \
-  --effort high
+review-party review bugs --repo .
+review-party review code-quality --repo .
+review-party review documentation --repo .
 ```
 
-`bugs` remains the default Profile, and Grok is the default Reviewer. The
-packaged `bugs`, `code-quality`, and `documentation` Profiles require the same
-repository read/search capability contract with
-explicit repository-mutation, shell, and web denials, but compile distinct
-purposes, materiality thresholds, Passes, prompts, and Profile Revisions.
-Review Party rejects an incompatible Reviewer before launch and does not
-silently fall back. An unavailable compatible Reviewer produces an inspectable
-Incomplete Review. Grok's built-in model is `grok-4.5`. OpenCode requires a
-model supplied by configuration or explicit `--model`. Personal and Repository
-Configuration can set `reviewers.<id>.model` and `allowed_models`; Repository
-Configuration takes precedence per reviewer field (`enabled`, `model`, and
-`allowed_models`). Repository `allowed_models` wins when authored; otherwise
-Personal wins. Review Party checks only that winning list against the winning
-model from Repository, Personal, or the packaged fallback. For a single Review,
-Review Party validates the effective selection before resolving the Review
-Subject. An authored `allowed_models` list also restricts explicit `--model`
-choices. For an enabled Reviewer with a non-empty packaged model, include that
-model in the allowlist when no authored model wins: `grok-4.5` for Grok, `auto`
-for Copilot, or `gpt-5.6-luna` for Codex. OpenCode has no packaged model. Remove
-the `allowed_models` field to clear the restriction; an empty array allows no
-model. Disabling the Reviewer makes its model policy inert. The full precedence
-and validation contract is in
-[`docs/design/profile-library-v1.md`](docs/design/profile-library-v1.md#effective-policy-and-publication-contract).
-Copilot's built-in `auto`
-selection records the model it resolves. Codex's built-in model is
-`gpt-5.6-luna` with high-effort reasoning by default.
+Each saved Profile fixes its Reviewer, model, reasoning effort, Attempt
+deadline, and instructions. Ordinary Review, explain, replay, and Party commands
+do not accept execution overrides. A different cost or quality choice is a
+differently named Profile.
 
-Callers may override the selected Reviewer's reasoning effort with
-`--effort`. For OpenCode, Review Party passes an explicit value such as `high`
-as the model variant and records it in the effective Profile Revision and
-Review Record. Copilot's `auto` model cannot be combined with an explicit
-effort; Review Party reports that unsupported choice instead of dropping it.
+Packaged `bugs`, `code-quality`, and `documentation` material is available only
+as non-executable Templates. Global and Repository Configuration may still
+enable or disable known Reviewers and constrain accepted models. Review Party
+checks the saved Profile against that policy before launch and never substitutes
+a different Reviewer or model.
 
 Query the local Review history using facts recorded at execution time:
 
@@ -113,69 +88,43 @@ time and then Review ID. The default limit is 20 and the maximum is 200. JSON
 output contains `entries`, the applied `limit`, and `has_more`. History selects
 existing Reviews; it does not rerun or replay them.
 
-## Personal and Repository Configuration
+## Global and Repository Configuration
 
-Review Party loads Personal Configuration from
-`${XDG_CONFIG_HOME:-$HOME/.config}/review-party/config.json` and Repository
-Configuration from `<repo>/.reviewparty/config.json`. Both use schema version 1
-and may select default Reviewer, Profile, and Party choices or enable, disable,
-select, and restrict models for supported Reviewers. Repository values take precedence
-in Effective Configuration. Only Personal Configuration accepts
-`state_directory` and `eval`; ordinary callers should let `review-party init`
-manage the state directory.
+Review Party loads Global Configuration from
+`${XDG_CONFIG_HOME:-$HOME/.config}/review-party/` and Repository Configuration
+from `<repo>/.reviewparty/`. Both use schema version 1. Global Configuration may
+hold reusable Profiles, Parties, Reviewer policy, Eval defaults, and the managed
+state location. Global availability enables no Reviews by itself. The `reviews`
+field is Repository-only; Global Configuration rejects it.
 
-Personal Configuration may include `eval` and `state_directory`:
-
-```json
-{
-  "schema_version": 1,
-  "defaults": {"reviewer": "grok", "party": "standard"},
-  "reviewers": {
-    "grok": {"enabled": true, "model": "grok-4.5"},
-    "opencode": {
-      "enabled": true,
-      "model": "meta/muse-spark-1.2-contributor",
-      "allowed_models": [
-        "meta/muse-spark-1.2-contributor",
-        "opencode-go/deepseek-v4-flash"
-      ]
-    },
-    "copilot": {"enabled": true, "model": "auto"}
-  },
-  "eval": {
-    "retry_policy": {
-      "max_attempts": 3,
-      "initial_backoff": "1s",
-      "max_backoff": "30s"
-    },
-    "concurrency_limit": 1
-  }
-}
-```
-
-Repository Configuration uses the same defaults and reviewer fields but omits
-Personal-only `eval` and `state_directory`:
+`defaults.profile` and `defaults.party` are not accepted configuration fields.
+Repository Configuration owns the complete default roll-up in `reviews`:
 
 ```json
 {
   "schema_version": 1,
-  "defaults": {"reviewer": "grok"},
-  "reviewers": {
-    "grok": {"enabled": true, "model": "grok-4.5"}
+  "reviews": {
+    "concurrency_limit": 3,
+    "global": [
+      {"party": "baseline"},
+      {"profile": "documentation"}
+    ],
+    "repository": [
+      {"profile": "supabase-rls"}
+    ]
   }
 }
 ```
 
-An explicit `--reviewer` never bypasses `enabled: false`, and an explicit
-`--model` must belong to `allowed_models` when that list is configured. Unknown
-fields, unsupported versions, unknown Reviewers, disabled defaults, and
-disallowed models fail before Agent Harness launch. A single Review validates
-these choices before Review Subject resolution. A missing file preserves the
-built-in zero-configuration behavior.
-Eval defaults are three total Attempts with finite jittered backoff and one
-active Reviewer execution. A named Experiment Configuration or explicit
-`--attempts` and `--concurrency` flags can override those user defaults for one
-durably identified Eval Suite Run.
+Each selection item names exactly one Profile or Party. Global items expand
+before Repository items, with authored order preserved. Slice 5 connects this
+saved selection to `review-party run`; the current `review` and `party run`
+commands remain transitional.
+
+Only Global Configuration accepts `state_directory` and `eval`. Repository
+Configuration rejects those fields. Unknown fields, unsupported versions,
+unknown Reviewers, and invalid selections fail closed. Loading or resolving
+absent configuration creates no files.
 
 Review Party currently invokes all four harnesses directly (Grok, OpenCode,
 Copilot, Codex). ACPX remains a future transport option rather than part of
@@ -203,16 +152,13 @@ Replay one recorded committed Review's frozen inputs as a new ordinary Review:
 
 ```sh
 review-party replay rp_...
-review-party replay rp_... --reviewer opencode \
-  --model meta/muse-spark-1.2-contributor --effort high
 ```
 
-Default replay reuses the exact recorded committed Subject, Profile Revision,
-Profile Snapshot, Reviewer/model/effort, capability contract, and execution
-deadline. It first proves that the recorded commits still reconstruct the same
-Subject identity. Explicit Reviewer/model/effort flags create a newly identified
-effective Profile Revision and recorded provenance; Review Party never silently
-substitutes an unavailable original choice. Working-changes Reviews are not
+Replay reuses the exact recorded committed Subject, Profile Revision, Profile
+Snapshot, Reviewer, model, effort, capability contract, and execution deadline.
+It first proves that the recorded commits still reconstruct the same Subject
+identity. Replay rejects execution overrides and never substitutes an unavailable
+recorded choice. Working-changes Reviews are not
 replayable. The new record has its own lifecycle, result, attempts, timestamps,
 and runtime provenance plus `replays_review_id` linkage to its source. Replay
 reproduces experiment inputs, not non-deterministic model output.
@@ -222,6 +168,7 @@ Configuration without installing Review Party into the shell:
 
 ```sh
 go run ./cmd/review-party eval run global:general-bugs \
+  --profile bugs \
   --reviewer opencode \
   --model meta/muse-spark-1.2-contributor \
   --effort high \
@@ -326,90 +273,32 @@ matching and interpretation contract.
 
 ## Review Parties
 
-A Party composes several Review Profiles over one frozen Review Subject. Every
-member executes through the ordinary Review path, and the resulting Review
-Bundle preserves each member's Review Record, provenance, and completeness:
-
-```sh
-review-party parties
-review-party party run standard --repo .
-review-party party run standard --repo . --base HEAD~1 --head HEAD --concurrency 2
-review-party inspect rb_... --format json
-```
-
-The packaged `standard` Party runs `bugs`, `code-quality`, and `documentation`
-over one shared Subject. Define reusable repository Parties in
-`.reviewparty/parties/<name>.json` or personal Parties under the personal
-configuration library:
+A Party is a named ordered group of scoped Profile references with one positive
+Concurrency Limit:
 
 ```json
 {
   "schema_version": 1,
   "name": "release-gate",
-  "description": "Pre-delivery sweep",
+  "description": "Pre-delivery review set",
   "concurrency_limit": 2,
   "profiles": [
-    {"profile": "bugs"},
-    {"profile": "code-quality", "reviewer": "codex", "model": "gpt-5.6-luna", "effort": "high"},
-    {"profile": "documentation", "reviewer": "opencode", "model": "opencode-go/deepseek-v4-flash", "effort": "high"}
+    {"scope": "global", "profile": "bugs"},
+    {"scope": "repository", "profile": "supabase-rls"}
   ]
 }
 ```
 
-Repository files shadow personal files with the same name, which shadow packaged
-definitions; a definition never silently merges with the definition it shadows.
-To compose a shared baseline with repository-specific steps, a Party declares
-`extends`: an ordered list of other Party names resolved through the same
-Repository, Personal, then packaged precedence. Inherited members run first in
-their declared order; a local member redefining an inherited Profile replaces
-that member's settings at its position. Every extending definition must still
-declare at least one local Profile. If it omits `concurrency_limit` or sets it
-to zero, the first parent in `extends` order with a nonzero limit supplies the
-bound; without one, execution remains sequential. Explicit `null` and negative
-limits are invalid. Cycles and unknown parents fail before launch:
+Repository Parties live under `.reviewparty/parties/`. Global Parties live
+under `${XDG_CONFIG_HOME:-$HOME/.config}/review-party/parties/`. A Global Party
+may reference only Global Profiles. A Repository Party may reference either
+scope.
 
-```json
-{
-  "schema_version": 1,
-  "name": "release-gate",
-  "extends": ["org-baseline"],
-  "profiles": [
-    {"profile": "code-quality", "reviewer": "codex", "effort": "high"}
-  ]
-}
-```
-
-With this definition stored as the Personal `org-baseline` Party, a repository
-`release-gate` can consolidate the baseline and local additions into one
-Bundle. To make it the repository default, author:
-
-```json
-{
-  "schema_version": 1,
-  "defaults": {"party": "release-gate"}
-}
-```
-
-A bare command then resolves the explicit, Repository, Personal, and packaged
-`standard` choices in order:
-
-```sh
-review-party party run --repo .
-```
-
-`review-party parties` lists each definition's declared `extends` and local
-`profiles`; the persisted Bundle from `party run` records the flattened effective
-members. Explicit `--reviewer`, `--model`, `--effort`, and `--concurrency` flags
-narrow every consolidated member and freeze the effective composition into the
-Party Revision.
-
-Preflight compiles every member Profile Revision before any Agent Harness
-launches, so one incompatible member fails the whole Party with zero attempts.
-Members execute with bounded concurrency (sequential by default) over the one
-Subject resolved before launch, so later working-tree changes cannot alter what
-later members review. A Bundle is Completed only when every required member
-completed; otherwise it stays honestly Incomplete while completed members keep
-their Findings visible. See [`docs/design/party-v1.md`](docs/design/party-v1.md).
+Parties cannot contain Parties, use `extends`, inherit concurrency, or override
+a member's Reviewer, model, effort, deadline, or instructions. Strict decoding
+rejects those retired fields. Repository Configuration performs composition by
+selecting Global and Repository Profiles or Parties in its `reviews` arrays.
+See [`docs/design/party-v1.md`](docs/design/party-v1.md).
 
 ## Operational Review Records
 
@@ -447,66 +336,41 @@ as integrity failures. Treat artifacts as sensitive review context.
 
 ## Review Profiles
 
-Review Party ships zero-configuration `bugs`, `code-quality`, and
-`documentation` Profiles and can load ordinary
-Markdown Profiles from a repository or a user-wide library. Packaged Profiles
-need no installation and are not copied by `review-party init`. Advanced
-callers can create one owned Profile from an explicit starting point:
+Review Party packages non-executable `bugs`, `code-quality`, and `documentation`
+Templates. A Template supplies judgment instructions only. Profile Creation
+copies those instructions, then requires the Caller to choose a Reviewer, model,
+reasoning effort, and positive Attempt deadline.
 
-```sh
-review-party profile create security --repo . --blank
-review-party profile create docs-team --global --from-packaged documentation
-review-party profiles
-review-party profile explain security
-review-party review security
-```
-
-To own the complete packaged starter set, run `review-party profile
-install-defaults --repo .` for a deliberately team-shareable repository copy,
-or use `--global` for personal copies. Existing files are retained. Owned
-Profiles shadow packaged updates, and installation does not change the selected
-default Profile.
-
-Repository and personal libraries use the same shape:
+Every executable Profile is a two-file aggregate:
 
 ```text
-.reviewparty/
-├── config.json
-└── profiles/
-    ├── bugs.md
-    └── security.md
+.reviewparty/profiles/security/
+├── profile.json
+└── instructions.md
 ```
 
-The personal library lives at
-`${XDG_CONFIG_HOME:-$HOME/.config}/review-party/`, next to the Personal
-Configuration document. Configuration is optional and only selects defaults;
-Personal and Repository documents share one schema, while Repository scope does
-not accept managed-state or evaluation fields:
+Global Profiles use the same shape under
+`${XDG_CONFIG_HOME:-$HOME/.config}/review-party/profiles/`. Metadata is strict:
 
 ```json
 {
   "schema_version": 1,
-  "defaults": {
-    "profile": "security",
-    "reviewer": "grok"
-  }
+  "name": "security",
+  "reviewer": "opencode",
+  "model": "meta/muse-spark-1.2-contributor",
+  "reasoning_effort": "high",
+  "attempt_deadline": "3m",
+  "template_id": "bugs",
+  "template_revision": "bugs-v4"
 }
 ```
 
-Selection precedence is explicit caller choice, repository config, personal
-config, then packaged defaults. A repository Markdown file shadows a personal or
-packaged file with the same name as one complete definition; Review Party does
-not concatenate or inherit prompt text. An invalid higher-precedence file stops
-before an Agent Harness launches rather than silently selecting another
-Profile.
+`template_id` and `template_revision` are omitted together for a blank Profile.
+The Configuration Manager publishes metadata and instructions through one
+snapshot-bound atomic Plan. A stale plan or failed write changes neither file.
+Profile Creation commands over this accepted aggregate arrive in Slice 6.
+Agents can use the Configuration Manager's typed `PlanProfileCreation`,
+`PlanProfileCopy`, and `Publish` operations now.
 
-Profile Markdown controls Reviewer Judgment. Review Party still owns tool and
-capability restrictions, Context Discovery, immutable Review Subject framing,
-the canonical Review Result contract, deadlines, and incomplete-result
-semantics. Profiles cannot configure executables, transports, or shell commands.
-
-Packaged Profiles contain their complete purpose-specific judgment instructions.
-A repository or personal Profile that shadows one of them does not silently inherit
-the packaged risk taxonomy, evidence rules, confidence threshold, or review
-style. `review-party profile explain PROFILE` shows the authored Markdown and
-the compiler-owned execution recipe separately before a Reviewer is launched.
+The retired `profiles/<name>.md` representation has no Configuration Manager
+reader. See [`docs/design/profile-library-v1.md`](docs/design/profile-library-v1.md).

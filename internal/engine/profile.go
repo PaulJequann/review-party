@@ -16,6 +16,7 @@ type compiledProfile struct {
 	revision           model.ProfileRevision
 	snapshot           model.ProfileSnapshot
 	reviewer           reviewerRegistration
+	deadline           time.Duration
 	reviewerWasDefault bool
 	buildPrompt        func(model.ReviewSubject) string
 }
@@ -25,7 +26,6 @@ type profileDefinition struct {
 	description          string
 	purpose              string
 	materialityThreshold string
-	defaultReviewer      string
 	pass                 model.ReviewPassRevision
 	requiredCapabilities []model.Capability
 }
@@ -84,6 +84,7 @@ func compileProfileDefinition(catalog reviewerCatalog, selection model.ProfileSe
 	return compiledProfile{
 		revision:           revision,
 		reviewer:           registration,
+		deadline:           deadline,
 		reviewerWasDefault: reviewerWasDefault,
 	}, nil
 }
@@ -118,9 +119,6 @@ func resolveProfileReviewer(catalog reviewerCatalog, definition profileDefinitio
 	if reviewer == "" {
 		reviewer = catalog.defaultReviewer
 	}
-	if reviewer == "" {
-		reviewer = definition.defaultReviewer
-	}
 	registration, err := catalog.resolve(reviewer)
 	if err != nil {
 		return reviewerRegistration{}, false, err
@@ -151,54 +149,16 @@ func profileRevisionIdentity(revision model.ProfileRevision) string {
 	return hex.EncodeToString(hash[:])
 }
 
-func builtInProfileDefinitions() []profileDefinition {
-	capabilities := restrictedReviewCapabilities()
-	return []profileDefinition{
-		{
-			name:                 "bugs",
-			description:          "Material bug review",
-			purpose:              "Find material defects in the Review Subject.",
-			materialityThreshold: "A concrete actionable regression in behavior or an applicable Project Rule.",
-			defaultReviewer:      defaultReviewer,
-			pass:                 model.ReviewPassRevision{Name: "bug-review", Required: true, Purpose: "Evaluate material correctness and delivery-risk defects.", PromptRevision: "bugs-v4"},
-			requiredCapabilities: capabilities,
-		},
-		{
-			name:                 "code-quality",
-			description:          "Maintainability and structural quality review",
-			purpose:              "Find material maintainability regressions and concrete opportunities to simplify the implementation.",
-			materialityThreshold: "A concrete structural regression or high-conviction simplification that materially affects maintainability, change safety, or local architecture.",
-			defaultReviewer:      defaultReviewer,
-			pass:                 model.ReviewPassRevision{Name: "code-quality-review", Required: true, Purpose: "Evaluate material structural and maintainability defects.", PromptRevision: "code-quality-v1"},
-			requiredCapabilities: capabilities,
-		},
-		{
-			name:                 "documentation",
-			description:          "Documentation accuracy review",
-			purpose:              "Evaluate documentation accuracy, omissions, consistency, and project language.",
-			materialityThreshold: "Documentation that would materially mislead a Caller or maintainer.",
-			defaultReviewer:      defaultReviewer,
-			pass:                 model.ReviewPassRevision{Name: "documentation-review", Required: true, Purpose: "Evaluate material documentation defects.", PromptRevision: "documentation-v1"},
-			requiredCapabilities: capabilities,
-		},
-	}
+var packagedTemplateRevisions = map[string]string{
+	"bugs":          "bugs-v4",
+	"code-quality":  "code-quality-v1",
+	"documentation": "documentation-v1",
 }
 
-func findProfileDefinition(name string) (profileDefinition, error) {
-	for _, definition := range builtInProfileDefinitions() {
-		if definition.name == name {
-			definition.requiredCapabilities = append([]model.Capability(nil), definition.requiredCapabilities...)
-			return definition, nil
-		}
-	}
-	return profileDefinition{}, UnknownProfileError{Name: name, Available: SupportedProfiles()}
-}
-
-func SupportedProfiles() []string {
-	definitions := builtInProfileDefinitions()
-	names := make([]string, 0, len(definitions))
-	for _, definition := range definitions {
-		names = append(names, definition.name)
+func packagedTemplateIDs() []string {
+	names := make([]string, 0, len(packagedTemplateRevisions))
+	for name := range packagedTemplateRevisions {
+		names = append(names, name)
 	}
 	sort.Strings(names)
 	return names

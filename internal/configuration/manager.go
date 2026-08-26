@@ -1,4 +1,4 @@
-// Package configuration owns Review Party's Personal and Repository
+// Package configuration owns Review Party's Global and Repository
 // Configuration: one load returns authored documents and effective values with
 // exact provenance, typed intents are staged into validated Plans, and
 // confirmed Plans publish atomically. Callers never inspect raw
@@ -17,8 +17,8 @@ import (
 type Scope string
 
 const (
-	// ScopePersonal is the Caller-owned configuration that applies across repositories.
-	ScopePersonal Scope = "personal"
+	// ScopeGlobal is the Caller-owned configuration that applies across repositories.
+	ScopeGlobal Scope = "global"
 	// ScopeRepository is the team-owned configuration under <repository>/.reviewparty.
 	ScopeRepository Scope = "repository"
 )
@@ -28,7 +28,7 @@ type Source string
 
 const (
 	SourcePackaged   Source = "packaged"
-	SourcePersonal   Source = "personal"
+	SourceGlobal     Source = "global"
 	SourceRepository Source = "repository"
 	SourceExplicit   Source = "explicit"
 )
@@ -43,54 +43,51 @@ const maximumPartyBytes = 16 * 1024
 type Repository string
 
 // Options configures a Manager. The zero value uses the canonical XDG
-// personal root and no known reviewers; most callers supply the packaged
+// global root and no known reviewers; most callers supply the packaged
 // reviewer identifiers so validation can reject unknown references.
 type Options struct {
-	// PersonalRoot overrides the canonical personal configuration directory.
-	PersonalRoot string
-	// PersonalConfigPath overrides the personal config.json file name while
-	// keeping the rest of the layout beneath PersonalRoot.
-	PersonalConfigPath string
+	// GlobalRoot overrides the canonical global configuration directory.
+	GlobalRoot string
+	// GlobalConfigPath overrides the global config.json file name while
+	// keeping the rest of the layout beneath GlobalRoot.
+	GlobalConfigPath string
 	// Reviewers lists the packaged reviewer identifiers that documents may reference.
 	Reviewers []string
 	// PackagedReviewerModels supplies each reviewer's packaged model when one exists.
 	PackagedReviewerModels map[string]string
 	// PackagedDefaultReviewer is the effective default reviewer when nothing is authored.
 	PackagedDefaultReviewer string
-	// PackagedDefaultProfile is the effective default profile when nothing is authored.
-	PackagedDefaultProfile string
-	// PackagedDefaultParty is the effective default Party when nothing is authored.
-	PackagedDefaultParty string
+	// Templates supplies immutable packaged Review Profile Templates.
+	Templates []Template
 	// ValidateName validates authored Profile and Party references; nil skips the check.
 	ValidateName func(string) error
 }
 
-// Manager owns Personal and Repository Configuration paths, resolution,
+// Manager owns Global and Repository Configuration paths, resolution,
 // staged change plans, and atomic publication.
 type Manager struct {
-	personalRoot       string
-	personalConfigPath string
-	reviewers          map[string]string
-	packaged           packagedDefaults
-	nameValidator      func(string) error
-	publishWrite       func(*pendingWrite) error
+	globalRoot       string
+	globalConfigPath string
+	reviewers        map[string]string
+	packaged         packagedDefaults
+	nameValidator    func(string) error
+	templates        []Template
+	publication      *publicationModule
 }
 
 type packagedDefaults struct {
 	defaultReviewer string
-	defaultProfile  string
-	defaultParty    string
 }
 
-// NewManager constructs a Manager. The personal root may be empty when the
+// NewManager constructs a Manager. The global root may be empty when the
 // platform provides no configuration home; operations that need it fail with
 // a clear error instead of guessing a location.
 func NewManager(options Options) *Manager {
-	if options.PersonalRoot == "" {
-		if options.PersonalConfigPath != "" {
-			options.PersonalRoot = filepath.Dir(options.PersonalConfigPath)
+	if options.GlobalRoot == "" {
+		if options.GlobalConfigPath != "" {
+			options.GlobalRoot = filepath.Dir(options.GlobalConfigPath)
 		} else {
-			options.PersonalRoot = DefaultPersonalRoot()
+			options.GlobalRoot = DefaultGlobalRoot()
 		}
 	}
 	reviewers := make(map[string]string, len(options.Reviewers))
@@ -98,23 +95,20 @@ func NewManager(options Options) *Manager {
 		reviewers[id] = options.PackagedReviewerModels[id]
 	}
 	return &Manager{
-		personalRoot:       options.PersonalRoot,
-		personalConfigPath: options.PersonalConfigPath,
-		reviewers:          reviewers,
-		packaged: packagedDefaults{
-			defaultReviewer: options.PackagedDefaultReviewer,
-			defaultProfile:  options.PackagedDefaultProfile,
-			defaultParty:    options.PackagedDefaultParty,
-		},
-		nameValidator: options.ValidateName,
-		publishWrite:  writeAtomically,
+		globalRoot:       options.GlobalRoot,
+		globalConfigPath: options.GlobalConfigPath,
+		reviewers:        reviewers,
+		packaged:         packagedDefaults{defaultReviewer: options.PackagedDefaultReviewer},
+		nameValidator:    options.ValidateName,
+		templates:        append([]Template(nil), options.Templates...),
+		publication:      newPublicationModule(),
 	}
 }
 
-// DefaultPersonalRoot returns the canonical personal configuration directory:
+// DefaultGlobalRoot returns the canonical global configuration directory:
 // ${XDG_CONFIG_HOME:-$HOME/.config}/review-party. It is empty when the
 // platform provides no home directory.
-func DefaultPersonalRoot() string {
+func DefaultGlobalRoot() string {
 	directory, err := os.UserConfigDir()
 	if err != nil {
 		return ""
@@ -122,23 +116,23 @@ func DefaultPersonalRoot() string {
 	return filepath.Join(directory, "review-party")
 }
 
-// ErrPersonalRootUnavailable reports that the platform provides no personal
-// configuration home. Reads treat it as absent Personal Configuration;
+// ErrGlobalRootUnavailable reports that the platform provides no global
+// configuration home. Reads treat it as absent Global Configuration;
 // writes and library roots surface it as an error.
-var ErrPersonalRootUnavailable = errors.New("personal configuration home is unavailable; set XDG_CONFIG_HOME or HOME")
+var ErrGlobalRootUnavailable = errors.New("global configuration home is unavailable; set XDG_CONFIG_HOME or HOME")
 
-// PersonalRoot returns the personal configuration directory.
-func (manager *Manager) PersonalRoot() (string, error) {
-	if manager.personalRoot == "" {
-		return "", ErrPersonalRootUnavailable
+// GlobalRoot returns the global configuration directory.
+func (manager *Manager) GlobalRoot() (string, error) {
+	if manager.globalRoot == "" {
+		return "", ErrGlobalRootUnavailable
 	}
-	return manager.personalRoot, nil
+	return manager.globalRoot, nil
 }
 
 func (manager *Manager) scopeDirectory(scope Scope, repository Repository) (directory, anchor string, err error) {
 	switch scope {
-	case ScopePersonal:
-		root, err := manager.PersonalRoot()
+	case ScopeGlobal:
+		root, err := manager.GlobalRoot()
 		if err != nil {
 			return "", "", err
 		}
@@ -165,8 +159,8 @@ func (manager *Manager) configPathAndAnchor(scope Scope, repository Repository) 
 	if err != nil {
 		return "", "", err
 	}
-	if scope == ScopePersonal && manager.personalConfigPath != "" {
-		return manager.personalConfigPath, filepath.Dir(manager.personalConfigPath), nil
+	if scope == ScopeGlobal && manager.globalConfigPath != "" {
+		return manager.globalConfigPath, filepath.Dir(manager.globalConfigPath), nil
 	}
 	return filepath.Join(directory, "config.json"), anchor, nil
 }

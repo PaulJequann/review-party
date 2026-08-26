@@ -8,22 +8,15 @@ import (
 	"reviewparty/internal/configuration"
 )
 
-const (
-	// packagedDefaultProfileName is the effective default Profile when nothing is authored.
-	packagedDefaultProfileName = "bugs"
-	// defaultPartyName is the effective default Party when nothing is authored.
-	defaultPartyName = "standard"
-)
-
 // newConfigurationManager constructs the Configuration Manager with Review
 // Party's packaged reviewer knowledge so documents validate against known
-// reviewers. An explicit path overrides the canonical Personal Configuration
+// reviewers. An explicit path overrides the canonical Global Configuration
 // file location.
-func newConfigurationManager(personalConfigPath string) *configuration.Manager {
+func newConfigurationManager(globalConfigPath string) *configuration.Manager {
 	options := reviewPartyConfigurationOptions()
-	if personalConfigPath != "" {
-		options.PersonalRoot = filepath.Dir(personalConfigPath)
-		options.PersonalConfigPath = personalConfigPath
+	if globalConfigPath != "" {
+		options.GlobalRoot = filepath.Dir(globalConfigPath)
+		options.GlobalConfigPath = globalConfigPath
 	}
 	return configuration.NewManager(options)
 }
@@ -33,10 +26,21 @@ func reviewPartyConfigurationOptions() configuration.Options {
 		Reviewers:               supportedReviewerIDs(),
 		PackagedReviewerModels:  packagedReviewerModels(),
 		PackagedDefaultReviewer: defaultReviewer,
-		PackagedDefaultProfile:  packagedDefaultProfileName,
-		PackagedDefaultParty:    defaultPartyName,
+		Templates:               packagedReviewProfileTemplates(),
 		ValidateName:            validateAuthoredName,
 	}
+}
+
+func packagedReviewProfileTemplates() []configuration.Template {
+	templates := make([]configuration.Template, 0, len(packagedTemplateIDs()))
+	for _, id := range packagedTemplateIDs() {
+		instructions, err := packagedProfileFiles.ReadFile("profiles/" + id + ".md")
+		if err != nil {
+			panic(fmt.Sprintf("read packaged Review Profile Template %q: %v", id, err))
+		}
+		templates = append(templates, configuration.Template{ID: id, Revision: packagedTemplateRevisions[id], Instructions: string(instructions)})
+	}
+	return templates
 }
 
 func supportedReviewerIDs() []string {
@@ -51,20 +55,6 @@ func packagedReviewerModels() map[string]string {
 		}
 	}
 	return models
-}
-
-func selectProfileFromEffective(effective configuration.Effective, explicitReviewer string) (profileSelection, error) {
-	name := effective.DefaultProfile.Value
-	if err := validateAuthoredName(name); err != nil {
-		return profileSelection{}, fmt.Errorf("profile name %q: %w", name, err)
-	}
-	return profileSelection{name: name, reviewer: firstNonempty(explicitReviewer, effective.DefaultReviewer.Value)}, nil
-}
-
-// profileSelection carries an explicit or defaulted Profile and Reviewer choice.
-type profileSelection struct {
-	name     string
-	reviewer string
 }
 
 func validateAuthoredName(name string) error {

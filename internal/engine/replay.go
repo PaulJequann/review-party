@@ -51,12 +51,9 @@ func (conductor *Conductor) replayProfile(source model.ReviewRecord, selection m
 	if err := validateReplayProfile(revision); err != nil {
 		return compiledProfile{}, err
 	}
-	registration, overridden, err := conductor.resolveReplayReviewer(revision, selection)
+	registration, err := conductor.resolveReplayReviewer(revision, selection)
 	if err != nil {
 		return compiledProfile{}, err
-	}
-	if overridden {
-		revision = replayRevisionWithReviewer(revision, registration)
 	}
 	return replayCompiledProfile(revision, source.ProfileSnapshot, registration), nil
 }
@@ -71,37 +68,25 @@ func validateReplayProfile(revision model.ProfileRevision) error {
 	return nil
 }
 
-func (conductor *Conductor) resolveReplayReviewer(revision model.ProfileRevision, selection model.ReplaySelection) (reviewerRegistration, bool, error) {
-	overridden := selection.Reviewer != "" || selection.Model != "" || selection.Effort != ""
-	reviewerID := firstNonempty(selection.Reviewer, revision.ReviewerID)
-	registration, err := conductor.reviewers.resolve(reviewerID)
+func (conductor *Conductor) resolveReplayReviewer(revision model.ProfileRevision, selection model.ReplaySelection) (reviewerRegistration, error) {
+	if replayHasExecutionOverrides(selection) {
+		return reviewerRegistration{}, errors.New("Replay does not accept Reviewer, model, or effort overrides")
+	}
+	registration, err := conductor.reviewers.resolve(revision.ReviewerID)
 	if err != nil {
-		return reviewerRegistration{}, false, err
-	}
-	selection, err = completeReplaySelection(selection, revision, registration)
-	if err != nil {
-		return reviewerRegistration{}, false, err
-	}
-	if err := validateReplayCapabilities(revision, reviewerID, registration); err != nil {
-		return reviewerRegistration{}, false, err
-	}
-	registration, err = resolveReviewerSelection(registration, model.ProfileSelection{Reviewer: reviewerID, Model: selection.Model, Effort: selection.Effort})
-	if err != nil {
-		return reviewerRegistration{}, false, err
-	}
-	return registration, overridden, nil
-}
-
-func completeReplaySelection(selection model.ReplaySelection, revision model.ProfileRevision, registration reviewerRegistration) (model.ReplaySelection, error) {
-	if selection.Reviewer != "" {
-		return selection, nil
+		return reviewerRegistration{}, err
 	}
 	if err := validateRecordedTransport(registration, revision); err != nil {
-		return model.ReplaySelection{}, err
+		return reviewerRegistration{}, err
 	}
-	selection.Model = firstNonempty(selection.Model, revision.Model)
-	selection.Effort = firstNonempty(selection.Effort, revision.Effort)
-	return selection, nil
+	if err := validateReplayCapabilities(revision, revision.ReviewerID, registration); err != nil {
+		return reviewerRegistration{}, err
+	}
+	return resolveReviewerSelection(registration, model.ProfileSelection{Reviewer: revision.ReviewerID, Model: revision.Model, Effort: revision.Effort})
+}
+
+func replayHasExecutionOverrides(selection model.ReplaySelection) bool {
+	return selection.Reviewer != "" || selection.Model != "" || selection.Effort != ""
 }
 
 func validateReplayCapabilities(revision model.ProfileRevision, reviewerID string, registration reviewerRegistration) error {
@@ -117,15 +102,6 @@ func validateRecordedTransport(registration reviewerRegistration, revision model
 		return nil
 	}
 	return fmt.Errorf("recorded reviewer transport %s/%s is unavailable", revision.Reviewer.Harness, revision.Reviewer.Transport)
-}
-
-func replayRevisionWithReviewer(revision model.ProfileRevision, registration reviewerRegistration) model.ProfileRevision {
-	revision.ReviewerID = registration.candidate.ID
-	revision.Model = registration.candidate.Model
-	revision.Effort = registration.candidate.Effort
-	revision.Reviewer = registration.candidate.provenance()
-	revision.Revision = profileRevisionIdentity(revision)
-	return revision
 }
 
 func replayCompiledProfile(revision model.ProfileRevision, snapshot model.ProfileSnapshot, registration reviewerRegistration) compiledProfile {

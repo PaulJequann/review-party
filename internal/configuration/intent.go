@@ -1,6 +1,7 @@
 package configuration
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 )
@@ -20,18 +21,6 @@ type Intent interface {
 type SetDefaultReviewer struct {
 	Target   Scope
 	Reviewer string
-}
-
-// SetDefaultProfile selects or clears (empty Profile) the default Profile in one scope.
-type SetDefaultProfile struct {
-	Target  Scope
-	Profile string
-}
-
-// SetDefaultParty selects or clears (empty Party) the default Party in one scope.
-type SetDefaultParty struct {
-	Target Scope
-	Party  string
 }
 
 // SetReviewerEnabled enables or disables one reviewer in one scope.
@@ -56,9 +45,14 @@ type SetReviewerAllowedModels struct {
 }
 
 // SetStateDirectory selects or clears (empty Directory) the managed state location.
-// Managed state is always a Personal Configuration choice.
+// Managed state is always a Global Configuration choice.
 type SetStateDirectory struct {
 	Directory string
+}
+
+// SetReviewSelection replaces the complete repository-owned default roll-up.
+type SetReviewSelection struct {
+	Selection ReviewSelection
 }
 
 func reviewerField(reviewer, field string) string {
@@ -84,28 +78,6 @@ func (intent SetDefaultReviewer) applyIntent(document *Document) {
 }
 func (intent SetDefaultReviewer) readIntent(document Document) (string, bool) {
 	return authoredString(configurationText(document.Defaults.Reviewer))
-}
-
-func (intent SetDefaultProfile) intentScope() Scope { return intent.Target }
-func (intent SetDefaultProfile) intentField() string {
-	return "defaults.profile"
-}
-func (intent SetDefaultProfile) applyIntent(document *Document) {
-	document.Defaults.Profile = intent.Profile
-}
-func (intent SetDefaultProfile) readIntent(document Document) (string, bool) {
-	return authoredString(configurationText(document.Defaults.Profile))
-}
-
-func (intent SetDefaultParty) intentScope() Scope { return intent.Target }
-func (intent SetDefaultParty) intentField() string {
-	return "defaults.party"
-}
-func (intent SetDefaultParty) applyIntent(document *Document) {
-	document.Defaults.Party = intent.Party
-}
-func (intent SetDefaultParty) readIntent(document Document) (string, bool) {
-	return authoredString(configurationText(document.Defaults.Party))
 }
 
 func (intent SetReviewerEnabled) intentScope() Scope { return intent.Target }
@@ -160,7 +132,7 @@ func (intent SetReviewerAllowedModels) readIntent(document Document) (string, bo
 	return strings.Join(models, ","), true
 }
 
-func (intent SetStateDirectory) intentScope() Scope { return ScopePersonal }
+func (intent SetStateDirectory) intentScope() Scope { return ScopeGlobal }
 func (intent SetStateDirectory) intentField() string {
 	return "state_directory"
 }
@@ -169,4 +141,23 @@ func (intent SetStateDirectory) applyIntent(document *Document) {
 }
 func (intent SetStateDirectory) readIntent(document Document) (string, bool) {
 	return authoredString(configurationText(document.StateDirectory))
+}
+
+func (intent SetReviewSelection) intentScope() Scope  { return ScopeRepository }
+func (intent SetReviewSelection) intentField() string { return "reviews" }
+func (intent SetReviewSelection) applyIntent(document *Document) {
+	selection := intent.Selection
+	selection.Global = append([]SelectionItem(nil), selection.Global...)
+	selection.Repository = append([]SelectionItem(nil), selection.Repository...)
+	document.Reviews = &selection
+}
+func (intent SetReviewSelection) readIntent(document Document) (string, bool) {
+	if document.Reviews == nil {
+		return "", false
+	}
+	payload, err := json.Marshal(document.Reviews)
+	if err != nil {
+		panic(fmt.Sprintf("encode review selection preview: %v", err))
+	}
+	return string(payload), true
 }

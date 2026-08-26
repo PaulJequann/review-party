@@ -2,6 +2,7 @@ package configuration
 
 import (
 	"fmt"
+	"path/filepath"
 )
 
 // Change planning lives in this file. Typed intents and their field mapping
@@ -26,12 +27,12 @@ type Plan struct {
 }
 
 type planState struct {
-	changes []Change
-	scopes  []Scope
-	paths   []string
-	valid   bool
-	reason  string
-	staged  []stagedDocument
+	changes     []Change
+	scopes      []Scope
+	paths       []string
+	valid       bool
+	reason      string
+	publication publicationPlan
 }
 
 type stagedDocument struct {
@@ -116,7 +117,7 @@ func (manager *Manager) stageIntent(plan *Plan, staged map[Scope]*stagedDocument
 	}
 	scope := intent.intentScope()
 	switch scope {
-	case ScopePersonal, ScopeRepository:
+	case ScopeGlobal, ScopeRepository:
 	default:
 		return nil, fmt.Errorf("unknown configuration scope %q", scope)
 	}
@@ -147,7 +148,7 @@ func (manager *Manager) stageIntent(plan *Plan, staged map[Scope]*stagedDocument
 }
 
 func (manager *Manager) validateStaged(plan *Plan, staged map[Scope]*stagedDocument, loaded Loaded) error {
-	for _, scope := range []Scope{ScopePersonal, ScopeRepository} {
+	for _, scope := range []Scope{ScopeGlobal, ScopeRepository} {
 		document, ok := staged[scope]
 		if !ok {
 			continue
@@ -156,9 +157,16 @@ func (manager *Manager) validateStaged(plan *Plan, staged map[Scope]*stagedDocum
 			plan.state.reason = invalid(document.scope, document.path, err).Error()
 			return err
 		}
-		plan.state.staged = append(plan.state.staged, *document)
-		plan.state.paths = append(plan.state.paths, document.path)
-		addScopeOnce(&plan.state.scopes, document.scope)
+		payload, err := renderDocument(document.document)
+		if err != nil {
+			plan.state.reason = err.Error()
+			return err
+		}
+		write := pendingWrite{
+			scope: document.scope, anchor: document.anchor, path: document.path,
+			payload: payload, backup: append([]byte(nil), document.baseline.payload...), existed: document.baseline.existed,
+		}
+		addPlanFiles(plan.state, document.scope, []pendingWrite{write})
 	}
 	if _, err := manager.resolveEffectiveReviewers(withStagedDocuments(loaded, staged)); err != nil {
 		plan.state.reason = err.Error()
@@ -175,7 +183,7 @@ func withStagedDocuments(loaded Loaded, staged map[Scope]*stagedDocument) Loaded
 		if scope == ScopeRepository {
 			loaded.Repository = document
 		} else {
-			loaded.Personal = document
+			loaded.Global = document
 		}
 	}
 	return loaded
@@ -185,7 +193,29 @@ func loadedScopeFor(loaded Loaded, scope Scope) LoadedDocument {
 	if scope == ScopeRepository {
 		return loaded.Repository
 	}
-	return loaded.Personal
+	return loaded.Global
+}
+
+func newFilePlan(scope Scope, change Change, writes []pendingWrite) Plan {
+	state := &planState{valid: true, changes: []Change{change}}
+	addPlanFiles(state, scope, writes)
+	return Plan{state: state}
+}
+
+func newProfilePlan(scope Scope, change Change, publication pendingProfilePublication) Plan {
+	state := &planState{
+		valid: true, scopes: []Scope{scope}, changes: []Change{change}, publication: publicationPlan{profiles: []pendingProfilePublication{publication}},
+		paths: []string{filepath.Join(publication.directory, "profile.json"), filepath.Join(publication.directory, "instructions.md")},
+	}
+	return Plan{state: state}
+}
+
+func addPlanFiles(state *planState, scope Scope, writes []pendingWrite) {
+	addScopeOnce(&state.scopes, scope)
+	state.publication.files = append(state.publication.files, writes...)
+	for _, write := range writes {
+		state.paths = append(state.paths, write.path)
+	}
 }
 
 func addScopeOnce(scopes *[]Scope, scope Scope) {

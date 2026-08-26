@@ -162,41 +162,34 @@ type EvalSuiteTermination struct {
 type ReviewBundleID string
 
 type PartyMember struct {
-	Profile  string `json:"profile"`
-	Reviewer string `json:"reviewer,omitempty"`
-	Model    string `json:"model,omitempty"`
-	Effort   string `json:"effort,omitempty"`
+	Scope   string `json:"scope"`
+	Profile string `json:"profile"`
 }
 
 type PartyDefinition struct {
 	SchemaVersion    int           `json:"schema_version"`
 	Name             string        `json:"name"`
 	Description      string        `json:"description,omitempty"`
-	Extends          []string      `json:"extends,omitempty"`
 	Profiles         []PartyMember `json:"profiles"`
 	ConcurrencyLimit int           `json:"concurrency_limit,omitempty"`
 }
 
 type PartySelection struct {
-	Name             string
-	Repository       string
-	Subject          SubjectReference
-	Reviewer         string
-	Model            string
-	Effort           string
-	ConcurrencyLimit int
+	Name       string
+	Repository string
+	Subject    SubjectReference
 }
 
 type PartySummary struct {
-	Name        string   `json:"name"`
-	Description string   `json:"description"`
-	Extends     []string `json:"extends,omitempty"`
-	Members     []string `json:"members"`
-	Source      string   `json:"source"`
-	Error       string   `json:"error,omitempty"`
+	Name        string        `json:"name"`
+	Description string        `json:"description"`
+	Members     []PartyMember `json:"members"`
+	Source      string        `json:"source"`
+	Error       string        `json:"error,omitempty"`
 }
 
 type BundleMember struct {
+	Scope        string    `json:"scope"`
 	Profile      string    `json:"profile"`
 	ReviewID     ReviewID  `json:"review_id,omitempty"`
 	Lifecycle    Lifecycle `json:"lifecycle"`
