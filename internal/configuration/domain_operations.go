@@ -20,17 +20,16 @@ type PartyDraft struct {
 func (manager *Manager) PlanPartyCreation(repository Repository, draft PartyDraft) (Plan, error) {
 	party := Party{SchemaVersion: SchemaVersion, Name: draft.Name, Description: draft.Description, ConcurrencyLimit: draft.ConcurrencyLimit, Profiles: append([]ProfileReference(nil), draft.Profiles...)}
 	plan := Plan{state: &planState{}}
-	if err := manager.validateParty(party, draft.Target); err != nil {
+	if err := manager.validatePartyCreation(repository, draft.Target, party); err != nil {
 		plan.state.reason = err.Error()
 		return plan, nil
 	}
-	entry, anchor, err := manager.partyEntry(draft.Target, repository, draft.Name)
+	entry, anchor, err := manager.partyEntry(draft.Target, repository, party.Name)
 	if err != nil {
 		return Plan{}, err
 	}
-	path := entry.Path
-	if _, err := os.Lstat(path); err == nil {
-		plan.state.reason = fmt.Sprintf("Party %q already exists", draft.Name)
+	if _, err := os.Lstat(entry.Path); err == nil {
+		plan.state.reason = fmt.Sprintf("Party %q already exists", party.Name)
 		return plan, nil
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return Plan{}, err
@@ -39,12 +38,23 @@ func (manager *Manager) PlanPartyCreation(repository Repository, draft PartyDraf
 	if err != nil {
 		return Plan{}, err
 	}
-	writes := []pendingWrite{{scope: draft.Target, anchor: anchor, path: path, payload: payload}}
+	if err := partyDefinitionPayload.validate(payload); err != nil {
+		plan.state.reason = err.Error()
+		return plan, nil
+	}
+	write := pendingWrite{scope: draft.Target, anchor: anchor, path: entry.Path, payload: payload}
 	change := Change{
-		Field: "parties." + draft.Name, Scope: draft.Target, Path: path,
+		Field: "parties." + party.Name, Scope: draft.Target, Path: entry.Path,
 		After: fmt.Sprintf("profiles=%d concurrency=%d", len(party.Profiles), party.ConcurrencyLimit), HadAfter: true,
 	}
-	return newFilePlan(draft.Target, change, writes), nil
+	return newFilePlan(draft.Target, change, []pendingWrite{write}), nil
+}
+
+func (manager *Manager) validatePartyCreation(repository Repository, scope Scope, party Party) error {
+	if err := manager.validateParty(party, scope); err != nil {
+		return err
+	}
+	return manager.validatePartyReferences(repository, party)
 }
 
 func renderParty(party Party) ([]byte, error) {

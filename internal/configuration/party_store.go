@@ -51,10 +51,26 @@ func (manager *Manager) partyInventoryLayer(repository Repository, layer configu
 	return inventory, nil
 }
 
+func (manager *Manager) validatePartyReferences(repository Repository, party Party) error {
+	for index, reference := range party.Profiles {
+		_, found, err := manager.ResolveProfileReference(repository, reference)
+		if err != nil {
+			return fmt.Errorf("profiles[%d]: %w", index, err)
+		}
+		if !found {
+			return fmt.Errorf("profiles[%d]: %s Profile %q was not found", index, reference.Scope, reference.Profile)
+		}
+	}
+	return nil
+}
+
 func (manager *Manager) inventoryParty(repository Repository, entry AuthoredEntry) Definition[Party] {
 	party, found, err := manager.LoadParty(entry.Scope, repository, entry.Name)
 	if err == nil && !found {
 		err = fmt.Errorf("Party %q is incomplete", entry.Name)
+	}
+	if err == nil {
+		err = manager.validatePartyReferences(repository, party)
 	}
 	return Definition[Party]{Scope: entry.Scope, Name: entry.Name, Path: entry.Path, Source: entry.Source, Value: party, Err: err}
 }

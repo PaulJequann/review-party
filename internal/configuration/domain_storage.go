@@ -52,11 +52,15 @@ func (manager *Manager) PlanProfileCreation(repository Repository, draft Profile
 	if err != nil {
 		return Plan{}, err
 	}
+	publication := pendingProfilePublication{scope: draft.Target, anchor: anchor, directory: directory, metadata: metadata, instructions: []byte(instructions)}
+	if err := publication.validateSize(); err != nil {
+		plan.state.reason = err.Error()
+		return plan, nil
+	}
 	change := Change{
 		Field: "profiles." + draft.Name, Scope: draft.Target, Path: directory,
 		After: profilePlanSummary(profile), HadAfter: true,
 	}
-	publication := pendingProfilePublication{scope: draft.Target, anchor: anchor, directory: directory, metadata: metadata, instructions: []byte(instructions)}
 	return newProfilePlan(draft.Target, change, publication), nil
 }
 
@@ -78,6 +82,13 @@ func (manager *Manager) profileCreationTarget(scope Scope, repository Repository
 	}
 	conflict := fmt.Sprintf("Profile directory %q already exists; creation never overwrites complete or incomplete material", directory)
 	return anchor, directory, conflict, nil
+}
+
+func (publication pendingProfilePublication) validateSize() error {
+	if err := profileMetadataPayload.validate(publication.metadata); err != nil {
+		return err
+	}
+	return profileInstructionsPayload.validate(publication.instructions)
 }
 
 func profilePlanSummary(profile Profile) string {

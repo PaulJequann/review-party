@@ -23,6 +23,7 @@ func TestPartyReaderRejectsExtends(t *testing.T) {
 
 func TestPartySummaryKeepsScopedMembers(t *testing.T) {
 	repository := testRepository(t)
+	writeExecutableProfile(t, repository, "bugs")
 	writeConfigurationParty(t, repository, configuration.Party{
 		SchemaVersion: 1, Name: "gate", ConcurrencyLimit: 1,
 		Profiles: []configuration.ProfileReference{{Scope: configuration.ScopeRepository, Profile: "bugs"}},

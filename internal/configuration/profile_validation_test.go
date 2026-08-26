@@ -13,6 +13,14 @@ func TestProfileRequiresEveryExecutionChoice(t *testing.T) {
 	}, "model and reasoning_effort are required")
 }
 
+func TestProfileCreationRejectsInstructionsBeyondReadLimit(t *testing.T) {
+	manager := testManager(t, t.TempDir())
+	assertInvalidProfileDraft(t, manager, ProfileDraft{
+		Target: ScopeGlobal, Name: "security", Reviewer: "opencode", Model: "muse",
+		ReasoningEffort: "high", AttemptDeadline: "2m", Instructions: strings.Repeat("x", MaximumDocumentBytes+1),
+	}, "instructions exceed")
+}
+
 func TestProfileRejectsExcessiveAttemptDeadline(t *testing.T) {
 	manager := testManager(t, t.TempDir())
 	assertInvalidProfileDraft(t, manager, ProfileDraft{
