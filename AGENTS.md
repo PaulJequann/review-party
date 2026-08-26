@@ -32,9 +32,15 @@ result contract does not require every agent to use the same wire protocol.
 
 ## Dogfooding
 
-For a bounded local dogfood Review of this repository, use the configured
-OpenCode Muse selection. It is the accepted fast feedback path; do not silently
-replace it with Grok or another model:
+For a bounded local dogfood Review, use complete saved Profiles configured with
+OpenCode `meta/muse-spark-1.2-contributor`, high effort, and a three-minute
+Attempt deadline. Ordinary Review commands execute those settings exactly.
+Treat missing Profiles as unavailable rather than substituting Grok or another
+model. Before initialization, populate `bugs`, `code-quality`, and
+`documentation` under
+`$XDG_CONFIG_HOME/review-party/profiles/<name>/{profile.json,instructions.md}`
+using the accepted layout in `docs/design/profile-library-v1.md`; `init` prepares
+record state and never creates Profiles.
 
 ```sh
 XDG_STATE_HOME="$PWD/scratch/dogfood-state" \
@@ -42,9 +48,7 @@ XDG_CONFIG_HOME="$PWD/scratch/dogfood-config" \
   go run ./cmd/review-party init --repo .
 XDG_STATE_HOME="$PWD/scratch/dogfood-state" \
 XDG_CONFIG_HOME="$PWD/scratch/dogfood-config" \
-  go run ./cmd/review-party review bugs --repo . --reviewer opencode \
-  --model meta/muse-spark-1.2-contributor --deadline 3m \
-  --format json
+  go run ./cmd/review-party review bugs --repo . --format json
 ```
 
 Treat dogfooding as a small multi-Profile review exercise, not a formal Party or
@@ -57,9 +61,7 @@ provenance rather than merging raw Reviewer text.
 ```sh
 XDG_STATE_HOME="$PWD/scratch/dogfood-state" \
 XDG_CONFIG_HOME="$PWD/scratch/dogfood-config" \
-  go run ./cmd/review-party review code-quality --repo . --reviewer opencode \
-  --model meta/muse-spark-1.2-contributor --deadline 3m \
-  --format json
+  go run ./cmd/review-party review code-quality --repo . --format json
 ```
 
 - Inspect the persisted record with the same isolated `XDG_STATE_HOME` and

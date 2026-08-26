@@ -135,9 +135,9 @@ func TestEvalSuiteDeadlineStopsNewCases(t *testing.T) {
 	suite := writeEvalTestSuite(t, []testEvalCase{{id: "first"}, {id: "second"}})
 	executor := &deadlineEvalExecutor{}
 	conductor := testEvalConductor(t, executor)
-	conductor.attemptDeadline = 20 * time.Millisecond
+	conductor.evalDefaultDeadline = 20 * time.Millisecond
 	selection := evalSelection(suite)
-	selection.Experiment.Deadline = conductor.attemptDeadline.String()
+	selection.Experiment.Deadline = conductor.evalDefaultDeadline.String()
 	run, err := conductor.RunEvalSuite(context.Background(), selection)
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("error = %v", err)
@@ -253,7 +253,7 @@ func newObservedEvalStore(t *testing.T) (*store.LedgerRecordStore, *observingEva
 
 func newLifecycleTestConductor(t *testing.T, records store.RecordStore, executor attemptExecutor) *Conductor {
 	t.Helper()
-	conductor, err := newConductorWithProfiles(records, catalogWithExecutors(map[string]attemptExecutor{defaultReviewer: executor}), newProfileLibrary(t.TempDir()), time.Second)
+	conductor, err := newConductorWithProfiles(records, catalogWithExecutors(map[string]attemptExecutor{defaultReviewer: executor}), newTestProfileLibrary(t), time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}

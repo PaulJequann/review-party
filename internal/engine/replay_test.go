@@ -65,51 +65,16 @@ func assertReplayLineage(t *testing.T, source *model.ReviewID, expected model.Re
 	}
 }
 
-func TestReplayRecordsExplicitReviewerOverride(t *testing.T) {
+func TestReplayRejectsExecutionOverrides(t *testing.T) {
 	repository, base, head := committedReviewFixture(t)
-	grok := successfulExecutor(cleanReview)
-	opencode := successfulExecutor(cleanReview)
-	conductor := testConductorWithExecutors(t, map[string]attemptExecutor{"grok": grok, "opencode": opencode}, time.Second)
-	original, err := conductor.Review(context.Background(), model.ReviewSelection{Repository: repository, Subject: model.CommittedRange(base, head), Profile: "bugs", Reviewer: "grok"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	replay, err := conductor.Replay(context.Background(), model.ReplaySelection{SourceReviewID: original.ID, Reviewer: "opencode", Model: "meta/muse-spark-1.2-contributor", Effort: "high"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if replay.ProfileRevision.ReviewerID != "opencode" {
-		t.Fatalf("reviewer = %s", replay.ProfileRevision.ReviewerID)
-	}
-	if replay.ProfileRevision.Model != "meta/muse-spark-1.2-contributor" {
-		t.Fatalf("model = %s", replay.ProfileRevision.Model)
-	}
-	if replay.ProfileRevision.Effort != "high" {
-		t.Fatalf("effort = %s", replay.ProfileRevision.Effort)
-	}
-	if opencode.attemptCount() != 1 {
-		t.Fatalf("opencode attempts = %d", opencode.attemptCount())
-	}
-}
-
-func TestReplayOriginalReviewerUnavailabilityRemainsIncomplete(t *testing.T) {
-	repository, base, head := committedReviewFixture(t)
-	executor := successfulExecutor(cleanReview)
-	conductor := testConductor(t, executor, time.Second)
+	conductor := testConductor(t, successfulExecutor(cleanReview), time.Second)
 	original, err := conductor.Review(context.Background(), model.ReviewSelection{Repository: repository, Subject: model.CommittedRange(base, head), Profile: "bugs"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	executor.availability = availability{Available: false, Diagnostic: "recorded Reviewer unavailable"}
-	replay, err := conductor.Replay(context.Background(), model.ReplaySelection{SourceReviewID: original.ID})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if replay.Lifecycle != model.LifecycleIncomplete || replay.ProfileRevision.ReviewerID != original.ProfileRevision.ReviewerID {
-		t.Fatalf("replay = %#v", replay)
-	}
-	if executor.attemptCount() != 1 {
-		t.Fatalf("attempts = %d, want only original", executor.attemptCount())
+	_, err = conductor.Replay(context.Background(), model.ReplaySelection{SourceReviewID: original.ID, Reviewer: "opencode"})
+	if err == nil || !strings.Contains(err.Error(), "does not accept") {
+		t.Fatalf("error = %v", err)
 	}
 }
 
@@ -161,11 +126,9 @@ func installChangedBugsProfile(t *testing.T, repository string) {
 		t.Fatal(err)
 	}
 	payload = []byte(strings.Replace(string(payload), "Find material defects", "CHANGED PROFILE MUST NOT BE REPLAYED", 1))
-	directory := filepath.Join(repository, ".reviewparty", "profiles")
-	if err := os.MkdirAll(directory, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(directory, "bugs.md"), payload, 0o600); err != nil {
+	writeExecutableProfile(t, repository, "bugs")
+	directory := filepath.Join(repository, ".reviewparty", "profiles", "bugs")
+	if err := os.WriteFile(filepath.Join(directory, "instructions.md"), payload, 0o600); err != nil {
 		t.Fatal(err)
 	}
 }

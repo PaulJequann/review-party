@@ -1,6 +1,6 @@
 # Review Party implementation plan
 Status: active planning ledger
-Last reconciled: 2026-08-24
+Last reconciled: 2026-08-26
 
 This document orders the work from project inception through replacement of the
 current skill-owned execution machinery. It records the shipped local CLI,
@@ -68,21 +68,22 @@ slice status and this checklist when the acceptance evidence is committed.
 - [x] Slice 26a: layered Party composition with `extends` chains and
   `defaults.party` selection (delivered in PR #9; accepted for direct
   replacement by Configuration Hub Slice 4).
-- [ ] Configuration Hub Slice 4: domain and storage reset. This is the next
-  user-directed slice; see `docs/configuration-hub-implementation-plan.md`.
+- [x] Configuration Hub Slice 4: Global and Repository domain and storage reset.
+- [ ] Configuration Hub Slice 5: resolution and `review-party run`. This is the
+  next slice; see `docs/configuration-hub-implementation-plan.md`.
 - [ ] Slice 21 — ACPX transport adapter.
 - [ ] Slice 22 — native-versus-ACP adapter experiments.
 - [ ] Slice 23 — fix verification and bounded continuation.
 - [ ] Slice 24 — thin skill integration and migration.
 - [ ] Slice 25 — supported local delivery baseline.
 
-Current state: Slices 10 through 20, Slice 17a, Slices 26 and 26a, DEV-56
-through DEV-60, and DEV-66 through DEV-69 are complete. PR #11 removed the
+Current state: Slices 10 through 20, Slice 17a, Slices 26 and 26a, Configuration
+Hub Slice 4, DEV-56 through DEV-60, and DEV-66 through DEV-69 are complete. PR #11 removed the
 pre-release Review Record compatibility paths and replaced the incremental SQL
 migration chain with one initial schema. Retired local state requires a fresh
 `review-party init`; future work must not restore legacy import or rollback
-behavior. The user has selected Configuration Hub Slice 4 as the next work;
-that focused plan overrides the older Slice 21 cursor until the replacement is
+behavior. Configuration Hub Slice 5 is next; its focused plan overrides the
+older Slice 21 cursor until the configuration and execution replacement is
 complete. Linear otherwise owns future work selection; use Ready issues there
 before the older roadmap below as execution authority.
 
@@ -174,16 +175,14 @@ For every unchecked slice:
 Review Party is a working experimental Go CLI with a synchronous, caller-first
 `Conductor` Module. It currently provides:
 
-- profile discovery and recipe explanation without Agent Harness launch or a
-  Review Record;
-- packaged, repository, and global filesystem-backed Markdown Profiles with
-  deterministic precedence and no inheritance;
-- `review-party review [PROFILE]` over one frozen working-changes
+- transitional profile discovery and recipe explanation without Agent Harness
+  launch or a Review Record;
+- the accepted two-file executable Profile and non-executable Template storage
+  model, resolved through the Configuration Manager;
+- transitional `review-party review PROFILE` over one frozen working-changes
   Review Subject;
-- explicit Grok, OpenCode, or Copilot Reviewer selection with no fallback;
-- explicit caller-selected reasoning effort carried through the effective
-  Profile Revision, actual adapter invocation where supported, and Review
-  Record provenance;
+- exact saved Reviewer, model, effort, deadline, and instructions with no
+  ordinary execution overrides or fallback;
 - strict XDG user configuration for the Default Reviewer, Reviewer enablement,
   and per-Reviewer model selection/allowlists;
 - direct CLI adapters with repository read/search-only capability backstops;
@@ -1130,12 +1129,11 @@ without claiming deterministic model output or replaying application events.
 
 ```text
 review-party replay <review-id>
-review-party replay <review-id> --reviewer <id> --model <model> --effort <effort>
 ```
 
-The default reuses the original committed Subject and effective Profile
-Revision snapshot. Explicit overrides produce recorded differences; no
-unavailable original choice is silently replaced.
+Replay reuses the original committed Subject and exact Profile Revision
+snapshot. Configuration Hub Slice 4 removed Reviewer, model, and effort
+overrides; an unavailable recorded choice is never replaced.
 
 ### Interface and ownership decisions
 
@@ -1965,8 +1963,7 @@ with inherited members listed before the local addition.
 
 ## Immediate next action
 
-Proceed with Slice 4 of
+Proceed with Configuration Hub Slice 5 in
 [`configuration-hub-implementation-plan.md`](configuration-hub-implementation-plan.md):
-replace the Profile, Template, Party, scope, and repository roll-up foundations
-before adding more Hub behavior. Slice 21 remains pending until this
-user-directed replacement is complete.
+resolve Repository `reviews` into the ordinary `review-party run` path. Slice 21
+remains pending until the Configuration Hub replacement is complete.

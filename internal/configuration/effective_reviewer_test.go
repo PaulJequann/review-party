@@ -8,12 +8,12 @@ import (
 )
 
 func TestEffectiveReviewerAccessReturnsDefensiveCopies(t *testing.T) {
-	personalRoot := t.TempDir()
-	writeDocument(t, filepath.Join(personalRoot, "config.json"), `{
+	globalRoot := t.TempDir()
+	writeDocument(t, filepath.Join(globalRoot, "config.json"), `{
   "schema_version": 1,
   "reviewers": {"opencode": {"model": "model-a", "allowed_models": ["model-a", "model-b"]}}
 }`)
-	effective, err := testManager(t, personalRoot).Resolve(Request{})
+	effective, err := testManager(t, globalRoot).Resolve(Request{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,11 +49,11 @@ func TestEffectiveReviewerWithoutPackagedModelRemainsPresent(t *testing.T) {
 }
 
 func TestEffectiveDisabledReviewerLeavesCrossScopeModelPolicyInert(t *testing.T) {
-	personalRoot := t.TempDir()
+	globalRoot := t.TempDir()
 	repository := t.TempDir()
-	personalPath := filepath.Join(personalRoot, "config.json")
+	globalPath := filepath.Join(globalRoot, "config.json")
 	repositoryPath := filepath.Join(repository, ".reviewparty", "config.json")
-	writeDocument(t, personalPath, `{
+	writeDocument(t, globalPath, `{
   "schema_version": 1,
   "reviewers": {"opencode": {"enabled": false}}
 }`)
@@ -62,7 +62,7 @@ func TestEffectiveDisabledReviewerLeavesCrossScopeModelPolicyInert(t *testing.T)
   "reviewers": {"opencode": {"model": "model-a", "allowed_models": ["model-b"]}}
 }`)
 
-	effective, err := testManager(t, personalRoot).Resolve(Request{Repository: Repository(repository)})
+	effective, err := testManager(t, globalRoot).Resolve(Request{Repository: Repository(repository)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,11 +73,11 @@ func TestEffectiveDisabledReviewerLeavesCrossScopeModelPolicyInert(t *testing.T)
 }
 
 func TestEffectiveEnabledReviewerRejectsCrossScopeModelPolicyWithWinningProvenance(t *testing.T) {
-	personalRoot := t.TempDir()
+	globalRoot := t.TempDir()
 	repository := t.TempDir()
-	personalPath := filepath.Join(personalRoot, "config.json")
+	globalPath := filepath.Join(globalRoot, "config.json")
 	repositoryPath := filepath.Join(repository, ".reviewparty", "config.json")
-	writeDocument(t, personalPath, `{
+	writeDocument(t, globalPath, `{
   "schema_version": 1,
   "reviewers": {"opencode": {"enabled": false, "allowed_models": ["model-b"]}}
 }`)
@@ -86,7 +86,7 @@ func TestEffectiveEnabledReviewerRejectsCrossScopeModelPolicyWithWinningProvenan
   "reviewers": {"opencode": {"enabled": true, "model": "model-a"}}
 }`)
 
-	_, err := testManager(t, personalRoot).Resolve(Request{Repository: Repository(repository)})
+	_, err := testManager(t, globalRoot).Resolve(Request{Repository: Repository(repository)})
 	var invalid EffectiveReviewerPolicyError
 	if !errors.As(err, &invalid) {
 		t.Fatalf("error = %v, want EffectiveReviewerPolicyError", err)
@@ -94,7 +94,7 @@ func TestEffectiveEnabledReviewerRejectsCrossScopeModelPolicyWithWinningProvenan
 	if invalid.Model.Source != SourceRepository || invalid.Model.Path != repositoryPath {
 		t.Fatalf("model provenance = %#v", invalid.Model)
 	}
-	if invalid.AllowedModels.Source != SourcePersonal || invalid.AllowedModels.Path != personalPath {
+	if invalid.AllowedModels.Source != SourceGlobal || invalid.AllowedModels.Path != globalPath {
 		t.Fatalf("allowed_models provenance = %#v", invalid.AllowedModels)
 	}
 }

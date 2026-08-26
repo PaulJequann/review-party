@@ -18,23 +18,23 @@ import (
 
 type Config struct {
 	AttemptDeadline time.Duration
-	// UserConfigurationPath optionally overrides the canonical Personal
+	// UserConfigurationPath optionally overrides the canonical Global
 	// Configuration file location for tests and explicit --config flags.
 	UserConfigurationPath string
 }
 
 type Conductor struct {
-	store           store.RecordStore
-	reviewers       reviewerCatalog
-	configuration   *configuration.Manager
-	profiles        profileLibrary
-	attemptDeadline time.Duration
-	now             func() time.Time
-	buildProvenance func() model.RuntimeProvenance
-	artifacts       *artifact.Store
-	retryDelay      func(model.RetryPolicy, int, time.Duration) time.Duration
-	wait            func(context.Context, time.Duration) error
-	runner          *reviewRunner
+	store               store.RecordStore
+	reviewers           reviewerCatalog
+	configuration       *configuration.Manager
+	profiles            profileLibrary
+	evalDefaultDeadline time.Duration
+	now                 func() time.Time
+	buildProvenance     func() model.RuntimeProvenance
+	artifacts           *artifact.Store
+	retryDelay          func(model.RetryPolicy, int, time.Duration) time.Duration
+	wait                func(context.Context, time.Duration) error
+	runner              *reviewRunner
 }
 
 func New(config Config) (*Conductor, error) {
@@ -51,7 +51,7 @@ func New(config Config) (*Conductor, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Repository-scoped profile compilation applies the complete Personal and
+	// Repository-scoped profile compilation applies the complete Global and
 	// Repository reviewer policy before validating a selection.
 	reviewers := defaultReviewerCatalog()
 	conductor, err := newConductorWithProfiles(store, reviewers, profileLibrary{configuration: manager}, config.AttemptDeadline)
@@ -79,15 +79,15 @@ func newConductorWithProfiles(store store.RecordStore, reviewers reviewerCatalog
 		return nil, errProfileLibraryNotConfigured
 	}
 	conductor := &Conductor{
-		store:           store,
-		reviewers:       reviewers,
-		configuration:   profiles.manager(),
-		profiles:        profiles,
-		attemptDeadline: deadline,
-		now:             time.Now,
-		buildProvenance: provenance.CurrentRuntimeProvenance,
-		retryDelay:      retryDelay,
-		wait:            waitForRetry,
+		store:               store,
+		reviewers:           reviewers,
+		configuration:       profiles.manager(),
+		profiles:            profiles,
+		evalDefaultDeadline: deadline,
+		now:                 time.Now,
+		buildProvenance:     provenance.CurrentRuntimeProvenance,
+		retryDelay:          retryDelay,
+		wait:                waitForRetry,
 	}
 	conductor.runner = newReviewRunner(store, func() time.Time { return conductor.now() }, func() model.RuntimeProvenance { return conductor.buildProvenance() }, newArtifactPublisher(nil))
 	return conductor, nil
@@ -115,7 +115,7 @@ func (conductor *Conductor) Review(ctx context.Context, selection model.ReviewSe
 		return model.ReviewRecord{}, err
 	}
 	reviewStarted := conductor.now().UTC()
-	prepared, err := conductor.prepareReview(selection)
+	prepared, err := conductor.prepareReview(selection, false)
 	if err != nil {
 		return model.ReviewRecord{}, err
 	}
@@ -180,26 +180,23 @@ type preparedReview struct {
 	deadline time.Duration
 }
 
-func (conductor *Conductor) prepareReview(selection model.ReviewSelection) (preparedReview, error) {
-	profileSelection := selection.ProfileSelection()
+func (conductor *Conductor) prepareReview(selection model.ReviewSelection, allowExperimentOverrides bool) (preparedReview, error) {
+	if !allowExperimentOverrides && reviewHasExecutionOverrides(selection) {
+		return preparedReview{}, errors.New("ordinary Reviews do not accept Reviewer, model, or effort overrides")
+	}
 	timings := model.ReviewTimings{}
 	subjectStarted := conductor.now().UTC()
 	repository, repositoryErr := resolveReviewRepository(selection)
 	timings.SubjectResolutionMS += elapsedMilliseconds(subjectStarted, conductor.now().UTC())
 	if repositoryErr != nil {
-		if selection.Reviewer != "" {
-			if err := conductor.profiles.validateExplicitReviewer(selection.ProfileSelection(), selection.Repository, conductor.reviewers); err != nil {
-				return preparedReview{}, err
-			}
-		}
 		return preparedReview{}, repositoryErr
 	}
-	resolved, err := conductor.profiles.resolve(profileRequest{repository: repository, name: profileSelection.Profile, reviewer: profileSelection.Reviewer})
+	resolved, err := conductor.profiles.resolve(profileRequest{repository: repository, name: selection.Profile})
 	if err != nil {
 		return preparedReview{}, err
 	}
 	profileStarted := conductor.now().UTC()
-	profile, err := conductor.compileProfile(profileSelection, resolved)
+	profile, err := conductor.compilePreparedProfile(selection, resolved, allowExperimentOverrides)
 	timings.ProfileCompilationMS = elapsedMilliseconds(profileStarted, conductor.now().UTC())
 	if err != nil {
 		return preparedReview{}, err
@@ -210,7 +207,18 @@ func (conductor *Conductor) prepareReview(selection model.ReviewSelection) (prep
 	if err != nil {
 		return preparedReview{}, err
 	}
-	return preparedReview{subject: subject, profile: profile, timings: timings, deadline: conductor.attemptDeadline}, nil
+	return preparedReview{subject: subject, profile: profile, timings: timings, deadline: profile.deadline}, nil
+}
+
+func reviewHasExecutionOverrides(selection model.ReviewSelection) bool {
+	return selection.Reviewer != "" || selection.Model != "" || selection.Effort != ""
+}
+
+func (conductor *Conductor) compilePreparedProfile(selection model.ReviewSelection, resolved resolvedProfile, allowExperimentOverrides bool) (compiledProfile, error) {
+	if !allowExperimentOverrides {
+		return conductor.compileResolvedProfile(resolved)
+	}
+	return conductor.compileResolvedExperimentProfile(selection.ProfileSelection(), resolved)
 }
 
 func resolveReviewRepository(selection model.ReviewSelection) (string, error) {
@@ -255,7 +263,14 @@ func (conductor *Conductor) explainAt(ctx context.Context, selection model.Profi
 	if err := ctx.Err(); err != nil {
 		return model.ProfileExplanation{}, err
 	}
-	profile, err := conductor.compileFilesystemProfile(selection, repository)
+	if profileSelectionHasExecutionOverrides(selection) {
+		return model.ProfileExplanation{}, errors.New("Profile explanation does not accept Reviewer, model, or effort overrides")
+	}
+	resolved, err := conductor.profiles.resolve(profileRequest{repository: repository, name: selection.Profile})
+	if err != nil {
+		return model.ProfileExplanation{}, err
+	}
+	profile, err := conductor.compileResolvedProfile(resolved)
 	if err != nil {
 		return model.ProfileExplanation{}, err
 	}

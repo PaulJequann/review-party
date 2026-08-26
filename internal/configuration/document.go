@@ -10,19 +10,17 @@ import (
 	"sort"
 )
 
-// SchemaVersion is the single configuration schema version used by Personal
+// SchemaVersion is the single configuration schema version used by Global
 // and Repository documents.
 const SchemaVersion = 1
 
 // Defaults holds the selection defaults authored in one scope.
 type Defaults struct {
 	Reviewer string `json:"reviewer,omitempty"`
-	Profile  string `json:"profile,omitempty"`
-	Party    string `json:"party,omitempty"`
 }
 
 func (defaults *Defaults) UnmarshalJSON(payload []byte) error {
-	if _, err := decodeObjectFields(payload, "defaults", "reviewer", "profile", "party"); err != nil {
+	if _, err := decodeObjectFields(payload, "defaults", "reviewer"); err != nil {
 		return err
 	}
 	type plainDefaults Defaults
@@ -35,7 +33,7 @@ func (defaults *Defaults) UnmarshalJSON(payload []byte) error {
 }
 
 func (defaults Defaults) empty() bool {
-	return defaults.Reviewer == "" && defaults.Profile == "" && defaults.Party == ""
+	return defaults.Reviewer == ""
 }
 
 // ReviewerPolicy is one reviewer's authored policy inside one scope. A nil
@@ -77,7 +75,7 @@ type RetryPolicy struct {
 }
 
 // EvalPolicy holds advanced evaluation defaults. Evaluation settings are a
-// Personal Configuration concern; Repository scope does not accept them.
+// Global Configuration concern; Repository scope does not accept them.
 type EvalPolicy struct {
 	RetryPolicy      RetryPolicy `json:"retry_policy,omitempty"`
 	ConcurrencyLimit int         `json:"concurrency_limit,omitempty"`
@@ -96,7 +94,7 @@ func (policy *EvalPolicy) UnmarshalJSON(payload []byte) error {
 	return nil
 }
 
-// Document is the unified configuration document shared by Personal and
+// Document is the unified configuration document shared by Global and
 // Repository scopes. Scope validation decides which fields each scope permits.
 type Document struct {
 	SchemaVersion  int                       `json:"schema_version"`
@@ -104,10 +102,11 @@ type Document struct {
 	Defaults       Defaults                  `json:"defaults,omitempty"`
 	Reviewers      map[string]ReviewerPolicy `json:"reviewers,omitempty"`
 	Eval           *EvalPolicy               `json:"eval,omitempty"`
+	Reviews        *ReviewSelection          `json:"reviews,omitempty"`
 }
 
 func (document *Document) UnmarshalJSON(payload []byte) error {
-	if _, err := decodeObjectFields(payload, "configuration", "schema_version", "state_directory", "defaults", "reviewers", "eval"); err != nil {
+	if _, err := decodeObjectFields(payload, "configuration", "schema_version", "state_directory", "defaults", "reviewers", "eval", "reviews"); err != nil {
 		return err
 	}
 	type plainDocument Document
@@ -186,15 +185,18 @@ func validateDocument(document Document, scope Scope, manager *Manager) error {
 	if err := validateReviewers(document.Reviewers, manager); err != nil {
 		return err
 	}
-	return validateDocumentEval(document.Eval)
+	if err := validateDocumentEval(document.Eval); err != nil {
+		return err
+	}
+	return validateReviewSelection(document.Reviews, scope, manager)
 }
 
 func validateScopeFields(document Document, scope Scope) error {
-	if scope == ScopeRepository && document.StateDirectory != "" {
-		return errors.New("state_directory is a Personal Configuration field")
+	if scope == ScopeRepository {
+		return validateRepositoryFields(document)
 	}
-	if scope == ScopeRepository && document.Eval != nil {
-		return errors.New("eval is a Personal Configuration field")
+	if document.Reviews != nil {
+		return errors.New("reviews is a Repository Configuration field")
 	}
 	if document.StateDirectory != "" && !filepath.IsAbs(document.StateDirectory) {
 		return errors.New("state_directory must be an absolute path")
@@ -202,14 +204,18 @@ func validateScopeFields(document Document, scope Scope) error {
 	return nil
 }
 
+func validateRepositoryFields(document Document) error {
+	if document.StateDirectory != "" {
+		return errors.New("state_directory is a Global Configuration field")
+	}
+	if document.Eval != nil {
+		return errors.New("eval is a Global Configuration field")
+	}
+	return nil
+}
+
 func validateDefaults(defaults Defaults, manager *Manager) error {
-	if err := validateDefault("reviewer", defaults.Reviewer, manager.validateReviewer); err != nil {
-		return err
-	}
-	if err := validateDefault("profile", defaults.Profile, manager.validateName); err != nil {
-		return err
-	}
-	return validateDefault("party", defaults.Party, manager.validateName)
+	return validateDefault("reviewer", defaults.Reviewer, manager.validateReviewer)
 }
 
 func validateDefault(field, value string, validate func(string) error) error {
@@ -266,6 +272,7 @@ type formattedDocument struct {
 	Defaults       *Defaults                 `json:"defaults,omitempty"`
 	Reviewers      map[string]ReviewerPolicy `json:"reviewers,omitempty"`
 	Eval           *formattedEval            `json:"eval,omitempty"`
+	Reviews        *ReviewSelection          `json:"reviews,omitempty"`
 }
 
 // formattedEval renders evaluation defaults without a redundant empty
@@ -292,6 +299,7 @@ func renderDocument(document Document) ([]byte, error) {
 		StateDirectory: document.StateDirectory,
 		Reviewers:      document.Reviewers,
 		Eval:           eval,
+		Reviews:        document.Reviews,
 	}
 	if !document.Defaults.empty() {
 		defaults := document.Defaults

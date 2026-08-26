@@ -8,13 +8,13 @@ import (
 )
 
 func TestPlanRejectsEnabledSameScopeModelMismatchWithoutWriting(t *testing.T) {
-	personalRoot := t.TempDir()
-	manager := testManager(t, personalRoot)
-	personalPath := filepath.Join(personalRoot, "config.json")
+	globalRoot := t.TempDir()
+	manager := testManager(t, globalRoot)
+	globalPath := filepath.Join(globalRoot, "config.json")
 
 	plan, err := manager.Plan("", []Intent{
-		SetReviewerModel{Target: ScopePersonal, Reviewer: "opencode", Model: "model-a"},
-		SetReviewerAllowedModels{Target: ScopePersonal, Reviewer: "opencode", Models: []string{"model-b"}},
+		SetReviewerModel{Target: ScopeGlobal, Reviewer: "opencode", Model: "model-a"},
+		SetReviewerAllowedModels{Target: ScopeGlobal, Reviewer: "opencode", Models: []string{"model-b"}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -22,21 +22,21 @@ func TestPlanRejectsEnabledSameScopeModelMismatchWithoutWriting(t *testing.T) {
 	if plan.Valid() {
 		t.Fatal("plan is valid, want effective policy rejection")
 	}
-	if !strings.Contains(plan.Reason(), personalPath) {
-		t.Fatalf("plan reason = %q, want path %q", plan.Reason(), personalPath)
+	if !strings.Contains(plan.Reason(), globalPath) {
+		t.Fatalf("plan reason = %q, want path %q", plan.Reason(), globalPath)
 	}
 	assertPublishRefused(t, manager, plan)
-	assertFileAbsent(t, personalPath)
+	assertFileAbsent(t, globalPath)
 }
 
 func TestPlanAllowsDisabledSameScopeModelMismatch(t *testing.T) {
-	personalRoot := t.TempDir()
-	manager := testManager(t, personalRoot)
+	globalRoot := t.TempDir()
+	manager := testManager(t, globalRoot)
 
 	plan, err := manager.Plan("", []Intent{
-		SetReviewerEnabled{Target: ScopePersonal, Reviewer: "opencode", Enabled: false},
-		SetReviewerModel{Target: ScopePersonal, Reviewer: "opencode", Model: "model-a"},
-		SetReviewerAllowedModels{Target: ScopePersonal, Reviewer: "opencode", Models: []string{"model-b"}},
+		SetReviewerEnabled{Target: ScopeGlobal, Reviewer: "opencode", Enabled: false},
+		SetReviewerModel{Target: ScopeGlobal, Reviewer: "opencode", Model: "model-a"},
+		SetReviewerAllowedModels{Target: ScopeGlobal, Reviewer: "opencode", Models: []string{"model-b"}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -47,12 +47,12 @@ func TestPlanAllowsDisabledSameScopeModelMismatch(t *testing.T) {
 }
 
 func TestPlanRejectsAllowlistExcludingPackagedModelWithoutWriting(t *testing.T) {
-	personalRoot := t.TempDir()
-	manager := testManager(t, personalRoot)
-	personalPath := filepath.Join(personalRoot, "config.json")
+	globalRoot := t.TempDir()
+	manager := testManager(t, globalRoot)
+	globalPath := filepath.Join(globalRoot, "config.json")
 
 	plan, err := manager.Plan("", []Intent{
-		SetReviewerAllowedModels{Target: ScopePersonal, Reviewer: "grok", Models: []string{"other-model"}},
+		SetReviewerAllowedModels{Target: ScopeGlobal, Reviewer: "grok", Models: []string{"other-model"}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -60,19 +60,19 @@ func TestPlanRejectsAllowlistExcludingPackagedModelWithoutWriting(t *testing.T) 
 	if plan.Valid() {
 		t.Fatal("plan is valid, want packaged model rejection")
 	}
-	for _, fragment := range []string{"grok-4.5", "packaged configuration", personalPath} {
+	for _, fragment := range []string{"grok-4.5", "packaged configuration", globalPath} {
 		if !strings.Contains(plan.Reason(), fragment) {
 			t.Fatalf("plan reason = %q, want %q", plan.Reason(), fragment)
 		}
 	}
 	assertPublishRefused(t, manager, plan)
-	assertFileAbsent(t, personalPath)
+	assertFileAbsent(t, globalPath)
 }
 
 func TestPlanAllowsAllowlistContainingPackagedModel(t *testing.T) {
 	manager := testManager(t, t.TempDir())
 	plan, err := manager.Plan("", []Intent{
-		SetReviewerAllowedModels{Target: ScopePersonal, Reviewer: "grok", Models: []string{"grok-4.5"}},
+		SetReviewerAllowedModels{Target: ScopeGlobal, Reviewer: "grok", Models: []string{"grok-4.5"}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -83,13 +83,13 @@ func TestPlanAllowsAllowlistContainingPackagedModel(t *testing.T) {
 }
 
 func TestPlanValidatesStagedScopeAgainstUntouchedScopeWithoutWriting(t *testing.T) {
-	personalRoot := t.TempDir()
+	globalRoot := t.TempDir()
 	repository := t.TempDir()
-	personalPath := filepath.Join(personalRoot, "config.json")
+	globalPath := filepath.Join(globalRoot, "config.json")
 	repositoryPath := filepath.Join(repository, ".reviewparty", "config.json")
-	const personalDocument = `{"schema_version":1,"reviewers":{"opencode":{"allowed_models":["model-b"]}}}`
-	writeDocument(t, personalPath, personalDocument)
-	manager := testManager(t, personalRoot)
+	const globalDocument = `{"schema_version":1,"reviewers":{"opencode":{"allowed_models":["model-b"]}}}`
+	writeDocument(t, globalPath, globalDocument)
+	manager := testManager(t, globalRoot)
 
 	plan, err := manager.Plan(Repository(repository), []Intent{
 		SetReviewerModel{Target: ScopeRepository, Reviewer: "opencode", Model: "model-a"},
@@ -100,19 +100,19 @@ func TestPlanValidatesStagedScopeAgainstUntouchedScopeWithoutWriting(t *testing.
 	if plan.Valid() {
 		t.Fatal("plan is valid, want effective policy rejection")
 	}
-	for _, path := range []string{repositoryPath, personalPath} {
+	for _, path := range []string{repositoryPath, globalPath} {
 		if !strings.Contains(plan.Reason(), path) {
 			t.Fatalf("plan reason = %q, want path %q", plan.Reason(), path)
 		}
 	}
 	assertPublishRefused(t, manager, plan)
 	assertFileAbsent(t, repositoryPath)
-	payload, err := os.ReadFile(personalPath)
+	payload, err := os.ReadFile(globalPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(payload) != personalDocument {
-		t.Fatalf("invalid plan changed personal configuration: %s", payload)
+	if string(payload) != globalDocument {
+		t.Fatalf("invalid plan changed global configuration: %s", payload)
 	}
 }
 

@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-func testManager(t *testing.T, personalRoot string) *Manager {
+func testManager(t *testing.T, globalRoot string) *Manager {
 	t.Helper()
 	validateName := func(name string) error {
 		if strings.ContainsAny(name, "./") {
@@ -18,12 +18,10 @@ func testManager(t *testing.T, personalRoot string) *Manager {
 		return nil
 	}
 	return NewManager(Options{
-		PersonalRoot:            personalRoot,
+		GlobalRoot:              globalRoot,
 		Reviewers:               []string{"grok", "opencode", "copilot", "codex"},
 		PackagedReviewerModels:  map[string]string{"grok": "grok-4.5", "copilot": "auto", "codex": "gpt-5.6-luna"},
 		PackagedDefaultReviewer: "grok",
-		PackagedDefaultProfile:  "bugs",
-		PackagedDefaultParty:    "standard",
 		ValidateName:            validateName,
 	})
 }
@@ -43,12 +41,11 @@ func TestResolvePreservesScopeProvenance(t *testing.T) {
 	repository := t.TempDir()
 	writeDocument(t, filepath.Join(root, "config.json"), `{
   "schema_version": 1,
-  "defaults": {"reviewer": "opencode", "party": "baseline"},
+  "defaults": {"reviewer": "opencode"},
   "reviewers": {"opencode": {"model": "meta/muse-spark-1.2-contributor"}}
 }`)
 	writeDocument(t, filepath.Join(repository, ".reviewparty", "config.json"), `{
   "schema_version": 1,
-  "defaults": {"profile": "security", "party": "release-gate"},
   "reviewers": {"opencode": {"enabled": false}}
 }`)
 	manager := testManager(t, root)
@@ -57,15 +54,13 @@ func TestResolvePreservesScopeProvenance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	personalPath := filepath.Join(root, "config.json")
+	globalPath := filepath.Join(root, "config.json")
 	repositoryPath := filepath.Join(repository, ".reviewparty", "config.json")
 
-	assertStringValue(t, "default reviewer", effective.DefaultReviewer, "opencode", true, SourcePersonal, personalPath)
-	assertStringValue(t, "default profile", effective.DefaultProfile, "security", true, SourceRepository, repositoryPath)
-	assertStringValue(t, "default party", effective.DefaultParty, "release-gate", true, SourceRepository, repositoryPath)
+	assertStringValue(t, "default reviewer", effective.DefaultReviewer, "opencode", true, SourceGlobal, globalPath)
 	opencode := mustReviewerPolicy(t, effective, "opencode")
 	assertBoolValue(t, "opencode enabled", opencode.Enabled, false, true, SourceRepository, repositoryPath)
-	assertStringValue(t, "opencode model", opencode.Model, "meta/muse-spark-1.2-contributor", true, SourcePersonal, personalPath)
+	assertStringValue(t, "opencode model", opencode.Model, "meta/muse-spark-1.2-contributor", true, SourceGlobal, globalPath)
 	grok := mustReviewerPolicy(t, effective, "grok")
 	assertBoolValue(t, "grok enabled", grok.Enabled, true, false, SourcePackaged, "")
 }
@@ -74,13 +69,11 @@ func TestResolveReportsExplicitOverrideProvenance(t *testing.T) {
 	root := t.TempDir()
 	manager := testManager(t, root)
 
-	effective, err := manager.Resolve(Request{Overrides: Overrides{Reviewer: "codex", Party: "release-gate"}})
+	effective, err := manager.Resolve(Request{Overrides: Overrides{Reviewer: "codex"}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	assertStringValue(t, "explicit reviewer", effective.DefaultReviewer, "codex", true, SourceExplicit, "")
-	assertStringValue(t, "explicit party", effective.DefaultParty, "release-gate", true, SourceExplicit, "")
-	assertStringValue(t, "packaged profile", effective.DefaultProfile, "bugs", false, SourcePackaged, "")
 }
 
 func TestResolvingDefaultsCreatesNoFile(t *testing.T) {
@@ -92,23 +85,22 @@ func TestResolvingDefaultsCreatesNoFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertLoadedDocumentAbsent(t, "personal", loaded.Personal)
+	assertLoadedDocumentAbsent(t, "global", loaded.Global)
 	assertLoadedDocumentAbsent(t, "repository", loaded.Repository)
 	effective, err := manager.Resolve(Request{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	assertStringValue(t, "packaged reviewer", effective.DefaultReviewer, "grok", false, SourcePackaged, "")
-	assertStringValue(t, "packaged party", effective.DefaultParty, "standard", false, SourcePackaged, "")
 	if _, err := os.Stat(filepath.Join(root, "config.json")); !os.IsNotExist(err) {
-		t.Fatalf("personal configuration was created: %v", err)
+		t.Fatalf("global configuration was created: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(repository, ".reviewparty", "config.json")); !os.IsNotExist(err) {
 		t.Fatalf("repository configuration was created: %v", err)
 	}
 }
 
-func TestRepositoryScopeRejectsPersonalOnlyFields(t *testing.T) {
+func TestRepositoryScopeRejectsGlobalOnlyFields(t *testing.T) {
 	repository := t.TempDir()
 	writeDocument(t, filepath.Join(repository, ".reviewparty", "config.json"),
 		`{"schema_version":1,"state_directory":"/somewhere/private"}`)
@@ -119,7 +111,7 @@ func TestRepositoryScopeRejectsPersonalOnlyFields(t *testing.T) {
 	if !errors.As(err, &invalid) {
 		t.Fatalf("error = %v, want InvalidDocumentError", err)
 	}
-	if invalid.Scope != ScopeRepository || !strings.Contains(invalid.Reason, "state_directory is a Personal Configuration field") {
+	if invalid.Scope != ScopeRepository || !strings.Contains(invalid.Reason, "state_directory is a Global Configuration field") {
 		t.Fatalf("error = %#v", invalid)
 	}
 }
@@ -127,11 +119,11 @@ func TestRepositoryScopeRejectsPersonalOnlyFields(t *testing.T) {
 func TestPublishIsAtomicWhenASecondFileFails(t *testing.T) {
 	root := t.TempDir()
 	repository := t.TempDir()
-	personalPath := filepath.Join(root, "config.json")
-	writeDocument(t, personalPath, `{"schema_version":1,"defaults":{"reviewer":"opencode"}}`)
+	globalPath := filepath.Join(root, "config.json")
+	writeDocument(t, globalPath, `{"schema_version":1,"defaults":{"reviewer":"opencode"}}`)
 	manager := testManager(t, root)
 	writes := 0
-	manager.publishWrite = func(write *pendingWrite) error {
+	manager.publication.writeFile = func(write *pendingWrite) error {
 		writes++
 		if writes == 2 {
 			return errors.New("forced second publication failure")
@@ -154,13 +146,13 @@ func TestPublishIsAtomicWhenASecondFileFails(t *testing.T) {
 	if err == nil {
 		t.Fatal("publication unexpectedly succeeded")
 	}
-	payload, readErr := os.ReadFile(personalPath)
+	payload, readErr := os.ReadFile(globalPath)
 	if readErr != nil {
 		t.Fatal(readErr)
 	}
 	const original = `{"schema_version":1,"defaults":{"reviewer":"opencode"}}`
 	if string(payload) != original {
-		t.Fatalf("personal configuration changed during failed publication:\n%s", payload)
+		t.Fatalf("global configuration changed during failed publication:\n%s", payload)
 	}
 }
 
@@ -192,16 +184,12 @@ func TestPublishedTypedReviewerIntentsUpdateEffectiveValues(t *testing.T) {
 	root := t.TempDir()
 	manager := testManager(t, root)
 	requireConfirmedPlan(t, manager, []Intent{
-		SetDefaultProfile{Target: ScopePersonal, Profile: "security"},
-		SetDefaultParty{Target: ScopePersonal, Party: "release-gate"},
-		SetReviewerEnabled{Target: ScopePersonal, Reviewer: "opencode", Enabled: false},
-		SetReviewerAllowedModels{Target: ScopePersonal, Reviewer: "opencode", Models: []string{"model-a", "model-b"}},
+		SetReviewerEnabled{Target: ScopeGlobal, Reviewer: "opencode", Enabled: false},
+		SetReviewerAllowedModels{Target: ScopeGlobal, Reviewer: "opencode", Models: []string{"model-a", "model-b"}},
 	})
 	effective := requireEffective(t, manager)
-	assertStringValue(t, "default profile", effective.DefaultProfile, "security", true, SourcePersonal, filepath.Join(root, "config.json"))
-	assertStringValue(t, "default party", effective.DefaultParty, "release-gate", true, SourcePersonal, filepath.Join(root, "config.json"))
 	opencode := mustReviewerPolicy(t, effective, "opencode")
-	assertBoolValue(t, "opencode enabled", opencode.Enabled, false, true, SourcePersonal, filepath.Join(root, "config.json"))
+	assertBoolValue(t, "opencode enabled", opencode.Enabled, false, true, SourceGlobal, filepath.Join(root, "config.json"))
 	if !reflect.DeepEqual(opencode.AllowedModels.Value, []string{"model-a", "model-b"}) || !opencode.AllowedModels.Authored {
 		t.Fatalf("opencode allowed models = %#v", opencode.AllowedModels)
 	}
@@ -220,7 +208,7 @@ func TestRenderedDocumentIsStableAndOmitsDefaults(t *testing.T) {
 	full := Document{
 		SchemaVersion:  SchemaVersion,
 		StateDirectory: "/state",
-		Defaults:       Defaults{Reviewer: "grok", Profile: "bugs"},
+		Defaults:       Defaults{Reviewer: "grok"},
 		Reviewers: map[string]ReviewerPolicy{
 			"opencode": {Enabled: boolPointer(false), Model: "m"},
 		},
@@ -234,8 +222,7 @@ func TestRenderedDocumentIsStableAndOmitsDefaults(t *testing.T) {
   "schema_version": 1,
   "state_directory": "/state",
   "defaults": {
-    "reviewer": "grok",
-    "profile": "bugs"
+    "reviewer": "grok"
   },
   "reviewers": {
     "opencode": {
@@ -262,7 +249,7 @@ func TestPlanRejectsUnknownReviewerAndPublishRefusesInvalidPlan(t *testing.T) {
 	manager := testManager(t, root)
 
 	plan, err := manager.Plan(Repository(""), []Intent{
-		SetDefaultReviewer{Target: ScopePersonal, Reviewer: "unknown"},
+		SetDefaultReviewer{Target: ScopeGlobal, Reviewer: "unknown"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -289,19 +276,19 @@ func TestPlanRejectsNilIntentAndPublishRefusesInvalidPlan(t *testing.T) {
 	}
 }
 
-func TestPublishedPersonalConfigurationIsPrivateAndReadable(t *testing.T) {
+func TestPublishedGlobalConfigurationIsPrivateAndReadable(t *testing.T) {
 	root := t.TempDir()
 	manager := testManager(t, root)
-	plan := requirePersonalPlan(t, manager, root)
-	assertPersonalPlanShape(t, plan)
+	plan := requireGlobalPlan(t, manager, root)
+	assertGlobalPlanShape(t, plan)
 	if err := manager.Publish(plan); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(root, "config.json")
 	assertPrivateFile(t, path)
 	effective := requireEffective(t, manager)
-	assertStringValue(t, "state directory", effective.StateDirectory, root, true, SourcePersonal, path)
-	assertStringValue(t, "model", mustReviewerPolicy(t, effective, "opencode").Model, "meta/muse-spark-1.2-contributor", true, SourcePersonal, path)
+	assertStringValue(t, "state directory", effective.StateDirectory, root, true, SourceGlobal, path)
+	assertStringValue(t, "model", mustReviewerPolicy(t, effective, "opencode").Model, "meta/muse-spark-1.2-contributor", true, SourceGlobal, path)
 }
 
 func mustReviewerPolicy(t *testing.T, effective Effective, id string) ReviewerSettings {
@@ -313,11 +300,11 @@ func mustReviewerPolicy(t *testing.T, effective Effective, id string) ReviewerSe
 	return policy
 }
 
-func requirePersonalPlan(t *testing.T, manager *Manager, root string) Plan {
+func requireGlobalPlan(t *testing.T, manager *Manager, root string) Plan {
 	t.Helper()
 	plan, err := manager.Plan(Repository(""), []Intent{
 		SetStateDirectory{Directory: root},
-		SetReviewerModel{Target: ScopePersonal, Reviewer: "opencode", Model: "meta/muse-spark-1.2-contributor"},
+		SetReviewerModel{Target: ScopeGlobal, Reviewer: "opencode", Model: "meta/muse-spark-1.2-contributor"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -342,7 +329,7 @@ func requireConfirmedPlan(t *testing.T, manager *Manager, intents []Intent) {
 	}
 }
 
-func assertPersonalPlanShape(t *testing.T, plan Plan) {
+func assertGlobalPlanShape(t *testing.T, plan Plan) {
 	t.Helper()
 	if len(plan.Changes()) != 2 {
 		t.Fatalf("plan changes = %#v", plan.Changes())
@@ -350,7 +337,7 @@ func assertPersonalPlanShape(t *testing.T, plan Plan) {
 	if len(plan.Paths()) != 1 {
 		t.Fatalf("plan paths = %#v", plan.Paths())
 	}
-	if plan.Scopes()[0] != ScopePersonal {
+	if plan.Scopes()[0] != ScopeGlobal {
 		t.Fatalf("plan scopes = %#v", plan.Scopes())
 	}
 }

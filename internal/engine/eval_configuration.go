@@ -5,11 +5,11 @@ import (
 	"reviewparty/internal/model"
 )
 
-// ApplyEvalConfigurationDefaults applies the authored Personal Configuration
+// ApplyEvalConfigurationDefaults applies the authored Global Configuration
 // defaults for the reviewer, model, retry policy, and concurrency limit of an
 // Experiment Configuration.
-func ApplyEvalConfigurationDefaults(personalConfigPath string, experiment *model.ExperimentConfiguration) error {
-	manager := newConfigurationManager(personalConfigPath)
+func ApplyEvalConfigurationDefaults(globalConfigPath string, experiment *model.ExperimentConfiguration) error {
+	manager := newConfigurationManager(globalConfigPath)
 	effective, err := manager.Resolve(configuration.Request{})
 	if err != nil {
 		return err

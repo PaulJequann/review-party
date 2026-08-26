@@ -79,11 +79,11 @@ func validateEvalSuiteProfile(suite, profile string) error {
 }
 
 func (conductor *Conductor) validateEvalSelection(experiment model.ExperimentConfiguration) error {
-	if err := validateExperiment(experiment, conductor.attemptDeadline); err != nil {
+	if err := validateExperiment(experiment, conductor.evalDefaultDeadline); err != nil {
 		return err
 	}
 	selection := model.ProfileSelection{Profile: experiment.Profile, Reviewer: experiment.Reviewer, Model: experiment.Model, Effort: experiment.Effort}
-	_, err := conductor.compileFilesystemProfile(selection, "")
+	_, err := conductor.compileExperimentProfile(selection, "")
 	return err
 }
 

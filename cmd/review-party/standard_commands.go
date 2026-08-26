@@ -13,21 +13,15 @@ import (
 
 func newReviewCommand(streams commandIO) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:               "review [PROFILE]",
+		Use:               "review PROFILE",
 		Short:             "Review working changes or a committed range",
 		Example:           "  review-party review bugs --repo .\n  review-party review code-quality --base main --head HEAD --format json",
-		Args:              cobra.MaximumNArgs(1),
+		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: completeProfileNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			profile := ""
-			if len(args) == 1 {
-				profile = args[0]
-			}
 			options := reviewOptions{
-				profile: profile, repository: stringFlag(cmd, "repo"), format: stringFlag(cmd, "format"),
-				deadline: durationFlag(cmd, "deadline"), configuration: stringFlag(cmd, "config"),
-				reviewer: stringFlag(cmd, "reviewer"), model: stringFlag(cmd, "model"), effort: stringFlag(cmd, "effort"),
-				base: stringFlag(cmd, "base"), head: stringFlag(cmd, "head"),
+				profile: args[0], repository: stringFlag(cmd, "repo"), format: stringFlag(cmd, "format"),
+				configuration: stringFlag(cmd, "config"), base: stringFlag(cmd, "base"), head: stringFlag(cmd, "head"),
 			}
 			return commandResult(executeReview(cmd.Context(), options, streams.output, streams.errors))
 		},
@@ -40,19 +34,17 @@ func newReplayCommand(streams commandIO) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "replay REVIEW_ID",
 		Short:   "Replay a recorded committed Review",
-		Example: "  review-party replay rp_... --reviewer opencode --model MODEL",
+		Example: "  review-party replay rp_...",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			options := replayOptions{
 				id: model.ReviewID(args[0]), format: stringFlag(cmd, "format"), configuration: stringFlag(cmd, "config"),
-				reviewer: stringFlag(cmd, "reviewer"), model: stringFlag(cmd, "model"), effort: stringFlag(cmd, "effort"),
 			}
 			return commandResult(executeReplay(cmd.Context(), options, streams.output, streams.errors))
 		},
 	}
 	addFormatFlag(cmd)
 	addConfigurationFlag(cmd)
-	addCommonSelectionFlags(cmd)
 	return cmd
 }
 
@@ -109,46 +101,24 @@ func newProfilesCommand(streams commandIO) *cobra.Command {
 func newExplainCommand(use string, streams commandIO) *cobra.Command {
 	cmd := &cobra.Command{
 		Use: use + " PROFILE", Short: "Explain a compiled Review Profile without launching a Reviewer",
-		Example: "  review-party " + use + " bugs --reviewer opencode --model MODEL", Args: cobra.ExactArgs(1),
+		Example: "  review-party " + use + " bugs", Args: cobra.ExactArgs(1),
 		ValidArgsFunction: completeProfileNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			options := explainOptions{
-				profile: args[0], format: stringFlag(cmd, "format"), deadline: durationFlag(cmd, "deadline"), configuration: stringFlag(cmd, "config"),
-				reviewer: stringFlag(cmd, "reviewer"), model: stringFlag(cmd, "model"), effort: stringFlag(cmd, "effort"), repository: stringFlag(cmd, "repo"),
+				profile: args[0], format: stringFlag(cmd, "format"), configuration: stringFlag(cmd, "config"), repository: stringFlag(cmd, "repo"),
 			}
 			return commandResult(executeExplain(cmd.Context(), options, streams.output, streams.errors))
 		},
 	}
 	addRepositoryFlag(cmd, "Git repository whose Profile should be explained")
 	addFormatFlag(cmd)
-	addExecutionFlags(cmd)
-	addCommonSelectionFlags(cmd)
+	addConfigurationFlag(cmd)
 	return cmd
 }
 
 func newProfileCommand(streams commandIO) *cobra.Command {
-	cmd := &cobra.Command{Use: "profile", Short: "Manage one Review Profile", Args: cobra.NoArgs, RunE: showCommandHelp}
-	create := &cobra.Command{
-		Use: "create NAME", Short: "Create an owned Review Profile", Example: "  review-party profile create security --blank --repo .", Args: cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			options := profileCreateOptions{profileScopeOptions: profileScopeOptions{repository: stringFlag(cmd, "repo"), global: boolFlag(cmd, "global")}, name: args[0], blank: boolFlag(cmd, "blank"), packaged: stringFlag(cmd, "from-packaged")}
-			return commandResult(executeProfileCreate(options, streams.output, streams.errors))
-		},
-	}
-	addRepositoryFlag(create, "Git repository that will own the Profile")
-	create.Flags().Bool("global", false, "Create a personal Profile")
-	create.Flags().Bool("blank", false, "Start from a minimal blank Profile")
-	create.Flags().String("from-packaged", "", "Start from a packaged Profile")
-	install := &cobra.Command{
-		Use: "install-defaults", Short: "Copy packaged Profiles into one owned scope", Example: "  review-party profile install-defaults --repo .", Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			options := profileScopeOptions{repository: stringFlag(cmd, "repo"), global: boolFlag(cmd, "global")}
-			return commandResult(executeProfileInstallDefaults(options, streams.output, streams.errors))
-		},
-	}
-	addRepositoryFlag(install, "Git repository that will own the Profiles")
-	install.Flags().Bool("global", false, "Install starter Profiles in Personal Configuration")
-	cmd.AddCommand(newExplainCommand("explain", streams), create, install)
+	cmd := &cobra.Command{Use: "profile", Short: "Inspect one saved Review Profile", Args: cobra.NoArgs, RunE: showCommandHelp}
+	cmd.AddCommand(newExplainCommand("explain", streams))
 	return cmd
 }
 
@@ -197,37 +167,32 @@ func newLibraryListCommand(spec libraryListSpec, streams commandIO) *cobra.Comma
 func newPartyCommand(streams commandIO) *cobra.Command {
 	cmd := &cobra.Command{Use: "party", Short: "Run or manage a Review Party", Args: cobra.NoArgs, RunE: showCommandHelp}
 	run := &cobra.Command{
-		Use: "run [PARTY]", Short: "Run every member of a Review Party over one Subject", Example: "  review-party party run standard --repo . --concurrency 2",
-		Args: cobra.MaximumNArgs(1), ValidArgsFunction: completePartyNames,
+		Use: "run PARTY", Short: "Run every member of a Review Party over one Subject", Example: "  review-party party run release-gate --repo .",
+		Args: cobra.ExactArgs(1), ValidArgsFunction: completePartyNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			name := ""
-			if len(args) == 1 {
-				name = args[0]
-			}
 			subjectReference, err := reviewSubjectReference(stringFlag(cmd, "base"), stringFlag(cmd, "head"))
 			if err != nil {
 				return err
 			}
 			options := partyRunOptions{
-				name: name, repository: stringFlag(cmd, "repo"), subject: subjectReference,
-				reviewer: stringFlag(cmd, "reviewer"), model: stringFlag(cmd, "model"), effort: stringFlag(cmd, "effort"),
-				concurrency: intFlag(cmd, "concurrency"), deadline: durationFlag(cmd, "deadline"), format: stringFlag(cmd, "format"), configuration: stringFlag(cmd, "config"),
+				name: args[0], repository: stringFlag(cmd, "repo"), subject: subjectReference,
+				format: stringFlag(cmd, "format"), configuration: stringFlag(cmd, "config"),
 			}
 			return commandResult(executePartyRun(cmd.Context(), options, streams.output, streams.errors))
 		},
 	}
 	addReviewFlags(run)
-	run.Flags().Int("concurrency", 0, "Maximum active Reviewer executions")
 	cmd.AddCommand(run)
 	return cmd
 }
 
 func newConfigCommand(streams commandIO) *cobra.Command {
 	cmd := &cobra.Command{Use: "config", Short: "Inspect or manage Review Party configuration", Args: cobra.NoArgs, RunE: showCommandHelp}
-	path := &cobra.Command{Use: "path", Short: "Print the Personal Configuration path", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+	path := &cobra.Command{Use: "path", Short: "Print the Global Configuration path", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		return printConfigurationPath(stringFlag(cmd, "config"), streams.output)
 	}}
-	show := &cobra.Command{Use: "show", Short: "Print the authored Personal Configuration", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+	file := &cobra.Command{Use: "file", Short: "Inspect authored Configuration files", Args: cobra.NoArgs, RunE: showCommandHelp}
+	show := &cobra.Command{Use: "show", Short: "Print the authored Global Configuration", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		if err := showConfiguration(stringFlag(cmd, "config"), streams.output); err != nil {
 			return commandExitError{code: printFailure(streams.errors, err)}
 		}
@@ -235,7 +200,8 @@ func newConfigCommand(streams commandIO) *cobra.Command {
 	}}
 	addConfigurationFlag(path)
 	addConfigurationFlag(show)
-	cmd.AddCommand(path, show)
+	file.AddCommand(show)
+	cmd.AddCommand(path, file)
 	return cmd
 }
 

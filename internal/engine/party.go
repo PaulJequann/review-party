@@ -37,38 +37,6 @@ type preparedParty struct {
 	members []preparedReview
 }
 
-// effectivePartyDefinition applies explicit caller overrides on top of the
-// stored definition. An override narrows every member to the explicitly
-// selected Reviewer choice; it never substitutes or silently drops a choice.
-func effectivePartyDefinition(definition model.PartyDefinition, selection model.PartySelection) model.PartyDefinition {
-	effective := model.PartyDefinition{
-		SchemaVersion:    definition.SchemaVersion,
-		Name:             definition.Name,
-		Description:      definition.Description,
-		ConcurrencyLimit: definition.ConcurrencyLimit,
-		Profiles:         append([]model.PartyMember(nil), definition.Profiles...),
-	}
-	if selection.ConcurrencyLimit > 0 {
-		effective.ConcurrencyLimit = selection.ConcurrencyLimit
-	}
-	if effective.ConcurrencyLimit == 0 {
-		effective.ConcurrencyLimit = 1
-	}
-	for index := range effective.Profiles {
-		member := &effective.Profiles[index]
-		if selection.Reviewer != "" {
-			member.Reviewer = selection.Reviewer
-		}
-		if selection.Model != "" {
-			member.Model = selection.Model
-		}
-		if selection.Effort != "" {
-			member.Effort = selection.Effort
-		}
-	}
-	return effective
-}
-
 type partyPlan struct {
 	effective  model.PartyDefinition
 	source     string
@@ -95,15 +63,12 @@ func (conductor *Conductor) prepareParty(selection model.PartySelection) (prepar
 	}
 	prepared := preparedParty{bundle: bundle, members: make([]preparedReview, 0, len(plan.members))}
 	for _, member := range plan.members {
-		prepared.members = append(prepared.members, preparedReview{subject: plan.subject, profile: member.profile, timings: member.timings, deadline: conductor.attemptDeadline})
+		prepared.members = append(prepared.members, preparedReview{subject: plan.subject, profile: member.profile, timings: member.timings, deadline: member.profile.deadline})
 	}
 	return prepared, ledger, nil
 }
 
 func (conductor *Conductor) planParty(selection model.PartySelection) (partyPlan, error) {
-	if selection.ConcurrencyLimit < 0 {
-		return partyPlan{}, errors.New("party concurrency override must not be negative")
-	}
 	repository, err := subject.ResolveRepositoryRoot(selection.Repository)
 	if err != nil {
 		return partyPlan{}, err
@@ -113,14 +78,11 @@ func (conductor *Conductor) planParty(selection model.PartySelection) (partyPlan
 	if err != nil {
 		return partyPlan{}, err
 	}
-	composed, err := conductor.composeParty(lookup)
+	effective, source, err := conductor.resolveParty(lookup)
 	if err != nil {
 		return partyPlan{}, err
 	}
-	effective := effectivePartyDefinition(composed.definition, selection)
-	if err := validatePartyDefinition(effective); err != nil {
-		return partyPlan{}, InvalidPartyDefinitionError{Name: effective.Name, Reason: err.Error()}
-	}
+	effective.Profiles = append([]model.PartyMember(nil), effective.Profiles...)
 	subject, subjectResolutionMS, err := conductor.resolveSharedSubject(selection.Subject, repository)
 	if err != nil {
 		return partyPlan{}, err
@@ -129,23 +91,17 @@ func (conductor *Conductor) planParty(selection model.PartySelection) (partyPlan
 	if err != nil {
 		return partyPlan{}, err
 	}
-	return partyPlan{effective: effective, source: composed.source, repository: repository, subject: subject, members: members}, nil
+	return partyPlan{effective: effective, source: source, repository: repository, subject: subject, members: members}, nil
 }
 
-// resolvePartyLookup resolves the explicit or configured default Party through
-// the same Configuration Manager that owns Profile and Reviewer precedence.
 func (conductor *Conductor) resolvePartyLookup(selection model.PartySelection) (partyLookup, error) {
 	if conductor.configuration == nil {
 		return partyLookup{}, errors.New("party resolution requires a configuration manager")
 	}
-	effective, err := conductor.configuration.Resolve(configuration.Request{
-		Repository: configuration.Repository(selection.Repository),
-		Overrides:  configuration.Overrides{Party: selection.Name},
-	})
-	if err != nil {
-		return partyLookup{}, err
+	if selection.Name == "" {
+		return partyLookup{}, errors.New("Party name is required")
 	}
-	return partyLookup{repository: selection.Repository, name: effective.DefaultParty.Value}, nil
+	return partyLookup{repository: selection.Repository, name: selection.Name}, nil
 }
 
 // resolveSharedSubject freezes the one Review Subject every member will review,
@@ -158,24 +114,44 @@ func (conductor *Conductor) resolveSharedSubject(reference model.SubjectReferenc
 
 // compilePartyMembers compiles every member Profile Revision before the bundle
 // row is created so an incompatible Reviewer fails closed before any launch.
-func (conductor *Conductor) compilePartyMembers(repository string, effective model.PartyDefinition, subjectResolutionMS int64) ([]compiledPartyMember, error) {
-	members := make([]compiledPartyMember, 0, len(effective.Profiles))
-	for _, member := range effective.Profiles {
+func (conductor *Conductor) compilePartyMembers(repository string, party model.PartyDefinition, subjectResolutionMS int64) ([]compiledPartyMember, error) {
+	effective, err := conductor.configuration.Resolve(configuration.Request{Repository: configuration.Repository(repository)})
+	if err != nil {
+		return nil, err
+	}
+	members := make([]compiledPartyMember, 0, len(party.Profiles))
+	for _, member := range party.Profiles {
 		compiledStarted := conductor.now().UTC()
-		selection := model.ProfileSelection{Profile: member.Profile, Reviewer: member.Reviewer, Model: member.Model, Effort: member.Effort}
-		profile, err := conductor.compileFilesystemProfile(selection, repository)
+		profile, err := conductor.compilePartyProfile(repository, member, effective)
 		if err != nil {
-			return nil, fmt.Errorf("party %q member %q: %w", effective.Name, member.Profile, err)
+			return nil, fmt.Errorf("party %q member %q: %w", party.Name, member.Profile, err)
 		}
 		timings := model.ReviewTimings{SubjectResolutionMS: subjectResolutionMS, ProfileCompilationMS: elapsedMilliseconds(compiledStarted, conductor.now().UTC())}
-		members = append(members, compiledPartyMember{profile: profile, timings: timings})
+		members = append(members, compiledPartyMember{reference: member, profile: profile, timings: timings})
 	}
 	return members, nil
 }
 
+func (conductor *Conductor) compilePartyProfile(repository string, member model.PartyMember, effective configuration.Effective) (compiledProfile, error) {
+	reference := configuration.ProfileReference{Scope: configuration.Scope(member.Scope), Profile: member.Profile}
+	profile, found, err := conductor.configuration.ResolveProfileReference(configuration.Repository(repository), reference)
+	if err != nil {
+		return compiledProfile{}, err
+	}
+	if !found {
+		return compiledProfile{}, fmt.Errorf("%s Profile %q was not found", member.Scope, member.Profile)
+	}
+	resolved, err := resolvedFromProfile(profile, effective)
+	if err != nil {
+		return compiledProfile{}, err
+	}
+	return conductor.compileResolvedProfile(resolved)
+}
+
 type compiledPartyMember struct {
-	profile compiledProfile
-	timings model.ReviewTimings
+	reference model.PartyMember
+	profile   compiledProfile
+	timings   model.ReviewTimings
 }
 
 func newPendingBundle(created time.Time, plan partyPlan) (model.ReviewBundle, error) {
@@ -197,7 +173,7 @@ func newPendingBundle(created time.Time, plan partyPlan) (model.ReviewBundle, er
 		UpdatedAt:        created,
 	}
 	for _, member := range plan.members {
-		bundle.Members = append(bundle.Members, model.BundleMember{Profile: member.profile.revision.Name, Lifecycle: model.LifecyclePending})
+		bundle.Members = append(bundle.Members, model.BundleMember{Scope: member.reference.Scope, Profile: member.profile.revision.Name, Lifecycle: model.LifecyclePending})
 	}
 	bundle.PartyRevision = partyRevisionIdentity(bundle, plan.effective, plan.members)
 	return bundle, nil
@@ -209,6 +185,7 @@ func newPendingBundle(created time.Time, plan partyPlan) (model.ReviewBundle, er
 // revision instead of silently overriding recorded provenance.
 func partyRevisionIdentity(bundle model.ReviewBundle, effective model.PartyDefinition, members []compiledPartyMember) string {
 	type revisionMember struct {
+		Scope           string `json:"scope"`
 		Profile         string `json:"profile"`
 		Reviewer        string `json:"reviewer"`
 		Model           string `json:"model"`
@@ -224,6 +201,7 @@ func partyRevisionIdentity(bundle model.ReviewBundle, effective model.PartyDefin
 	for index, member := range effective.Profiles {
 		compiled := members[index].profile.revision
 		composition.Members = append(composition.Members, revisionMember{
+			Scope:           member.Scope,
 			Profile:         member.Profile,
 			Reviewer:        compiled.ReviewerID,
 			Model:           compiled.Model,
@@ -330,7 +308,7 @@ func (conductor *Conductor) absorbPendingPartyResults(ledger store.BundleStore, 
 // Incomplete lifecycle is an honest member outcome; only persistence or
 // cancellation-class errors are hard failures that stop remaining work.
 func (conductor *Conductor) absorbPartyMember(ledger store.BundleStore, bundle model.ReviewBundle, result concurrentPartyResult) (model.ReviewBundle, error) {
-	member := model.BundleMember{Profile: bundle.Members[result.index].Profile, ReviewID: result.record.ID, Lifecycle: result.record.Lifecycle}
+	member := model.BundleMember{Scope: bundle.Members[result.index].Scope, Profile: bundle.Members[result.index].Profile, ReviewID: result.record.ID, Lifecycle: result.record.Lifecycle}
 	if result.record.Result != nil {
 		member.Status = string(result.record.Result.Status)
 		member.FindingCount = result.record.Result.FindingCount()

@@ -7,29 +7,21 @@ import (
 	"fmt"
 	"io"
 	"strings"
-	"time"
 
 	"reviewparty/internal/engine"
 	"reviewparty/internal/model"
 )
 
 func executePartyRun(ctx context.Context, options partyRunOptions, stdout, stderr io.Writer) int {
-	conductor, err := engine.New(engine.Config{
-		AttemptDeadline:       options.deadline,
-		UserConfigurationPath: options.configuration,
-	})
+	conductor, err := engine.New(engine.Config{UserConfigurationPath: options.configuration})
 	if err != nil {
 		fmt.Fprintf(stderr, "review-party: %v\n", err)
 		return 1
 	}
 	bundle, err := conductor.RunParty(ctx, model.PartySelection{
-		Name:             options.name,
-		Repository:       options.repository,
-		Subject:          options.subject,
-		Reviewer:         options.reviewer,
-		Model:            options.model,
-		Effort:           options.effort,
-		ConcurrencyLimit: options.concurrency,
+		Name:       options.name,
+		Repository: options.repository,
+		Subject:    options.subject,
 	})
 	if err != nil {
 		fmt.Fprintf(stderr, "review-party: %v\n", err)
@@ -49,11 +41,6 @@ type partyRunOptions struct {
 	name          string
 	repository    string
 	subject       model.SubjectReference
-	reviewer      string
-	model         string
-	effort        string
-	concurrency   int
-	deadline      time.Duration
 	format        string
 	configuration string
 }
@@ -102,11 +89,16 @@ func printHumanPartySummaries(stdout io.Writer, summaries []model.PartySummary) 
 			description = summary.Error
 		}
 		fmt.Fprintf(stdout, "%s · %s · %s\n", summary.Name, summary.Source, description)
-		if len(summary.Extends) > 0 {
-			fmt.Fprintf(stdout, "  extends: %s\n", strings.Join(summary.Extends, ", "))
-		}
-		fmt.Fprintf(stdout, "  profiles: %s\n", strings.Join(summary.Members, ", "))
+		fmt.Fprintf(stdout, "  profiles: %s\n", strings.Join(partySummaryMembers(summary.Members), ", "))
 	}
+}
+
+func partySummaryMembers(members []model.PartyMember) []string {
+	formatted := make([]string, 0, len(members))
+	for _, member := range members {
+		formatted = append(formatted, member.Scope+":"+member.Profile)
+	}
+	return formatted
 }
 
 func printBundle(output io.Writer, bundle model.ReviewBundle, format string) error {

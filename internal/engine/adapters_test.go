@@ -9,7 +9,6 @@ import (
 	"reviewparty/internal/result"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestCopilotCommandRestrictsVisibleTools(t *testing.T) {
@@ -61,45 +60,6 @@ func TestCopilotUnavailableModelIsClassifiedWithoutRetry(t *testing.T) {
 	execution := classifyCopilotFailure(`Error: Model "gpt-5.6-luna" from --model flag is not available.`, context.Canceled)
 	if execution.Outcome != model.AttemptReviewerUnavailable {
 		t.Fatalf("outcome = %q", execution.Outcome)
-	}
-}
-
-func TestReviewerSelectionChangesProfileRevision(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	executor := successfulExecutor(cleanReview)
-	capabilities := restrictedReviewCapabilities()
-	catalog := newReviewerCatalog([]reviewerRegistration{
-		{candidate: reviewerCandidate{ID: "reviewer-a", Model: "same-model", Effort: "same-effort", Harness: "same-harness", Transport: "same-transport"}, capabilities: capabilities, executor: executor},
-		{candidate: reviewerCandidate{ID: "reviewer-b", Model: "same-model", Effort: "same-effort", Harness: "same-harness", Transport: "same-transport"}, capabilities: capabilities, executor: executor},
-	})
-	first, err := compileSelectedTestProfile(catalog, model.ProfileSelection{Profile: "bugs", Reviewer: "reviewer-a"}, time.Second)
-	if err != nil {
-		t.Fatal(err)
-	}
-	second, err := compileSelectedTestProfile(catalog, model.ProfileSelection{Profile: "bugs", Reviewer: "reviewer-b"}, time.Second)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if first.revision.Revision == second.revision.Revision {
-		t.Fatal("different reviewers produced the same Profile Revision")
-	}
-}
-
-func TestCompiledBugProfileIncludesPromisedPass(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	profile, err := compileSelectedTestProfile(defaultReviewerCatalog(), model.ProfileSelection{Profile: "bugs", Reviewer: "grok"}, time.Second)
-	if err != nil {
-		t.Fatal(err)
-	}
-	passes := profile.revision.Passes
-	if len(passes) != 1 {
-		t.Fatalf("passes = %#v, want one pass", passes)
-	}
-	if passes[0].Name != "bug-review" {
-		t.Fatalf("pass name = %q, want bug-review", passes[0].Name)
-	}
-	if !passes[0].Required {
-		t.Fatal("bug-review pass is not required")
 	}
 }
 
