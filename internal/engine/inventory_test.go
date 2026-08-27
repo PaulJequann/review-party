@@ -1,10 +1,14 @@
 package engine
 
-import "testing"
+import (
+	"context"
+	"testing"
+	"time"
+)
 
 func TestProfilesListOnlySavedExecutableProfiles(t *testing.T) {
-	library := newTestProfileLibrary(t)
-	profiles, err := library.list("")
+	conductor := testConductor(t, successfulExecutor(cleanReview), time.Second)
+	profiles, err := conductor.ProfilesForRepository(context.Background(), "")
 	if err != nil {
 		t.Fatal(err)
 	}

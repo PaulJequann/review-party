@@ -108,7 +108,7 @@ func (conductor *Conductor) prepareRun(selection model.RunSelection) (preparedBu
 // launches. It fails closed on a missing selection, missing reference,
 // incomplete Profile, unavailable saved Reviewer, or rejected model.
 func (conductor *Conductor) planSelection(selection model.RunSelection) (plannedSelection, error) {
-	repository, err := subject.ResolveRepositoryRoot(selection.Repository)
+	repository, err := resolveSubjectRepository(selection.Repository, selection.Subject)
 	if err != nil {
 		return plannedSelection{}, err
 	}
@@ -120,7 +120,10 @@ func (conductor *Conductor) planSelection(selection model.RunSelection) (planned
 	if err != nil {
 		return plannedSelection{}, err
 	}
-	subject, subjectResolutionMS, err := conductor.resolveSharedSubject(selection.Subject, repository)
+	resolvedRepository, subject, subjectResolutionMS, err := conductor.prepareReviewSubject(selection.Repository, selection.Subject)
+	if err == nil && resolvedRepository != repository {
+		repository = resolvedRepository
+	}
 	if err != nil {
 		return plannedSelection{}, err
 	}
@@ -132,10 +135,23 @@ func (conductor *Conductor) planSelection(selection model.RunSelection) (planned
 
 // resolveSharedSubject freezes the one Review Subject every member will review,
 // after preflight compiles every Profile Revision and before any launch.
-func (conductor *Conductor) resolveSharedSubject(reference model.SubjectReference, repository string) (model.ReviewSubject, int64, error) {
+func (conductor *Conductor) prepareReviewSubject(repository string, reference model.SubjectReference) (string, model.ReviewSubject, int64, error) {
 	started := conductor.now().UTC()
-	resolved, err := subject.ResolveSubject(repository, reference)
-	return resolved, elapsedMilliseconds(started, conductor.now().UTC()), err
+	resolvedRepository, err := resolveSubjectRepository(repository, reference)
+	if err != nil {
+		return "", model.ReviewSubject{}, elapsedMilliseconds(started, conductor.now().UTC()), err
+	}
+	resolved, err := subject.ResolveSubject(resolvedRepository, reference)
+	return resolvedRepository, resolved, elapsedMilliseconds(started, conductor.now().UTC()), err
+}
+
+// resolveSubjectRepository is the single repository rule shared by ordinary
+// and Eval preparation, including captured Subjects that already carry paths.
+func resolveSubjectRepository(repository string, reference model.SubjectReference) (string, error) {
+	if reference.Kind == model.SubjectCapturedChange {
+		return repository, nil
+	}
+	return subject.ResolveRepositoryRoot(repository)
 }
 
 // resolvedRunSelection pairs the expanded selection with its reviewer policy.

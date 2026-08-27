@@ -11,40 +11,18 @@ import (
 	"reviewparty/internal/store"
 )
 
-func TestOrdinaryReviewRejectsInvocationOverrides(t *testing.T) {
-	repository := changedTestRepository(t)
-	library := newProfileLibrary(t.TempDir())
-	publishTestProfile(t, library.manager(), configuration.ProfileDraft{
-		Target: configuration.ScopeGlobal, Name: "bugs", Reviewer: "grok", Model: "grok-4.5",
-		ReasoningEffort: "high", AttemptDeadline: "1m", Instructions: "Review bugs.\n",
-	})
-	grok := successfulExecutor(cleanReview)
-	opencode := successfulExecutor(cleanReview)
-	conductor := newConfiguredTestConductor(t, library, map[string]attemptExecutor{"grok": grok, "opencode": opencode})
-	_, err := conductor.Review(context.Background(), model.ReviewSelection{
-		Repository: repository, Subject: model.WorkingChanges(), Profile: "bugs",
-		Reviewer: "opencode", Model: "other", Effort: "low",
-	})
-	if err == nil {
-		t.Fatal("ordinary Review accepted execution overrides")
-	}
-	if grok.attemptCount() != 0 || opencode.attemptCount() != 0 {
-		t.Fatalf("grok attempts = %d, opencode attempts = %d", grok.attemptCount(), opencode.attemptCount())
-	}
-}
-
 func TestSavedProfileReviewerPolicyFailsClosed(t *testing.T) {
 	repository := changedTestRepository(t)
 	root := t.TempDir()
 	writeTestFile(t, filepath.Join(root, "config.json"), `{"schema_version":1,"reviewers":{"grok":{"enabled":false}}}`)
-	library := newProfileLibrary(root)
-	publishTestProfile(t, library.manager(), configuration.ProfileDraft{
+	manager := configuration.NewManager(configuration.Options{GlobalRoot: root, Reviewers: []string{"grok", "opencode", "copilot", "codex"}})
+	publishTestProfile(t, manager, configuration.ProfileDraft{
 		Target: configuration.ScopeGlobal, Name: "bugs", Reviewer: "grok", Model: "grok-4.5",
 		ReasoningEffort: "high", AttemptDeadline: "1m", Instructions: "Review bugs.\n",
 	})
 	executor := successfulExecutor(cleanReview)
-	conductor := newConfiguredTestConductor(t, library, map[string]attemptExecutor{"grok": executor})
-	_, err := conductor.Review(context.Background(), model.ReviewSelection{Repository: repository, Subject: model.WorkingChanges(), Profile: "bugs"})
+	conductor := newConfiguredTestConductor(t, manager, map[string]attemptExecutor{"grok": executor})
+	_, err := conductor.Review(context.Background(), model.RunSelection{Repository: repository, Subject: model.WorkingChanges(), Profile: "bugs"})
 	if err == nil {
 		t.Fatal("disabled saved Reviewer was accepted")
 	}
@@ -64,13 +42,13 @@ func publishTestProfile(t *testing.T, manager *configuration.Manager, draft conf
 	}
 }
 
-func newConfiguredTestConductor(t *testing.T, library profileLibrary, executors map[string]attemptExecutor) *Conductor {
+func newConfiguredTestConductor(t *testing.T, manager *configuration.Manager, executors map[string]attemptExecutor) *Conductor {
 	t.Helper()
 	ledger, err := store.NewLedgerRecordStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	conductor, err := newConductorWithProfiles(ledger, catalogWithExecutors(executors), library, time.Second)
+	conductor, err := newConductorWithManager(ledger, catalogWithExecutors(executors), manager, time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}

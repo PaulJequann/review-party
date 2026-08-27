@@ -18,7 +18,7 @@ func TestReplayUsesFrozenProfileAndCreatesIndependentLineage(t *testing.T) {
 	repository, base, head := committedReviewFixture(t)
 	executor := successfulExecutor(cleanReview)
 	conductor := testConductor(t, executor, time.Second)
-	original, err := conductor.Review(context.Background(), model.ReviewSelection{Repository: repository, Subject: model.CommittedRange(base, head), Profile: "bugs"})
+	original, err := conductor.Review(context.Background(), model.RunSelection{Repository: repository, Subject: model.CommittedRange(base, head), Profile: "bugs"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +68,7 @@ func assertReplayLineage(t *testing.T, source *model.ReviewID, expected model.Re
 func TestReplayRejectsExecutionOverrides(t *testing.T) {
 	repository, base, head := committedReviewFixture(t)
 	conductor := testConductor(t, successfulExecutor(cleanReview), time.Second)
-	original, err := conductor.Review(context.Background(), model.ReviewSelection{Repository: repository, Subject: model.CommittedRange(base, head), Profile: "bugs"})
+	original, err := conductor.Review(context.Background(), model.RunSelection{Repository: repository, Subject: model.CommittedRange(base, head), Profile: "bugs"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +99,7 @@ func TestReplayRejectsMissingCommitBeforeLaunch(t *testing.T) {
 	repository, base, head := committedReviewFixture(t)
 	executor := successfulExecutor(cleanReview)
 	conductor := testConductor(t, executor, time.Second)
-	original, err := conductor.Review(context.Background(), model.ReviewSelection{Repository: repository, Subject: model.CommittedRange(base, head), Profile: "bugs"})
+	original, err := conductor.Review(context.Background(), model.RunSelection{Repository: repository, Subject: model.CommittedRange(base, head), Profile: "bugs"})
 	if err != nil {
 		t.Fatal(err)
 	}

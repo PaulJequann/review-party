@@ -380,7 +380,7 @@ func TestRunDeduplicatesExactScopedOccurrencesAcrossSources(t *testing.T) {
 	repository := changedTestRepository(t)
 	executor := successfulExecutor(cleanReview)
 	conductor := testPartyConductor(t, map[string]attemptExecutor{defaultReviewer: executor})
-	globalRoot, err := conductor.profiles.manager().GlobalRoot()
+	globalRoot, err := conductor.configuration.GlobalRoot()
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -39,12 +39,25 @@ func (conductor *Conductor) prepareEvalReview(ctx context.Context, selection mod
 		return preparedReview{}, time.Time{}, err
 	}
 	started := conductor.now().UTC()
-	prepared, err := conductor.prepareReview(selection, true)
+	timings := model.ReviewTimings{}
+	repository, _, subjectResolutionMS, err := conductor.prepareReviewSubject(selection.Repository, selection.Subject)
+	timings.SubjectResolutionMS += subjectResolutionMS
 	if err != nil {
 		return preparedReview{}, time.Time{}, err
 	}
-	prepared.profile.revision.AttemptLimit = policy.MaxAttempts
-	return prepared, started, nil
+	profileStarted := conductor.now().UTC()
+	profile, err := conductor.compileExperimentProfile(selection.ProfileSelection(), repository)
+	timings.ProfileCompilationMS = elapsedMilliseconds(profileStarted, conductor.now().UTC())
+	if err != nil {
+		return preparedReview{}, time.Time{}, err
+	}
+	_, resolvedSubject, subjectResolutionMS, err := conductor.prepareReviewSubject(selection.Repository, selection.Subject)
+	timings.SubjectResolutionMS += subjectResolutionMS
+	if err != nil {
+		return preparedReview{}, time.Time{}, err
+	}
+	profile.revision.AttemptLimit = policy.MaxAttempts
+	return preparedReview{subject: resolvedSubject, profile: profile, timings: timings, deadline: profile.deadline}, started, nil
 }
 
 func shouldRetryEval(record model.ReviewRecord, err error, attempts int, policy model.RetryPolicy) bool {

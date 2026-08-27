@@ -14,22 +14,22 @@ import (
 
 func TestRepositoryProfileShadowsGlobalAsCompleteDefinition(t *testing.T) {
 	repository := changedTestRepository(t)
-	library := newProfileLibrary(t.TempDir())
-	publishTestProfile(t, library.manager(), configuration.ProfileDraft{
+	manager := configuration.NewManager(configuration.Options{GlobalRoot: t.TempDir(), Reviewers: []string{"grok", "opencode", "copilot", "codex"}})
+	publishTestProfile(t, manager, configuration.ProfileDraft{
 		Target: configuration.ScopeGlobal, Name: "bugs", Reviewer: "grok", Model: "grok-4.5",
 		ReasoningEffort: "high", AttemptDeadline: "1m", Instructions: "GLOBAL GUIDANCE\n",
 	})
-	plan, err := library.manager().PlanProfileCreation(configuration.Repository(repository), configuration.ProfileDraft{
+	plan, err := manager.PlanProfileCreation(configuration.Repository(repository), configuration.ProfileDraft{
 		Target: configuration.ScopeRepository, Name: "bugs", Reviewer: "grok", Model: "grok-4.5",
 		ReasoningEffort: "high", AttemptDeadline: "2m", Instructions: "REPOSITORY GUIDANCE\n",
 	})
 	if err != nil || !plan.Valid() {
 		t.Fatalf("plan error = %v, reason = %q", err, plan.Reason())
 	}
-	if err := library.manager().Publish(plan); err != nil {
+	if err := manager.Publish(plan); err != nil {
 		t.Fatal(err)
 	}
-	profile, err := compileTestProfile(library, "bugs", model.ReviewSubject{Repository: repository})
+	profile, err := compileTestProfile(manager, "bugs", model.ReviewSubject{Repository: repository})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,8 +39,8 @@ func TestRepositoryProfileShadowsGlobalAsCompleteDefinition(t *testing.T) {
 }
 
 func TestTemplateCannotResolveAsExecutableProfile(t *testing.T) {
-	library := newProfileLibrary(t.TempDir())
-	_, err := compileTestProfile(library, "bugs", model.ReviewSubject{})
+	manager := configuration.NewManager(configuration.Options{GlobalRoot: t.TempDir(), Reviewers: []string{"grok", "opencode", "copilot", "codex"}})
+	_, err := compileTestProfile(manager, "bugs", model.ReviewSubject{})
 	var unknown UnknownProfileError
 	if !errors.As(err, &unknown) {
 		t.Fatalf("error = %v", err)
@@ -49,7 +49,7 @@ func TestTemplateCannotResolveAsExecutableProfile(t *testing.T) {
 
 func TestUnknownProfileReportsInvalidAuthoredNames(t *testing.T) {
 	root := t.TempDir()
-	library := newProfileLibrary(root)
+	manager := configuration.NewManager(configuration.Options{GlobalRoot: root, Reviewers: []string{"grok", "opencode", "copilot", "codex"}})
 	directory := filepath.Join(root, "profiles", "broken")
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		t.Fatal(err)
@@ -57,7 +57,7 @@ func TestUnknownProfileReportsInvalidAuthoredNames(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(directory, "profile.json"), []byte("INVALID"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, err := compileTestProfile(library, "missing", model.ReviewSubject{})
+	_, err := compileTestProfile(manager, "missing", model.ReviewSubject{})
 	var unknown UnknownProfileError
 	if !errors.As(err, &unknown) {
 		t.Fatalf("error = %v", err)
@@ -72,8 +72,8 @@ func TestUnknownProfileReportsInvalidAuthoredNames(t *testing.T) {
 
 func TestInvalidProfileMetadataFailsWithoutFallback(t *testing.T) {
 	repository := changedTestRepository(t)
-	library := newProfileLibrary(t.TempDir())
-	publishTestProfile(t, library.manager(), configuration.ProfileDraft{
+	manager := configuration.NewManager(configuration.Options{GlobalRoot: t.TempDir(), Reviewers: []string{"grok", "opencode", "copilot", "codex"}})
+	publishTestProfile(t, manager, configuration.ProfileDraft{
 		Target: configuration.ScopeGlobal, Name: "security", Reviewer: "grok", Model: "grok-4.5",
 		ReasoningEffort: "high", AttemptDeadline: "1m", Instructions: "GLOBAL\n",
 	})
@@ -87,14 +87,17 @@ func TestInvalidProfileMetadataFailsWithoutFallback(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(directory, "instructions.md"), []byte("REPOSITORY\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := compileTestProfile(library, "security", model.ReviewSubject{Repository: repository}); err == nil {
+	if _, err := compileTestProfile(manager, "security", model.ReviewSubject{Repository: repository}); err == nil {
 		t.Fatal("invalid Repository Profile fell back to Global")
 	}
 }
 
-func compileTestProfile(library profileLibrary, name string, subject model.ReviewSubject) (compiledProfile, error) {
-	conductor := Conductor{reviewers: defaultReviewerCatalog(), profiles: library, evalDefaultDeadline: time.Minute}
-	resolved, err := library.resolve(profileRequest{repository: subject.Repository, name: name})
+func compileTestProfile(manager *configuration.Manager, name string, subject model.ReviewSubject) (compiledProfile, error) {
+	conductor, err := newConductorWithManager(nil, defaultReviewerCatalog(), manager, time.Minute)
+	if err != nil {
+		return compiledProfile{}, err
+	}
+	resolved, err := conductor.resolveProfile(profileRequest{repository: subject.Repository, name: name})
 	if err != nil {
 		return compiledProfile{}, err
 	}
