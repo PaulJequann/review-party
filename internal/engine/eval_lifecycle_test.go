@@ -253,7 +253,7 @@ func newObservedEvalStore(t *testing.T) (*store.LedgerRecordStore, *observingEva
 
 func newLifecycleTestConductor(t *testing.T, records store.RecordStore, executor attemptExecutor) *Conductor {
 	t.Helper()
-	conductor, err := newConductorWithProfiles(records, catalogWithExecutors(map[string]attemptExecutor{defaultReviewer: executor}), newTestProfileLibrary(t), time.Second)
+	conductor, err := newConductorWithManager(records, catalogWithExecutors(map[string]attemptExecutor{defaultReviewer: executor}), newTestConfigurationManager(t), time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}

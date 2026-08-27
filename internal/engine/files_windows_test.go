@@ -5,7 +5,12 @@ package engine
 import "testing"
 
 func TestSavedProfileUsesPortableSourceOnWindows(t *testing.T) {
-	profile, err := newTestProfileLibrary(t).findProfile(profileLookup{name: "bugs"})
+	manager := newTestConfigurationManager(t)
+	conductor, err := newConductorWithManager(nil, defaultReviewerCatalog(), manager, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile, err := conductor.resolveProfile("", "bugs")
 	if err != nil {
 		t.Fatal(err)
 	}

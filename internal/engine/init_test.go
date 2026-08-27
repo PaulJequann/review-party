@@ -7,6 +7,7 @@ import (
 )
 
 func TestInitializationDoesNotCreateProfileMaterial(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	repository := testRepository(t)
 	if _, err := InitializeReviewParty(ReviewPartyInitialization{Repository: repository}); err != nil {
 		t.Fatal(err)

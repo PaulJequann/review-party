@@ -3,11 +3,9 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"strings"
-	"time"
 
 	"reviewparty/internal/engine"
 	"reviewparty/internal/model"
@@ -41,65 +39,6 @@ func executeReplay(ctx context.Context, options replayOptions, stdout, stderr io
 		return 2
 	}
 	return 0
-}
-
-type reviewOptions struct {
-	profile       string
-	repository    string
-	format        string
-	deadline      time.Duration
-	configuration string
-	reviewer      string
-	model         string
-	effort        string
-	base          string
-	head          string
-}
-
-func executeReview(ctx context.Context, options reviewOptions, stdout, stderr io.Writer) int {
-	subjectReference, err := reviewSubjectReference(options.base, options.head)
-	if err != nil {
-		fmt.Fprintf(stderr, "review-party: %v\n", err)
-		return usageExitCode
-	}
-	conductor, err := engine.New(engine.Config{
-		AttemptDeadline:       options.deadline,
-		UserConfigurationPath: options.configuration,
-	})
-	if err != nil {
-		fmt.Fprintf(stderr, "review-party: %v\n", err)
-		return 1
-	}
-	record, err := conductor.Review(ctx, model.ReviewSelection{
-		Repository: options.repository,
-		Subject:    subjectReference,
-		Profile:    options.profile,
-		Reviewer:   options.reviewer,
-		Model:      options.model,
-		Effort:     options.effort,
-	})
-	if err != nil {
-		fmt.Fprintf(stderr, "review-party: %v\n", err)
-		return 1
-	}
-	if err := printRecordWithConfiguration(stdout, record, options.format, options.configuration); err != nil {
-		fmt.Fprintf(stderr, "review-party: %v\n", err)
-		return 1
-	}
-	if record.Lifecycle == model.LifecycleIncomplete {
-		return usageExitCode
-	}
-	return 0
-}
-
-func reviewSubjectReference(base, head string) (model.SubjectReference, error) {
-	if (base == "") != (head == "") {
-		return model.SubjectReference{}, errors.New("--base and --head must be provided together")
-	}
-	if base != "" {
-		return model.CommittedRange(base, head), nil
-	}
-	return model.WorkingChanges(), nil
 }
 
 func executeInspect(ctx context.Context, options inspectOptions, stdout, stderr io.Writer) int {

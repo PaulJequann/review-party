@@ -19,13 +19,10 @@ import (
 const ledgerFilename = "ledger.sqlite"
 
 // currentLedgerSchemaVersion identifies the single schema used by this pre-release
-// product. It deliberately continues the historical numbering past the last
-// released migration so no obsolete ledger can collide with the replacement.
-const currentLedgerSchemaVersion = 9
-
-// maxObsoleteLedgerSchemaVersion is the highest schema from the replaced
-// pre-release migration chain that explicit preparation may reset in place.
-const maxObsoleteLedgerSchemaVersion = 8
+// product. State preparation replaces any other recognized version without
+// upgrading or preserving it. The numbering continues past the last released
+// migration so no obsolete ledger can collide with a replacement.
+const currentLedgerSchemaVersion = 10
 
 var ErrReviewRecordStateNotInitialized = errors.New("Review Party is not initialized")
 var ErrReviewRecordStateRequiresPreparation = errors.New("Review Party state requires preparation")
@@ -388,28 +385,35 @@ func (s *LedgerRecordStore) migrate() error {
 	if err != nil {
 		return err
 	}
-	if version > maxObsoleteLedgerSchemaVersion && version != currentLedgerSchemaVersion {
+	if version > currentLedgerSchemaVersion {
 		return fmt.Errorf("review ledger schema %d is newer than supported schema %d", version, currentLedgerSchemaVersion)
 	}
 	if version != currentLedgerSchemaVersion {
 		// Explicit preparation replaces a recognized pre-release ledger in place
 		// (a zero version means a fresh database); it never upgrades or preserves
 		// obsolete state.
-		for _, table := range obsoleteLedgerTables {
-			if _, err := tx.Exec("DROP TABLE IF EXISTS " + table); err != nil {
-				return fmt.Errorf("replace obsolete review ledger schema %d: %w", version, err)
-			}
+		if err := dropObsoleteLedgerTables(tx, version); err != nil {
+			return err
 		}
-		if _, err := tx.Exec("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY)"); err != nil {
-			return fmt.Errorf("recreate migration table: %w", err)
-		}
-	}
-	if version != currentLedgerSchemaVersion {
 		if err := applyKnownMigration(tx, currentLedgerSchemaVersion); err != nil {
 			return err
 		}
 	}
 	return tx.Commit()
+}
+
+// dropObsoleteLedgerTables clears every table a replaced pre-release ledger
+// could own, ordered so foreign-key children are dropped before their parents.
+func dropObsoleteLedgerTables(tx *sql.Tx, replaced int) error {
+	for _, table := range obsoleteLedgerTables {
+		if _, err := tx.Exec("DROP TABLE IF EXISTS " + table); err != nil {
+			return fmt.Errorf("replace obsolete review ledger schema %d: %w", replaced, err)
+		}
+	}
+	if _, err := tx.Exec("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY)"); err != nil {
+		return fmt.Errorf("recreate migration table: %w", err)
+	}
+	return nil
 }
 
 func applyKnownMigration(tx *sql.Tx, version int) error {
@@ -596,22 +600,22 @@ func nullableTime(value time.Time) any {
 }
 
 func (s *LedgerRecordStore) CreateReviewBundle(bundle model.ReviewBundle) error {
-	members, termination, err := bundlePayloads(bundle)
+	payloads, err := bundlePayloads(bundle)
 	if err != nil {
 		return err
 	}
-	_, err = s.db.Exec(`INSERT INTO review_bundles(id,party,description,party_revision,repository,subject_kind,subject_identity,lifecycle,termination,members,concurrency_limit,created_at,updated_at,completed_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		bundle.ID, bundle.Party, bundle.Description, bundle.PartyRevision, bundle.Repository, bundle.SubjectKind, bundle.SubjectIdentity, bundle.Lifecycle, termination, members, bundle.ConcurrencyLimit, bundle.CreatedAt.UTC(), bundle.UpdatedAt.UTC(), nullableTime(bundle.CompletedAt))
+	_, err = s.db.Exec(`INSERT INTO review_bundles(id,description,revision,repository,subject_kind,subject_identity,lifecycle,termination,selection,warnings,deduplicated,members,concurrency_limit,created_at,updated_at,completed_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		bundle.ID, bundle.Description, bundle.Revision, bundle.Repository, bundle.SubjectKind, bundle.SubjectIdentity, bundle.Lifecycle, payloads.termination, payloads.selection, payloads.warnings, payloads.deduplicated, payloads.members, bundle.ConcurrencyLimit, bundle.CreatedAt.UTC(), bundle.UpdatedAt.UTC(), nullableTime(bundle.CompletedAt))
 	return err
 }
 
 func (s *LedgerRecordStore) SaveReviewBundle(bundle model.ReviewBundle) error {
-	members, termination, err := bundlePayloads(bundle)
+	mutable, err := renderMutableBundleColumns(bundle)
 	if err != nil {
 		return err
 	}
 	result, err := s.db.Exec(`UPDATE review_bundles SET lifecycle=?,termination=?,members=?,updated_at=?,completed_at=? WHERE id=?`,
-		bundle.Lifecycle, termination, members, bundle.UpdatedAt.UTC(), nullableTime(bundle.CompletedAt), bundle.ID)
+		bundle.Lifecycle, mutable.termination, mutable.members, bundle.UpdatedAt.UTC(), nullableTime(bundle.CompletedAt), bundle.ID)
 	if err != nil {
 		return err
 	}
@@ -625,39 +629,134 @@ func (s *LedgerRecordStore) SaveReviewBundle(bundle model.ReviewBundle) error {
 	return nil
 }
 
-func bundlePayloads(bundle model.ReviewBundle) ([]byte, []byte, error) {
+// reviewBundlePayloads renders the immutable creation columns a Review Bundle
+// persists once; SaveReviewBundle deliberately writes only its mutable subset.
+type reviewBundlePayloads struct {
+	members      []byte
+	termination  []byte
+	selection    []byte
+	warnings     []byte
+	deduplicated []byte
+}
+
+// mutableBundleColumns renders only the columns member absorption updates.
+type mutableBundleColumns struct {
+	members     []byte
+	termination []byte
+}
+
+func bundlePayloads(bundle model.ReviewBundle) (reviewBundlePayloads, error) {
+	mutable, err := renderMutableBundleColumns(bundle)
+	if err != nil {
+		return reviewBundlePayloads{}, err
+	}
+	selection, warnings, deduplicated, err := bundleSelectionPayloads(bundle)
+	if err != nil {
+		return reviewBundlePayloads{}, err
+	}
+	return reviewBundlePayloads{
+		members: mutable.members, termination: mutable.termination,
+		selection: selection, warnings: warnings, deduplicated: deduplicated,
+	}, nil
+}
+
+func renderMutableBundleColumns(bundle model.ReviewBundle) (mutableBundleColumns, error) {
 	members, err := json.Marshal(bundle.Members)
 	if err != nil {
-		return nil, nil, err
+		return mutableBundleColumns{}, err
 	}
 	termination, err := json.Marshal(bundle.Termination)
 	if err != nil {
-		return nil, nil, err
+		return mutableBundleColumns{}, err
 	}
-	return members, termination, nil
+	return mutableBundleColumns{members: members, termination: termination}, nil
+}
+
+// bundleSelectionPayloads renders the resolution facts authored once at
+// creation and never rewritten afterwards. Absent facts persist as empty
+// arrays so loading never encounters null collection columns.
+func bundleSelectionPayloads(bundle model.ReviewBundle) ([]byte, []byte, []byte, error) {
+	var (
+		selection    []byte
+		warnings     []byte
+		deduplicated []byte
+		err          error
+	)
+	if bundle.Selection == nil {
+		selection = []byte("null")
+	} else if selection, err = json.Marshal(bundle.Selection); err != nil {
+		return nil, nil, nil, err
+	}
+	presentWarnings := bundle.Warnings
+	if presentWarnings == nil {
+		presentWarnings = []model.BundleWarning{}
+	}
+	if warnings, err = json.Marshal(presentWarnings); err != nil {
+		return nil, nil, nil, err
+	}
+	presentDuplicates := bundle.Deduplicated
+	if presentDuplicates == nil {
+		presentDuplicates = []model.SkippedDuplicate{}
+	}
+	if deduplicated, err = json.Marshal(presentDuplicates); err != nil {
+		return nil, nil, nil, err
+	}
+	return selection, warnings, deduplicated, nil
 }
 
 func (s *LedgerRecordStore) LoadReviewBundle(id model.ReviewBundleID) (model.ReviewBundle, error) {
 	var bundle model.ReviewBundle
-	var members, termination []byte
+	var payloads reviewBundlePayloads
 	var completedAt sql.NullTime
-	err := s.db.QueryRow(`SELECT id,party,description,party_revision,repository,subject_kind,subject_identity,lifecycle,termination,members,concurrency_limit,created_at,updated_at,completed_at FROM review_bundles WHERE id=?`, id).Scan(
-		&bundle.ID, &bundle.Party, &bundle.Description, &bundle.PartyRevision, &bundle.Repository, &bundle.SubjectKind, &bundle.SubjectIdentity, &bundle.Lifecycle, &termination, &members, &bundle.ConcurrencyLimit, &bundle.CreatedAt, &bundle.UpdatedAt, &completedAt)
+	err := s.db.QueryRow(`SELECT id,description,revision,repository,subject_kind,subject_identity,lifecycle,termination,selection,warnings,deduplicated,members,concurrency_limit,created_at,updated_at,completed_at FROM review_bundles WHERE id=?`, id).Scan(
+		&bundle.ID, &bundle.Description, &bundle.Revision, &bundle.Repository, &bundle.SubjectKind, &bundle.SubjectIdentity, &bundle.Lifecycle, &payloads.termination, &payloads.selection, &payloads.warnings, &payloads.deduplicated, &payloads.members, &bundle.ConcurrencyLimit, &bundle.CreatedAt, &bundle.UpdatedAt, &completedAt)
 	if err != nil {
 		return model.ReviewBundle{}, err
 	}
-	if err := json.Unmarshal(members, &bundle.Members); err != nil {
+	if err := decodeReviewBundlePayloads(&bundle, payloads); err != nil {
 		return model.ReviewBundle{}, err
-	}
-	if len(termination) > 0 && string(termination) != "null" {
-		if err := json.Unmarshal(termination, &bundle.Termination); err != nil {
-			return model.ReviewBundle{}, err
-		}
 	}
 	if completedAt.Valid {
 		bundle.CompletedAt = completedAt.Time
 	}
 	return bundle, nil
+}
+
+// decodeReviewBundlePayloads restores the collection columns and optional
+// termination from their stored JSON representations.
+func decodeReviewBundlePayloads(bundle *model.ReviewBundle, payloads reviewBundlePayloads) error {
+	if err := decodeJSONColumn(payloads.members, "members", &bundle.Members); err != nil {
+		return err
+	}
+	if len(payloads.termination) > 0 && string(payloads.termination) != "null" {
+		if err := json.Unmarshal(payloads.termination, &bundle.Termination); err != nil {
+			return err
+		}
+	}
+	if err := decodeNullableJSONColumn(payloads.selection, "selection", &bundle.Selection); err != nil {
+		return err
+	}
+	if err := decodeJSONColumn(payloads.warnings, "warnings", &bundle.Warnings); err != nil {
+		return err
+	}
+	return decodeJSONColumn(payloads.deduplicated, "deduplicated", &bundle.Deduplicated)
+}
+
+func decodeJSONColumn(payload []byte, name string, destination any) error {
+	if len(payload) == 0 || string(payload) == "null" {
+		return fmt.Errorf("review bundle %s column holds %q", name, payload)
+	}
+	return json.Unmarshal(payload, destination)
+}
+
+func decodeNullableJSONColumn(payload []byte, name string, destination any) error {
+	if string(payload) == "null" {
+		return nil
+	}
+	if len(payload) == 0 {
+		return fmt.Errorf("review bundle %s column is empty", name)
+	}
+	return json.Unmarshal(payload, destination)
 }
 
 func (s *LedgerRecordStore) PublishAdjudication(revision model.AdjudicationRevision) (model.AdjudicationRevision, error) {

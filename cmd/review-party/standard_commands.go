@@ -11,25 +11,6 @@ import (
 	"reviewparty/internal/store"
 )
 
-func newReviewCommand(streams commandIO) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:               "review PROFILE",
-		Short:             "Review working changes or a committed range",
-		Example:           "  review-party review bugs --repo .\n  review-party review code-quality --base main --head HEAD --format json",
-		Args:              cobra.ExactArgs(1),
-		ValidArgsFunction: completeProfileNames,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			options := reviewOptions{
-				profile: args[0], repository: stringFlag(cmd, "repo"), format: stringFlag(cmd, "format"),
-				configuration: stringFlag(cmd, "config"), base: stringFlag(cmd, "base"), head: stringFlag(cmd, "head"),
-			}
-			return commandResult(executeReview(cmd.Context(), options, streams.output, streams.errors))
-		},
-	}
-	addReviewFlags(cmd)
-	return cmd
-}
-
 func newReplayCommand(streams commandIO) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "replay REVIEW_ID",
@@ -161,28 +142,6 @@ func newLibraryListCommand(spec libraryListSpec, streams commandIO) *cobra.Comma
 	addRepositoryFlag(cmd, "Git repository whose "+spec.label+" should be listed")
 	addFormatFlag(cmd)
 	addConfigurationFlag(cmd)
-	return cmd
-}
-
-func newPartyCommand(streams commandIO) *cobra.Command {
-	cmd := &cobra.Command{Use: "party", Short: "Run or manage a Review Party", Args: cobra.NoArgs, RunE: showCommandHelp}
-	run := &cobra.Command{
-		Use: "run PARTY", Short: "Run every member of a Review Party over one Subject", Example: "  review-party party run release-gate --repo .",
-		Args: cobra.ExactArgs(1), ValidArgsFunction: completePartyNames,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			subjectReference, err := reviewSubjectReference(stringFlag(cmd, "base"), stringFlag(cmd, "head"))
-			if err != nil {
-				return err
-			}
-			options := partyRunOptions{
-				name: args[0], repository: stringFlag(cmd, "repo"), subject: subjectReference,
-				format: stringFlag(cmd, "format"), configuration: stringFlag(cmd, "config"),
-			}
-			return commandResult(executePartyRun(cmd.Context(), options, streams.output, streams.errors))
-		},
-	}
-	addReviewFlags(run)
-	cmd.AddCommand(run)
 	return cmd
 }
 

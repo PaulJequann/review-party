@@ -12,39 +12,6 @@ import (
 	"reviewparty/internal/model"
 )
 
-func executePartyRun(ctx context.Context, options partyRunOptions, stdout, stderr io.Writer) int {
-	conductor, err := engine.New(engine.Config{UserConfigurationPath: options.configuration})
-	if err != nil {
-		fmt.Fprintf(stderr, "review-party: %v\n", err)
-		return 1
-	}
-	bundle, err := conductor.RunParty(ctx, model.PartySelection{
-		Name:       options.name,
-		Repository: options.repository,
-		Subject:    options.subject,
-	})
-	if err != nil {
-		fmt.Fprintf(stderr, "review-party: %v\n", err)
-		return 1
-	}
-	if err := printBundle(stdout, bundle, options.format); err != nil {
-		fmt.Fprintf(stderr, "review-party: %v\n", err)
-		return 1
-	}
-	if bundle.Lifecycle == model.LifecycleIncomplete {
-		return 2
-	}
-	return 0
-}
-
-type partyRunOptions struct {
-	name          string
-	repository    string
-	subject       model.SubjectReference
-	format        string
-	configuration string
-}
-
 type partiesOptions struct {
 	repository    string
 	format        string
@@ -116,11 +83,17 @@ func printBundle(output io.Writer, bundle model.ReviewBundle, format string) err
 
 func printHumanBundle(output io.Writer, bundle model.ReviewBundle) {
 	fmt.Fprintf(output, "bundle %s\n", bundle.ID)
-	fmt.Fprintf(output, "%s · %s · %d/%d review(s) completed\n", bundle.Party, bundle.Lifecycle, completedBundleMembers(bundle), len(bundle.Members))
-	fmt.Fprintf(output, "party revision: %s\n", bundle.PartyRevision)
+	fmt.Fprintf(output, "%s · %d/%d review(s) completed\n", bundle.Lifecycle, completedBundleMembers(bundle), len(bundle.Members))
+	if partyName := explicitPartyName(bundle); partyName != "" {
+		fmt.Fprintf(output, "party: %s\n", partyName)
+	}
+	fmt.Fprintf(output, "revision: %s\n", bundle.Revision)
+	printBundleSelection(output, bundle.Selection)
+	printBundleWarnings(output, bundle.Warnings)
+	printBundleDeduplication(output, bundle.Deduplicated)
 	fmt.Fprintf(output, "subject: %s %s\n", bundle.SubjectKind, shortIdentity(bundle.SubjectIdentity))
 	for _, member := range bundle.Members {
-		line := fmt.Sprintf("  %-16s %s", member.Profile, memberStatus(member))
+		line := fmt.Sprintf("  %-16s %s", scopedMemberName(member), memberStatus(member))
 		if member.Status != "" && member.ReviewID != "" {
 			line += fmt.Sprintf(" (%d finding(s))", member.FindingCount)
 		}
@@ -130,6 +103,48 @@ func printHumanBundle(output io.Writer, bundle model.ReviewBundle) {
 		fmt.Fprintf(output, "incomplete: %s: %s\n", bundle.Termination.Category, bundle.Termination.Message)
 	}
 	fmt.Fprintf(output, "inspect: review-party inspect %s\n", bundle.ID)
+}
+
+// explicitPartyName names the Party behind an explicit-party selection.
+func explicitPartyName(bundle model.ReviewBundle) string {
+	selection := bundle.Selection
+	if selection == nil || selection.Kind != "explicit_party" {
+		return ""
+	}
+	if len(selection.Authored) == 0 {
+		return ""
+	}
+	return selection.Authored[0].Name
+}
+
+// printBundleSelection reports which authored choice produced this run.
+func printBundleSelection(output io.Writer, selection *model.BundleSelection) {
+	if selection == nil || selection.Source == "" {
+		return
+	}
+	fmt.Fprintf(output, "selection: %s", selection.Kind)
+	if selection.LimitSource != "" {
+		fmt.Fprintf(output, " · limit %d (%s)", selection.ConcurrencyLimit, selection.LimitSource)
+	}
+	fmt.Fprint(output, "\n")
+}
+
+func printBundleWarnings(output io.Writer, warnings []model.BundleWarning) {
+	for _, warning := range warnings {
+		fmt.Fprintf(output, "warning: %s\n", warning.Message)
+	}
+}
+
+// printBundleDeduplication explains every occurrence removed by exact-identity
+// deduplication and where its first execution remains.
+func printBundleDeduplication(output io.Writer, duplicates []model.SkippedDuplicate) {
+	for _, duplicate := range duplicates {
+		fmt.Fprintf(output, "deduplicated: %s:%s selected again by %s; first run kept at %s\n", duplicate.Scope, duplicate.Profile, duplicate.Origin, duplicate.KeptOrigin)
+	}
+}
+
+func scopedMemberName(member model.BundleMember) string {
+	return member.Scope + ":" + member.Profile
 }
 
 func completedBundleMembers(bundle model.ReviewBundle) int {

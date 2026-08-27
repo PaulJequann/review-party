@@ -21,16 +21,7 @@ const (
 //go:embed profiles/*.md
 var packagedProfileFiles embed.FS
 
-type profileLibrary struct {
-	configuration *configuration.Manager
-}
-
-var errProfileLibraryNotConfigured = errors.New("profile library requires an explicit configuration manager")
-
-type profileRequest struct {
-	repository string
-	name       string
-}
+var errConfigurationNotConfigured = errors.New("configuration manager is not configured")
 
 type resolvedProfile struct {
 	name         string
@@ -43,17 +34,6 @@ type resolvedProfile struct {
 	effort       string
 	deadline     time.Duration
 	effective    configuration.Effective
-}
-
-// manager returns the Configuration Manager that owns this Profile library.
-func (library profileLibrary) manager() *configuration.Manager {
-	return library.configuration
-}
-
-func newProfileLibrary(globalRoot string) profileLibrary {
-	options := reviewPartyConfigurationOptions()
-	options.GlobalRoot = globalRoot
-	return profileLibrary{configuration: configuration.NewManager(options)}
 }
 
 func (conductor *Conductor) compileProfile(selection model.ProfileSelection, resolved resolvedProfile) (compiledProfile, error) {
@@ -100,7 +80,7 @@ func filesystemPassName(profileName string) string {
 }
 
 func (conductor *Conductor) profileSummaries(repository string) ([]model.ProfileSummary, error) {
-	inventory, err := conductor.profiles.inventory(repository)
+	inventory, err := conductor.configuration.ProfileInventory(configuration.Repository(repository))
 	if err != nil {
 		return nil, err
 	}

@@ -15,7 +15,7 @@ func TestExperimentCompilationUsesFrozenExperimentDeadline(t *testing.T) {
 		name: "bugs", instructions: "Review bugs.", digest: "source", reviewer: defaultReviewer,
 		model: "grok-4.5", effort: "high", deadline: time.Minute,
 	}
-	compiled, err := conductor.compilePreparedProfile(model.ReviewSelection{Profile: "bugs"}, resolved, true)
+	compiled, err := conductor.compileResolvedExperimentProfile(model.ProfileSelection{Profile: "bugs"}, resolved)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -28,8 +28,8 @@ func TestExperimentCompilationUsesFrozenExperimentDeadline(t *testing.T) {
 }
 
 func TestSavedProfileCompilesOneStablePass(t *testing.T) {
-	library := newTestProfileLibrary(t)
-	profile, err := compileTestProfile(library, "bugs", model.ReviewSubject{})
+	manager := newTestConfigurationManager(t)
+	profile, err := compileTestProfile(manager, "bugs", model.ReviewSubject{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,8 +42,8 @@ func TestSavedProfileCompilesOneStablePass(t *testing.T) {
 }
 
 func TestSavedInstructionsReachPromptWithoutTemplateInheritance(t *testing.T) {
-	library := newTestProfileLibrary(t)
-	profile, err := compileTestProfile(library, "documentation", model.ReviewSubject{})
+	manager := newTestConfigurationManager(t)
+	profile, err := compileTestProfile(manager, "documentation", model.ReviewSubject{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,9 +53,9 @@ func TestSavedInstructionsReachPromptWithoutTemplateInheritance(t *testing.T) {
 	}
 }
 
-func TestZeroValueProfileLibraryReturnsConfigurationError(t *testing.T) {
-	_, err := (profileLibrary{}).findProfile(profileLookup{name: "bugs"})
-	if !errors.Is(err, errProfileLibraryNotConfigured) {
+func TestZeroValueConductorReturnsConfigurationError(t *testing.T) {
+	_, err := (&Conductor{}).resolveProfile(profileRequest{name: "bugs"})
+	if !errors.Is(err, errConfigurationNotConfigured) {
 		t.Fatalf("error = %v", err)
 	}
 }

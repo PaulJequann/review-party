@@ -47,13 +47,13 @@ Each item selects exactly one Profile or Party. Global selections precede Reposi
 
 Selection editing uses typed add, remove, move, and concurrency operations through the Configuration Manager. Callers do not edit dotted JSON paths.
 
-## Resolution contract for Slice 5
+## Resolution contract
 
-Slice 5 will expand Parties in member order and deduplicate exact scoped Profile identities at first occurrence. `global:code-quality` and `repository:code-quality` are different identities and must both remain selected, with a warning for the Caller.
+Status: implemented by Configuration Hub Slice 5.
 
-Slice 5 must also fail preflight on a missing reference, incomplete Profile, unavailable saved Reviewer, or rejected model before an Agent Harness launches. Review Bundles will retain the authored selection, expanded scoped identities, Profile Revisions, deduplication facts, warnings, and provenance.
+Slice 5 expands Parties in member order and deduplicates exact scoped Profile identities at first occurrence. `global:code-quality` and `repository:code-quality` are different identities and must both remain selected, with a warning for the Caller.
 
-Slice 4 establishes the accepted storage and domain contract. The transitional execution commands are replaced in Slice 5.
+Slice 5 fails preflight on a missing reference, incomplete Profile, unavailable saved Reviewer, or rejected model before an Agent Harness launches. Review Bundles retain the authored selection, expanded scoped identities, Profile Revisions, deduplication facts, warnings, Concurrency Limit provenance, and a composition Revision digest. The transitional `review` and `party run` commands were removed without aliases; `review-party run --profile | --party` replaces them.
 
 ## Non-goals
 

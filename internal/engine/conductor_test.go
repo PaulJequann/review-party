@@ -143,7 +143,7 @@ func TestReviewPreservesValidFindings(t *testing.T) {
 func TestRecordSaveFailureRemovesPublishedAttemptArtifacts(t *testing.T) {
 	repository := changedTestRepository(t)
 	store := &failFinalRecordStore{}
-	conductor, err := newConductorWithProfiles(store, catalogWithExecutors(map[string]attemptExecutor{defaultReviewer: successfulExecutor(cleanReview)}), newTestProfileLibrary(t), time.Second)
+	conductor, err := newConductorWithManager(store, catalogWithExecutors(map[string]attemptExecutor{defaultReviewer: successfulExecutor(cleanReview)}), newTestConfigurationManager(t), time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -436,23 +436,23 @@ func testConductorWithExecutors(t *testing.T, executors map[string]attemptExecut
 	if err != nil {
 		t.Fatal(err)
 	}
-	library := newTestProfileLibraryWithDeadline(t, deadline)
-	conductor, err := newConductorWithProfiles(store, catalogWithExecutors(executors), library, deadline)
+	manager := newTestConfigurationManagerWithDeadline(t, deadline)
+	conductor, err := newConductorWithManager(store, catalogWithExecutors(executors), manager, deadline)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return conductor
 }
 
-func newTestProfileLibrary(t *testing.T) profileLibrary {
-	return newTestProfileLibraryWithDeadline(t, time.Second)
+func newTestConfigurationManager(t *testing.T) *configuration.Manager {
+	return newTestConfigurationManagerWithDeadline(t, time.Second)
 }
 
-func newTestProfileLibraryWithDeadline(t *testing.T, deadline time.Duration) profileLibrary {
+func newTestConfigurationManagerWithDeadline(t *testing.T, deadline time.Duration) *configuration.Manager {
 	t.Helper()
-	library := newProfileLibrary(t.TempDir())
-	seedTestProfiles(t, library.manager(), deadline)
-	return library
+	manager := configuration.NewManager(configuration.Options{GlobalRoot: t.TempDir(), Reviewers: []string{"grok", "opencode", "copilot", "codex"}})
+	seedTestProfiles(t, manager, deadline)
+	return manager
 }
 
 func seedTestProfiles(t *testing.T, manager *configuration.Manager, deadline time.Duration) {
@@ -472,8 +472,8 @@ func seedTestProfiles(t *testing.T, manager *configuration.Manager, deadline tim
 	}
 }
 
-func testSelection(repository string) model.ReviewSelection {
-	return model.ReviewSelection{Repository: repository, Subject: model.WorkingChanges(), Profile: "bugs"}
+func testSelection(repository string) model.RunSelection {
+	return model.RunSelection{Repository: repository, Subject: model.WorkingChanges(), Profile: "bugs"}
 }
 
 func changedTestRepository(t *testing.T) string {

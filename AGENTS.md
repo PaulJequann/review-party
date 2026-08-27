@@ -54,7 +54,7 @@ XDG_CONFIG_HOME="$PWD/scratch/dogfood-config" \
   review-party init --repo .
 XDG_STATE_HOME="$PWD/scratch/dogfood-state" \
 XDG_CONFIG_HOME="$PWD/scratch/dogfood-config" \
-  review-party review bugs --repo . --format json
+  review-party run --profile bugs --repo . --format json
 ```
 
 Treat dogfooding as a small multi-Profile review exercise, not a formal Party or
@@ -67,7 +67,7 @@ provenance rather than merging raw Reviewer text.
 ```sh
 XDG_STATE_HOME="$PWD/scratch/dogfood-state" \
 XDG_CONFIG_HOME="$PWD/scratch/dogfood-config" \
-  review-party review code-quality --repo . --format json
+  review-party run --profile code-quality --repo . --format json
 ```
 
 - Inspect the persisted record with the same isolated `XDG_STATE_HOME` and

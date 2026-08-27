@@ -2,313 +2,119 @@ package engine
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"errors"
-	"fmt"
-	"reviewparty/internal/subject"
-	"time"
 
-	"reviewparty/internal/configuration"
 	"reviewparty/internal/model"
 	"reviewparty/internal/store"
 )
 
-func (conductor *Conductor) RunParty(ctx context.Context, selection model.PartySelection) (model.ReviewBundle, error) {
-	if err := ctx.Err(); err != nil {
-		return model.ReviewBundle{}, err
-	}
-	if err := conductor.requirePreparedState(selection.Repository); err != nil {
-		return model.ReviewBundle{}, err
-	}
-	party, ledger, err := conductor.prepareParty(selection)
-	if err != nil {
-		return model.ReviewBundle{}, err
-	}
-	if party.bundle.ConcurrencyLimit > 1 {
-		return conductor.executePartyConcurrent(ctx, ledger, party)
-	}
-	return conductor.executePartySequential(ctx, ledger, party)
-}
+// This file owns Review Bundle execution mechanics for every resolved
+// selection: sequential and concurrent member launches, absorption of member
+// outcomes, lifecycle finalization, and bundle inspection. Resolution-driven
+// planning lives in run.go.
 
-type preparedParty struct {
-	bundle  model.ReviewBundle
-	members []preparedReview
-}
-
-type partyPlan struct {
-	effective  model.PartyDefinition
-	source     string
-	repository string
-	subject    model.ReviewSubject
-	members    []compiledPartyMember
-}
-
-func (conductor *Conductor) prepareParty(selection model.PartySelection) (preparedParty, store.BundleStore, error) {
-	plan, err := conductor.planParty(selection)
-	if err != nil {
-		return preparedParty{}, nil, err
-	}
-	ledger, ok := conductor.store.(store.BundleStore)
-	if !ok {
-		return preparedParty{}, nil, errors.New("party execution requires the SQLite ledger")
-	}
-	bundle, err := newPendingBundle(conductor.now().UTC(), plan)
-	if err != nil {
-		return preparedParty{}, nil, err
-	}
-	if err := ledger.CreateReviewBundle(bundle); err != nil {
-		return preparedParty{}, nil, err
-	}
-	prepared := preparedParty{bundle: bundle, members: make([]preparedReview, 0, len(plan.members))}
-	for _, member := range plan.members {
-		prepared.members = append(prepared.members, preparedReview{subject: plan.subject, profile: member.profile, timings: member.timings, deadline: member.profile.deadline})
-	}
-	return prepared, ledger, nil
-}
-
-func (conductor *Conductor) planParty(selection model.PartySelection) (partyPlan, error) {
-	repository, err := subject.ResolveRepositoryRoot(selection.Repository)
-	if err != nil {
-		return partyPlan{}, err
-	}
-	selection.Repository = repository
-	lookup, err := conductor.resolvePartyLookup(selection)
-	if err != nil {
-		return partyPlan{}, err
-	}
-	effective, source, err := conductor.resolveParty(lookup)
-	if err != nil {
-		return partyPlan{}, err
-	}
-	effective.Profiles = append([]model.PartyMember(nil), effective.Profiles...)
-	subject, subjectResolutionMS, err := conductor.resolveSharedSubject(selection.Subject, repository)
-	if err != nil {
-		return partyPlan{}, err
-	}
-	members, err := conductor.compilePartyMembers(repository, effective, subjectResolutionMS)
-	if err != nil {
-		return partyPlan{}, err
-	}
-	return partyPlan{effective: effective, source: source, repository: repository, subject: subject, members: members}, nil
-}
-
-func (conductor *Conductor) resolvePartyLookup(selection model.PartySelection) (partyLookup, error) {
-	if conductor.configuration == nil {
-		return partyLookup{}, errors.New("party resolution requires a configuration manager")
-	}
-	if selection.Name == "" {
-		return partyLookup{}, errors.New("Party name is required")
-	}
-	return partyLookup{repository: selection.Repository, name: selection.Name}, nil
-}
-
-// resolveSharedSubject freezes the one Review Subject every member will review,
-// before any Profile Revision compiles or any harness launches.
-func (conductor *Conductor) resolveSharedSubject(reference model.SubjectReference, repository string) (model.ReviewSubject, int64, error) {
-	started := conductor.now().UTC()
-	subject, err := subject.ResolveSubject(repository, reference)
-	return subject, elapsedMilliseconds(started, conductor.now().UTC()), err
-}
-
-// compilePartyMembers compiles every member Profile Revision before the bundle
-// row is created so an incompatible Reviewer fails closed before any launch.
-func (conductor *Conductor) compilePartyMembers(repository string, party model.PartyDefinition, subjectResolutionMS int64) ([]compiledPartyMember, error) {
-	effective, err := conductor.configuration.Resolve(configuration.Request{Repository: configuration.Repository(repository)})
-	if err != nil {
-		return nil, err
-	}
-	members := make([]compiledPartyMember, 0, len(party.Profiles))
-	for _, member := range party.Profiles {
-		compiledStarted := conductor.now().UTC()
-		profile, err := conductor.compilePartyProfile(repository, member, effective)
-		if err != nil {
-			return nil, fmt.Errorf("party %q member %q: %w", party.Name, member.Profile, err)
-		}
-		timings := model.ReviewTimings{SubjectResolutionMS: subjectResolutionMS, ProfileCompilationMS: elapsedMilliseconds(compiledStarted, conductor.now().UTC())}
-		members = append(members, compiledPartyMember{reference: member, profile: profile, timings: timings})
-	}
-	return members, nil
-}
-
-func (conductor *Conductor) compilePartyProfile(repository string, member model.PartyMember, effective configuration.Effective) (compiledProfile, error) {
-	reference := configuration.ProfileReference{Scope: configuration.Scope(member.Scope), Profile: member.Profile}
-	profile, found, err := conductor.configuration.ResolveProfileReference(configuration.Repository(repository), reference)
-	if err != nil {
-		return compiledProfile{}, err
-	}
-	if !found {
-		return compiledProfile{}, fmt.Errorf("%s Profile %q was not found", member.Scope, member.Profile)
-	}
-	resolved, err := resolvedFromProfile(profile, effective)
-	if err != nil {
-		return compiledProfile{}, err
-	}
-	return conductor.compileResolvedProfile(resolved)
-}
-
-type compiledPartyMember struct {
-	reference model.PartyMember
-	profile   compiledProfile
-	timings   model.ReviewTimings
-}
-
-func newPendingBundle(created time.Time, plan partyPlan) (model.ReviewBundle, error) {
-	id, err := newDomainID("rb", created)
-	if err != nil {
-		return model.ReviewBundle{}, err
-	}
-	bundle := model.ReviewBundle{
-		ID:               model.ReviewBundleID(id),
-		Party:            plan.effective.Name,
-		Description:      plan.effective.Description,
-		Repository:       plan.repository,
-		SubjectKind:      plan.subject.Kind,
-		SubjectIdentity:  plan.subject.Identity,
-		Lifecycle:        model.LifecyclePending,
-		Members:          make([]model.BundleMember, 0, len(plan.members)),
-		ConcurrencyLimit: plan.effective.ConcurrencyLimit,
-		CreatedAt:        created,
-		UpdatedAt:        created,
-	}
-	for _, member := range plan.members {
-		bundle.Members = append(bundle.Members, model.BundleMember{Scope: member.reference.Scope, Profile: member.profile.revision.Name, Lifecycle: model.LifecyclePending})
-	}
-	bundle.PartyRevision = partyRevisionIdentity(bundle, plan.effective, plan.members)
-	return bundle, nil
-}
-
-// partyRevisionIdentity freezes the effective composition: stored name,
-// concurrency limit, and each member's effective Reviewer choice plus its exact
-// compiled Profile Revision. Caller flags therefore produce a distinct
-// revision instead of silently overriding recorded provenance.
-func partyRevisionIdentity(bundle model.ReviewBundle, effective model.PartyDefinition, members []compiledPartyMember) string {
-	type revisionMember struct {
-		Scope           string `json:"scope"`
-		Profile         string `json:"profile"`
-		Reviewer        string `json:"reviewer"`
-		Model           string `json:"model"`
-		Effort          string `json:"effort"`
-		ProfileRevision string `json:"profile_revision"`
-	}
-	composition := struct {
-		SchemaVersion    int              `json:"schema_version"`
-		Name             string           `json:"name"`
-		ConcurrencyLimit int              `json:"concurrency_limit"`
-		Members          []revisionMember `json:"members"`
-	}{SchemaVersion: effective.SchemaVersion, Name: effective.Name, ConcurrencyLimit: bundle.ConcurrencyLimit}
-	for index, member := range effective.Profiles {
-		compiled := members[index].profile.revision
-		composition.Members = append(composition.Members, revisionMember{
-			Scope:           member.Scope,
-			Profile:         member.Profile,
-			Reviewer:        compiled.ReviewerID,
-			Model:           compiled.Model,
-			Effort:          compiled.Effort,
-			ProfileRevision: compiled.Revision,
-		})
-	}
-	payload, err := json.Marshal(composition)
-	if err != nil {
-		panic(fmt.Sprintf("encode Party Revision identity: %v", err))
-	}
-	digest := sha256.Sum256(payload)
-	return hex.EncodeToString(digest[:])
-}
-
-func (conductor *Conductor) executePartySequential(ctx context.Context, ledger store.BundleStore, party preparedParty) (model.ReviewBundle, error) {
-	bundle := party.bundle
-	bundle.Lifecycle = model.LifecycleRunning
-	bundle.UpdatedAt = conductor.now().UTC()
-	if err := ledger.SaveReviewBundle(bundle); err != nil {
-		return conductor.stopParty(ledger, &bundle, evalFailureCategory(err), err)
-	}
-	for index := range party.members {
-		if err := ctx.Err(); err != nil {
-			return conductor.stopParty(ledger, &bundle, evalFailureCategory(err), err)
-		}
-		record, err := conductor.runPreparedReview(ctx, party.members[index], nil, conductor.now().UTC())
-		result := concurrentPartyResult{index: index, record: record, err: err}
-		next, hardErr := conductor.absorbPartyMember(ledger, bundle, result)
-		bundle = next
-		if hardErr != nil {
-			return conductor.stopParty(ledger, &bundle, evalFailureCategory(hardErr), hardErr)
-		}
-	}
-	return conductor.finalizeParty(ledger, bundle)
-}
-
-type concurrentPartyResult struct {
+type concurrentMemberResult struct {
 	index  int
 	record model.ReviewRecord
 	err    error
 }
 
-func (conductor *Conductor) executePartyConcurrent(ctx context.Context, ledger store.BundleStore, party preparedParty) (model.ReviewBundle, error) {
-	runContext, cancel := context.WithCancel(ctx)
-	defer cancel()
-	runContext = context.WithValue(runContext, attemptGateContextKey{}, make(chan struct{}, party.bundle.ConcurrencyLimit))
-	bundle := party.bundle
+func (conductor *Conductor) executePreparedBundle(ctx context.Context, ledger store.BundleStore, prepared preparedBundle) (model.ReviewBundle, error) {
+	if prepared.bundle.ConcurrencyLimit > 1 {
+		return conductor.executeBundleConcurrent(ctx, ledger, prepared)
+	}
+	return conductor.executeBundleSequential(ctx, ledger, prepared)
+}
+
+func (conductor *Conductor) executeBundleSequential(ctx context.Context, ledger store.BundleStore, prepared preparedBundle) (model.ReviewBundle, error) {
+	bundle := prepared.bundle
 	bundle.Lifecycle = model.LifecycleRunning
 	bundle.UpdatedAt = conductor.now().UTC()
 	if err := ledger.SaveReviewBundle(bundle); err != nil {
-		return conductor.stopParty(ledger, &bundle, evalFailureCategory(err), err)
+		return conductor.stopBundle(ledger, &bundle, evalFailureCategory(err), err)
 	}
-	results := make(chan concurrentPartyResult, len(party.members))
-	launched, launchErr := conductor.launchPartyMembers(runContext, party, results)
+	for index := range prepared.members {
+		if err := ctx.Err(); err != nil {
+			return conductor.stopBundle(ledger, &bundle, evalFailureCategory(err), err)
+		}
+		record, err := conductor.runPreparedReview(ctx, prepared.members[index], nil, conductor.now().UTC())
+		result := concurrentMemberResult{index: index, record: record, err: err}
+		next, hardErr := conductor.absorbBundleMember(ledger, bundle, result)
+		bundle = next
+		if hardErr != nil {
+			return conductor.stopBundle(ledger, &bundle, evalFailureCategory(hardErr), hardErr)
+		}
+	}
+	return conductor.finalizeBundle(ledger, bundle)
+}
+
+func (conductor *Conductor) executeBundleConcurrent(ctx context.Context, ledger store.BundleStore, prepared preparedBundle) (model.ReviewBundle, error) {
+	runContext, cancel := context.WithCancel(ctx)
+	defer cancel()
+	runContext = context.WithValue(runContext, attemptGateContextKey{}, make(chan struct{}, prepared.bundle.ConcurrencyLimit))
+	bundle := prepared.bundle
+	bundle.Lifecycle = model.LifecycleRunning
+	bundle.UpdatedAt = conductor.now().UTC()
+	if err := ledger.SaveReviewBundle(bundle); err != nil {
+		return conductor.stopBundle(ledger, &bundle, evalFailureCategory(err), err)
+	}
+	results := make(chan concurrentMemberResult, len(prepared.members))
+	launched, launchErr := conductor.launchBundleMembers(runContext, prepared, results)
 	if launchErr != nil {
 		cancel()
-		bundle = conductor.absorbPendingPartyResults(ledger, bundle, results, launched)
-		return conductor.stopParty(ledger, &bundle, evalFailureCategory(launchErr), launchErr)
+		bundle = conductor.absorbPendingBundleResults(ledger, bundle, results, launched)
+		return conductor.stopBundle(ledger, &bundle, evalFailureCategory(launchErr), launchErr)
 	}
 	consumed := 0
 	for consumed < launched {
 		result := <-results
 		consumed++
-		next, hardErr := conductor.absorbPartyMember(ledger, bundle, result)
+		next, hardErr := conductor.absorbBundleMember(ledger, bundle, result)
 		bundle = next
 		if hardErr != nil {
 			cancel()
-			bundle = conductor.absorbPendingPartyResults(ledger, bundle, results, launched-consumed)
-			return conductor.stopParty(ledger, &bundle, evalFailureCategory(hardErr), hardErr)
+			bundle = conductor.absorbPendingBundleResults(ledger, bundle, results, launched-consumed)
+			return conductor.stopBundle(ledger, &bundle, evalFailureCategory(hardErr), hardErr)
 		}
 	}
-	return conductor.finalizeParty(ledger, bundle)
+	return conductor.finalizeBundle(ledger, bundle)
 }
 
-func (conductor *Conductor) launchPartyMembers(ctx context.Context, party preparedParty, results chan<- concurrentPartyResult) (int, error) {
+func (conductor *Conductor) launchBundleMembers(ctx context.Context, prepared preparedBundle, results chan<- concurrentMemberResult) (int, error) {
 	started := 0
-	for index := range party.members {
+	for index := range prepared.members {
 		if err := ctx.Err(); err != nil {
 			return started, err
 		}
 		started++
-		go func(index int, prepared preparedReview) {
-			record, err := conductor.runPreparedReview(ctx, prepared, nil, conductor.now().UTC())
-			results <- concurrentPartyResult{index: index, record: record, err: err}
-		}(index, party.members[index])
+		go func(index int, member preparedReview) {
+			record, err := conductor.runPreparedReview(ctx, member, nil, conductor.now().UTC())
+			results <- concurrentMemberResult{index: index, record: record, err: err}
+		}(index, prepared.members[index])
 	}
 	return started, nil
 }
 
-// absorbPendingPartyResults drains results of members that were already
+// absorbPendingBundleResults drains results of members that were already
 // launched when a hard stop happened, so every persisted child Review stays
 // linked in the bundle instead of being orphaned as a pending member.
-func (conductor *Conductor) absorbPendingPartyResults(ledger store.BundleStore, bundle model.ReviewBundle, results chan concurrentPartyResult, pending int) model.ReviewBundle {
+func (conductor *Conductor) absorbPendingBundleResults(ledger store.BundleStore, bundle model.ReviewBundle, results chan concurrentMemberResult, pending int) model.ReviewBundle {
 	for drained := 0; drained < pending; drained++ {
 		result := <-results
-		next, _ := conductor.absorbPartyMember(ledger, bundle, result)
+		next, _ := conductor.absorbBundleMember(ledger, bundle, result)
 		bundle = next
 	}
 	return bundle
 }
 
-// absorbPartyMember records one terminal member outcome on the bundle. A child
+// absorbBundleMember records one terminal member outcome on the bundle. A child
 // Incomplete lifecycle is an honest member outcome; only persistence or
-// cancellation-class errors are hard failures that stop remaining work.
-func (conductor *Conductor) absorbPartyMember(ledger store.BundleStore, bundle model.ReviewBundle, result concurrentPartyResult) (model.ReviewBundle, error) {
-	member := model.BundleMember{Scope: bundle.Members[result.index].Scope, Profile: bundle.Members[result.index].Profile, ReviewID: result.record.ID, Lifecycle: result.record.Lifecycle}
+// cancellation-class errors are hard failures that stop remaining work. The
+// member's scoped identity, origin, and Profile Revision survive the update.
+func (conductor *Conductor) absorbBundleMember(ledger store.BundleStore, bundle model.ReviewBundle, result concurrentMemberResult) (model.ReviewBundle, error) {
+	member := bundle.Members[result.index]
+	member.ReviewID = result.record.ID
+	member.Lifecycle = result.record.Lifecycle
 	if result.record.Result != nil {
 		member.Status = string(result.record.Result.Status)
 		member.FindingCount = result.record.Result.FindingCount()
@@ -321,7 +127,7 @@ func (conductor *Conductor) absorbPartyMember(ledger store.BundleStore, bundle m
 	return bundle, result.err
 }
 
-func (conductor *Conductor) finalizeParty(ledger store.BundleStore, bundle model.ReviewBundle) (model.ReviewBundle, error) {
+func (conductor *Conductor) finalizeBundle(ledger store.BundleStore, bundle model.ReviewBundle) (model.ReviewBundle, error) {
 	bundle.CompletedAt = conductor.now().UTC()
 	bundle.UpdatedAt = bundle.CompletedAt
 	bundle.Lifecycle = model.LifecycleCompleted
@@ -337,7 +143,7 @@ func (conductor *Conductor) finalizeParty(ledger store.BundleStore, bundle model
 	return bundle, nil
 }
 
-func (conductor *Conductor) stopParty(ledger store.BundleStore, bundle *model.ReviewBundle, category model.TerminationCategory, cause error) (model.ReviewBundle, error) {
+func (conductor *Conductor) stopBundle(ledger store.BundleStore, bundle *model.ReviewBundle, category model.TerminationCategory, cause error) (model.ReviewBundle, error) {
 	bundle.Lifecycle = model.LifecycleIncomplete
 	bundle.Termination = &model.BundleTermination{Category: category, Message: cause.Error()}
 	bundle.CompletedAt = conductor.now().UTC()

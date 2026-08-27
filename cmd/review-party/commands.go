@@ -46,8 +46,8 @@ func newRootCommand(streams commandIO) *cobra.Command {
 	root := &cobra.Command{
 		Use:           "review-party",
 		Short:         "Run bounded code reviews through coding agents",
-		Long:          "Review Party compiles named review profiles into bounded agent runs and stores validated review records.",
-		Example:       "  review-party review bugs --repo .\n  review-party config\n  review-party history --format json",
+		Long:          "Review Party resolves one repository's review selection into bounded agent runs and stores validated review records.",
+		Example:       "  review-party run --repo .\n  review-party run --profile code-quality --repo .\n  review-party config\n  review-party history --format json",
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -59,7 +59,7 @@ func newRootCommand(streams commandIO) *cobra.Command {
 	root.SetErr(streams.errors)
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return err })
 	root.AddCommand(
-		newReviewCommand(streams),
+		newRunCommand(streams),
 		newReplayCommand(streams),
 		newInspectCommand(streams),
 		newHistoryCommand(streams),
@@ -67,7 +67,6 @@ func newRootCommand(streams commandIO) *cobra.Command {
 		newExplainCommand("explain", streams),
 		newProfileCommand(streams),
 		newPartiesCommand(streams),
-		newPartyCommand(streams),
 		newEvalCommand(streams),
 		newConfigCommand(streams),
 		newInitCommand(streams),

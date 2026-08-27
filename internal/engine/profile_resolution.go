@@ -14,7 +14,7 @@ func profileSelectionHasExecutionOverrides(selection model.ProfileSelection) boo
 }
 
 func (conductor *Conductor) compileExperimentProfile(selection model.ProfileSelection, repository string) (compiledProfile, error) {
-	resolved, err := conductor.profiles.resolve(profileRequest{repository: repository, name: selection.Profile})
+	resolved, err := conductor.resolveProfile(profileRequest{repository: repository, name: selection.Profile})
 	if err != nil {
 		return compiledProfile{}, err
 	}
@@ -40,28 +40,28 @@ func (conductor *Conductor) compileResolvedProfile(resolved resolvedProfile) (co
 	return conductor.compileProfile(selection, resolved)
 }
 
-func (library profileLibrary) resolveConfiguration(request profileRequest) (configuration.Effective, string, error) {
-	if library.manager() == nil {
-		return configuration.Effective{}, "", errProfileLibraryNotConfigured
-	}
-	if err := validateAuthoredName(request.name); err != nil {
-		return configuration.Effective{}, "", fmt.Errorf("profile name %q: %w", request.name, err)
-	}
-	effective, err := library.manager().Resolve(configuration.Request{Repository: configuration.Repository(request.repository)})
-	return effective, request.name, err
+type profileRequest struct {
+	repository string
+	name       string
 }
 
-func (library profileLibrary) resolve(request profileRequest) (resolvedProfile, error) {
-	effective, name, err := library.resolveConfiguration(request)
+func (conductor *Conductor) resolveProfile(request profileRequest) (resolvedProfile, error) {
+	if conductor.configuration == nil {
+		return resolvedProfile{}, errConfigurationNotConfigured
+	}
+	if err := validateAuthoredName(request.name); err != nil {
+		return resolvedProfile{}, fmt.Errorf("profile name %q: %w", request.name, err)
+	}
+	effective, err := conductor.configuration.Resolve(configuration.Request{Repository: configuration.Repository(request.repository)})
 	if err != nil {
 		return resolvedProfile{}, err
 	}
-	profile, found, err := library.manager().ResolveProfile(configuration.Repository(request.repository), name)
+	profile, found, err := conductor.configuration.ResolveProfile(configuration.Repository(request.repository), request.name)
 	if err != nil {
 		return resolvedProfile{}, err
 	}
 	if !found {
-		return resolvedProfile{}, UnknownProfileError{Name: name, Available: library.authoredProfileNames(request.repository)}
+		return resolvedProfile{}, UnknownProfileError{Name: request.name, Available: conductor.authoredProfileNames(request.repository)}
 	}
 	return resolvedFromProfile(profile, effective)
 }
@@ -76,18 +76,21 @@ func resolvedFromProfile(profile configuration.Profile, effective configuration.
 
 type profileInventoryFilter func(configuration.Definition[configuration.Profile]) bool
 
-func (library profileLibrary) authoredProfileNames(repository string) []string {
-	return library.profileNames(repository, func(configuration.Definition[configuration.Profile]) bool { return true })
+func (conductor *Conductor) authoredProfileNames(repository string) []string {
+	return conductor.profileNames(repository, func(configuration.Definition[configuration.Profile]) bool { return true })
 }
 
-func (library profileLibrary) executableProfileNames(repository string) []string {
-	return library.profileNames(repository, func(definition configuration.Definition[configuration.Profile]) bool {
+func (conductor *Conductor) executableProfileNames(repository string) []string {
+	return conductor.profileNames(repository, func(definition configuration.Definition[configuration.Profile]) bool {
 		return definition.Err == nil
 	})
 }
 
-func (library profileLibrary) profileNames(repository string, include profileInventoryFilter) []string {
-	inventory, err := library.inventory(repository)
+func (conductor *Conductor) profileNames(repository string, include profileInventoryFilter) []string {
+	if conductor.configuration == nil {
+		return nil
+	}
+	inventory, err := conductor.configuration.ProfileInventory(configuration.Repository(repository))
 	if err != nil {
 		return nil
 	}

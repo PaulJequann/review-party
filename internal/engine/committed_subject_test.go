@@ -22,7 +22,7 @@ func TestCommittedReviewExecutesAtRecordedHeadAndCleansCheckout(t *testing.T) {
 		assertCommittedExecutionView(t, spec.Repository)
 		return attemptExecution{AssistantText: cleanReview, Outcome: model.AttemptCompleted}
 	}}
-	record, err := testConductor(t, executor, time.Second).Review(context.Background(), model.ReviewSelection{Repository: repository, Subject: model.CommittedRange(base, head), Profile: "bugs"})
+	record, err := testConductor(t, executor, time.Second).Review(context.Background(), model.RunSelection{Repository: repository, Subject: model.CommittedRange(base, head), Profile: "bugs"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +40,7 @@ func TestCommittedReviewExecutesAtRecordedHeadAndCleansCheckout(t *testing.T) {
 func TestInvalidCommittedRangePreventsHarnessLaunch(t *testing.T) {
 	repository := testRepository(t)
 	executor := successfulExecutor(cleanReview)
-	_, err := testConductor(t, executor, time.Second).Review(context.Background(), model.ReviewSelection{Repository: repository, Subject: model.CommittedRange("missing-base", "HEAD"), Profile: "bugs"})
+	_, err := testConductor(t, executor, time.Second).Review(context.Background(), model.RunSelection{Repository: repository, Subject: model.CommittedRange("missing-base", "HEAD"), Profile: "bugs"})
 	if err == nil {
 		t.Fatal("expected invalid base error")
 	}
@@ -83,7 +83,7 @@ func assertIncompleteCheckoutCleanup(t *testing.T, run func(context.Context) att
 		executionPath = spec.Repository
 		return run(ctx)
 	}}
-	record, err := testConductor(t, executor, 10*time.Millisecond).Review(context.Background(), model.ReviewSelection{Repository: repository, Subject: model.CommittedRange(base, "HEAD"), Profile: "bugs"})
+	record, err := testConductor(t, executor, 10*time.Millisecond).Review(context.Background(), model.RunSelection{Repository: repository, Subject: model.CommittedRange(base, "HEAD"), Profile: "bugs"})
 	if err != nil {
 		t.Fatal(err)
 	}
