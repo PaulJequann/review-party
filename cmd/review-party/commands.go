@@ -71,6 +71,7 @@ func newRootCommand(streams commandIO) *cobra.Command {
 		newEvalCommand(streams),
 		newConfigCommand(streams),
 		newInitCommand(streams),
+		newVersionCommand(streams),
 	)
 	return root
 }

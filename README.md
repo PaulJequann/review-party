@@ -11,6 +11,43 @@ live in [`docs/research`](docs/research/).
 The accepted first implementation slice is documented in
 [`docs/design/conductor-v1.md`](docs/design/conductor-v1.md).
 
+## Local development installation
+
+Build and atomically install the current checkout into
+`${XDG_BIN_HOME:-$HOME/.local/bin}`:
+
+```sh
+./scripts/install-local.sh
+review-party version
+```
+
+Pass a directory as the first argument to install elsewhere. The installer does
+not create configuration or state. Sync the tracked Profile Templates into
+complete executable Global Profiles for local dogfood with:
+
+```sh
+./scripts/sync-local-profiles.sh
+```
+
+This command replaces the local `bugs`, `code-quality`, and `documentation`
+Profile metadata and instructions. It reads Template content and revisions from
+the checkout, and fixes execution to the dogfood Reviewer settings. Environment
+variables named `REVIEW_PARTY_DOGFOOD_REVIEWER`,
+`REVIEW_PARTY_DOGFOOD_MODEL`, `REVIEW_PARTY_DOGFOOD_EFFORT`, and
+`REVIEW_PARTY_DOGFOOD_DEADLINE` may explicitly select different settings. Pass
+a Profiles directory as the first argument to target an isolated configuration.
+
+Run the installed-binary smoke check from an isolated repository and isolated
+XDG roots with:
+
+```sh
+./scripts/smoke-installed.sh "$(command -v review-party)"
+```
+
+Review Party is pre-release. Re-run the installer and Profile sync after
+updating `main`, and use the installed binary rather than `go run` for ordinary
+dogfood Reviews.
+
 ## Current CLI
 
 > Configuration Hub Slice 4 established Global and Repository Configuration,
