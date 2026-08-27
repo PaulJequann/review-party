@@ -40,6 +40,8 @@ func TestProfilesCommandListsOnlySavedProfiles(t *testing.T) {
 
 func isolatedProfilesRepository(t *testing.T) string {
 	t.Helper()
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	repository := t.TempDir()
 	runProfileTestCommand(t, exec.Command("git", "-C", repository, "init", "--quiet"))
 	return repository

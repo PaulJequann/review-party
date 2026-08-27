@@ -31,10 +31,10 @@ func TestRetiredProfileMutationCommandsAreAbsent(t *testing.T) {
 	}
 }
 
-func TestOrdinaryReviewRejectsExecutionOverrides(t *testing.T) {
+func TestOrdinaryRunRejectsExecutionOverrides(t *testing.T) {
 	for _, flag := range []string{"--reviewer", "--model", "--effort", "--deadline"} {
 		var stdout, stderr bytes.Buffer
-		arguments := []string{"review", "bugs", flag, "value"}
+		arguments := []string{"run", flag, "value"}
 		if flag == "--deadline" {
 			arguments[len(arguments)-1] = "1m"
 		}

@@ -15,11 +15,12 @@ record, err := conductor.Inspect(ctx, reviewID)
 The CLI presents the common path as:
 
 ```text
-review-party review bugs
+review-party run
 review-party inspect <review-id>
 ```
 
-`Party` will join the Interface when Party execution exists. Durable
+`Run` replaced the earlier `review` and `party run` commands and executes the
+repository's saved selection or one explicit Profile or Party. Durable
 `Start`/`Await`/`Cancel` lifecycle control is deferred until hosted execution
 provides a concrete need. A host can wrap the synchronous operation in a job
 runner without exposing Review Party's internal execution machinery.

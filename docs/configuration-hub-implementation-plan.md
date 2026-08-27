@@ -2,7 +2,7 @@
 
 <!-- Stashbox: https://stashbox.local.bysliek.com/0XZZMwVbSdKL -->
 
-Status: Slices 1-4 complete; Slice 5 is next
+Status: Slices 1-5 complete; Slice 6 is next
 Last reconciled: 2026-08-26
 
 This plan replaces Review Party's current configuration and execution model with
@@ -344,7 +344,7 @@ and repository roll-up model before adding more interfaces.
 
 ## Slice 5: resolution and `review-party run`
 
-Status: **Next**
+Status: **Complete**
 
 ### Goal
 
@@ -368,6 +368,24 @@ it through the ordinary Review path.
 - Persist authored selection, expanded list, deduplication facts, warnings,
   Profile Revisions, and provenance in the Review Bundle.
 - Keep bare `review-party` as successful help.
+
+### Shipped behavior notes
+
+- Resolution lives in the Configuration Manager as `ResolveRun`; the engine only
+  compiles resolved slots and authors the Bundle. A missing reference surfaces
+  with its selection origin (`reviews.global[1]`) and available names.
+- Review Bundles gained a `selection` record (kind, source, limit provenance,
+  authored items), `warnings`, `deduplicated` facts, per-member origins and
+  Profile Revisions, and one composition `revision` digest. The ledger schema
+  moved to version 10; preparation replaces prior pre-release ledgers in place
+  per the established no-migration policy, including earlier single-schema
+  versions such as 9.
+- An interactive unconfigured run currently refuses with guidance to
+  initialize and configure; opening the Hub belongs to Slice 8, so both modes
+  refuse without writes or launches this slice.
+- Sequential execution preserves authored order; Concurrency Limits above one
+  gate attempts through the existing bounded launch mechanism while bundle rows
+  stay ordered by authored position.
 
 ### Acceptance
 
@@ -550,6 +568,10 @@ are written.
 | Recovery preserves retired state | Fresh initialization destroys an incompatible ledger | Real filesystem recovery | Ledger and sidecars exist in backup before new state preparation |
 | Hub cancellation is clean | Leaving a form publishes part of a Profile | Hub and Configuration Manager | Cancel and exit before final confirmation write nothing |
 | Machine mutation never blocks on prompts | An agent waits forever without a terminal | Config command | Mutation refuses unless `--yes` supplies authorization |
+| Slice 5: an explicit choice replaces the saved default | `--profile code-quality` silently appends to the repository roll-up | Public run command | Exactly the named Profile or Party executes; conflicting flags are refused |
+| Slice 5: unqualified explicit names resolve Repository first | An explicit name launches the Global copy although a Repository copy exists | Selection resolver | The resolved scope follows Repository-before-Global; qualified names are exact |
+| Slice 5: the roll-up owns its Concurrency Limit | A Party limit replaces the repository limit or vice versa | Selection resolver and bundle persistence | Expanded list carries the authoring limit's provenance |
+| Slice 5: an unconfigured run refuses cleanly | A missing selection starts reviews with nothing selected or writes fallback state | Public run command | Nonzero exit names the configuration gap; no Reviewer launches and no files are written |
 
 ## Explicit non-goals
 

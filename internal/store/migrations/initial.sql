@@ -110,18 +110,20 @@ CREATE INDEX adjudication_suite_history ON adjudication_revisions(suite_run_id, 
 
 CREATE TABLE review_bundles (
   id TEXT PRIMARY KEY,
-  party TEXT NOT NULL,
   description TEXT NOT NULL DEFAULT '',
-  party_revision TEXT NOT NULL,
+  revision TEXT NOT NULL,
   repository TEXT NOT NULL,
   subject_kind TEXT NOT NULL,
   subject_identity TEXT NOT NULL,
   lifecycle TEXT NOT NULL,
   termination BLOB,
+  selection BLOB NOT NULL,
+  warnings BLOB NOT NULL,
+  deduplicated BLOB NOT NULL,
   members BLOB NOT NULL,
   concurrency_limit INTEGER NOT NULL,
   created_at TIMESTAMP NOT NULL,
   updated_at TIMESTAMP NOT NULL,
   completed_at TIMESTAMP
 );
-CREATE INDEX review_bundles_party_history ON review_bundles(party, created_at DESC);
+CREATE INDEX review_bundles_repository_history ON review_bundles(repository, created_at DESC);

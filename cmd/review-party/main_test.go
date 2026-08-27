@@ -125,9 +125,9 @@ func TestHistoryRejectsRemovedRecordsFlag(t *testing.T) {
 	}
 }
 
-func TestReviewRequiresCompleteCommittedRange(t *testing.T) {
+func TestRunRequiresCompleteCommittedRange(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	if exit := run(context.Background(), []string{"review", "bugs", "--base", "HEAD~1"}, &stdout, &stderr); exit != 2 {
+	if exit := run(context.Background(), []string{"run", "--base", "HEAD~1"}, &stdout, &stderr); exit != 2 {
 		t.Fatalf("exit = %d, stderr = %q", exit, stderr.String())
 	}
 	if !strings.Contains(stderr.String(), "--base and --head must be provided together") {
@@ -169,9 +169,9 @@ func TestHistoryParsesFiltersAndRendersEquivalentSummaries(t *testing.T) {
 	}
 }
 
-func TestReviewHelpOmitsExecutionOverrides(t *testing.T) {
+func TestRunHelpOmitsExecutionOverrides(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	if exit := run(context.Background(), []string{"review", "--help"}, &stdout, &stderr); exit != 0 {
+	if exit := run(context.Background(), []string{"run", "--help"}, &stdout, &stderr); exit != 0 {
 		t.Fatalf("exit = %d, stderr = %q", exit, stderr.String())
 	}
 	for _, flag := range []string{"--reviewer", "--model", "--effort", "--deadline"} {

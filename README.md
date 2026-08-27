@@ -50,11 +50,10 @@ dogfood Reviews.
 
 ## Current CLI
 
-> Configuration Hub Slice 4 established Global and Repository Configuration,
-> complete two-file Profiles, non-executable Templates, flat scoped Parties,
-> and repository-owned review selection. Slice 5 will connect that foundation
-> to `review-party run` and remove the transitional `review` and `party run`
-> commands. See
+> Configuration Hub Slice 5 resolves the repository's saved review selection
+> into an inspectable Review Bundle and runs it through `review-party run`.
+> The transitional `review` and `party run` commands are replaced with no
+> aliases. See
 > [`docs/configuration-hub-implementation-plan.md`](docs/configuration-hub-implementation-plan.md).
 
 Run `review-party` with no arguments for task-oriented help. Every command and
@@ -91,17 +90,33 @@ review-party config path
 review-party config file show
 ```
 
-Run one exact saved Profile:
+Run one exact saved Profile, one Party, or the repository's saved selection:
 
 ```sh
-review-party review bugs --repo .
-review-party review code-quality --repo .
-review-party review documentation --repo .
+review-party run --profile bugs --repo .
+review-party run --profile code-quality --repo .
+review-party run --profile documentation --repo .
+review-party run --party baseline --repo .
+review-party run --repo .
 ```
 
+Without `--profile` or `--party`, `run` executes the repository's complete
+saved roll-up from `.reviewparty/config.json reviews`. An explicit choice
+replaces that default for one run and never edits configuration. Unqualified
+names resolve Repository before Global; prefix `global:` or `repository:` for
+an exact scope. Exact duplicated Profile identities execute once — later
+occurrences are recorded as deduplicated — while same-named Profiles from both
+scopes are distinct: both run and produce a strong warning in human and JSON
+output. The authored selection, expanded execution list, deduplication facts,
+warnings, Concurrency Limit provenance, and every executed Profile Revision are
+preserved in the Review Bundle (`rb_…`, inspectable via
+`review-party inspect`). A missing Profile or Party, invalid Profile,
+unavailable saved Reviewer, or rejected model fails closed before any Reviewer
+launches.
+
 Each saved Profile fixes its Reviewer, model, reasoning effort, Attempt
-deadline, and instructions. Ordinary Review, explain, replay, and Party commands
-do not accept execution overrides. A different cost or quality choice is a
+deadline, and instructions. Ordinary `run`, explain, replay, and Party
+commands do not accept execution overrides. A different cost or quality choice is a
 differently named Profile.
 
 Packaged `bugs`, `code-quality`, and `documentation` material is available only
@@ -153,10 +168,11 @@ Repository Configuration owns the complete default roll-up in `reviews`:
 }
 ```
 
-Each selection item names exactly one Profile or Party. Global items expand
-before Repository items, with authored order preserved. Slice 5 connects this
-saved selection to `review-party run`; the current `review` and `party run`
-commands remain transitional.
+Each selection item names exactly one Profile or Party. Global entries expand
+before Repository entries in authored order; global items select Global
+definitions and repository items select Repository definitions. The saved
+selection owns its own Concurrency Limit for the complete roll-up, and this is
+what `review-party run` executes without flags.
 
 Only Global Configuration accepts `state_directory` and `eval`. Repository
 Configuration rejects those fields. Unknown fields, unsupported versions,
@@ -171,7 +187,7 @@ Review an exact committed range with full object provenance and an isolated
 repository view:
 
 ```sh
-review-party review bugs --repo . --base HEAD~1 --head HEAD
+review-party run --profile bugs --repo . --base HEAD~1 --head HEAD
 ```
 
 Both revisions must resolve to commits already present in the local repository.

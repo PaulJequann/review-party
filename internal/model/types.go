@@ -61,6 +61,15 @@ type ReplaySelection struct {
 	Effort         string
 }
 
+// RunSelection is one ordinary run request: at most one explicit definition
+// may be supplied; without either, the repository's saved selection runs.
+type RunSelection struct {
+	Repository string
+	Subject    SubjectReference
+	Profile    string
+	Party      string
+}
+
 type EvalRunID string
 type EvalSuiteRunID string
 
@@ -166,20 +175,6 @@ type PartyMember struct {
 	Profile string `json:"profile"`
 }
 
-type PartyDefinition struct {
-	SchemaVersion    int           `json:"schema_version"`
-	Name             string        `json:"name"`
-	Description      string        `json:"description,omitempty"`
-	Profiles         []PartyMember `json:"profiles"`
-	ConcurrencyLimit int           `json:"concurrency_limit,omitempty"`
-}
-
-type PartySelection struct {
-	Name       string
-	Repository string
-	Subject    SubjectReference
-}
-
 type PartySummary struct {
 	Name        string        `json:"name"`
 	Description string        `json:"description"`
@@ -188,13 +183,49 @@ type PartySummary struct {
 	Error       string        `json:"error,omitempty"`
 }
 
+// BundleAuthoredItem records one authored, ordered entry of the selection
+// that produced a Review Bundle.
+type BundleAuthoredItem struct {
+	Kind  string `json:"kind"`
+	Name  string `json:"name"`
+	Scope string `json:"scope"`
+}
+
+// BundleSelection preserves the authored choice behind one run together with
+// which authoring supplied its Concurrency Limit.
+type BundleSelection struct {
+	Kind             string               `json:"kind"`
+	Source           string               `json:"source,omitempty"`
+	ConcurrencyLimit int                  `json:"concurrency_limit,omitempty"`
+	LimitSource      string               `json:"limit_source,omitempty"`
+	Authored         []BundleAuthoredItem `json:"authored,omitempty"`
+}
+
+// SkippedDuplicate records one occurrence removed by exact-identity
+// deduplication and where its first occurrence remains.
+type SkippedDuplicate struct {
+	Scope      string `json:"scope"`
+	Profile    string `json:"profile"`
+	Origin     string `json:"origin"`
+	KeptOrigin string `json:"kept_origin"`
+}
+
+// BundleWarning is one resolution warning preserved with the run it affected.
+type BundleWarning struct {
+	Category string `json:"category"`
+	Name     string `json:"name,omitempty"`
+	Message  string `json:"message"`
+}
+
 type BundleMember struct {
-	Scope        string    `json:"scope"`
-	Profile      string    `json:"profile"`
-	ReviewID     ReviewID  `json:"review_id,omitempty"`
-	Lifecycle    Lifecycle `json:"lifecycle"`
-	Status       string    `json:"status,omitempty"`
-	FindingCount int       `json:"finding_count,omitempty"`
+	Scope           string    `json:"scope"`
+	Profile         string    `json:"profile"`
+	ProfileRevision string    `json:"profile_revision,omitempty"`
+	Origin          string    `json:"origin,omitempty"`
+	ReviewID        ReviewID  `json:"review_id,omitempty"`
+	Lifecycle       Lifecycle `json:"lifecycle"`
+	Status          string    `json:"status,omitempty"`
+	FindingCount    int       `json:"finding_count,omitempty"`
 }
 
 type BundleTermination struct {
@@ -204,14 +235,16 @@ type BundleTermination struct {
 
 type ReviewBundle struct {
 	ID               ReviewBundleID     `json:"id"`
-	Party            string             `json:"party"`
+	Revision         string             `json:"revision"`
 	Description      string             `json:"description,omitempty"`
-	PartyRevision    string             `json:"party_revision"`
 	Repository       string             `json:"repository"`
 	SubjectKind      SubjectKind        `json:"subject_kind"`
 	SubjectIdentity  string             `json:"subject_identity"`
 	Lifecycle        Lifecycle          `json:"lifecycle"`
 	Termination      *BundleTermination `json:"termination,omitempty"`
+	Selection        *BundleSelection   `json:"selection,omitempty"`
+	Warnings         []BundleWarning    `json:"warnings,omitempty"`
+	Deduplicated     []SkippedDuplicate `json:"deduplicated,omitempty"`
 	Members          []BundleMember     `json:"members"`
 	ConcurrencyLimit int                `json:"concurrency_limit"`
 	CreatedAt        time.Time          `json:"created_at"`

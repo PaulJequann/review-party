@@ -15,7 +15,7 @@ func TestPartyReaderRejectsExtends(t *testing.T) {
 	path := filepath.Join(repository, ".reviewparty", "parties", "gate.json")
 	writePartyBytes(t, path, []byte(`{"schema_version":1,"name":"gate","extends":["baseline"],"concurrency_limit":1,"profiles":[{"scope":"repository","profile":"bugs"}]}`))
 	conductor := testPartyConductor(t, nil)
-	_, _, err := conductor.resolveParty(partyLookup{repository: repository, name: "gate"})
+	_, _, err := conductor.configuration.LoadParty(configuration.ScopeRepository, configuration.Repository(repository), "gate")
 	if err == nil || !strings.Contains(err.Error(), `unknown field "extends"`) {
 		t.Fatalf("error = %v", err)
 	}

@@ -47,22 +47,14 @@ func TestFlagAccessRejectsUnregisteredName(t *testing.T) {
 	stringFlag(cmd, "misspelled")
 }
 
-func TestPartyRunRequiresExplicitName(t *testing.T) {
-	root := newRootCommand(productionCommandIO(strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{}))
-	cmd, _, err := root.Find([]string{"party", "run"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := cmd.Args(cmd, nil); err == nil {
-		t.Fatal("party run accepted an omitted Party")
-	}
-}
-
-func TestPartyRunRejectsExecutionOverrides(t *testing.T) {
+func TestRunRejectsConflictingExplicitSelection(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	exit := run(context.Background(), []string{"party", "run", "gate", "--concurrency", "2"}, &stdout, &stderr)
-	if exit != usageExitCode || !strings.Contains(stderr.String(), "unknown flag") {
-		t.Fatalf("exit = %d, diagnostic = %q", exit, stderr.String())
+	exit := run(context.Background(), []string{"run", "--profile", "a", "--party", "b"}, &stdout, &stderr)
+	if exit != usageExitCode {
+		t.Fatalf("exit = %d, want %d", exit, usageExitCode)
+	}
+	if !strings.Contains(stderr.String(), "profile") || !strings.Contains(stderr.String(), "party") {
+		t.Fatalf("diagnostic does not name the conflict: %q", stderr.String())
 	}
 }
 
