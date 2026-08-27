@@ -40,8 +40,7 @@ func (conductor *Conductor) prepareEvalReview(ctx context.Context, selection mod
 	}
 	started := conductor.now().UTC()
 	timings := model.ReviewTimings{}
-	repository, _, subjectResolutionMS, err := conductor.prepareReviewSubject(selection.Repository, selection.Subject)
-	timings.SubjectResolutionMS += subjectResolutionMS
+	repository, err := resolveSubjectRepository(selection.Repository, selection.Subject)
 	if err != nil {
 		return preparedReview{}, time.Time{}, err
 	}
@@ -51,7 +50,7 @@ func (conductor *Conductor) prepareEvalReview(ctx context.Context, selection mod
 	if err != nil {
 		return preparedReview{}, time.Time{}, err
 	}
-	_, resolvedSubject, subjectResolutionMS, err := conductor.prepareReviewSubject(selection.Repository, selection.Subject)
+	_, resolvedSubject, subjectResolutionMS, err := conductor.prepareReviewSubject(repository, selection.Subject)
 	timings.SubjectResolutionMS += subjectResolutionMS
 	if err != nil {
 		return preparedReview{}, time.Time{}, err
