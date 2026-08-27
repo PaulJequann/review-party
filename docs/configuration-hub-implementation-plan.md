@@ -3,7 +3,7 @@
 <!-- Stashbox: https://stashbox.local.bysliek.com/0XZZMwVbSdKL -->
 
 Status: Slices 1-5 complete; Slice 6 is next
-Last reconciled: 2026-08-26
+Last reconciled: 2026-08-27
 
 This plan replaces Review Party's current configuration and execution model with
 the accepted Global and Repository Configuration model in [`../CONTEXT.md`](../CONTEXT.md).
@@ -242,7 +242,7 @@ Slice 1  Dependency and harness capability spike                 Complete
 Slice 2  Scoped Configuration Manager                            Complete
 Slice 3  Cobra command tree                                      Complete
 Slice 4  Domain and storage reset                                Complete
-Slice 5  Resolution and review-party run                         Next
+Slice 5  Resolution and review-party run                         Complete (PR #13)
 Slice 6  Agent-facing configuration commands
 Slice 7  Discovery and onboarding
 Slice 8  Hub shell and core editors
@@ -344,7 +344,7 @@ and repository roll-up model before adding more interfaces.
 
 ## Slice 5: resolution and `review-party run`
 
-Status: **Complete**
+Status: **Complete (PR #13)**
 
 ### Goal
 
