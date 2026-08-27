@@ -117,6 +117,17 @@ type ResolvedReviews struct {
 // identities deduplicate at their first occurrence, and missing required
 // material fails closed before any caller plans execution.
 func (manager *Manager) ResolveRun(request RunRequest) (ResolvedReviews, error) {
+	loaded, err := manager.Load(request.Repository)
+	if err != nil {
+		return ResolvedReviews{}, err
+	}
+	return manager.ResolveRunLoaded(request, loaded)
+}
+
+// ResolveRunLoaded resolves one selection from an already loaded configuration
+// snapshot. Definition files remain resolved through the manager so missing or
+// malformed executable material still fails closed.
+func (manager *Manager) ResolveRunLoaded(request RunRequest, loaded Loaded) (ResolvedReviews, error) {
 	switch {
 	case request.Profile != "" && request.Party != "":
 		return ResolvedReviews{}, errors.New("an explicit Profile and an explicit Party cannot be selected together")
@@ -125,7 +136,7 @@ func (manager *Manager) ResolveRun(request RunRequest) (ResolvedReviews, error) 
 	case request.Party != "":
 		return manager.resolveExplicitParty(request.Repository, request.Party)
 	default:
-		return manager.resolveDefaultSelection(request.Repository)
+		return manager.resolveDefaultSelection(request.Repository, loaded)
 	}
 }
 
@@ -154,9 +165,7 @@ func (failure UnresolvedReferenceError) Error() string {
 	return message
 }
 
-// splitQualifiedReference separates an optional exact "global:"/"repository:"
-// qualifier from a definition name.
-func splitQualifiedReference(value string) (Scope, string) {
+func parseScopedReference(value string) (Scope, string) {
 	globalPrefix, repositoryPrefix := string(ScopeGlobal)+":", string(ScopeRepository)+":"
 	switch {
 	case strings.HasPrefix(value, globalPrefix):
@@ -166,6 +175,45 @@ func splitQualifiedReference(value string) (Scope, string) {
 	default:
 		return "", value
 	}
+}
+
+// ParseSelectionItem parses one raw selection reference while preserving the
+// scope owned by the selected review group. Definition existence is validated
+// later by Manager.Plan with the complete resulting document.
+func ParseSelectionItem(scope Scope, profile, party string) (SelectionItem, error) {
+	if profile == "" && party == "" {
+		return SelectionItem{}, errors.New("choose exactly one of --profile or --party")
+	}
+	value := profile
+	if value == "" {
+		value = party
+	}
+	qualified, name := parseScopedReference(value)
+	if qualified != "" && qualified != scope {
+		return SelectionItem{}, fmt.Errorf("%s selection must reference a %s definition", value, scope)
+	}
+	if profile != "" {
+		return SelectionItem{Profile: name}, nil
+	}
+	return SelectionItem{Party: name}, nil
+}
+
+// ParseProfileReferences parses raw Party member references with one shared
+// scope grammar. Party creation validates the resulting references in its
+// complete Plan.
+func ParseProfileReferences(defaultScope Scope, values []string) ([]ProfileReference, error) {
+	profiles := make([]ProfileReference, 0, len(values))
+	for _, value := range values {
+		scope, name := parseScopedReference(value)
+		if scope == "" {
+			scope = defaultScope
+		}
+		if scope != ScopeGlobal && scope != ScopeRepository {
+			return nil, fmt.Errorf("Profile reference %q has an unknown scope", value)
+		}
+		profiles = append(profiles, ProfileReference{Scope: scope, Profile: name})
+	}
+	return profiles, nil
 }
 
 // scopedKey is one exact scoped identity used for deduplication.
@@ -186,7 +234,7 @@ type authoredEntry struct {
 // resolveExplicitProfile resolves --profile NAME to exactly one scoped
 // identity. Unqualified names prefer Repository Configuration before Global.
 func (manager *Manager) resolveExplicitProfile(repository Repository, value string) (ResolvedReviews, error) {
-	qualified, unqualified := splitQualifiedReference(value)
+	qualified, unqualified := parseScopedReference(value)
 	profileScope, err := manager.explicitProfileScope(repository, qualified, unqualified)
 	if err != nil {
 		return ResolvedReviews{}, err
@@ -275,11 +323,8 @@ func (manager *Manager) resolveExplicitParty(repository Repository, value string
 
 // resolveDefaultSelection expands the repository's authored reviews roll-up:
 // global entries first, then repository entries, preserving authored order.
-func (manager *Manager) resolveDefaultSelection(repository Repository) (ResolvedReviews, error) {
-	selection, value, err := manager.EffectiveReviewSelection(repository)
-	if err != nil {
-		return ResolvedReviews{}, err
-	}
+func (manager *Manager) resolveDefaultSelection(repository Repository, loaded Loaded) (ResolvedReviews, error) {
+	selection, value := manager.effectiveReviewSelection(loaded)
 	if !value.Authored {
 		return ResolvedReviews{}, ErrNoRepositorySelection
 	}
@@ -374,7 +419,7 @@ func partyEntry(name string, scope Scope, origin string, party Party) authoredEn
 // selectionParty loads one possibly qualified Party for a run selection,
 // preferring Repository Configuration before Global for unqualified names.
 func (manager *Manager) selectionParty(repository Repository, value, origin string) (Party, Scope, error) {
-	qualified, unqualified := splitQualifiedReference(value)
+	qualified, unqualified := parseScopedReference(value)
 	if qualified != "" {
 		return manager.selectionPartyAt(repository, qualified, unqualified, origin)
 	}

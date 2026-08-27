@@ -2,7 +2,7 @@
 
 <!-- Stashbox: https://stashbox.local.bysliek.com/0XZZMwVbSdKL -->
 
-Status: Slices 1-5 complete; Slice 6 is next
+Status: Slices 1-6 complete; Slice 7 is next
 Last reconciled: 2026-08-27
 
 This plan replaces Review Party's current configuration and execution model with
@@ -243,7 +243,7 @@ Slice 2  Scoped Configuration Manager                            Complete
 Slice 3  Cobra command tree                                      Complete
 Slice 4  Domain and storage reset                                Complete
 Slice 5  Resolution and review-party run                         Complete (PR #13)
-Slice 6  Agent-facing configuration commands
+Slice 6  Agent-facing configuration commands                Complete
 Slice 7  Discovery and onboarding
 Slice 8  Hub shell and core editors
 Slice 9  Template updates, recovery, and release polish
@@ -394,12 +394,12 @@ it through the ordinary Review path.
 - Missing, invalid, or unavailable Profiles launch no Reviewer.
 - Exact overlaps run once without making ordinary configuration feel broken.
 - Same-named Global and Repository Profiles both run with a strong warning.
-- An interactive unconfigured run opens configuration; a noninteractive run
-  refuses without writes or Agent Harness launch.
+- Both interactive and noninteractive unconfigured runs refuse with guidance
+  and launch no Reviewer. Hub opening is deferred to Slice 8.
 
 ## Slice 6: agent-facing configuration commands
 
-Status: **Pending**
+Status: **Complete**
 
 ### Goal
 
@@ -408,23 +408,26 @@ explicit, machine-readable commands.
 
 ### Command families
 
-These commands are the Slice 6 target and are not part of the Slice 4 CLI.
+These commands are the Slice 6 interface. They are not part of the Slice 4 CLI.
 
 ```text
 review-party config show [--repo PATH] [--format human|json]
-review-party config file show --scope global|repository [--format human|json]
+review-party config file show --scope global|repository [--repo PATH] [--config PATH] [--format human|json]
 review-party config validate [--scope global|repository] [--format human|json]
-review-party config profile create NAME (--template TEMPLATE|--blank) ...
-review-party config profile copy NAME --to-scope global|repository
-review-party config party create NAME ...
-review-party config reviews add --scope global|repository (--profile NAME|--party NAME)
-review-party config reviews remove ...
-review-party config reviews move ...
-review-party config reviews set-concurrency N
+review-party config profile create NAME (--template TEMPLATE|--blank) --reviewer ID --model ID --effort EFFORT --deadline DURATION [--instructions TEXT|--instructions-file PATH] [--scope global|repository] [--repo PATH] [--format human|json] [--yes]
+review-party config profile copy NAME --target-scope global|repository [--repo PATH] [--format human|json] [--yes]
+review-party config party create NAME --profile PROFILE --concurrency-limit N [--scope global|repository] [--description TEXT] [--repo PATH] [--format human|json] [--yes]
+review-party config reviews add --scope global|repository (--profile NAME|--party NAME) [--repo PATH] [--format human|json] [--yes]
+review-party config reviews remove --scope global|repository (--index N|--profile NAME|--party NAME) [--repo PATH] [--format human|json] [--yes]
+review-party config reviews move --scope global|repository --from N --to N [--repo PATH] [--format human|json] [--yes]
+review-party config reviews set-concurrency N [--repo PATH] [--format human|json] [--yes]
 ```
 
-Exact verbs remain a slice decision, but they must express domain operations,
-not dotted JSON paths.
+The shipped `remove` command accepts an index or one Profile or Party selector.
+The shipped `move` command accepts `--scope`, `--from`, and `--to`. The
+`set-concurrency` value is its positional `N` argument. These commands express
+domain operations, not dotted JSON paths. Repository-scoped file inspection and
+repository-scoped mutations require `--repo PATH`.
 
 ### Work
 
@@ -436,6 +439,25 @@ not dotted JSON paths.
 - Keep stdout machine-clean and refuse non-TTY confirmation without `--yes`.
 - Implement commands and later Hub editors as vertical pairs over the same
   typed operation.
+
+### Shipped behavior
+
+- `config show` resolves Effective Configuration for the selected repository.
+  JSON includes effective value provenance, the ordered expanded Review list,
+  exact deduplication facts, same-name warnings, and the selection limit
+  provenance. An unconfigured repository exits successfully and reports the
+  missing selection in `selection_error`.
+- `config file show --scope ...` prints one validated authored document. It
+  does not report the effective result. An absent document returns its path and
+  `present: false` in JSON.
+- `config validate` validates one scope or both scopes. It checks authored
+  Profile and Party definitions and the repository selection references without
+  creating missing files.
+- Profile creation, Profile copy, Party creation, and selection edits all use
+  Configuration Manager Plans. JSON mutation output contains semantic changes
+  with before and after values, affected scopes, paths, and publication state.
+- Mutations with `--format json` require `--yes`. Human mutations require a
+  terminal confirmation, and non-TTY callers must pass `--yes`.
 
 ### Acceptance
 

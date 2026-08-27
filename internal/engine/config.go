@@ -21,6 +21,12 @@ func newConfigurationManager(globalConfigPath string) *configuration.Manager {
 	return configuration.NewManager(options)
 }
 
+// ReviewPartyConfigurationOptions returns the engine-independent configuration
+// knowledge used by Review Party's command and execution compositions.
+func ReviewPartyConfigurationOptions() configuration.Options {
+	return reviewPartyConfigurationOptions()
+}
+
 func reviewPartyConfigurationOptions() configuration.Options {
 	return configuration.Options{
 		Reviewers:               supportedReviewerIDs(),

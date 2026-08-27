@@ -22,17 +22,3 @@ func printConfigurationPath(path string, output io.Writer) error {
 	_, err := fmt.Fprintln(output, path)
 	return err
 }
-
-func showConfiguration(path string, output io.Writer) error {
-	payload, err := os.ReadFile(path)
-	if err != nil {
-		return fmt.Errorf("read user configuration %q: %w", path, err)
-	}
-	if _, err := output.Write(payload); err != nil {
-		return err
-	}
-	if len(payload) == 0 || payload[len(payload)-1] != '\n' {
-		fmt.Fprintln(output)
-	}
-	return nil
-}

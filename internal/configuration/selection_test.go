@@ -106,6 +106,27 @@ func expectSlots(t *testing.T, got []string, want ...string) {
 	}
 }
 
+func TestParseScopedReference(t *testing.T) {
+	tests := []struct {
+		input string
+		scope Scope
+		name  string
+	}{
+		{input: "global:bugs", scope: ScopeGlobal, name: "bugs"},
+		{input: "repository:bugs", scope: ScopeRepository, name: "bugs"},
+		{input: "bugs", name: "bugs"},
+		{input: "other:bugs", name: "other:bugs"},
+	}
+	for _, test := range tests {
+		t.Run(test.input, func(t *testing.T) {
+			scope, name := parseScopedReference(test.input)
+			if scope != test.scope || name != test.name {
+				t.Fatalf("parseScopedReference(%q) = (%q, %q), want (%q, %q)", test.input, scope, name, test.scope, test.name)
+			}
+		})
+	}
+}
+
 func TestDefaultSelectionExpandsGlobalBeforeRepositoryInAuthoredOrder(t *testing.T) {
 	fixture := newSelectionFixture(t)
 	fixture.profile(t, ScopeGlobal, "bugs")

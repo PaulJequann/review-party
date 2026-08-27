@@ -147,8 +147,7 @@ func (intent SetReviewSelection) intentScope() Scope  { return ScopeRepository }
 func (intent SetReviewSelection) intentField() string { return "reviews" }
 func (intent SetReviewSelection) applyIntent(document *Document) {
 	selection := intent.Selection
-	selection.Global = append([]SelectionItem(nil), selection.Global...)
-	selection.Repository = append([]SelectionItem(nil), selection.Repository...)
+	selection = cloneReviewSelection(selection)
 	document.Reviews = &selection
 }
 func (intent SetReviewSelection) readIntent(document Document) (string, bool) {

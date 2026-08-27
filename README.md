@@ -50,8 +50,8 @@ dogfood Reviews.
 
 ## Current CLI
 
-> Configuration Hub Slice 5 resolves the repository's saved review selection
-> into an inspectable Review Bundle and runs it through `review-party run`.
+> Configuration Hub Slices 5 and 6 resolve the repository's saved review selection
+> and expose it through `review-party run` and `review-party config ...`.
 > The transitional `review` and `party run` commands are replaced with no
 > aliases. See
 > [`docs/configuration-hub-implementation-plan.md`](docs/configuration-hub-implementation-plan.md).
@@ -87,7 +87,31 @@ Harness or creating a Review Record:
 review-party profiles
 review-party explain bugs
 review-party config path
-review-party config file show
+review-party config show --repo . --format json
+review-party config file show --scope global --format json
+review-party config validate --repo . --format json
+```
+
+Agents and automation use the `config` command family for configuration
+changes. Read the effective configuration with `config show`; use `config file`
+only to inspect one authored document. Mutation commands return a semantic Plan
+with before and after values. Confirm mutations in a TTY or pass `--yes`; JSON
+and non-TTY mutations require `--yes`.
+
+For example, create a complete Profile from a packaged Template, add it to the
+repository's saved selection, and set the selection limit:
+
+```sh
+review-party config profile create code-quality \
+  --template code-quality \
+  --reviewer opencode \
+  --model meta/muse-spark-1.2-contributor \
+  --effort high \
+  --deadline 3m \
+  --yes --format json
+review-party config reviews add --scope global --profile code-quality \
+  --repo . --yes --format json
+review-party config reviews set-concurrency 2 --repo . --yes --format json
 ```
 
 Run one exact saved Profile, one Party, or the repository's saved selection:
@@ -421,9 +445,11 @@ Global Profiles use the same shape under
 `template_id` and `template_revision` are omitted together for a blank Profile.
 The Configuration Manager publishes metadata and instructions through one
 snapshot-bound atomic Plan. A stale plan or failed write changes neither file.
-Profile Creation commands over this accepted aggregate arrive in Slice 6.
-Agents can use the Configuration Manager's typed `PlanProfileCreation`,
-`PlanProfileCopy`, and `Publish` operations now.
+Profile Creation commands over this accepted aggregate are available through
+`config profile create` and `config profile copy`. Agents can also use the
+Configuration Manager's typed `PlanProfileCreation`, `PlanProfileCopy`, and
+`Publish` operations.
 
 The retired `profiles/<name>.md` representation has no Configuration Manager
-reader. See [`docs/design/profile-library-v1.md`](docs/design/profile-library-v1.md).
+reader. Use `config profile create` or `config profile copy` for agent-facing
+Profile operations. See [`docs/design/profile-library-v1.md`](docs/design/profile-library-v1.md).

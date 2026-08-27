@@ -55,7 +55,7 @@ A Template never participates in Profile lookup. Profile Creation copies Templat
 
 ## Publication
 
-Profile Creation and copy produce reviewed, snapshot-bound plans. Publication writes `profile.json` and `instructions.md` as one rollback-protected unit. A failure cannot leave new metadata paired with absent or stale instructions. Existing Profiles are never overwritten by creation or copy.
+Profile Creation and copy produce reviewed, snapshot-bound plans. The agent-facing commands are `config profile create` and `config profile copy`. Publication writes `profile.json` and `instructions.md` as one rollback-protected unit. A failure cannot leave new metadata paired with absent or stale instructions. Existing Profiles are never overwritten by creation or copy.
 
 Opening configuration, listing Templates, and resolving absent Profiles create no files or directories.
 
