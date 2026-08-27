@@ -73,18 +73,43 @@ func executeRun(ctx context.Context, options runOptions, stdout, stderr io.Write
 		fmt.Fprintf(stderr, "review-party: %v\n", err)
 		return 1
 	}
-	bundle, err := conductor.Run(ctx, model.RunSelection{
+	return executeRunWithConductor(ctx, conductor, options, commandIO{output: stdout, errors: stderr})
+}
+
+type runConductor interface {
+	ReviewExplicitProfile(context.Context, model.RunSelection) (model.ReviewRecord, error)
+	Run(context.Context, model.RunSelection) (model.ReviewBundle, error)
+}
+
+func executeRunWithConductor(ctx context.Context, conductor runConductor, options runOptions, streams commandIO) int {
+	selection := model.RunSelection{
 		Repository: options.repository,
 		Subject:    options.subject,
 		Profile:    options.profile,
 		Party:      options.party,
-	})
+	}
+	if options.profile != "" {
+		record, err := conductor.ReviewExplicitProfile(ctx, selection)
+		if err != nil {
+			fmt.Fprintf(streams.errors, "review-party: %v\n", err)
+			return 1
+		}
+		if err := printRecordWithConfiguration(streams.output, record, options.format, options.configuration); err != nil {
+			fmt.Fprintf(streams.errors, "review-party: %v\n", err)
+			return 1
+		}
+		if record.Lifecycle == model.LifecycleIncomplete {
+			return usageExitCode
+		}
+		return 0
+	}
+	bundle, err := conductor.Run(ctx, selection)
 	if err != nil {
-		fmt.Fprintf(stderr, "review-party: %v\n", err)
+		fmt.Fprintf(streams.errors, "review-party: %v\n", err)
 		return 1
 	}
-	if err := printBundle(stdout, bundle, options.format); err != nil {
-		fmt.Fprintf(stderr, "review-party: %v\n", err)
+	if err := printBundle(streams.output, bundle, options.format); err != nil {
+		fmt.Fprintf(streams.errors, "review-party: %v\n", err)
 		return 1
 	}
 	if bundle.Lifecycle == model.LifecycleIncomplete {

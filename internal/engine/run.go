@@ -41,6 +41,33 @@ func (conductor *Conductor) Run(ctx context.Context, selection model.RunSelectio
 	return conductor.executePreparedBundle(ctx, ledger, prepared)
 }
 
+// ReviewExplicitProfile runs one explicitly selected Profile as an ordinary
+// Review. It shares Run's scoped resolution and complete preflight, but does
+// not create a Review Bundle; explicit Profile dogfood remains a single
+// Review Record.
+func (conductor *Conductor) ReviewExplicitProfile(ctx context.Context, selection model.RunSelection) (model.ReviewRecord, error) {
+	if err := ctx.Err(); err != nil {
+		return model.ReviewRecord{}, err
+	}
+	if selection.Profile == "" {
+		return model.ReviewRecord{}, errors.New("an explicit Profile is required")
+	}
+	if err := conductor.requirePreparedState(selection.Repository); err != nil {
+		return model.ReviewRecord{}, err
+	}
+	reviewStarted := conductor.now().UTC()
+	planned, err := conductor.planSelection(selection)
+	if err != nil {
+		return model.ReviewRecord{}, err
+	}
+	if len(planned.members) != 1 {
+		return model.ReviewRecord{}, errors.New("explicit Profile must resolve to exactly one Profile")
+	}
+	member := planned.members[0]
+	prepared := preparedReview{subject: planned.subject, profile: member.profile, timings: member.timings, deadline: member.profile.deadline}
+	return conductor.runPreparedReview(ctx, prepared, nil, reviewStarted)
+}
+
 type plannedSelection struct {
 	resolved   configuration.ResolvedReviews
 	repository string
