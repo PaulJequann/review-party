@@ -124,7 +124,7 @@ func (flow *ProfileOnboarding) Set(field OnboardingField, value OnboardingText) 
 	if !found {
 		return fmt.Errorf("unknown onboarding field %q", field)
 	}
-	if onboardingStepRank(flow.step) < onboardingStepRank(step) {
+	if !onboardingFieldReady(flow.draft, step) {
 		return fmt.Errorf("onboarding is not ready for %s", step)
 	}
 	setOnboardingField(&flow.draft, field, value)
@@ -234,31 +234,21 @@ func (flow *ProfileOnboarding) ensureEditable() error {
 }
 
 func (flow *ProfileOnboarding) clearDependentFields(step OnboardingStep) {
-	switch step {
-	case OnboardingChooseSource:
-		flow.draft.Name = ""
-		flow.draft.Reviewer = ""
-		flow.draft.Model = ""
-		flow.draft.ReasoningEffort = ""
-		flow.draft.AttemptDeadline = ""
+	clearFollowing := step == OnboardingChooseSource
+	resetModelChoices := clearFollowing
+	for _, spec := range onboardingFields {
+		if spec.step == step {
+			clearFollowing = true
+			continue
+		}
+		if !clearFollowing {
+			continue
+		}
+		spec.write(&flow.draft, "")
+		resetModelChoices = resetModelChoices || spec.resetModelChoices
+	}
+	if resetModelChoices {
 		flow.modelChoiceCheck = ModelChoiceCheck{}
-	case OnboardingName:
-		flow.draft.Reviewer = ""
-		flow.draft.Model = ""
-		flow.draft.ReasoningEffort = ""
-		flow.draft.AttemptDeadline = ""
-		flow.modelChoiceCheck = ModelChoiceCheck{}
-	case OnboardingReviewer:
-		flow.draft.Model = ""
-		flow.draft.ReasoningEffort = ""
-		flow.draft.AttemptDeadline = ""
-		flow.modelChoiceCheck = ModelChoiceCheck{}
-	case OnboardingModel:
-		flow.draft.ReasoningEffort = ""
-		flow.draft.AttemptDeadline = ""
-		flow.modelChoiceCheck = ModelChoiceCheck{}
-	case OnboardingEffort:
-		flow.draft.AttemptDeadline = ""
 	}
 }
 
@@ -266,73 +256,61 @@ func (flow *ProfileOnboarding) nextStep() OnboardingStep {
 	if flow.draft.TemplateID == "" && !hasOnboardingText(flow.draft.Instructions) {
 		return OnboardingChooseSource
 	}
-	if !hasOnboardingText(flow.draft.Name) {
-		return OnboardingName
-	}
-	if !hasOnboardingText(flow.draft.Reviewer) {
-		return OnboardingReviewer
-	}
-	if !hasOnboardingText(flow.draft.Model) {
-		return OnboardingModel
-	}
-	if !hasOnboardingText(flow.draft.ReasoningEffort) {
-		return OnboardingEffort
-	}
-	if !hasOnboardingText(flow.draft.AttemptDeadline) {
-		return OnboardingDeadline
+	for _, spec := range onboardingFields {
+		if !hasOnboardingText(spec.read(flow.draft)) {
+			return spec.step
+		}
 	}
 	return OnboardingValidation
 }
 
-func onboardingStepRank(step OnboardingStep) int {
-	if rank, found := onboardingStepOrder[step]; found {
-		return rank
-	}
-	return -1
-}
-
-var onboardingStepOrder = map[OnboardingStep]int{
-	OnboardingChooseSource: 0,
-	OnboardingName:         1,
-	OnboardingReviewer:     2,
-	OnboardingModel:        3,
-	OnboardingEffort:       4,
-	OnboardingDeadline:     5,
-	OnboardingValidation:   6,
-	OnboardingReview:       7,
-	OnboardingComplete:     8,
-	OnboardingCancelled:    9,
-}
-
 func onboardingFieldStep(field OnboardingField) (OnboardingStep, bool) {
-	switch field {
-	case OnboardingFieldName:
-		return OnboardingName, true
-	case OnboardingFieldReviewer:
-		return OnboardingReviewer, true
-	case OnboardingFieldModel:
-		return OnboardingModel, true
-	case OnboardingFieldEffort:
-		return OnboardingEffort, true
-	case OnboardingFieldDeadline:
-		return OnboardingDeadline, true
+	for _, spec := range onboardingFields {
+		if spec.field == field {
+			return spec.step, true
+		}
 	}
 	return "", false
 }
 
 func setOnboardingField(draft *ProfileDraft, field OnboardingField, value OnboardingText) {
-	switch field {
-	case OnboardingFieldName:
-		draft.Name = string(value)
-	case OnboardingFieldReviewer:
-		draft.Reviewer = string(value)
-	case OnboardingFieldModel:
-		draft.Model = string(value)
-	case OnboardingFieldEffort:
-		draft.ReasoningEffort = string(value)
-	case OnboardingFieldDeadline:
-		draft.AttemptDeadline = string(value)
+	for _, spec := range onboardingFields {
+		if spec.field == field {
+			spec.write(draft, string(value))
+			return
+		}
 	}
+}
+
+func onboardingFieldReady(draft ProfileDraft, target OnboardingStep) bool {
+	if draft.TemplateID == "" && !hasOnboardingText(draft.Instructions) {
+		return false
+	}
+	for _, spec := range onboardingFields {
+		if spec.step == target {
+			return true
+		}
+		if !hasOnboardingText(spec.read(draft)) {
+			return false
+		}
+	}
+	return false
+}
+
+type onboardingFieldSpec struct {
+	field             OnboardingField
+	step              OnboardingStep
+	read              func(ProfileDraft) string
+	write             func(*ProfileDraft, string)
+	resetModelChoices bool
+}
+
+var onboardingFields = [...]onboardingFieldSpec{
+	{field: OnboardingFieldName, step: OnboardingName, read: func(draft ProfileDraft) string { return draft.Name }, write: func(draft *ProfileDraft, value string) { draft.Name = value }},
+	{field: OnboardingFieldReviewer, step: OnboardingReviewer, read: func(draft ProfileDraft) string { return draft.Reviewer }, write: func(draft *ProfileDraft, value string) { draft.Reviewer = value }, resetModelChoices: true},
+	{field: OnboardingFieldModel, step: OnboardingModel, read: func(draft ProfileDraft) string { return draft.Model }, write: func(draft *ProfileDraft, value string) { draft.Model = value }, resetModelChoices: true},
+	{field: OnboardingFieldEffort, step: OnboardingEffort, read: func(draft ProfileDraft) string { return draft.ReasoningEffort }, write: func(draft *ProfileDraft, value string) { draft.ReasoningEffort = value }},
+	{field: OnboardingFieldDeadline, step: OnboardingDeadline, read: func(draft ProfileDraft) string { return draft.AttemptDeadline }, write: func(draft *ProfileDraft, value string) { draft.AttemptDeadline = value }},
 }
 
 func hasOnboardingText(value string) bool {
