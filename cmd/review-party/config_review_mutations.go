@@ -135,7 +135,7 @@ func selectionItemFromCommand(cmd *cobra.Command, scope configuration.Scope) (co
 }
 
 func parseSelectionItem(scope configuration.Scope, profile, party string) (configuration.SelectionItem, error) {
-	if profile == "" && party == "" {
+	if (profile == "") == (party == "") {
 		return configuration.SelectionItem{}, errors.New("choose exactly one of --profile or --party")
 	}
 	value := profile

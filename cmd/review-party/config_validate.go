@@ -106,7 +106,11 @@ func loadValidationFiles(manager *configuration.Manager, scopes []configuration.
 	result := configurationValidationResult{
 		Scopes: make([]string, 0, len(scopes)), Files: make([]configurationFileStatus, 0, len(scopes)),
 	}
-	inspection, err := manager.InspectAuthored(repository, scopes)
+	inspectionScopes := scopes
+	if containsScope(scopes, configuration.ScopeRepository) && !containsScope(scopes, configuration.ScopeGlobal) {
+		inspectionScopes = []configuration.Scope{configuration.ScopeGlobal, configuration.ScopeRepository}
+	}
+	inspection, err := manager.InspectAuthored(repository, inspectionScopes)
 	for _, scope := range scopes {
 		file, found := inspection.File(scope)
 		if !found {

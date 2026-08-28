@@ -25,6 +25,19 @@ func validateReviewSelection(selection *ReviewSelection, scope Scope, manager *M
 	return validateSelectionItems("repository", selection.Repository, manager)
 }
 
+func validateReviewSelectionReferences(selection ReviewSelection, repository Repository, manager *Manager) error {
+	_, err := (selectionResolver{lookup: manager.selectionLookup(repository)}).resolve(
+		repository,
+		RunRequest{Repository: repository},
+		selection,
+		Value[ReviewSelection]{Authored: true},
+	)
+	if errors.Is(err, ErrNoRepositorySelection) {
+		return nil
+	}
+	return err
+}
+
 func validateSelectionItems(group string, items []SelectionItem, manager *Manager) error {
 	for index, item := range items {
 		name, err := item.Name()

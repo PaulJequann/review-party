@@ -151,6 +151,51 @@ func TestConfigValidateGlobalScopeChecksEffectiveReviewerPolicy(t *testing.T) {
 	}
 }
 
+func TestConfigValidateRepositoryScopeIncludesGlobalPolicy(t *testing.T) {
+	configRoot := t.TempDir()
+	repository := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", configRoot)
+	globalPath := filepath.Join(configRoot, "review-party", "config.json")
+	writeTestFile(t, testFile{path: globalPath, contents: `{"schema_version":1,"reviewers":{"grok":{"model":"bad-model","allowed_models":["good-model"]}}}`})
+
+	result := runConfigCommand(t, []string{
+		"config", "validate", "--scope", "repository", "--repo", repository, "--format", "json",
+	})
+	if result.exitCode == 0 {
+		t.Fatalf("repository validation succeeded, output = %q", result.stdout)
+	}
+	if !strings.Contains(result.stdout, "not in allowed_models") || !strings.Contains(result.stdout, globalPath) {
+		t.Fatalf("validation result = %q, missing Global policy diagnostic", result.stdout)
+	}
+}
+
+func TestConfigReviewsRejectAmbiguousSelectors(t *testing.T) {
+	configRoot := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", configRoot)
+	for _, test := range []struct {
+		name    string
+		command []string
+	}{
+		{name: "add", command: []string{"config", "reviews", "add"}},
+		{name: "remove", command: []string{"config", "reviews", "remove"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			repository := t.TempDir()
+			arguments := append(test.command, "--scope", "global", "--profile", "bugs", "--party", "baseline", "--repo", repository, "--yes", "--format", "json")
+			result := runConfigCommand(t, arguments)
+			if result.exitCode == 0 {
+				t.Fatal("ambiguous selector command succeeded")
+			}
+			if !strings.Contains(result.stdout+result.stderr, "choose exactly one") {
+				t.Fatalf("ambiguous selector error = %q", result.stdout+result.stderr)
+			}
+			if _, err := os.Stat(filepath.Join(repository, ".reviewparty", "config.json")); !os.IsNotExist(err) {
+				t.Fatalf("ambiguous selector command created configuration: %v", err)
+			}
+		})
+	}
+}
+
 func TestConfigValidateReportsAbsentFilesInJSONWithoutWriting(t *testing.T) {
 	configRoot := t.TempDir()
 	repository := t.TempDir()
