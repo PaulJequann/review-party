@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -311,6 +312,38 @@ func TestPackagedEvalSuitesSelectDistinctCorpora(t *testing.T) {
 	}
 }
 
+func TestPackagedEvalCorpusIsIgnoredByRecursiveGoDiscovery(t *testing.T) {
+	root := goModuleRoot(t)
+	command := exec.Command("go", "list", "./...")
+	command.Dir = root
+	command.Env = append(os.Environ(), "GOCACHE="+t.TempDir())
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("go list ./...: %v\n%s", err, output)
+	}
+}
+
+func TestCallerOwnedEvalPreservesGoModText(t *testing.T) {
+	root := writeEvalTestSuite(t, []testEvalCase{{id: "caller-owned"}})
+	for _, fixture := range []string{"base", "head"} {
+		writeEvalFile(t, filepath.Join(root, "cases", "caller-owned", fixture, "go.mod.txt"), "module example.com/caller-owned\n")
+	}
+
+	suite, err := loadEvalSuite(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(suite.cleanup)
+	for _, fixture := range []string{suite.cases[0].base, suite.cases[0].head} {
+		if _, err := os.Stat(filepath.Join(fixture, "go.mod.txt")); err != nil {
+			t.Fatalf("caller-owned fixture lost go.mod.txt: %v", err)
+		}
+		if _, err := os.Stat(filepath.Join(fixture, "go.mod")); !os.IsNotExist(err) {
+			t.Fatalf("caller-owned fixture gained go.mod: %v", err)
+		}
+	}
+}
+
 func TestPackagedCodeQualityEvalSuiteLoadsDeclaredCases(t *testing.T) {
 	suite, err := loadEvalSuite("global:code-quality")
 	if err != nil {
@@ -515,5 +548,23 @@ func writeEvalFile(t *testing.T, path, payload string) {
 	}
 	if err := os.WriteFile(path, []byte(payload), 0o600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func goModuleRoot(t *testing.T) string {
+	t.Helper()
+	directory, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(directory, "go.mod")); err == nil {
+			return directory
+		}
+		parent := filepath.Dir(directory)
+		if parent == directory {
+			t.Fatal("could not find go.mod")
+		}
+		directory = parent
 	}
 }

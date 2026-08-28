@@ -17,7 +17,7 @@ import (
 
 const evalCaseSchemaVersion = 1
 
-//go:embed evals
+//go:embed testdata/evals
 var packagedEvalFiles embed.FS
 
 type evalSuiteManifest struct {
@@ -81,13 +81,13 @@ type evalSuiteMaterialization struct {
 func loadEvalSuite(reference string) (loadedEvalSuite, error) {
 	switch reference {
 	case "global:canary-bugs":
-		return loadPackagedEvalSuite("evals/general-bugs")
+		return loadPackagedEvalSuite("testdata/evals/general-bugs")
 	case "global:general-bugs":
-		return loadPackagedEvalSuite("evals/realistic-general-bugs")
+		return loadPackagedEvalSuite("testdata/evals/realistic-general-bugs")
 	case "global:code-quality":
-		return loadPackagedEvalSuite("evals/code-quality")
+		return loadPackagedEvalSuite("testdata/evals/code-quality")
 	case "global:seeded-bugs":
-		return loadPackagedEvalSuite("evals/seeded-bugs")
+		return loadPackagedEvalSuite("testdata/evals/seeded-bugs")
 	}
 	if reservedEvalSuiteName(reference) {
 		return loadedEvalSuite{}, fmt.Errorf("unknown eval suite %q", reference)
