@@ -171,6 +171,12 @@ func TestCodexAuthenticationPayloadDoesNotExposeAccount(t *testing.T) {
 	}
 }
 
+func TestVersionFromUserAgentRejectsUnparseableText(t *testing.T) {
+	if got := versionFromUserAgent("private user data\x1b[31m"); got != "unknown" {
+		t.Fatalf("version from unparseable user agent = %q, want unknown", got)
+	}
+}
+
 func TestCodexAdapterUsesInjectableSession(t *testing.T) {
 	stdout := strings.NewReader(strings.Join([]string{
 		`{"jsonrpc":"2.0","id":1,"result":{"userAgent":"codex 1.0"}}`,

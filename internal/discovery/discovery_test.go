@@ -141,16 +141,16 @@ func TestOpenBoundsAnUncooperativeAdapter(t *testing.T) {
 	close(release)
 }
 
-func TestDiscoverManySerializesCacheWrites(t *testing.T) {
+func TestConcurrentCacheWritesForSameReviewerAreSerialized(t *testing.T) {
 	cache := &trackingCache{savedDone: make(chan struct{})}
-	service := NewService(Options{Adapters: []Adapter{
-		fakeAdapter{id: "grok", observation: Observation{Status: StatusSupported, Models: []Model{{ID: "grok-4.6"}}}},
-		fakeAdapter{id: "opencode", observation: Observation{Status: StatusSupported, Models: []Model{{ID: "openai/gpt-5"}}}},
-	}, Cache: cache})
-	results := service.DiscoverMany(context.Background(), nil)
-	if len(results) != 2 {
-		t.Fatalf("results = %#v", results)
-	}
+	service := NewService(Options{
+		Adapters: []Adapter{fakeAdapter{
+			id: "grok", observation: Observation{Status: StatusSupported, Models: []Model{{ID: "grok-4.6"}}},
+		}},
+		Cache: cache,
+	})
+	go service.Discover(context.Background(), "grok")
+	go service.Discover(context.Background(), "grok")
 	select {
 	case <-cache.savedDone:
 	case <-time.After(time.Second):
@@ -180,6 +180,33 @@ func TestDiscoverReturnsBeforeSlowCacheWrite(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("discovery waited for a slow cache write")
+	}
+	close(cache.release)
+	if err := service.Flush(context.Background()); err != nil {
+		t.Fatalf("flush error = %v", err)
+	}
+}
+
+func TestSlowCacheWriteDoesNotBlockAnotherReviewerCacheRead(t *testing.T) {
+	cache := &blockingCache{started: make(chan struct{}), release: make(chan struct{})}
+	service := NewService(Options{Adapters: []Adapter{fakeAdapter{
+		id: "grok", observation: Observation{Status: StatusSupported, Models: []Model{{ID: "grok-4.6"}}},
+	}}, Cache: cache})
+	go service.Discover(context.Background(), "grok")
+	select {
+	case <-cache.started:
+	case <-time.After(time.Second):
+		t.Fatal("cache write did not start")
+	}
+	readDone := make(chan struct{})
+	go func() {
+		service.Cached("opencode")
+		close(readDone)
+	}()
+	select {
+	case <-readDone:
+	case <-time.After(time.Second):
+		t.Fatal("slow cache write blocked another Reviewer cache read")
 	}
 	close(cache.release)
 	if err := service.Flush(context.Background()); err != nil {

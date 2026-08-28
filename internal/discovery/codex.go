@@ -365,7 +365,7 @@ func accountIsMissing(account json.RawMessage) bool {
 }
 
 func versionFromUserAgent(userAgent string) string {
-	return firstNonempty(versionFromOutput([]byte(userAgent)), userAgent)
+	return firstNonempty(versionFromOutput([]byte(userAgent)), "unknown")
 }
 
 func codexUnavailable(ctx context.Context, signIn *SignInAction, err error) Observation {

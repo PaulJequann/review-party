@@ -108,12 +108,13 @@ type Cache interface {
 // Service runs bounded observations and provides immediate choices to Hub
 // consumers while a live observation completes asynchronously.
 type Service struct {
-	adapters    map[string]Adapter
-	cache       Cache
-	cacheMu     sync.Mutex
-	cacheWrites cacheWriteTracker
-	deadline    time.Duration
-	now         func() time.Time
+	adapters     map[string]Adapter
+	cache        Cache
+	cacheLocks   map[string]*sync.Mutex
+	cacheLocksMu sync.Mutex
+	cacheWrites  cacheWriteTracker
+	deadline     time.Duration
+	now          func() time.Time
 }
 
 // Options configures a discovery Service. A nil Cache disables persistence;
@@ -142,7 +143,7 @@ func NewService(options Options) *Service {
 		}
 		adapters[adapter.Reviewer()] = adapter
 	}
-	return &Service{adapters: adapters, cache: options.Cache, deadline: deadline, now: now}
+	return &Service{adapters: adapters, cache: options.Cache, cacheLocks: make(map[string]*sync.Mutex), deadline: deadline, now: now}
 }
 
 // NewDefaultService wires the four Reviewers currently supported by Review
@@ -202,8 +203,9 @@ func (service *Service) saveCachedResult(reviewer string, result Result) {
 	service.cacheWrites.start()
 	go func() {
 		defer service.cacheWrites.finish()
-		service.cacheMu.Lock()
-		defer service.cacheMu.Unlock()
+		cacheLock := service.cacheLock(reviewer)
+		cacheLock.Lock()
+		defer cacheLock.Unlock()
 		current, found, err := service.cache.Load(reviewer)
 		if newerCacheExists(current, found, err, cached.ObservedAt) {
 			return
@@ -344,8 +346,9 @@ func (service *Service) Cached(reviewer string) (Result, bool) {
 	if service.cache == nil {
 		return Result{}, false
 	}
-	service.cacheMu.Lock()
-	defer service.cacheMu.Unlock()
+	cacheLock := service.cacheLock(reviewer)
+	cacheLock.Lock()
+	defer cacheLock.Unlock()
 	result, found, err := service.cache.Load(reviewer)
 	if !validCachedResult(result, found, err) {
 		return Result{}, false
@@ -353,6 +356,17 @@ func (service *Service) Cached(reviewer string) (Result, bool) {
 	result.Models = cloneModels(result.Models)
 	result.Cached = true
 	return result, true
+}
+
+func (service *Service) cacheLock(reviewer string) *sync.Mutex {
+	service.cacheLocksMu.Lock()
+	defer service.cacheLocksMu.Unlock()
+	if lock := service.cacheLocks[reviewer]; lock != nil {
+		return lock
+	}
+	lock := &sync.Mutex{}
+	service.cacheLocks[reviewer] = lock
+	return lock
 }
 
 func validCachedResult(result Result, found bool, err error) bool {
