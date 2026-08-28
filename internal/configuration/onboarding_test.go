@@ -14,20 +14,20 @@ func TestProfileOnboardingPublishesOnlyAfterConfirmation(t *testing.T) {
 		Templates:    []Template{{ID: "bugs", Revision: "v1", Instructions: "Find bugs.\n"}},
 		ValidateName: func(string) error { return nil },
 	})
-	flow := NewProfileOnboarding(ScopeGlobal)
+	flow := NewProfileOnboarding(manager, ScopeGlobal)
 	requireOnboardingStep(t, flow, OnboardingChooseSource)
-	requireOnboardingErrorFree(t, flow.ChooseTemplate(manager, "bugs"))
-	requireOnboardingErrorFree(t, flow.SetName("bugs"))
-	requireOnboardingErrorFree(t, flow.SetReviewer("grok"))
-	requireOnboardingErrorFree(t, flow.SetModel("grok-4.5"))
-	requireOnboardingErrorFree(t, flow.SetEffort("high"))
-	requireOnboardingErrorFree(t, flow.SetDeadline("1m"))
-	plan, err := flow.Validate(manager, "")
+	requireOnboardingErrorFree(t, flow.ChooseTemplate("bugs"))
+	requireOnboardingErrorFree(t, flow.Set(OnboardingFieldName, "bugs"))
+	requireOnboardingErrorFree(t, flow.Set(OnboardingFieldReviewer, "grok"))
+	requireOnboardingErrorFree(t, flow.Set(OnboardingFieldModel, "grok-4.5"))
+	requireOnboardingErrorFree(t, flow.Set(OnboardingFieldEffort, "high"))
+	requireOnboardingErrorFree(t, flow.Set(OnboardingFieldDeadline, "1m"))
+	plan, err := flow.Validate("")
 	requireValidOnboardingPlan(t, flow, plan, err)
 	if _, err := os.Stat(filepath.Join(root, "profiles", "bugs")); !os.IsNotExist(err) {
 		t.Fatalf("validation wrote Profile material: %v", err)
 	}
-	requireOnboardingErrorFree(t, flow.Confirm(manager))
+	requireOnboardingErrorFree(t, flow.Confirm())
 	requireOnboardingStep(t, flow, OnboardingComplete)
 	if _, err := os.Stat(filepath.Join(root, "profiles", "bugs", "profile.json")); err != nil {
 		t.Fatalf("confirmed Profile missing: %v", err)
@@ -35,9 +35,9 @@ func TestProfileOnboardingPublishesOnlyAfterConfirmation(t *testing.T) {
 }
 
 func TestProfileOnboardingCancellationRetainsDraftWithoutWriting(t *testing.T) {
-	flow := NewProfileOnboarding(ScopeGlobal)
+	flow := NewProfileOnboarding(nil, ScopeGlobal)
 	requireOnboardingErrorFree(t, flow.ChooseBlank("Review documentation.\n"))
-	requireOnboardingErrorFree(t, flow.SetName("docs"))
+	requireOnboardingErrorFree(t, flow.Set(OnboardingFieldName, "docs"))
 	requireOnboardingErrorFree(t, flow.Cancel())
 	requireOnboardingStep(t, flow, OnboardingCancelled)
 	if draft := flow.Draft(); draft.Name != "docs" || draft.Instructions == "" {
@@ -57,16 +57,16 @@ func TestProfileOnboardingCannotCancelAfterConfirmation(t *testing.T) {
 		GlobalRoot: t.TempDir(), Reviewers: []string{"grok"},
 		ValidateName: func(string) error { return nil },
 	})
-	flow := NewProfileOnboarding(ScopeGlobal)
+	flow := NewProfileOnboarding(manager, ScopeGlobal)
 	requireOnboardingErrorFree(t, flow.ChooseBlank("Review bugs.\n"))
-	requireOnboardingErrorFree(t, flow.SetName("bugs"))
-	requireOnboardingErrorFree(t, flow.SetReviewer("grok"))
-	requireOnboardingErrorFree(t, flow.SetModel("grok-4.6"))
-	requireOnboardingErrorFree(t, flow.SetEffort("high"))
-	requireOnboardingErrorFree(t, flow.SetDeadline("1m"))
-	plan, err := flow.Validate(manager, "")
+	requireOnboardingErrorFree(t, flow.Set(OnboardingFieldName, "bugs"))
+	requireOnboardingErrorFree(t, flow.Set(OnboardingFieldReviewer, "grok"))
+	requireOnboardingErrorFree(t, flow.Set(OnboardingFieldModel, "grok-4.6"))
+	requireOnboardingErrorFree(t, flow.Set(OnboardingFieldEffort, "high"))
+	requireOnboardingErrorFree(t, flow.Set(OnboardingFieldDeadline, "1m"))
+	plan, err := flow.Validate("")
 	requireValidOnboardingPlan(t, flow, plan, err)
-	requireOnboardingErrorFree(t, flow.Confirm(manager))
+	requireOnboardingErrorFree(t, flow.Confirm())
 	if err := flow.Cancel(); err == nil {
 		t.Fatal("completed onboarding accepted cancellation")
 	}
@@ -76,14 +76,14 @@ func TestProfileOnboardingCannotCancelAfterConfirmation(t *testing.T) {
 func TestProfileOnboardingRejectsTargetCreatedAfterValidation(t *testing.T) {
 	root := t.TempDir()
 	manager := NewManager(Options{GlobalRoot: root, Reviewers: []string{"grok"}, ValidateName: func(string) error { return nil }})
-	flow := NewProfileOnboarding(ScopeGlobal)
+	flow := NewProfileOnboarding(manager, ScopeGlobal)
 	requireOnboardingErrorFree(t, flow.ChooseBlank("Review bugs.\n"))
-	requireOnboardingErrorFree(t, flow.SetName("bugs"))
-	requireOnboardingErrorFree(t, flow.SetReviewer("grok"))
-	requireOnboardingErrorFree(t, flow.SetModel("grok-4.6"))
-	requireOnboardingErrorFree(t, flow.SetEffort("high"))
-	requireOnboardingErrorFree(t, flow.SetDeadline("1m"))
-	plan, err := flow.Validate(manager, "")
+	requireOnboardingErrorFree(t, flow.Set(OnboardingFieldName, "bugs"))
+	requireOnboardingErrorFree(t, flow.Set(OnboardingFieldReviewer, "grok"))
+	requireOnboardingErrorFree(t, flow.Set(OnboardingFieldModel, "grok-4.6"))
+	requireOnboardingErrorFree(t, flow.Set(OnboardingFieldEffort, "high"))
+	requireOnboardingErrorFree(t, flow.Set(OnboardingFieldDeadline, "1m"))
+	plan, err := flow.Validate("")
 	requireValidOnboardingPlan(t, flow, plan, err)
 
 	otherManager := NewManager(Options{GlobalRoot: root, Reviewers: []string{"grok"}, ValidateName: func(string) error { return nil }})
@@ -98,7 +98,7 @@ func TestProfileOnboardingRejectsTargetCreatedAfterValidation(t *testing.T) {
 		t.Fatalf("other plan = %#v, err = %v", otherPlan, err)
 	}
 	requireOnboardingErrorFree(t, otherManager.Publish(otherPlan))
-	if err := flow.Confirm(manager); err == nil {
+	if err := flow.Confirm(); err == nil {
 		t.Fatal("stale onboarding plan overwrote a Profile created after validation")
 	}
 	profile, found, err := manager.LoadProfile(ScopeGlobal, "", "bugs")
@@ -116,28 +116,13 @@ func TestProfileOnboardingRejectsTargetCreatedAfterValidation(t *testing.T) {
 	}
 }
 
-func TestProfileOnboardingCannotConfirmThroughAnotherManager(t *testing.T) {
-	manager := NewManager(Options{
-		GlobalRoot: t.TempDir(), Reviewers: []string{"grok"},
-		ValidateName: func(string) error { return nil },
-	})
-	otherManager := NewManager(Options{
-		GlobalRoot: t.TempDir(), Reviewers: []string{"grok"},
-		ValidateName: func(string) error { return nil },
-	})
-	flow := NewProfileOnboarding(ScopeGlobal)
+func TestProfileOnboardingRequiresBoundManager(t *testing.T) {
+	flow := NewProfileOnboarding(nil, ScopeGlobal)
 	requireOnboardingErrorFree(t, flow.ChooseBlank("Review bugs.\n"))
-	requireOnboardingErrorFree(t, flow.SetName("bugs"))
-	requireOnboardingErrorFree(t, flow.SetReviewer("grok"))
-	requireOnboardingErrorFree(t, flow.SetModel("grok-4.6"))
-	requireOnboardingErrorFree(t, flow.SetEffort("high"))
-	requireOnboardingErrorFree(t, flow.SetDeadline("1m"))
-	plan, err := flow.Validate(manager, "")
-	requireValidOnboardingPlan(t, flow, plan, err)
-	if err := flow.Confirm(otherManager); err == nil {
-		t.Fatal("onboarding confirmed through a different Configuration Manager")
+	requireOnboardingErrorFree(t, flow.Set(OnboardingFieldName, "bugs"))
+	if _, err := flow.Validate(""); err == nil {
+		t.Fatal("onboarding validated without a bound Configuration Manager")
 	}
-	requireOnboardingStep(t, flow, OnboardingReview)
 }
 
 func TestProfileOnboardingTemplateEditBecomesBlankInstructions(t *testing.T) {
@@ -145,8 +130,8 @@ func TestProfileOnboardingTemplateEditBecomesBlankInstructions(t *testing.T) {
 		GlobalRoot: t.TempDir(), Templates: []Template{{ID: "bugs", Revision: "v1", Instructions: "Packaged.\n"}},
 		ValidateName: func(string) error { return nil },
 	})
-	flow := NewProfileOnboarding(ScopeGlobal)
-	requireOnboardingErrorFree(t, flow.ChooseTemplate(manager, "bugs"))
+	flow := NewProfileOnboarding(manager, ScopeGlobal)
+	requireOnboardingErrorFree(t, flow.ChooseTemplate("bugs"))
 	requireOnboardingErrorFree(t, flow.SetInstructions("Customized.\n"))
 	draft := flow.Draft()
 	if draft.TemplateID != "" {
@@ -161,7 +146,7 @@ func TestProfileOnboardingTemplateEditBecomesBlankInstructions(t *testing.T) {
 }
 
 func TestProfileOnboardingEmptyFieldsDoNotAdvance(t *testing.T) {
-	flow := NewProfileOnboarding(ScopeGlobal)
+	flow := NewProfileOnboarding(nil, ScopeGlobal)
 	requireOnboardingErrorFree(t, flow.ChooseBlank(""))
 	requireOnboardingStep(t, flow, OnboardingChooseSource)
 	requireOnboardingErrorFree(t, flow.ChooseBlank("Review bugs.\n"))
@@ -169,19 +154,19 @@ func TestProfileOnboardingEmptyFieldsDoNotAdvance(t *testing.T) {
 	requireOnboardingStep(t, flow, OnboardingChooseSource)
 	requireOnboardingErrorFree(t, flow.ChooseBlank("Review bugs.\n"))
 
-	requireOnboardingErrorFree(t, flow.SetName(""))
+	requireOnboardingErrorFree(t, flow.Set(OnboardingFieldName, ""))
 	requireOnboardingStep(t, flow, OnboardingName)
-	requireOnboardingErrorFree(t, flow.SetName("bugs"))
-	requireOnboardingErrorFree(t, flow.SetReviewer(""))
+	requireOnboardingErrorFree(t, flow.Set(OnboardingFieldName, "bugs"))
+	requireOnboardingErrorFree(t, flow.Set(OnboardingFieldReviewer, ""))
 	requireOnboardingStep(t, flow, OnboardingReviewer)
-	requireOnboardingErrorFree(t, flow.SetReviewer("grok"))
-	requireOnboardingErrorFree(t, flow.SetModel(""))
+	requireOnboardingErrorFree(t, flow.Set(OnboardingFieldReviewer, "grok"))
+	requireOnboardingErrorFree(t, flow.Set(OnboardingFieldModel, ""))
 	requireOnboardingStep(t, flow, OnboardingModel)
-	requireOnboardingErrorFree(t, flow.SetModel("grok-4.6"))
-	requireOnboardingErrorFree(t, flow.SetEffort(""))
+	requireOnboardingErrorFree(t, flow.Set(OnboardingFieldModel, "grok-4.6"))
+	requireOnboardingErrorFree(t, flow.Set(OnboardingFieldEffort, ""))
 	requireOnboardingStep(t, flow, OnboardingEffort)
-	requireOnboardingErrorFree(t, flow.SetEffort("high"))
-	requireOnboardingErrorFree(t, flow.SetDeadline(""))
+	requireOnboardingErrorFree(t, flow.Set(OnboardingFieldEffort, "high"))
+	requireOnboardingErrorFree(t, flow.Set(OnboardingFieldDeadline, ""))
 	requireOnboardingStep(t, flow, OnboardingDeadline)
 	requireOnboardingErrorFree(t, flow.Cancel())
 	requireOnboardingErrorFree(t, flow.Resume())
@@ -193,14 +178,14 @@ func TestProfileOnboardingClearsDependentFieldsWhenReviewerChanges(t *testing.T)
 		GlobalRoot: t.TempDir(), Reviewers: []string{"grok", "codex"},
 		ValidateName: func(string) error { return nil },
 	})
-	flow := NewProfileOnboarding(ScopeGlobal)
+	flow := NewProfileOnboarding(manager, ScopeGlobal)
 	requireOnboardingErrorFree(t, flow.ChooseBlank("Review bugs.\n"))
-	requireOnboardingErrorFree(t, flow.SetName("bugs"))
-	requireOnboardingErrorFree(t, flow.SetReviewer("grok"))
-	requireOnboardingErrorFree(t, flow.SetModel("grok-4.6"))
-	requireOnboardingErrorFree(t, flow.SetEffort("high"))
-	requireOnboardingErrorFree(t, flow.SetDeadline("1m"))
-	requireOnboardingErrorFree(t, flow.SetReviewer("codex"))
+	requireOnboardingErrorFree(t, flow.Set(OnboardingFieldName, "bugs"))
+	requireOnboardingErrorFree(t, flow.Set(OnboardingFieldReviewer, "grok"))
+	requireOnboardingErrorFree(t, flow.Set(OnboardingFieldModel, "grok-4.6"))
+	requireOnboardingErrorFree(t, flow.Set(OnboardingFieldEffort, "high"))
+	requireOnboardingErrorFree(t, flow.Set(OnboardingFieldDeadline, "1m"))
+	requireOnboardingErrorFree(t, flow.Set(OnboardingFieldReviewer, "codex"))
 	draft := flow.Draft()
 	if draft.Model != "" {
 		t.Fatalf("stale model = %q", draft.Model)
@@ -211,7 +196,7 @@ func TestProfileOnboardingClearsDependentFieldsWhenReviewerChanges(t *testing.T)
 	if draft.AttemptDeadline != "" {
 		t.Fatalf("stale deadline = %q", draft.AttemptDeadline)
 	}
-	if _, err := flow.Validate(manager, ""); err == nil {
+	if _, err := flow.Validate(""); err == nil {
 		t.Fatal("validation accepted an incomplete draft")
 	}
 }

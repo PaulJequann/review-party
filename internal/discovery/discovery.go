@@ -394,21 +394,6 @@ func validCachedResult(result Result, found bool, err error) bool {
 	return err == nil && found && result.Status == StatusSupported && len(result.Models) > 0
 }
 
-// IsKnownModel reports whether a model is available from the immediate choice
-// sources used by a Profile editor. It never starts discovery.
-func (service *Service) IsKnownModel(reviewer, model string, configured, packaged []string) bool {
-	model = strings.TrimSpace(model)
-	if model == "" {
-		return false
-	}
-	for _, choice := range service.ImmediateChoices(ChoiceRequest{Reviewer: reviewer, Configured: configured, Packaged: packaged}) {
-		if choice.Model.ID == model {
-			return true
-		}
-	}
-	return false
-}
-
 // ChoiceSource explains why a model is immediately available to a consumer.
 type ChoiceSource string
 
@@ -433,16 +418,41 @@ type ChoiceRequest struct {
 	Packaged   []string
 }
 
-// ImmediateChoices merges cached, configured, and packaged models in their
-// display order without starting live discovery.
-func (service *Service) ImmediateChoices(request ChoiceRequest) []ModelChoice {
+// ChoiceSnapshot is the canonical immediate model-choice view. It preserves
+// source provenance and answers exact-ID membership without starting discovery.
+type ChoiceSnapshot struct {
+	choices []ModelChoice
+}
+
+// ChoiceSnapshot builds cached, configured, and packaged choices in display
+// order. The returned snapshot is independent of later source mutations.
+func (service *Service) ChoiceSnapshot(request ChoiceRequest) ChoiceSnapshot {
 	choices := []ModelChoice{}
 	if cached, found := service.Cached(request.Reviewer); found {
 		choices = MergeChoices(choices, cached.Models, ChoiceSourceCached)
 	}
 	choices = MergeChoices(choices, stringModels(request.Configured), ChoiceSourceConfigured)
 	choices = MergeChoices(choices, stringModels(request.Packaged), ChoiceSourcePackaged)
-	return choices
+	return ChoiceSnapshot{choices: choices}
+}
+
+// Choices returns the snapshot's choices with copied mutable fields.
+func (snapshot ChoiceSnapshot) Choices() []ModelChoice {
+	return cloneChoices(snapshot.choices)
+}
+
+// Contains reports whether the exact model ID appears in the snapshot.
+func (snapshot ChoiceSnapshot) Contains(model string) bool {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return false
+	}
+	for _, choice := range snapshot.choices {
+		if choice.Model.ID == model {
+			return true
+		}
+	}
+	return false
 }
 
 // ChoiceSession is returned without waiting for live discovery. Refresh is a
@@ -460,7 +470,7 @@ func (service *Service) Open(ctx context.Context, request ChoiceRequest) ChoiceS
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	choices := service.ImmediateChoices(request)
+	choices := service.ChoiceSnapshot(request).Choices()
 	refreshContext, cancel := context.WithCancel(ctx)
 	refresh := make(chan Result, 1)
 	go func() {

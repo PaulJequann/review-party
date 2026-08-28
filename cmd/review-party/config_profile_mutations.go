@@ -69,7 +69,13 @@ func manualModelWarning(input modelWarningInput) string {
 		packaged = append(packaged, model)
 	}
 	service := input.discovery()
-	if service == nil || service.IsKnownModel(input.reviewer, input.model, configured, packaged) {
+	if service == nil {
+		return ""
+	}
+	choices := service.ChoiceSnapshot(discovery.ChoiceRequest{
+		Reviewer: input.reviewer, Configured: configured, Packaged: packaged,
+	})
+	if choices.Contains(input.model) {
 		return ""
 	}
 	return fmt.Sprintf("model %q was not reported by cached, configured, or packaged choices for Reviewer %q; confirm it explicitly", input.model, input.reviewer)

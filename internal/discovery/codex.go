@@ -10,7 +10,6 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
-	"sync"
 )
 
 type codexAdapter struct {
@@ -173,19 +172,14 @@ func noNextCursor(cursor *string) bool {
 }
 
 type execCodexSession struct {
-	process   *exec.Cmd
-	stdin     io.WriteCloser
-	stdout    io.ReadCloser
-	waited    chan error
-	closeOnce sync.Once
+	process *processSession
+	stdin   io.WriteCloser
+	stdout  io.ReadCloser
 }
 
 func newCodexSession(ctx context.Context, capture *codexCapture) (codexSession, error) {
-	if !processTreeCleanupAvailable() {
-		return nil, errors.New("discovery process-tree cleanup is unavailable on this platform")
-	}
-	process := exec.CommandContext(ctx, "codex", "app-server")
-	configureProcessGroup(process)
+	_ = ctx
+	process := exec.Command("codex", "app-server")
 	process.Env = environmentFor("codex")
 	stdin, err := process.StdinPipe()
 	if err != nil {
@@ -197,25 +191,18 @@ func newCodexSession(ctx context.Context, capture *codexCapture) (codexSession, 
 		return nil, err
 	}
 	process.Stderr = capture
-	if err := process.Start(); err != nil {
-		_ = stdin.Close()
-		_ = stdout.Close()
+	started, err := startProcessSession(process, stdin, stdout)
+	if err != nil {
 		return nil, err
 	}
-	waited := make(chan error, 1)
-	go func() { waited <- process.Wait() }()
-	return &execCodexSession{process: process, stdin: stdin, stdout: stdout, waited: waited}, nil
+	return &execCodexSession{process: started, stdin: stdin, stdout: stdout}, nil
 }
 
 func (session *execCodexSession) Stdin() io.WriteCloser { return session.stdin }
 func (session *execCodexSession) Stdout() io.ReadCloser { return session.stdout }
 
 func (session *execCodexSession) Close() {
-	session.closeOnce.Do(func() {
-		_ = session.stdin.Close()
-		_ = session.stdout.Close()
-		_ = stopProcess(session.process, session.waited)
-	})
+	session.process.Close()
 }
 
 type rpcMessage struct {

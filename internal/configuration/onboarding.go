@@ -12,6 +12,9 @@ type OnboardingStep string
 // OnboardingText is caller-supplied text entered during Profile onboarding.
 type OnboardingText string
 
+// OnboardingField identifies an editable Profile field.
+type OnboardingField string
+
 const (
 	OnboardingChooseSource OnboardingStep = "choose_source"
 	OnboardingName         OnboardingStep = "name"
@@ -23,44 +26,28 @@ const (
 	OnboardingReview       OnboardingStep = "review"
 	OnboardingComplete     OnboardingStep = "complete"
 	OnboardingCancelled    OnboardingStep = "cancelled"
+
+	OnboardingFieldName     OnboardingField = "name"
+	OnboardingFieldReviewer OnboardingField = "reviewer"
+	OnboardingFieldModel    OnboardingField = "model"
+	OnboardingFieldEffort   OnboardingField = "effort"
+	OnboardingFieldDeadline OnboardingField = "deadline"
 )
 
 // ProfileOnboarding is the non-UI state machine for first Profile creation.
 // It keeps a draft in memory until a caller validates and explicitly confirms
 // one Manager Plan. Cancellation never publishes a partial Profile.
 type ProfileOnboarding struct {
-	draft ProfileDraft
-	step  OnboardingStep
-	plan  Plan
-}
-
-type onboardingStepSpec struct {
-	step     OnboardingStep
-	terminal bool
-	ready    func(ProfileDraft) bool
-	clear    func(*ProfileDraft)
-	set      func(*ProfileDraft, OnboardingText)
-}
-
-var onboardingSteps = []onboardingStepSpec{
-	{step: OnboardingChooseSource, ready: func(draft ProfileDraft) bool {
-		return draft.TemplateID != "" || strings.TrimSpace(draft.Instructions) != ""
-	}},
-	{step: OnboardingName, ready: func(draft ProfileDraft) bool { return hasOnboardingText(draft.Name) }, clear: func(draft *ProfileDraft) { draft.Name = "" }, set: func(draft *ProfileDraft, value OnboardingText) { draft.Name = string(value) }},
-	{step: OnboardingReviewer, ready: func(draft ProfileDraft) bool { return hasOnboardingText(draft.Reviewer) }, clear: func(draft *ProfileDraft) { draft.Reviewer = "" }, set: func(draft *ProfileDraft, value OnboardingText) { draft.Reviewer = string(value) }},
-	{step: OnboardingModel, ready: func(draft ProfileDraft) bool { return hasOnboardingText(draft.Model) }, clear: func(draft *ProfileDraft) { draft.Model = "" }, set: func(draft *ProfileDraft, value OnboardingText) { draft.Model = string(value) }},
-	{step: OnboardingEffort, ready: func(draft ProfileDraft) bool { return hasOnboardingText(draft.ReasoningEffort) }, clear: func(draft *ProfileDraft) { draft.ReasoningEffort = "" }, set: func(draft *ProfileDraft, value OnboardingText) { draft.ReasoningEffort = string(value) }},
-	{step: OnboardingDeadline, ready: func(draft ProfileDraft) bool { return hasOnboardingText(draft.AttemptDeadline) }, clear: func(draft *ProfileDraft) { draft.AttemptDeadline = "" }, set: func(draft *ProfileDraft, value OnboardingText) { draft.AttemptDeadline = string(value) }},
-	{step: OnboardingValidation, terminal: true},
-	{step: OnboardingReview, terminal: true},
-	{step: OnboardingComplete, terminal: true},
-	{step: OnboardingCancelled, terminal: true},
+	manager *Manager
+	draft   ProfileDraft
+	step    OnboardingStep
+	plan    Plan
 }
 
 // NewProfileOnboarding starts a Profile flow in the requested Configuration
 // scope. It performs no filesystem work.
-func NewProfileOnboarding(target Scope) *ProfileOnboarding {
-	return &ProfileOnboarding{draft: ProfileDraft{Target: target}, step: OnboardingChooseSource}
+func NewProfileOnboarding(manager *Manager, target Scope) *ProfileOnboarding {
+	return &ProfileOnboarding{manager: manager, draft: ProfileDraft{Target: target}, step: OnboardingChooseSource}
 }
 
 // Step reports the next onboarding step.
@@ -75,20 +62,20 @@ func (flow *ProfileOnboarding) Draft() ProfileDraft {
 // ChooseTemplate selects immutable packaged instructions. The template is
 // copied by Manager.PlanProfileCreation; later package updates cannot mutate
 // this saved Profile.
-func (flow *ProfileOnboarding) ChooseTemplate(manager *Manager, id string) error {
+func (flow *ProfileOnboarding) ChooseTemplate(id string) error {
 	if err := flow.ensureEditable(); err != nil {
 		return err
 	}
-	if manager == nil {
+	if flow.manager == nil {
 		return errors.New("onboarding requires a Configuration Manager")
 	}
-	for _, template := range manager.Templates() {
+	for _, template := range flow.manager.Templates() {
 		if template.ID == id {
-			flow.resetAfter(OnboardingChooseSource)
+			flow.clearDependentFields(OnboardingChooseSource)
 			flow.draft.TemplateID = id
 			flow.draft.TemplateRevision = template.Revision
 			flow.draft.Instructions = ""
-			flow.advance(OnboardingName)
+			flow.step = flow.nextStep()
 			return nil
 		}
 	}
@@ -100,15 +87,11 @@ func (flow *ProfileOnboarding) ChooseBlank(instructions OnboardingText) error {
 	if err := flow.ensureEditable(); err != nil {
 		return err
 	}
-	flow.resetAfter(OnboardingChooseSource)
+	flow.clearDependentFields(OnboardingChooseSource)
 	flow.draft.TemplateID = ""
 	flow.draft.TemplateRevision = ""
 	flow.draft.Instructions = string(instructions)
-	if strings.TrimSpace(string(instructions)) == "" {
-		flow.invalidate(OnboardingChooseSource)
-		return nil
-	}
-	flow.advance(OnboardingName)
+	flow.step = flow.nextStep()
 	return nil
 }
 
@@ -120,55 +103,46 @@ func (flow *ProfileOnboarding) SetInstructions(instructions OnboardingText) erro
 	if flow.step == OnboardingChooseSource {
 		return errors.New("choose a Template or blank instructions first")
 	}
-	flow.resetAfter(OnboardingChooseSource)
+	flow.clearDependentFields(OnboardingChooseSource)
 	flow.draft.TemplateID = ""
 	flow.draft.TemplateRevision = ""
 	flow.draft.Instructions = string(instructions)
-	if strings.TrimSpace(string(instructions)) == "" {
-		flow.invalidate(OnboardingChooseSource)
-		return nil
-	}
-	flow.invalidate(OnboardingName)
+	flow.step = flow.nextStep()
 	return nil
 }
 
-// SetName supplies the Profile name.
-func (flow *ProfileOnboarding) SetName(name OnboardingText) error {
-	return flow.setTextField(OnboardingName, name)
-}
-
-// SetReviewer supplies the Reviewer ID.
-func (flow *ProfileOnboarding) SetReviewer(reviewer OnboardingText) error {
-	return flow.setTextField(OnboardingReviewer, reviewer)
-}
-
-// SetModel supplies the exact model ID, including a manually entered ID.
-func (flow *ProfileOnboarding) SetModel(model OnboardingText) error {
-	return flow.setTextField(OnboardingModel, model)
-}
-
-// SetEffort supplies the saved reasoning effort.
-func (flow *ProfileOnboarding) SetEffort(effort OnboardingText) error {
-	return flow.setTextField(OnboardingEffort, effort)
-}
-
-// SetDeadline supplies the finite Attempt deadline.
-func (flow *ProfileOnboarding) SetDeadline(deadline OnboardingText) error {
-	return flow.setTextField(OnboardingDeadline, deadline)
+// Set updates one executable Profile field and advances to the first missing
+// field. Changing an earlier field clears every dependent field.
+func (flow *ProfileOnboarding) Set(field OnboardingField, value OnboardingText) error {
+	if err := flow.ensureEditable(); err != nil {
+		return err
+	}
+	step, found := onboardingFieldStep(field)
+	if !found {
+		return fmt.Errorf("unknown onboarding field %q", field)
+	}
+	if onboardingStepRank(flow.step) < onboardingStepRank(step) {
+		return fmt.Errorf("onboarding is not ready for %s", step)
+	}
+	setOnboardingField(&flow.draft, field, value)
+	flow.clearDependentFields(step)
+	flow.plan = Plan{}
+	flow.step = flow.nextStep()
+	return nil
 }
 
 // Validate creates the reviewed, opaque Manager Plan without publishing it.
-func (flow *ProfileOnboarding) Validate(manager *Manager, repository Repository) (Plan, error) {
+func (flow *ProfileOnboarding) Validate(repository Repository) (Plan, error) {
 	if err := flow.ensureEditable(); err != nil {
 		return Plan{}, err
 	}
 	if flow.step != OnboardingValidation {
 		return Plan{}, errors.New("complete onboarding fields before validation")
 	}
-	if manager == nil {
+	if flow.manager == nil {
 		return Plan{}, errors.New("onboarding requires a Configuration Manager")
 	}
-	plan, err := manager.PlanProfileCreation(repository, flow.draft)
+	plan, err := flow.manager.PlanProfileCreation(repository, flow.draft)
 	if err != nil {
 		return Plan{}, err
 	}
@@ -186,14 +160,14 @@ func (flow *ProfileOnboarding) Plan() Plan { return flow.plan }
 
 // Confirm publishes the last valid plan. The caller owns the human or
 // machine-facing confirmation immediately before calling this method.
-func (flow *ProfileOnboarding) Confirm(manager *Manager) error {
+func (flow *ProfileOnboarding) Confirm() error {
 	if flow.step != OnboardingReview || !flow.plan.Valid() {
 		return errors.New("onboarding requires a valid reviewed Plan before confirmation")
 	}
-	if manager == nil {
+	if flow.manager == nil {
 		return errors.New("onboarding requires a Configuration Manager")
 	}
-	if err := manager.Publish(flow.plan); err != nil {
+	if err := flow.manager.Publish(flow.plan); err != nil {
 		return err
 	}
 	flow.step = OnboardingComplete
@@ -241,93 +215,99 @@ func (flow *ProfileOnboarding) ensureEditable() error {
 	return nil
 }
 
-func (flow *ProfileOnboarding) setField(step OnboardingStep) error {
-	if err := flow.ensureEditable(); err != nil {
-		return err
-	}
-	if onboardingStepRank(flow.step) < onboardingStepRank(step) {
-		return fmt.Errorf("onboarding is not ready for %s", step)
-	}
-	flow.invalidate(step)
-	return nil
-}
-
-func (flow *ProfileOnboarding) setTextField(step OnboardingStep, value OnboardingText) error {
-	if err := flow.setField(step); err != nil {
-		return err
-	}
-	field, found := onboardingStep(step)
-	if !found || field.set == nil {
-		return fmt.Errorf("onboarding step %s is not an editable field", step)
-	}
-	field.set(&flow.draft, value)
-	flow.resetAfter(step)
-	if strings.TrimSpace(string(value)) == "" {
-		flow.step = step
-		return nil
-	}
-	flow.advance(nextOnboardingStep(step))
-	return nil
-}
-
-func (flow *ProfileOnboarding) advance(step OnboardingStep) {
-	flow.plan = Plan{}
-	flow.step = step
-}
-
-func (flow *ProfileOnboarding) invalidate(step OnboardingStep) {
-	flow.plan = Plan{}
-	flow.step = step
-}
-
-func (flow *ProfileOnboarding) resetAfter(step OnboardingStep) {
-	rank := onboardingStepRank(step)
-	if rank < 0 {
-		return
-	}
-	for index := rank + 1; index < len(onboardingSteps); index++ {
-		if clear := onboardingSteps[index].clear; clear != nil {
-			clear(&flow.draft)
-		}
+func (flow *ProfileOnboarding) clearDependentFields(step OnboardingStep) {
+	switch step {
+	case OnboardingChooseSource:
+		flow.draft.Name = ""
+		fallthrough
+	case OnboardingName:
+		flow.draft.Reviewer = ""
+		fallthrough
+	case OnboardingReviewer:
+		flow.draft.Model = ""
+		fallthrough
+	case OnboardingModel:
+		flow.draft.ReasoningEffort = ""
+		fallthrough
+	case OnboardingEffort:
+		flow.draft.AttemptDeadline = ""
 	}
 }
 
 func (flow *ProfileOnboarding) nextStep() OnboardingStep {
-	for _, step := range onboardingSteps {
-		if step.terminal || step.ready == nil {
-			return step.step
-		}
-		if !step.ready(flow.draft) {
-			return step.step
-		}
+	if flow.draft.TemplateID == "" && !hasOnboardingText(flow.draft.Instructions) {
+		return OnboardingChooseSource
+	}
+	if !hasOnboardingText(flow.draft.Name) {
+		return OnboardingName
+	}
+	if !hasOnboardingText(flow.draft.Reviewer) {
+		return OnboardingReviewer
+	}
+	if !hasOnboardingText(flow.draft.Model) {
+		return OnboardingModel
+	}
+	if !hasOnboardingText(flow.draft.ReasoningEffort) {
+		return OnboardingEffort
+	}
+	if !hasOnboardingText(flow.draft.AttemptDeadline) {
+		return OnboardingDeadline
 	}
 	return OnboardingValidation
+}
+
+var onboardingStepRanks = map[OnboardingStep]int{
+	OnboardingChooseSource: 0,
+	OnboardingName:         1,
+	OnboardingReviewer:     2,
+	OnboardingModel:        3,
+	OnboardingEffort:       4,
+	OnboardingDeadline:     5,
+	OnboardingValidation:   6,
+	OnboardingReview:       7,
+	OnboardingComplete:     8,
+	OnboardingCancelled:    9,
 }
 
 func onboardingStepRank(step OnboardingStep) int {
-	for rank, candidate := range onboardingSteps {
-		if candidate.step == step {
-			return rank
-		}
+	rank, found := onboardingStepRanks[step]
+	if !found {
+		return -1
 	}
-	return -1
+	return rank
 }
 
-func onboardingStep(step OnboardingStep) (onboardingStepSpec, bool) {
-	for _, candidate := range onboardingSteps {
-		if candidate.step == step {
-			return candidate, true
-		}
+func onboardingFieldStep(field OnboardingField) (OnboardingStep, bool) {
+	switch field {
+	case OnboardingFieldName:
+		return OnboardingName, true
+	case OnboardingFieldReviewer:
+		return OnboardingReviewer, true
+	case OnboardingFieldModel:
+		return OnboardingModel, true
+	case OnboardingFieldEffort:
+		return OnboardingEffort, true
+	case OnboardingFieldDeadline:
+		return OnboardingDeadline, true
+	default:
+		return "", false
 	}
-	return onboardingStepSpec{}, false
 }
 
-func nextOnboardingStep(step OnboardingStep) OnboardingStep {
-	rank := onboardingStepRank(step)
-	if rank >= 0 && rank+1 < len(onboardingSteps) {
-		return onboardingSteps[rank+1].step
+func setOnboardingField(draft *ProfileDraft, field OnboardingField, value OnboardingText) {
+	text := string(value)
+	switch field {
+	case OnboardingFieldName:
+		draft.Name = text
+	case OnboardingFieldReviewer:
+		draft.Reviewer = text
+	case OnboardingFieldModel:
+		draft.Model = text
+	case OnboardingFieldEffort:
+		draft.ReasoningEffort = text
+	case OnboardingFieldDeadline:
+		draft.AttemptDeadline = text
 	}
-	return OnboardingValidation
 }
 
 func hasOnboardingText(value string) bool {

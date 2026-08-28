@@ -3,9 +3,11 @@ package discovery
 import (
 	"context"
 	"errors"
+	"io"
 	"os/exec"
 	"regexp"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -37,23 +39,59 @@ type Runner interface {
 	Run(context.Context, Command) RunResult
 }
 
+type processSession struct {
+	process   *exec.Cmd
+	finished  chan error
+	resources []io.Closer
+	closeOnce sync.Once
+}
+
+func startProcessSession(process *exec.Cmd, resources ...io.Closer) (*processSession, error) {
+	if !processTreeCleanupAvailable() {
+		closeProcessResources(resources)
+		return nil, errors.New("discovery process-tree cleanup is unavailable on this platform")
+	}
+	configureProcessGroup(process)
+	if err := process.Start(); err != nil {
+		closeProcessResources(resources)
+		return nil, err
+	}
+	finished := make(chan error, 1)
+	go func() { finished <- process.Wait() }()
+	return &processSession{process: process, finished: finished, resources: resources}, nil
+}
+
+func closeProcessResources(resources []io.Closer) {
+	for _, resource := range resources {
+		_ = resource.Close()
+	}
+}
+
+func (session *processSession) Stop() error {
+	return stopProcess(session.process, session.finished)
+}
+
+func (session *processSession) Close() {
+	session.closeOnce.Do(func() {
+		closeProcessResources(session.resources)
+		_ = session.Stop()
+	})
+}
+
 type execRunner struct{}
 
 func (execRunner) Run(ctx context.Context, command Command) RunResult {
 	if err := validateCommand(command); err != nil {
 		return RunResult{Err: err}
 	}
-	if !processTreeCleanupAvailable() {
-		return RunResult{Err: errors.New("discovery process-tree cleanup is unavailable on this platform")}
-	}
 	commandContext, cancel := context.WithCancel(ctx)
 	defer cancel()
 	output := &combinedBoundedOutput{boundedCapture: boundedCapture{limit: maxCaptureBytes, cancel: cancel}}
-	process, finished, err := startDiscoveryProcess(command, output)
+	session, err := startDiscoveryProcess(command, output)
 	if err != nil {
 		return processStartResult(err, ctx, output)
 	}
-	runErr := waitForDiscoveryProcess(commandContext, process, finished)
+	runErr := waitForDiscoveryProcess(commandContext, session)
 	return discoveryRunResult(output, ctx, runErr)
 }
 
@@ -67,18 +105,12 @@ func validateCommand(command Command) error {
 	return nil
 }
 
-func startDiscoveryProcess(command Command, output *combinedBoundedOutput) (*exec.Cmd, chan error, error) {
+func startDiscoveryProcess(command Command, output *combinedBoundedOutput) (*processSession, error) {
 	process := exec.Command(command.Args[0], command.Args[1:]...)
-	configureProcessGroup(process)
 	process.Env = append([]string(nil), command.Environment...)
 	process.Stdout = &boundedStream{output: output, target: &output.stdout}
 	process.Stderr = &boundedStream{output: output, target: &output.stderr}
-	if err := process.Start(); err != nil {
-		return nil, nil, err
-	}
-	finished := make(chan error, 1)
-	go func() { finished <- process.Wait() }()
-	return process, finished, nil
+	return startProcessSession(process)
 }
 
 func processStartResult(err error, ctx context.Context, output *combinedBoundedOutput) RunResult {
@@ -88,15 +120,15 @@ func processStartResult(err error, ctx context.Context, output *combinedBoundedO
 	}
 }
 
-func waitForDiscoveryProcess(ctx context.Context, process *exec.Cmd, finished <-chan error) error {
+func waitForDiscoveryProcess(ctx context.Context, session *processSession) error {
 	select {
-	case runErr := <-finished:
+	case runErr := <-session.finished:
 		if ctx.Err() != nil {
-			killProcessGroup(process)
+			killProcessGroup(session.process)
 		}
 		return runErr
 	case <-ctx.Done():
-		return stopProcess(process, finished)
+		return session.Stop()
 	}
 }
 
