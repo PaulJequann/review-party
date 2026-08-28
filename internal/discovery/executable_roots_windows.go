@@ -21,6 +21,15 @@ func trustedExecutableRoots() []string {
 	return roots
 }
 
+func isExecutableFile(path string, _ os.FileInfo) bool {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".exe", ".com", ".bat", ".cmd":
+		return true
+	default:
+		return false
+	}
+}
+
 func executableCandidates(directory, name string) []string {
 	path := filepath.Join(directory, name)
 	if strings.Contains(filepath.Base(name), ".") {

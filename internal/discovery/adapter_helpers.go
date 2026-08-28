@@ -4,7 +4,10 @@ import (
 	"context"
 	"regexp"
 	"strings"
+	"time"
 )
+
+const optionalProbeFallback = time.Second
 
 var versionPattern = regexp.MustCompile(`(?i)(?:version|v)[^0-9]*([0-9]+(?:\.[0-9]+){1,3})`)
 var modelIDPattern = regexp.MustCompile(`^[A-Za-z0-9._:/-]+$`)
@@ -29,8 +32,21 @@ func versionFromOutput(output []byte) string {
 }
 
 func harnessVersion(ctx context.Context, runner Runner, spec humanDiscoverySpec) string {
-	run := runner.Run(ctx, Command{Args: []string{spec.executable, "--version"}, Environment: environmentFor(spec.executable)})
+	probeContext, cancel := optionalProbeContext(ctx)
+	defer cancel()
+	run := runner.Run(probeContext, Command{Args: []string{spec.executable, "--version"}, Environment: environmentFor(spec.executable)})
 	return firstNonempty(versionFromOutput(run.Stdout), versionFromOutput(run.Stderr), "unknown")
+}
+
+func optionalProbeContext(parent context.Context) (context.Context, context.CancelFunc) {
+	if deadline, ok := parent.Deadline(); ok {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return context.WithCancel(parent)
+		}
+		return context.WithTimeout(parent, remaining/4)
+	}
+	return context.WithTimeout(parent, optionalProbeFallback)
 }
 
 func discoverHumanModels(ctx context.Context, runner Runner, spec humanDiscoverySpec, signIn *SignInAction) (RunResult, []Model, *Observation) {

@@ -144,7 +144,7 @@ func validateExecutablePath(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if !info.Mode().IsRegular() || info.Mode()&0111 == 0 {
+	if !info.Mode().IsRegular() || !isExecutableFile(resolved, info) {
 		return "", fmt.Errorf("%q is not an executable file", path)
 	}
 	workingDirectory, err := os.Getwd()

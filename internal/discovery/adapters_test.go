@@ -67,6 +67,20 @@ func TestHumanDiscoveryKeepsModelsWhenOptionalVersionTimesOut(t *testing.T) {
 	}
 }
 
+func TestDiscoverManyKeepsModelsWhenOptionalVersionTimesOut(t *testing.T) {
+	service := NewService(Options{
+		Adapters: []Adapter{NewGrokAdapter(versionTimeoutRunner{})},
+		Deadline: 10 * time.Millisecond,
+	})
+	results := service.DiscoverMany(context.Background(), []string{"grok"})
+	if len(results) != 1 || results[0].Status != StatusSupported {
+		t.Fatalf("results = %#v, want supported result", results)
+	}
+	if len(results[0].Models) != 1 || results[0].Models[0].ID != "grok-4.6" {
+		t.Fatalf("models = %#v, want grok-4.6", results[0].Models)
+	}
+}
+
 type versionTimeoutRunner struct{}
 
 func (versionTimeoutRunner) Run(ctx context.Context, command Command) RunResult {
