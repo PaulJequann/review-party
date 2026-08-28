@@ -431,10 +431,10 @@ The shipped `move` command accepts `--scope`, `--from`, and `--to`. The
 domain operations, not dotted JSON paths. Repository-scoped file inspection and
 repository-scoped mutations require `--repo PATH`.
 
-Repository-targeted validation also requires `--repo PATH`; without it, the
-command validates the current working directory's repository scope. Party
-creation accepts repeatable `--profile` flags, preserving the authored member
-order. For `config reviews add` and `config reviews remove`, a qualified
+Repository-scoped validation and default validation require `--repo PATH`;
+`--scope global` can be validated without a repository. Party creation accepts
+repeatable `--profile` flags, preserving the authored member order. For
+`config reviews add` and `config reviews remove`, a qualified
 `--profile` or `--party` reference must match `--scope`: `global:NAME` with
 `--scope global` or `repository:NAME` with `--scope repository`. Unqualified
 references use the selected scope.
