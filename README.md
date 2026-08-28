@@ -98,6 +98,11 @@ only to inspect one authored document. Mutation commands return a semantic Plan
 with before and after values. Confirm mutations in a TTY or pass `--yes`; JSON
 and non-TTY mutations require `--yes`.
 
+Review-selection `add` and `remove` accept qualified references only when they
+match `--scope`: use `global:NAME` with `--scope global` and
+`repository:NAME` with `--scope repository`. Unqualified references use the
+selected scope.
+
 For example, create a complete Profile from a packaged Template, add it to the
 repository's saved selection, and set the selection limit:
 

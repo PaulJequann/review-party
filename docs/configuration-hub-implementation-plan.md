@@ -415,10 +415,10 @@ These commands are the Slice 6 interface. They are not part of the Slice 4 CLI.
 ```text
 review-party config show [--repo PATH] [--format human|json]
 review-party config file show [--scope global|repository] [--repo PATH] [--config PATH] [--format human|json]
-review-party config validate [--scope global|repository] [--format human|json]
+review-party config validate [--scope global|repository] [--repo PATH] [--config PATH] [--format human|json]
 review-party config profile create NAME (--template TEMPLATE|--blank) --reviewer ID --model ID --effort EFFORT --deadline DURATION [--instructions TEXT|--instructions-file PATH] [--scope global|repository] [--repo PATH] [--format human|json] [--yes]
 review-party config profile copy NAME --target-scope global|repository [--repo PATH] [--format human|json] [--yes]
-review-party config party create NAME --profile PROFILE --concurrency-limit N [--scope global|repository] [--description TEXT] [--repo PATH] [--format human|json] [--yes]
+review-party config party create NAME --profile PROFILE [--profile PROFILE ...] --concurrency-limit N [--scope global|repository] [--description TEXT] [--repo PATH] [--format human|json] [--yes]
 review-party config reviews add --scope global|repository (--profile NAME|--party NAME) [--repo PATH] [--format human|json] [--yes]
 review-party config reviews remove --scope global|repository (--index N|--profile NAME|--party NAME) [--repo PATH] [--format human|json] [--yes]
 review-party config reviews move --scope global|repository --from N --to N [--repo PATH] [--format human|json] [--yes]
@@ -430,6 +430,14 @@ The shipped `move` command accepts `--scope`, `--from`, and `--to`. The
 `set-concurrency` value is its positional `N` argument. These commands express
 domain operations, not dotted JSON paths. Repository-scoped file inspection and
 repository-scoped mutations require `--repo PATH`.
+
+Repository-targeted validation also requires `--repo PATH`; without it, the
+command validates the current working directory's repository scope. Party
+creation accepts repeatable `--profile` flags, preserving the authored member
+order. For `config reviews add` and `config reviews remove`, a qualified
+`--profile` or `--party` reference must match `--scope`: `global:NAME` with
+`--scope global` or `repository:NAME` with `--scope repository`. Unqualified
+references use the selected scope.
 
 ### Work
 

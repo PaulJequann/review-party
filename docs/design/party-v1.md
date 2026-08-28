@@ -45,7 +45,7 @@ Repository Configuration owns the complete default roll-up:
 
 Each item selects exactly one Profile or Party. Global selections precede Repository selections, and order within each array is preserved. Merely creating a Global Profile or Party enables nothing.
 
-Selection editing uses typed add, remove, move, and concurrency operations through the Configuration Manager. Agents use `config reviews add`, `config reviews remove`, `config reviews move`, and `config reviews set-concurrency`. Callers do not edit dotted JSON paths.
+Selection editing uses typed add, remove, move, and concurrency operations through the Configuration Manager. Agents use `config reviews add`, `config reviews remove`, `config reviews move`, and `config reviews set-concurrency`. Callers do not edit dotted JSON paths. Qualified Profile or Party references in `add` and `remove` must match `--scope`: use `global:NAME` for Global selections and `repository:NAME` for Repository selections; unqualified references use the selected scope.
 
 ## Resolution contract
 
