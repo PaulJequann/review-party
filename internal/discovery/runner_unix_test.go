@@ -63,6 +63,21 @@ func TestRunnerUsesExplicitAllowlistedEnvironment(t *testing.T) {
 	}
 }
 
+func TestTrustedExecutableSkipsRelativePathEntries(t *testing.T) {
+	temp := t.TempDir()
+	if err := os.WriteFile(filepath.Join(temp, "sh"), []byte("#!/bin/sh\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(temp)
+	resolved, err := trustedExecutable("sh", []string{"PATH=.:/bin"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved == filepath.Join(temp, "sh") || pathWithinDirectory(temp, resolved) {
+		t.Fatalf("trusted executable resolved to repository-local PATH entry: %q", resolved)
+	}
+}
+
 func TestEnvironmentIncludesUserProfileRuntimeVariables(t *testing.T) {
 	variables := map[string]string{
 		"USERPROFILE":  "/users/review-party",

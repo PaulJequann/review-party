@@ -3,8 +3,11 @@ package discovery
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -106,11 +109,69 @@ func validateCommand(command Command) error {
 }
 
 func startDiscoveryProcess(command Command, output *combinedBoundedOutput) (*processSession, error) {
-	process := exec.Command(command.Args[0], command.Args[1:]...)
+	executable, err := trustedExecutable(command.Args[0], command.Environment)
+	if err != nil {
+		return nil, err
+	}
+	process := exec.Command(executable, command.Args[1:]...)
 	process.Env = append([]string(nil), command.Environment...)
 	process.Stdout = &boundedStream{output: output, target: &output.stdout}
 	process.Stderr = &boundedStream{output: output, target: &output.stderr}
 	return startProcessSession(process)
+}
+
+func trustedExecutable(name string, environment []string) (string, error) {
+	if filepath.IsAbs(name) {
+		return validateExecutablePath(name)
+	}
+	pathValue := environmentValue(environment, "PATH")
+	for _, directory := range filepath.SplitList(pathValue) {
+		if directory == "" || !filepath.IsAbs(directory) {
+			continue
+		}
+		candidate, err := validateExecutablePath(filepath.Join(directory, name))
+		if err == nil {
+			return candidate, nil
+		}
+	}
+	return "", fmt.Errorf("discovery executable %q was not found in trusted absolute PATH entries", name)
+}
+
+func validateExecutablePath(path string) (string, error) {
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return "", err
+	}
+	info, err := os.Stat(resolved)
+	if err != nil {
+		return "", err
+	}
+	if !info.Mode().IsRegular() || info.Mode()&0111 == 0 {
+		return "", fmt.Errorf("%q is not an executable file", path)
+	}
+	workingDirectory, err := os.Getwd()
+	if err == nil && pathWithinDirectory(workingDirectory, resolved) {
+		return "", fmt.Errorf("repository-local discovery executable %q is not trusted", path)
+	}
+	return resolved, nil
+}
+
+func pathWithinDirectory(directory, path string) bool {
+	relative, err := filepath.Rel(directory, path)
+	if err != nil {
+		return false
+	}
+	return relative == "." || (relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)))
+}
+
+func environmentValue(environment []string, name string) string {
+	for _, entry := range environment {
+		key, value, found := strings.Cut(entry, "=")
+		if found && environmentNameKey(key) == environmentNameKey(name) {
+			return value
+		}
+	}
+	return ""
 }
 
 func processStartResult(err error, ctx context.Context, output *combinedBoundedOutput) RunResult {

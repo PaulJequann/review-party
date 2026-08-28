@@ -323,7 +323,7 @@ func (service *Service) unavailableDiscoveries(reviewers []string, completed []b
 func unavailableDiscoveryResult(reviewer string, cause error, now time.Time) Result {
 	diagnostic := "discovery deadline exceeded"
 	if cause != nil {
-		diagnostic = cause.Error()
+		diagnostic = compactDiagnostic(cause.Error())
 	}
 	return Result{
 		Reviewer: reviewer, Status: StatusUnavailable, HarnessVersion: "unknown",
@@ -336,7 +336,8 @@ func normalizeObservation(result *Result, observation Observation, ctx context.C
 	result.Models = cloneModels(observation.Models)
 	result.HarnessVersion = firstNonempty(observation.HarnessVersion, "unknown")
 	result.Authentication = cloneAuthentication(observation.Authentication)
-	result.Diagnostic = observation.Diagnostic
+	result.Authentication.Diagnostic = compactDiagnostic(result.Authentication.Diagnostic)
+	result.Diagnostic = compactDiagnostic(observation.Diagnostic)
 	if observationTimedOut(ctx) && !observation.ModelsComplete {
 		markObservationUnavailable(result, ctx)
 	}

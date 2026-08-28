@@ -58,25 +58,19 @@ func modelChoiceCheck(input modelWarningInput) (configuration.ModelChoiceCheck, 
 	if input.model == "" || input.discovery == nil {
 		return configuration.ModelChoiceCheck{}, ""
 	}
-	effective, err := input.manager.Resolve(configuration.Request{Repository: configuration.Repository(input.repository)})
+	configured, found, err := input.manager.ProfileModelChoices(configuration.Repository(input.repository), input.reviewer)
 	if err != nil {
 		return configuration.ModelChoiceCheck{}, "model choice could not be checked against configured choices: " + err.Error()
 	}
-	settings, found := effective.ReviewerPolicy(input.reviewer)
 	if !found {
 		return configuration.ModelChoiceCheck{}, fmt.Sprintf("model %q was entered manually for unknown Reviewer %q; execution may be unavailable", input.model, input.reviewer)
-	}
-	configured := append([]string{settings.Model.Value}, settings.AllowedModels.Value...)
-	packaged := []string{}
-	if model := input.manager.PackagedReviewerModel(input.reviewer); model != "" {
-		packaged = append(packaged, model)
 	}
 	service := input.discovery()
 	if service == nil {
 		return configuration.ModelChoiceCheck{}, ""
 	}
 	choices := service.ChoiceSnapshot(discovery.ChoiceRequest{
-		Reviewer: input.reviewer, Configured: configured, Packaged: packaged,
+		Reviewer: input.reviewer, Configured: configured,
 	})
 	modelChoices := choices.Choices()
 	ids := make([]string, len(modelChoices))

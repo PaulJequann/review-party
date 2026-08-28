@@ -263,6 +263,23 @@ func TestCommandDiagnosticDoesNotExposeHarnessSecrets(t *testing.T) {
 	}
 }
 
+func TestDiscoverySanitizesStructuredAdapterDiagnostics(t *testing.T) {
+	result := NewService(Options{Adapters: []Adapter{fakeAdapter{id: "grok", observation: Observation{
+		Status:         StatusUnavailable,
+		Diagnostic:     `{"apiKey":"secret-value","message":"provider failed"}`,
+		Authentication: Authentication{Status: AuthUnavailable, Diagnostic: `{"accessToken":"token-secret"}`},
+	}}}}).Discover(context.Background(), "grok")
+	resultFromDeadline := unavailableDiscoveryResult("grok", errors.New(`{"apiKey":"deadline-secret"}`), time.Now())
+	for _, diagnostic := range []string{result.Diagnostic, result.Authentication.Diagnostic, resultFromDeadline.Diagnostic} {
+		if strings.Contains(diagnostic, "secret-value") || strings.Contains(diagnostic, "token-secret") {
+			t.Fatalf("diagnostic exposed a credential: %q", diagnostic)
+		}
+		if strings.Contains(diagnostic, "deadline-secret") {
+			t.Fatalf("deadline diagnostic exposed a credential: %q", diagnostic)
+		}
+	}
+}
+
 func TestCodexEnvironmentIncludesConfiguredHome(t *testing.T) {
 	t.Setenv("CODEX_HOME", "/tmp/review-party-codex")
 	for _, entry := range environmentFor("codex") {

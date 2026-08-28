@@ -179,8 +179,13 @@ type execCodexSession struct {
 
 func newCodexSession(ctx context.Context, capture *codexCapture) (codexSession, error) {
 	_ = ctx
-	process := exec.Command("codex", "app-server")
-	process.Env = environmentFor("codex")
+	environment := environmentFor("codex")
+	executable, err := trustedExecutable("codex", environment)
+	if err != nil {
+		return nil, err
+	}
+	process := exec.Command(executable, "app-server")
+	process.Env = environment
 	stdin, err := process.StdinPipe()
 	if err != nil {
 		return nil, err
