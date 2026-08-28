@@ -47,7 +47,7 @@ func TestPublicationRollsBackMixedFileAndProfileTransaction(t *testing.T) {
 	if err != nil || !profilePlan.Valid() {
 		t.Fatalf("Profile plan = valid %t, reason %q, error %v", profilePlan.Valid(), profilePlan.Reason(), err)
 	}
-	plan := Plan{state: &planState{valid: true, publication: publicationPlan{
+	plan := Plan{state: &planState{owner: manager, valid: true, publication: publicationPlan{
 		files: configPlan.state.publication.files, profiles: profilePlan.state.publication.profiles,
 	}}}
 	manager.publication.writeProfile = func(*pendingProfilePublication) error {

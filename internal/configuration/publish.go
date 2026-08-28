@@ -59,6 +59,12 @@ func (manager *Manager) Publish(plan Plan) error {
 	if !plan.Valid() {
 		return fmt.Errorf("refuse to publish an invalid change plan: %s", plan.Reason())
 	}
+	if plan.state.owner == nil {
+		return errors.New("refuse to publish a change plan without a Configuration Manager owner")
+	}
+	if plan.state.owner != manager {
+		return errors.New("refuse to publish a change plan through a different Configuration Manager")
+	}
 	return manager.publication.publish(plan.state.publication)
 }
 

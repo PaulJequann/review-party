@@ -6,7 +6,7 @@ target_root=${1:-${XDG_CONFIG_HOME:-"$HOME/.config"}/review-party/profiles}
 reviewer=${REVIEW_PARTY_DOGFOOD_REVIEWER:-opencode}
 model=${REVIEW_PARTY_DOGFOOD_MODEL:-meta/muse-spark-1.2-contributor}
 effort=${REVIEW_PARTY_DOGFOOD_EFFORT:-high}
-deadline=${REVIEW_PARTY_DOGFOOD_DEADLINE:-3m}
+deadline=${REVIEW_PARTY_DOGFOOD_DEADLINE:-8m}
 revision_source="$repository/internal/engine/profile.go"
 
 revision_for() {

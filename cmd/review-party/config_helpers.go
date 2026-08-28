@@ -16,6 +16,7 @@ type configurationMutationOptions struct {
 	configuration string
 	yes           bool
 	scope         configuration.Scope
+	warnings      []string
 }
 
 type configurationFileOptions struct {
@@ -42,6 +43,7 @@ type configurationPlanResult struct {
 	Valid     bool                  `json:"valid"`
 	Published bool                  `json:"published"`
 	Reason    string                `json:"reason,omitempty"`
+	Warnings  []string              `json:"warnings,omitempty"`
 	Scopes    []string              `json:"scopes,omitempty"`
 	Paths     []string              `json:"paths,omitempty"`
 	Changes   []configurationChange `json:"changes,omitempty"`

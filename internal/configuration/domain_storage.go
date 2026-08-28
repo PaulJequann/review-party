@@ -35,7 +35,7 @@ func (manager *Manager) PlanProfileCreation(repository Repository, draft Profile
 	if err != nil {
 		return Plan{}, err
 	}
-	plan := Plan{state: &planState{}}
+	plan := Plan{state: &planState{owner: manager}}
 	if err := manager.validateProfile(profile, instructions); err != nil {
 		plan.state.reason = err.Error()
 		return plan, nil
@@ -61,7 +61,7 @@ func (manager *Manager) PlanProfileCreation(repository Repository, draft Profile
 		Field: "profiles." + draft.Name, Scope: draft.Target, Path: directory,
 		After: profilePlanSummary(profile), HadAfter: true,
 	}
-	return newProfilePlan(draft.Target, change, publication), nil
+	return newProfilePlan(manager, draft.Target, change, publication), nil
 }
 
 func (manager *Manager) profileCreationTarget(scope Scope, repository Repository, name string) (string, string, string, error) {

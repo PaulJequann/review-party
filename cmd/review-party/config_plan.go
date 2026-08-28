@@ -23,19 +23,13 @@ func publishConfigurationPlan(manager *configuration.Manager, plan configuration
 	if err := manager.Publish(plan); err != nil {
 		return printConfigFailure(options.format, streams.output, streams.errors, err)
 	}
-	return printPublishedConfigurationPlan(plan, options.format, streams.output, streams.errors)
+	return printPublishedConfigurationPlan(plan, options, streams)
 }
 
 func printInvalidConfigurationPlan(plan configuration.Plan, options configurationMutationOptions, streams commandIO) int {
-	result := configurationPlanResult{
-		Valid: false, Reason: plan.Reason(), Scopes: scopesAsStrings(plan.Scopes()),
-		Paths: plan.Paths(), Changes: changesForPlan(plan),
-	}
+	result := configurationPlanResultFor(plan, options, false)
 	if options.format == "json" {
-		if err := writeJSON(streams.output, result); err != nil {
-			return printConfigFailure(options.format, streams.output, streams.errors, err)
-		}
-		return 1
+		return writeConfigurationPlanJSON(result, options.format, streams, 1)
 	}
 	return printConfigFailure(options.format, streams.output, streams.errors, fmt.Errorf("invalid configuration plan: %s", plan.Reason()))
 }
@@ -51,6 +45,7 @@ func confirmConfigurationPlanIfNeeded(options configurationMutationOptions, plan
 		return errors.New("configuration mutation requires --yes when stdin is not a terminal")
 	}
 	printHumanPlan(streams.output, plan)
+	printHumanWarnings(streams.output, options.warnings)
 	confirmed, err := confirmConfigurationPlan(streams.input, streams.output)
 	if err != nil {
 		return err
@@ -61,20 +56,30 @@ func confirmConfigurationPlanIfNeeded(options configurationMutationOptions, plan
 	return nil
 }
 
-func printPublishedConfigurationPlan(plan configuration.Plan, format string, stdout, stderr io.Writer) int {
-	result := configurationPlanResult{
-		Valid: true, Published: true, Scopes: scopesAsStrings(plan.Scopes()),
+func printPublishedConfigurationPlan(plan configuration.Plan, options configurationMutationOptions, streams commandIO) int {
+	result := configurationPlanResultFor(plan, options, true)
+	if options.format == "json" {
+		return writeConfigurationPlanJSON(result, options.format, streams, 0)
+	}
+	printHumanPlan(streams.output, plan)
+	printHumanWarnings(streams.output, options.warnings)
+	fmt.Fprintln(streams.output, "published")
+	return 0
+}
+
+func writeConfigurationPlanJSON(result configurationPlanResult, format string, streams commandIO, exitCode int) int {
+	if err := writeJSON(streams.output, result); err != nil {
+		return printConfigFailure(format, streams.output, streams.errors, err)
+	}
+	return exitCode
+}
+
+func configurationPlanResultFor(plan configuration.Plan, options configurationMutationOptions, published bool) configurationPlanResult {
+	return configurationPlanResult{
+		Valid: published, Published: published, Reason: plan.Reason(),
+		Warnings: append([]string(nil), options.warnings...), Scopes: scopesAsStrings(plan.Scopes()),
 		Paths: plan.Paths(), Changes: changesForPlan(plan),
 	}
-	if format == "json" {
-		if err := writeJSON(stdout, result); err != nil {
-			return printConfigFailure(format, stdout, stderr, err)
-		}
-		return 0
-	}
-	printHumanPlan(stdout, plan)
-	fmt.Fprintln(stdout, "published")
-	return 0
 }
 
 func changesForPlan(plan configuration.Plan) []configurationChange {
@@ -109,6 +114,12 @@ func printHumanPlan(output io.Writer, plan configuration.Plan) {
 			after = change.After
 		}
 		fmt.Fprintf(output, "  %s %s %q: %s -> %s\n", change.Scope, change.Field, change.Path, before, after)
+	}
+}
+
+func printHumanWarnings(output io.Writer, warnings []string) {
+	for _, warning := range warnings {
+		fmt.Fprintf(output, "warning: %s\n", warning)
 	}
 }
 

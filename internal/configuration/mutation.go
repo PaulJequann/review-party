@@ -27,6 +27,7 @@ type Plan struct {
 }
 
 type planState struct {
+	owner       *Manager
 	changes     []Change
 	scopes      []Scope
 	paths       []string
@@ -94,7 +95,7 @@ func (manager *Manager) Plan(repository Repository, intents []Intent) (Plan, err
 		return Plan{}, err
 	}
 	staged := map[Scope]*stagedDocument{}
-	plan := Plan{state: &planState{}}
+	plan := Plan{state: &planState{owner: manager}}
 	for _, intent := range intents {
 		change, err := manager.stageIntent(&plan, staged, loaded, repository, intent)
 		if err != nil {
@@ -211,15 +212,15 @@ func loadedScopeFor(loaded Loaded, scope Scope) LoadedDocument {
 	return loaded.Global
 }
 
-func newFilePlan(scope Scope, change Change, writes []pendingWrite) Plan {
-	state := &planState{valid: true, changes: []Change{change}}
+func newFilePlan(manager *Manager, scope Scope, change Change, writes []pendingWrite) Plan {
+	state := &planState{owner: manager, valid: true, changes: []Change{change}}
 	addPlanFiles(state, scope, writes)
 	return Plan{state: state}
 }
 
-func newProfilePlan(scope Scope, change Change, publication pendingProfilePublication) Plan {
+func newProfilePlan(manager *Manager, scope Scope, change Change, publication pendingProfilePublication) Plan {
 	state := &planState{
-		valid: true, scopes: []Scope{scope}, changes: []Change{change}, publication: publicationPlan{profiles: []pendingProfilePublication{publication}},
+		owner: manager, valid: true, scopes: []Scope{scope}, changes: []Change{change}, publication: publicationPlan{profiles: []pendingProfilePublication{publication}},
 		paths: []string{filepath.Join(publication.directory, "profile.json"), filepath.Join(publication.directory, "instructions.md")},
 	}
 	return Plan{state: state}

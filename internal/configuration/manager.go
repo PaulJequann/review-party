@@ -123,6 +123,15 @@ func NewManager(options Options) *Manager {
 	}
 }
 
+// PackagedReviewerModel returns the packaged model choice for one Reviewer.
+// An empty result means the packaged catalog has no model for that Reviewer.
+func (manager *Manager) PackagedReviewerModel(reviewer string) string {
+	if manager == nil {
+		return ""
+	}
+	return manager.reviewers[reviewer]
+}
+
 // DefaultGlobalRoot returns the canonical global configuration directory:
 // ${XDG_CONFIG_HOME:-$HOME/.config}/review-party. It is empty when the
 // platform provides no home directory.

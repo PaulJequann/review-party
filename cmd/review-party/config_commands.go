@@ -4,7 +4,16 @@ import (
 	"github.com/spf13/cobra"
 
 	"reviewparty/internal/configuration"
+	"reviewparty/internal/discovery"
 )
+
+type configurationDependencies struct {
+	discoveryService func() *discovery.Service
+}
+
+func defaultConfigurationDependencies() configurationDependencies {
+	return configurationDependencies{discoveryService: discovery.NewDefaultService}
+}
 
 func newConfigLeafCommand(use, short string, args cobra.PositionalArgs, run func(*cobra.Command, []string) error) *cobra.Command {
 	return &cobra.Command{Use: use, Short: short, Args: args, RunE: run}
@@ -65,19 +74,19 @@ func newConfigValidateCommand(streams commandIO) *cobra.Command {
 	return cmd
 }
 
-func newConfigProfileCommand(streams commandIO) *cobra.Command {
+func newConfigProfileCommand(streams commandIO, dependencies configurationDependencies) *cobra.Command {
 	cmd := &cobra.Command{Use: "profile", Short: "Create or copy Review Profiles", Args: cobra.NoArgs, RunE: showCommandHelp}
-	cmd.AddCommand(newConfigProfileCreateCommand(streams), newConfigProfileCopyCommand(streams))
+	cmd.AddCommand(newConfigProfileCreateCommand(streams, dependencies), newConfigProfileCopyCommand(streams))
 	return cmd
 }
 
-func newConfigProfileCreateCommand(streams commandIO) *cobra.Command {
+func newConfigProfileCreateCommand(streams commandIO, dependencies configurationDependencies) *cobra.Command {
 	cmd := newConfigLeafCommand("create NAME", "Create a complete executable Review Profile", cobra.ExactArgs(1), func(cmd *cobra.Command, args []string) error {
 		options := configurationMutationOptions{
 			repository: stringFlag(cmd, "repo"), format: stringFlag(cmd, "format"),
 			configuration: stringFlag(cmd, "config"), yes: boolFlag(cmd, "yes"),
 		}
-		return commandResult(executeConfigProfileCreate(args[0], cmd, options, streams))
+		return commandResult(executeConfigProfileCreate(args[0], cmd, options, streams, dependencies.discoveryService))
 	})
 	cmd.Flags().String("template", "", "Seed instructions from a packaged Review Profile Template")
 	cmd.Flags().Bool("blank", false, "Create from supplied instructions without a Template")
