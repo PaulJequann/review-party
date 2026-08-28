@@ -65,17 +65,6 @@ func (manager *Manager) InspectAuthored(repository Repository, scopes []Scope) (
 	return inspection, nil
 }
 
-// ReadAuthoredFile reads and validates one authored scope without exposing
-// the configuration Document or raw payload to the caller.
-func (manager *Manager) ReadAuthoredFile(scope Scope, repository Repository) (AuthoredFile, error) {
-	inspection, err := manager.InspectAuthored(repository, []Scope{scope})
-	file, found := inspection.File(scope)
-	if !found {
-		return AuthoredFile{Scope: scope}, err
-	}
-	return file, err
-}
-
 // ResolveAuthored resolves effective values from an authored inspection
 // without exposing the internal Loaded representation to the caller.
 func (manager *Manager) ResolveAuthored(request Request, inspection AuthoredInspection) (Effective, error) {

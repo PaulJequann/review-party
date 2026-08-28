@@ -54,12 +54,6 @@ func (manager *Manager) Load(repository Repository) (Loaded, error) {
 	return loaded, nil
 }
 
-// LoadScope reads one authored configuration scope without loading the other
-// scope. It is intended for explicit authored-file inspection and validation.
-func (manager *Manager) LoadScope(scope Scope, repository Repository) (LoadedDocument, error) {
-	return manager.loadScope(scope, repository)
-}
-
 func (manager *Manager) loadScope(scope Scope, repository Repository) (LoadedDocument, error) {
 	_, document, err := manager.readAuthoredFile(scope, repository)
 	if err != nil {

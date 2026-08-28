@@ -55,14 +55,14 @@ func TestInspectAuthoredReportsAbsentPathsWithoutCreatingFiles(t *testing.T) {
 	}
 }
 
-func TestReadAuthoredFileWritesExactValidatedPayload(t *testing.T) {
+func TestInspectAuthoredWritesExactValidatedPayload(t *testing.T) {
 	globalRoot := t.TempDir()
 	repository := t.TempDir()
 	path := filepath.Join(repository, ".reviewparty", "config.json")
 	payload := "{\n  \"schema_version\": 1\n}\n"
 	writeDocument(t, path, payload)
 
-	file, err := testManager(t, globalRoot).ReadAuthoredFile(ScopeRepository, Repository(repository))
+	file, err := inspectSingleAuthoredFile(t, testManager(t, globalRoot), ScopeRepository, Repository(repository))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ func TestReadAuthoredFileWritesExactValidatedPayload(t *testing.T) {
 	}
 }
 
-func TestReadAuthoredFilePreservesDocumentDiagnostics(t *testing.T) {
+func TestInspectAuthoredPreservesDocumentDiagnostics(t *testing.T) {
 	tests := []authoredFileDiagnosticCase{
 		{name: "malformed", payload: `{"schema_version":1,"unexpected":true}`, reason: "unknown field"},
 		{name: "invalid", payload: `{"schema_version":2}`, reason: "unsupported schema_version"},
@@ -98,7 +98,7 @@ func assertInvalidAuthoredFile(t *testing.T, test authoredFileDiagnosticCase) {
 	path := filepath.Join(repository, ".reviewparty", "config.json")
 	writeDocument(t, path, test.payload)
 
-	file, err := testManager(t, globalRoot).ReadAuthoredFile(ScopeRepository, Repository(repository))
+	file, err := inspectSingleAuthoredFile(t, testManager(t, globalRoot), ScopeRepository, Repository(repository))
 	if err == nil {
 		t.Fatal("authored document unexpectedly succeeded")
 	}
@@ -125,14 +125,14 @@ func assertInvalidDocumentError(t *testing.T, err error, path, reason string) {
 	}
 }
 
-func TestReadAuthoredFilePreservesRootedSafetyAndByteLimit(t *testing.T) {
+func TestInspectAuthoredPreservesRootedSafetyAndByteLimit(t *testing.T) {
 	t.Run("oversized", func(t *testing.T) {
 		globalRoot := t.TempDir()
 		repository := t.TempDir()
 		path := filepath.Join(repository, ".reviewparty", "config.json")
 		writeDocument(t, path, strings.Repeat("x", MaximumDocumentBytes+1))
 
-		_, err := testManager(t, globalRoot).ReadAuthoredFile(ScopeRepository, Repository(repository))
+		_, err := inspectSingleAuthoredFile(t, testManager(t, globalRoot), ScopeRepository, Repository(repository))
 		if err == nil {
 			t.Fatal("oversized authored file unexpectedly succeeded")
 		}
@@ -154,7 +154,7 @@ func TestReadAuthoredFilePreservesRootedSafetyAndByteLimit(t *testing.T) {
 			t.Skipf("symlinks unavailable: %v", err)
 		}
 
-		_, err := testManager(t, globalRoot).ReadAuthoredFile(ScopeRepository, Repository(repository))
+		_, err := inspectSingleAuthoredFile(t, testManager(t, globalRoot), ScopeRepository, Repository(repository))
 		if err == nil {
 			t.Fatal("symlinked authored file unexpectedly succeeded")
 		}
@@ -162,6 +162,16 @@ func TestReadAuthoredFilePreservesRootedSafetyAndByteLimit(t *testing.T) {
 			t.Fatalf("error = %v, want rooted symlink error", err)
 		}
 	})
+}
+
+func inspectSingleAuthoredFile(t *testing.T, manager *Manager, scope Scope, repository Repository) (AuthoredFile, error) {
+	t.Helper()
+	inspection, err := manager.InspectAuthored(repository, []Scope{scope})
+	file, found := inspection.File(scope)
+	if !found {
+		t.Fatalf("scope %q was not inspected", scope)
+	}
+	return file, err
 }
 
 func assertAuthoredFileFacts(t *testing.T, file AuthoredFile, expected authoredFileExpectation) {

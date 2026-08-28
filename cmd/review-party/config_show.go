@@ -128,10 +128,11 @@ func executeConfigurationFileShow(options configurationFileOptions, streams comm
 		if err != nil {
 			return 0, err
 		}
-		file, err := manager.ReadAuthoredFile(scope, configuration.Repository(options.repository))
+		inspection, err := manager.InspectAuthored(configuration.Repository(options.repository), []configuration.Scope{scope})
 		if err != nil {
 			return 0, err
 		}
+		file, _ := inspection.File(scope)
 		if !file.Present {
 			return printMissingConfigurationFile(manager, scope, options, streams), nil
 		}
