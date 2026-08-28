@@ -128,14 +128,14 @@ func executeConfigurationFileShow(options configurationFileOptions, streams comm
 		if err != nil {
 			return 0, err
 		}
-		loaded, err := manager.LoadScope(scope, configuration.Repository(options.repository))
+		file, err := manager.ReadAuthoredFile(scope, configuration.Repository(options.repository))
 		if err != nil {
 			return 0, err
 		}
-		if !loaded.Present {
+		if !file.Present {
 			return printMissingConfigurationFile(manager, scope, options, streams), nil
 		}
-		return printAuthoredPayload(loaded.Payload(), streams), nil
+		return printAuthoredPayload(file, streams), nil
 	})
 }
 
@@ -155,11 +155,11 @@ func printMissingConfigurationFile(manager *configuration.Manager, scope configu
 	return 0
 }
 
-func printAuthoredPayload(payload []byte, streams commandIO) int {
-	if _, err := streams.output.Write(payload); err != nil {
+func printAuthoredPayload(file configuration.AuthoredFile, streams commandIO) int {
+	if err := file.WritePayload(streams.output); err != nil {
 		return printFailure(streams.errors, err)
 	}
-	if len(payload) == 0 || payload[len(payload)-1] != '\n' {
+	if !file.HasTrailingNewline() {
 		_, _ = io.WriteString(streams.output, "\n")
 	}
 	return 0

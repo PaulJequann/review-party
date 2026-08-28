@@ -98,6 +98,28 @@ func TestConfigFileShowReadsRequestedRepositoryScope(t *testing.T) {
 	}
 }
 
+func TestConfigFileShowTerminatesPayloadWithoutNewline(t *testing.T) {
+	configRoot := t.TempDir()
+	repository := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", configRoot)
+	payload := `{"schema_version":1}`
+	path := filepath.Join(repository, ".reviewparty", "config.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(payload), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result := runConfigCommand(t, []string{
+		"config", "file", "show", "--scope", "repository", "--repo", repository, "--format", "json",
+	})
+	requireCommandSuccess(t, result)
+	if result.stdout != payload+"\n" {
+		t.Fatalf("authored payload = %q, want %q", result.stdout, payload+"\n")
+	}
+}
+
 func TestConfigValidateReportsInvalidScopeWithoutWriting(t *testing.T) {
 	configRoot := t.TempDir()
 	repository := t.TempDir()

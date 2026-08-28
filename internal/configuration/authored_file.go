@@ -5,11 +5,11 @@ import "io"
 // AuthoredFile is the validated result of reading one scoped configuration
 // file. The file bytes and decoded Document remain private to configuration.
 type AuthoredFile struct {
-	Scope   Scope
-	Path    string
-	Present bool
-
-	payload []byte
+	Scope           Scope
+	Path            string
+	Present         bool
+	payload         []byte
+	trailingNewline bool
 }
 
 // WritePayload writes the exact validated bytes authored in the file. An
@@ -20,6 +20,13 @@ func (file AuthoredFile) WritePayload(output io.Writer) error {
 	}
 	_, err := output.Write(file.payload)
 	return err
+}
+
+// HasTrailingNewline reports whether the authored payload already terminates
+// with a newline, so presentation adapters can preserve the file's output
+// without inspecting its bytes.
+func (file AuthoredFile) HasTrailingNewline() bool {
+	return file.Present && file.trailingNewline
 }
 
 // AuthoredInspection is an opaque snapshot of the requested authored scopes.

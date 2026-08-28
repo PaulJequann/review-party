@@ -94,6 +94,7 @@ func (manager *Manager) readAuthoredFile(scope Scope, repository Repository) (Au
 		return file, LoadedDocument{}, invalid(scope, path, err)
 	}
 	file.payload = append([]byte(nil), payload...)
+	file.trailingNewline = len(payload) > 0 && payload[len(payload)-1] == '\n'
 	return file, LoadedDocument{Scope: scope, Path: path, Present: true, Document: document, payload: payload}, nil
 }
 
