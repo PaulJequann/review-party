@@ -174,6 +174,12 @@ func (service *Service) Discover(ctx context.Context, reviewer string) Result {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	observationContext, cancel := context.WithTimeout(ctx, service.deadline)
+	defer cancel()
+	return service.discover(observationContext, reviewer)
+}
+
+func (service *Service) discover(ctx context.Context, reviewer string) Result {
 	result := Result{Reviewer: reviewer, HarnessVersion: "unknown", ObservedAt: service.now().UTC()}
 	adapter, found := service.adapters[reviewer]
 	if !found {
@@ -182,11 +188,9 @@ func (service *Service) Discover(ctx context.Context, reviewer string) Result {
 		result.Diagnostic = "no discovery adapter is registered"
 		return result
 	}
-	observationContext, cancel := context.WithTimeout(ctx, service.deadline)
-	defer cancel()
-	observation := adapter.Discover(observationContext)
-	normalizeObservation(&result, observation, observationContext)
-	if service.shouldCache(result, observationContext) {
+	observation := adapter.Discover(ctx)
+	normalizeObservation(&result, observation, ctx)
+	if service.shouldCache(result, ctx) {
 		service.saveCachedResult(reviewer, result)
 	}
 	return result
@@ -256,7 +260,7 @@ func (service *Service) collectDiscoveries(ctx context.Context, reviewers []stri
 	done := make(chan discoveryCompletion, len(reviewers))
 	for index, reviewer := range reviewers {
 		go func(index int, reviewer string) {
-			done <- discoveryCompletion{index: index, result: service.Discover(ctx, reviewer)}
+			done <- discoveryCompletion{index: index, result: service.discover(ctx, reviewer)}
 		}(index, reviewer)
 	}
 	for received := 0; received < len(reviewers); received++ {
