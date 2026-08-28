@@ -3,7 +3,6 @@ package configuration
 import (
 	"errors"
 	"fmt"
-	"io/fs"
 )
 
 // runtimeSnapshot is the private implementation of RuntimeSnapshot. The
@@ -137,13 +136,23 @@ func (manager *Manager) loadRuntimeDefinitions(request RunRequest, loaded Loaded
 		parties:      make(map[runtimeDefinitionKey]Definition[Party]),
 		partyNames:   make(map[Scope]map[string]struct{}),
 	}
-	if err := manager.loadRuntimeProfiles(request.Repository, &definitions); err != nil {
+	profiles, err := manager.ProfileInventory(request.Repository)
+	if errors.Is(err, ErrGlobalRootUnavailable) {
+		return definitions, nil
+	}
+	if err != nil {
 		return runtimeDefinitions{}, err
 	}
+	addRuntimeProfiles(&definitions, profiles)
 	if runtimeRequestNeedsParties(request, loaded) {
-		if err := manager.loadRuntimeParties(request.Repository, &definitions); err != nil {
+		parties, err := manager.PartyInventory(request.Repository)
+		if errors.Is(err, ErrGlobalRootUnavailable) {
+			return definitions, nil
+		}
+		if err != nil {
 			return runtimeDefinitions{}, err
 		}
+		addRuntimeParties(&definitions, parties)
 	}
 	return definitions, nil
 }
@@ -175,83 +184,20 @@ func selectionIncludesParty(items []SelectionItem) bool {
 	return false
 }
 
-func (manager *Manager) loadRuntimeProfiles(repository Repository, definitions *runtimeDefinitions) error {
-	return manager.loadRuntimeLayers(repository, runtimeLayerRequest{
-		child: profileDirectoryName, description: "Profile library", definitions: definitions,
-		capture: manager.captureRuntimeProfile,
-	})
-}
-
-type runtimeDefinitionCapture func(Repository, configurationLayer, fs.DirEntry, *runtimeDefinitions)
-
-type runtimeLayerRequest struct {
-	child       string
-	description string
-	definitions *runtimeDefinitions
-	capture     runtimeDefinitionCapture
-}
-
-func (manager *Manager) loadRuntimeLayers(repository Repository, request runtimeLayerRequest) error {
-	entries, err := manager.definitionEntries(repository, request.child, request.description)
-	if errors.Is(err, ErrGlobalRootUnavailable) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	for _, definitionEntry := range entries {
-		request.capture(repository, definitionEntry.layer, definitionEntry.entry, request.definitions)
-	}
-	return nil
-}
-
-func (manager *Manager) captureRuntimeProfile(repository Repository, layer configurationLayer, entry fs.DirEntry, definitions *runtimeDefinitions) {
-	name := entry.Name()
-	authored := profileEntryFor(layer, name)
-	key := runtimeDefinitionKey{scope: layer.scope, name: name}
-	if entry.IsDir() {
-		definitions.profiles[key] = manager.inventoryProfile(repository, authored)
-		addRuntimeName(definitions.profileNames, layer.scope, name)
-		return
-	}
-	profile, found, loadErr := manager.LoadProfile(layer.scope, repository, name)
-	if loadErr != nil {
-		definitions.profiles[key] = Definition[Profile]{
-			Scope: layer.scope, Name: name, Path: authored.Path, Source: authored.Source,
-			Value: profile, Err: loadErr,
-		}
-		return
-	}
-	if found {
-		definitions.profiles[key] = Definition[Profile]{
-			Scope: layer.scope, Name: name, Path: authored.Path, Source: authored.Source,
-			Value: profile,
-		}
+func addRuntimeProfiles(definitions *runtimeDefinitions, inventory []Definition[Profile]) {
+	for _, definition := range inventory {
+		key := runtimeDefinitionKey{scope: definition.Scope, name: definition.Name}
+		definitions.profiles[key] = definition
+		addRuntimeName(definitions.profileNames, definition.Scope, definition.Name)
 	}
 }
 
-func (manager *Manager) loadRuntimeParties(repository Repository, definitions *runtimeDefinitions) error {
-	return manager.loadRuntimeLayers(repository, runtimeLayerRequest{
-		child: partyDirectoryName, description: "Party library", definitions: definitions,
-		capture: manager.captureRuntimeParty,
-	})
-}
-
-func (manager *Manager) captureRuntimeParty(repository Repository, layer configurationLayer, entry fs.DirEntry, definitions *runtimeDefinitions) {
-	name, selected := selectPartyEntry(entry)
-	if !selected {
-		return
+func addRuntimeParties(definitions *runtimeDefinitions, inventory []Definition[Party]) {
+	for _, definition := range inventory {
+		key := runtimeDefinitionKey{scope: definition.Scope, name: definition.Name}
+		definitions.parties[key] = definition
+		addRuntimeName(definitions.partyNames, definition.Scope, definition.Name)
 	}
-	authored := partyEntryFor(layer, name)
-	party, found, loadErr := manager.LoadParty(layer.scope, repository, name)
-	if loadErr == nil && !found {
-		loadErr = fmt.Errorf("Party %q is incomplete", name)
-	}
-	definitions.parties[runtimeDefinitionKey{scope: layer.scope, name: name}] = Definition[Party]{
-		Scope: layer.scope, Name: name, Path: authored.Path, Source: authored.Source,
-		Value: party, Err: loadErr,
-	}
-	addRuntimeName(definitions.partyNames, layer.scope, name)
 }
 
 func addRuntimeName(names map[Scope]map[string]struct{}, scope Scope, name string) {
