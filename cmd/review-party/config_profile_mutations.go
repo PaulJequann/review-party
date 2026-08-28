@@ -29,13 +29,10 @@ func executeConfigProfileCreate(name string, cmd *cobra.Command, options configu
 			ReasoningEffort: stringFlag(cmd, "effort"), AttemptDeadline: stringFlag(cmd, "deadline"),
 			Instructions: instructions, TemplateID: templateID,
 		}
-		check, warning := modelChoiceCheck(modelWarningInput{
+		check := modelChoiceCheck(modelWarningInput{
 			manager: manager, discovery: discoveryService, repository: options.repository,
 			reviewer: draft.Reviewer, model: draft.Model,
 		})
-		if warning != "" {
-			options.warnings = append(options.warnings, warning)
-		}
 		plan, err := manager.PlanProfileCreationWithModelChoiceCheck(configuration.Repository(options.repository), draft, check)
 		if err != nil {
 			return 0, err
@@ -52,22 +49,26 @@ type modelWarningInput struct {
 	model      string
 }
 
-func modelChoiceCheck(input modelWarningInput) (configuration.ModelChoiceCheck, string) {
+func modelChoiceCheck(input modelWarningInput) configuration.ModelChoiceCheck {
 	if input.model == "" || input.discovery == nil {
-		return configuration.ModelChoiceCheck{}, ""
+		return configuration.ModelChoiceCheck{}
 	}
 	sources, err := input.manager.ProfileModelChoices(configuration.Repository(input.repository), input.reviewer)
 	if err != nil {
-		return configuration.ModelChoiceCheck{}, "model choice could not be checked against configured choices: " + err.Error()
+		return configuration.ModelChoiceCheck{Status: configuration.ModelChoicesUnavailable}
 	}
 	service := input.discovery()
 	if service == nil {
-		return configuration.ModelChoiceCheck{}, ""
+		return configuration.ModelChoiceCheck{}
 	}
 	choices := service.ChoiceSnapshot(discovery.ChoiceRequest{
 		Reviewer: input.reviewer, Configured: sources.Configured, Packaged: sources.Packaged,
 	})
-	return configuration.ModelChoiceCheck{Checked: true, Known: choices.Contains(input.model)}, ""
+	status := configuration.ModelChoicesUnknown
+	if choices.Contains(input.model) {
+		status = configuration.ModelChoicesKnown
+	}
+	return configuration.ModelChoiceCheck{Status: status}
 }
 
 func executeConfigProfileCopy(value, targetValue string, options configurationMutationOptions, streams commandIO) int {

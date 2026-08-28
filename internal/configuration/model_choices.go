@@ -2,11 +2,20 @@ package configuration
 
 import "fmt"
 
-// ModelChoiceCheck records the immediate choices available when a Profile
-// draft was reviewed. It is advisory and never changes the saved Profile.
+// ModelChoiceCheckStatus describes the result of an immediate model-choice
+// check. It is advisory and never changes the saved Profile.
+type ModelChoiceCheckStatus string
+
+const (
+	ModelChoicesUnchecked   ModelChoiceCheckStatus = "unchecked"
+	ModelChoicesKnown       ModelChoiceCheckStatus = "known"
+	ModelChoicesUnknown     ModelChoiceCheckStatus = "unknown"
+	ModelChoicesUnavailable ModelChoiceCheckStatus = "unavailable"
+)
+
+// ModelChoiceCheck records the result of an immediate model-choice check.
 type ModelChoiceCheck struct {
-	Checked bool
-	Known   bool
+	Status ModelChoiceCheckStatus
 }
 
 // ProfileModelChoiceSources returns the configured and packaged model choices
@@ -35,11 +44,14 @@ func (manager *Manager) ProfileModelChoices(repository Repository, reviewer stri
 }
 
 func (check ModelChoiceCheck) warning(profile Profile) string {
-	if !check.Checked || profile.Model == "" {
+	if profile.Model == "" {
 		return ""
 	}
-	if check.Known {
+	switch check.Status {
+	case "", ModelChoicesUnchecked, ModelChoicesKnown:
 		return ""
+	case ModelChoicesUnavailable:
+		return "model choice could not be checked against configured choices"
 	}
 	return fmt.Sprintf("model %q was not reported by cached, configured, or packaged choices for Reviewer %q; confirm it explicitly", profile.Model, profile.Reviewer)
 }
