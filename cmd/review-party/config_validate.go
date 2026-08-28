@@ -87,9 +87,9 @@ func validateConfiguration(manager *configuration.Manager, requested string, rep
 	return result, nil
 }
 
-func validateEffectiveConfiguration(manager *configuration.Manager, repository configuration.Repository, scopes []configuration.Scope, loaded configuration.Loaded) error {
+func validateEffectiveConfiguration(manager *configuration.Manager, repository configuration.Repository, scopes []configuration.Scope, inspection configuration.AuthoredInspection) error {
 	if containsScope(scopes, configuration.ScopeGlobal) && containsScope(scopes, configuration.ScopeRepository) {
-		if _, err := manager.ResolveLoaded(configuration.Request{Repository: repository}, loaded); err != nil {
+		if _, err := manager.ResolveAuthored(configuration.Request{Repository: repository}, inspection); err != nil {
 			return err
 		}
 	}
@@ -97,36 +97,27 @@ func validateEffectiveConfiguration(manager *configuration.Manager, repository c
 		return nil
 	}
 	var err error
-	_, err = manager.ResolveRunLoaded(configuration.RunRequest{Repository: repository}, loaded)
+	_, err = manager.ResolveRunAuthored(configuration.RunRequest{Repository: repository}, inspection)
 	if errors.Is(err, configuration.ErrNoRepositorySelection) {
 		return nil
 	}
 	return err
 }
 
-func loadValidationFiles(manager *configuration.Manager, scopes []configuration.Scope, repository configuration.Repository) (configurationValidationResult, configuration.Loaded, error) {
+func loadValidationFiles(manager *configuration.Manager, scopes []configuration.Scope, repository configuration.Repository) (configurationValidationResult, configuration.AuthoredInspection, error) {
 	result := configurationValidationResult{
 		Scopes: make([]string, 0, len(scopes)), Files: make([]configurationFileStatus, 0, len(scopes)),
 	}
-	var loaded configuration.Loaded
+	inspection, err := manager.InspectAuthored(repository, scopes)
 	for _, scope := range scopes {
-		document, err := manager.LoadScope(scope, repository)
-		path := document.Path
-		if path == "" {
-			path, _ = manager.ConfigPath(scope, repository)
+		file, found := inspection.File(scope)
+		if !found {
+			break
 		}
 		result.Scopes = append(result.Scopes, string(scope))
-		result.Files = append(result.Files, configurationFileStatus{Scope: string(scope), Path: path, Present: document.Present})
-		if err != nil {
-			return result, configuration.Loaded{}, err
-		}
-		if scope == configuration.ScopeGlobal {
-			loaded.Global = document
-		} else {
-			loaded.Repository = document
-		}
+		result.Files = append(result.Files, configurationFileStatus{Scope: string(scope), Path: file.Path, Present: file.Present})
 	}
-	return result, loaded, nil
+	return result, inspection, err
 }
 
 func validateAuthoredDefinitions(manager *configuration.Manager, repository configuration.Repository, scopes []configuration.Scope) error {

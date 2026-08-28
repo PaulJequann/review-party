@@ -114,6 +114,50 @@ func TestConfigValidateReportsInvalidScopeWithoutWriting(t *testing.T) {
 	}
 }
 
+func TestConfigValidateReportsAbsentFilesInJSONWithoutWriting(t *testing.T) {
+	configRoot := t.TempDir()
+	repository := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", configRoot)
+
+	result := runConfigCommand(t, []string{
+		"config", "validate", "--repo", repository, "--format", "json",
+	})
+	requireCommandSuccess(t, result)
+	var validation configurationValidationResult
+	if err := json.Unmarshal([]byte(result.stdout), &validation); err != nil {
+		t.Fatalf("validation output = %q: %v", result.stdout, err)
+	}
+	requireValidationScopes(t, validation.Scopes, []string{"global", "repository"})
+	want := []configurationFileStatus{
+		{Scope: "global", Path: filepath.Join(configRoot, "review-party", "config.json")},
+		{Scope: "repository", Path: filepath.Join(repository, ".reviewparty", "config.json")},
+	}
+	requireValidationFiles(t, validation.Files, want)
+	for _, file := range want {
+		requireFileAbsent(t, file.Path)
+	}
+}
+
+func TestConfigValidateReportsAbsentFilesInHumanOutput(t *testing.T) {
+	configRoot := t.TempDir()
+	repository := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", configRoot)
+
+	result := runConfigCommand(t, []string{
+		"config", "validate", "--repo", repository, "--format", "human",
+	})
+	requireCommandSuccess(t, result)
+	for _, want := range []string{
+		"valid configuration: global, repository",
+		"global: " + filepath.Join(configRoot, "review-party", "config.json") + " (absent)",
+		"repository: " + filepath.Join(repository, ".reviewparty", "config.json") + " (absent)",
+	} {
+		if !strings.Contains(result.stdout, want) {
+			t.Fatalf("human validation output = %q, missing %q", result.stdout, want)
+		}
+	}
+}
+
 func TestConfigMutationRequiresYesAndPublishesPlan(t *testing.T) {
 	configRoot := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", configRoot)
@@ -225,6 +269,57 @@ func requireValidationFailure(t *testing.T, command configCommandResult, path st
 	}
 	if !strings.Contains(result.Error, path) {
 		t.Fatalf("validation result = %#v", result)
+	}
+	requireValidationFileStatus(t, result.Files, path)
+}
+
+func requireValidationFileStatus(t *testing.T, files []configurationFileStatus, path string) {
+	t.Helper()
+	if len(files) != 1 {
+		t.Fatalf("validation file status = %#v", files)
+	}
+	if files[0].Path != path {
+		t.Fatalf("validation file path = %q, want %q", files[0].Path, path)
+	}
+	if !files[0].Present {
+		t.Fatalf("validation file was not reported present: %#v", files[0])
+	}
+}
+
+func requireValidationScopes(t *testing.T, got, want []string) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("validation scopes = %#v, want %#v", got, want)
+	}
+	for index := range want {
+		if got[index] != want[index] {
+			t.Fatalf("validation scope[%d] = %q, want %q", index, got[index], want[index])
+		}
+	}
+}
+
+func requireValidationFiles(t *testing.T, got, want []configurationFileStatus) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("validation files = %#v, want %#v", got, want)
+	}
+	for index := range want {
+		if got[index].Scope != want[index].Scope {
+			t.Fatalf("validation file[%d] scope = %q, want %q", index, got[index].Scope, want[index].Scope)
+		}
+		if got[index].Path != want[index].Path {
+			t.Fatalf("validation file[%d] path = %q, want %q", index, got[index].Path, want[index].Path)
+		}
+		if got[index].Present != want[index].Present {
+			t.Fatalf("validation file[%d] present = %t, want %t", index, got[index].Present, want[index].Present)
+		}
+	}
+}
+
+func requireFileAbsent(t *testing.T, path string) {
+	t.Helper()
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("validation created %q: %v", path, err)
 	}
 }
 
