@@ -26,7 +26,8 @@ func validateReviewSelection(selection *ReviewSelection, scope Scope, manager *M
 }
 
 func validateReviewSelectionReferences(selection ReviewSelection, repository Repository, manager *Manager) error {
-	_, err := (selectionResolver{lookup: manager.selectionLookup(repository)}).resolve(
+	lookup := manager.selectionLookup(repository)
+	resolved, err := (selectionResolver{lookup: lookup}).resolve(
 		repository,
 		RunRequest{Repository: repository},
 		selection,
@@ -35,7 +36,19 @@ func validateReviewSelectionReferences(selection ReviewSelection, repository Rep
 	if errors.Is(err, ErrNoRepositorySelection) {
 		return nil
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	for _, profile := range resolved.Expanded {
+		_, found, err := lookup.profileAt(profile.Scope, profile.Profile)
+		if err != nil {
+			return fmt.Errorf("%s: %s Profile %q: %w", profile.Origin, profile.Scope, profile.Profile, err)
+		}
+		if !found {
+			return fmt.Errorf("%s: %s Profile %q was not found", profile.Origin, profile.Scope, profile.Profile)
+		}
+	}
+	return nil
 }
 
 func validateSelectionItems(group string, items []SelectionItem, manager *Manager) error {

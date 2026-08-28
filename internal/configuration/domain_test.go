@@ -239,6 +239,34 @@ func TestPlanRejectsReviewSelectionWithMissingReferences(t *testing.T) {
 	}
 }
 
+func TestPlanRejectsReviewSelectionWithInvalidPartyReferences(t *testing.T) {
+	root := t.TempDir()
+	repository := t.TempDir()
+	writeDocument(t, filepath.Join(root, "parties", "broken.json"), `{
+  "schema_version": 1,
+  "name": "broken",
+  "concurrency_limit": 1,
+  "profiles": [{"scope":"global","profile":"missing"}]
+}`)
+	manager := testManager(t, root)
+	plan, err := manager.Plan(Repository(repository), []Intent{SetReviewSelection{Selection: ReviewSelection{
+		ConcurrencyLimit: 1,
+		Global:           []SelectionItem{{Party: "broken"}},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Valid() {
+		t.Fatal("selection with an invalid Party reference produced a valid plan")
+	}
+	if !strings.Contains(plan.Reason(), `global Profile "missing" was not found`) {
+		t.Fatalf("plan reason = %q", plan.Reason())
+	}
+	if _, err := os.Stat(filepath.Join(repository, ".reviewparty", "config.json")); !os.IsNotExist(err) {
+		t.Fatalf("invalid selection plan created configuration: %v", err)
+	}
+}
+
 func TestGlobalProfilesDoNotCreateDefaultSelection(t *testing.T) {
 	root := t.TempDir()
 	repository := t.TempDir()
