@@ -100,6 +100,20 @@ func TestTrustedExecutableIncludesKnownUserInstallationPaths(t *testing.T) {
 	}
 }
 
+func TestEnvironmentExcludesUntrustedPathEntries(t *testing.T) {
+	untrusted := t.TempDir()
+	t.Setenv("PATH", untrusted)
+	for _, entry := range environmentFor("codex") {
+		if strings.HasPrefix(entry, "PATH=") {
+			if strings.Contains(entry, untrusted) {
+				t.Fatalf("environment retained untrusted PATH: %q", entry)
+			}
+			return
+		}
+	}
+	t.Fatal("environment omitted trusted PATH")
+}
+
 func TestEnvironmentIncludesUserProfileRuntimeVariables(t *testing.T) {
 	variables := map[string]string{
 		"USERPROFILE":  "/users/review-party",

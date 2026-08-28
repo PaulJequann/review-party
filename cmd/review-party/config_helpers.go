@@ -16,7 +16,6 @@ type configurationMutationOptions struct {
 	configuration string
 	yes           bool
 	scope         configuration.Scope
-	warnings      []string
 }
 
 type configurationFileOptions struct {

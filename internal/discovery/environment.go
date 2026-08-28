@@ -8,7 +8,9 @@ import (
 func environmentFor(reviewer string) []string {
 	allowed := baseEnvironmentNames()
 	addReviewerEnvironmentNames(allowed, reviewer)
-	return currentEnvironment(allowed)
+	delete(allowed, "PATH")
+	delete(allowed, environmentNameKey("PATH"))
+	return append(currentEnvironment(allowed), "PATH="+strings.Join(trustedExecutableRoots(), string(os.PathListSeparator)))
 }
 
 func baseEnvironmentNames() map[string]bool {

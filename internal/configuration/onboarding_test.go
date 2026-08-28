@@ -261,6 +261,15 @@ func TestProfileOnboardingClearsDependentFieldsWhenReviewerChanges(t *testing.T)
 	}
 }
 
+func TestProfileOnboardingClearsModelChoiceCheckWhenModelChanges(t *testing.T) {
+	flow := completeOnboarding(t, nil)
+	requireOnboardingErrorFree(t, flow.SetModelChoiceCheck(ModelChoiceCheck{Status: ModelChoicesKnown}))
+	requireOnboardingErrorFree(t, flow.Set(OnboardingFieldModel, "grok-custom"))
+	if flow.modelChoiceCheck != (ModelChoiceCheck{}) {
+		t.Fatalf("model choice check = %#v, want cleared", flow.modelChoiceCheck)
+	}
+}
+
 func requireOnboardingErrorFree(t *testing.T, err error) {
 	t.Helper()
 	if err != nil {

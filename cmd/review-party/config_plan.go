@@ -45,7 +45,7 @@ func confirmConfigurationPlanIfNeeded(options configurationMutationOptions, plan
 		return errors.New("configuration mutation requires --yes when stdin is not a terminal")
 	}
 	printHumanPlan(streams.output, plan)
-	printHumanWarnings(streams.output, warningsForPlan(plan, options))
+	printHumanWarnings(streams.output, warningsForPlan(plan))
 	confirmed, err := confirmConfigurationPlan(streams.input, streams.output)
 	if err != nil {
 		return err
@@ -62,7 +62,7 @@ func printPublishedConfigurationPlan(plan configuration.Plan, options configurat
 		return writeConfigurationPlanJSON(result, options.format, streams, 0)
 	}
 	printHumanPlan(streams.output, plan)
-	printHumanWarnings(streams.output, warningsForPlan(plan, options))
+	printHumanWarnings(streams.output, warningsForPlan(plan))
 	fmt.Fprintln(streams.output, "published")
 	return 0
 }
@@ -77,14 +77,13 @@ func writeConfigurationPlanJSON(result configurationPlanResult, format string, s
 func configurationPlanResultFor(plan configuration.Plan, options configurationMutationOptions, published bool) configurationPlanResult {
 	return configurationPlanResult{
 		Valid: published, Published: published, Reason: plan.Reason(),
-		Warnings: warningsForPlan(plan, options), Scopes: scopesAsStrings(plan.Scopes()),
+		Warnings: warningsForPlan(plan), Scopes: scopesAsStrings(plan.Scopes()),
 		Paths: plan.Paths(), Changes: changesForPlan(plan),
 	}
 }
 
-func warningsForPlan(plan configuration.Plan, options configurationMutationOptions) []string {
-	warnings := append([]string(nil), plan.Warnings()...)
-	return append(warnings, options.warnings...)
+func warningsForPlan(plan configuration.Plan) []string {
+	return plan.Warnings()
 }
 
 func changesForPlan(plan configuration.Plan) []configurationChange {

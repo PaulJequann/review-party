@@ -239,6 +239,7 @@ func (flow *ProfileOnboarding) clearDependentFields(step OnboardingStep) {
 	for _, spec := range onboardingFields {
 		if spec.step == step {
 			clearFollowing = true
+			resetModelChoices = resetModelChoices || spec.resetModelChoices
 			continue
 		}
 		if !clearFollowing {
