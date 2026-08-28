@@ -22,6 +22,12 @@ type LoadedDocument struct {
 	payload []byte
 }
 
+// Payload returns a copy of the authored document bytes. It returns nil when
+// the scope has no authored file.
+func (document LoadedDocument) Payload() []byte {
+	return append([]byte(nil), document.payload...)
+}
+
 // Loaded carries both configuration scopes for one repository request.
 type Loaded struct {
 	Global     LoadedDocument
@@ -49,28 +55,45 @@ func (manager *Manager) Load(repository Repository) (Loaded, error) {
 }
 
 func (manager *Manager) loadScope(scope Scope, repository Repository) (LoadedDocument, error) {
+	_, document, err := manager.readAuthoredFile(scope, repository)
+	if err != nil {
+		return LoadedDocument{}, err
+	}
+	return document, nil
+}
+
+func (manager *Manager) readAuthoredFile(scope Scope, repository Repository) (AuthoredFile, LoadedDocument, error) {
+	file := AuthoredFile{Scope: scope}
 	path, anchor, err := manager.configPathAndAnchor(scope, repository)
 	if errors.Is(err, ErrGlobalRootUnavailable) {
-		return LoadedDocument{Scope: scope, Document: Document{SchemaVersion: SchemaVersion}}, nil
+		return file, emptyLoadedDocument(scope), nil
 	}
 	if err != nil {
-		return LoadedDocument{}, err
+		return file, LoadedDocument{}, err
 	}
+	file.Path = path
 	payload, found, err := readRegularFile(anchor, path, fmt.Sprintf("%s configuration", scope), MaximumDocumentBytes)
 	if err != nil {
-		return LoadedDocument{}, err
+		return file, LoadedDocument{}, err
 	}
 	if !found {
-		return LoadedDocument{Scope: scope, Document: Document{SchemaVersion: SchemaVersion}}, nil
+		return file, emptyLoadedDocument(scope), nil
 	}
+	file.Present = true
 	var document Document
 	if err := strictDecode(payload, &document); err != nil {
-		return LoadedDocument{}, invalid(scope, path, err)
+		return file, LoadedDocument{}, invalid(scope, path, err)
 	}
 	if err := validateDocument(document, scope, manager); err != nil {
-		return LoadedDocument{}, invalid(scope, path, err)
+		return file, LoadedDocument{}, invalid(scope, path, err)
 	}
-	return LoadedDocument{Scope: scope, Path: path, Present: true, Document: document, payload: payload}, nil
+	file.payload = append([]byte(nil), payload...)
+	file.trailingNewline = len(payload) > 0 && payload[len(payload)-1] == '\n'
+	return file, LoadedDocument{Scope: scope, Path: path, Present: true, Document: document, payload: payload}, nil
+}
+
+func emptyLoadedDocument(scope Scope) LoadedDocument {
+	return LoadedDocument{Scope: scope, Document: Document{SchemaVersion: SchemaVersion}}
 }
 
 // readRegularFile reads a regular file below anchor without following

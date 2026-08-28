@@ -102,11 +102,19 @@ func (manager *Manager) Resolve(request Request) (Effective, error) {
 	if err != nil {
 		return Effective{}, err
 	}
+	return manager.ResolveLoaded(request, loaded)
+}
+
+// ResolveLoaded resolves effective values from an already loaded snapshot.
+// Validation commands use it to preserve one authored-file read and its
+// provenance while checking a complete configuration.
+func (manager *Manager) ResolveLoaded(request Request, loaded Loaded) (Effective, error) {
 	effective := Effective{
 		DefaultReviewer: resolveDefault(loaded, defaultChoice(request.Overrides.Reviewer), reviewerDefault, defaultChoice(manager.packaged.defaultReviewer)),
 		StateDirectory:  globalValue(loaded, stateDirectoryValue),
 		Eval:            evalValue(loaded),
 	}
+	var err error
 	effective.reviewers, err = manager.resolveEffectiveReviewers(loaded)
 	if err != nil {
 		return Effective{}, err

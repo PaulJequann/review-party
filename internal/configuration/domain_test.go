@@ -160,6 +160,21 @@ func TestRepositoryReviewSelectionPreservesScopeGroupOrder(t *testing.T) {
 	root := t.TempDir()
 	repository := t.TempDir()
 	manager := testManager(t, root)
+	globalProfile, planningErr := manager.PlanProfileCreation("", ProfileDraft{
+		Target: ScopeGlobal, Name: "documentation", Reviewer: "grok", Model: "grok-4.5",
+		ReasoningEffort: "high", AttemptDeadline: "1m", Instructions: "Review documentation.\n",
+	})
+	requirePublishedPlan(t, manager, globalProfile, planningErr)
+	repositoryProfile, planningErr := manager.PlanProfileCreation(Repository(repository), ProfileDraft{
+		Target: ScopeRepository, Name: "security", Reviewer: "grok", Model: "grok-4.5",
+		ReasoningEffort: "high", AttemptDeadline: "1m", Instructions: "Review security.\n",
+	})
+	requirePublishedPlan(t, manager, repositoryProfile, planningErr)
+	party, planningErr := manager.PlanPartyCreation("", PartyDraft{
+		Target: ScopeGlobal, Name: "baseline", ConcurrencyLimit: 1,
+		Profiles: []ProfileReference{{Scope: ScopeGlobal, Profile: "documentation"}},
+	})
+	requirePublishedPlan(t, manager, party, planningErr)
 	selection := ReviewSelection{
 		ConcurrencyLimit: 2,
 		Global:           []SelectionItem{{Party: "baseline"}, {Profile: "documentation"}},
@@ -178,6 +193,77 @@ func TestRepositoryReviewSelectionPreservesScopeGroupOrder(t *testing.T) {
 	}
 	if !reflect.DeepEqual(resolved, selection) {
 		t.Fatalf("selection = %#v, want %#v", resolved, selection)
+	}
+}
+
+func requirePublishedPlan(t *testing.T, manager *Manager, plan Plan, planningErr error) {
+	t.Helper()
+	if planningErr != nil || !plan.Valid() {
+		t.Fatalf("plan error = %v, reason = %q", planningErr, plan.Reason())
+	}
+	if err := manager.Publish(plan); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPlanRejectsReviewSelectionWithMissingReferences(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		item SelectionItem
+		want string
+	}{
+		{name: "Profile", item: SelectionItem{Profile: "missing"}, want: `profile "missing"`},
+		{name: "Party", item: SelectionItem{Party: "missing"}, want: `party "missing"`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			repository := t.TempDir()
+			manager := testManager(t, root)
+			plan, err := manager.Plan(Repository(repository), []Intent{SetReviewSelection{Selection: ReviewSelection{
+				ConcurrencyLimit: 1,
+				Global:           []SelectionItem{test.item},
+			}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if plan.Valid() {
+				t.Fatal("selection with a missing reference produced a valid plan")
+			}
+			if !strings.Contains(plan.Reason(), test.want) {
+				t.Fatalf("plan reason = %q, want %q", plan.Reason(), test.want)
+			}
+			if _, err := os.Stat(filepath.Join(repository, ".reviewparty", "config.json")); !os.IsNotExist(err) {
+				t.Fatalf("invalid selection plan created configuration: %v", err)
+			}
+		})
+	}
+}
+
+func TestPlanRejectsReviewSelectionWithInvalidPartyReferences(t *testing.T) {
+	root := t.TempDir()
+	repository := t.TempDir()
+	writeDocument(t, filepath.Join(root, "parties", "broken.json"), `{
+  "schema_version": 1,
+  "name": "broken",
+  "concurrency_limit": 1,
+  "profiles": [{"scope":"global","profile":"missing"}]
+}`)
+	manager := testManager(t, root)
+	plan, err := manager.Plan(Repository(repository), []Intent{SetReviewSelection{Selection: ReviewSelection{
+		ConcurrencyLimit: 1,
+		Global:           []SelectionItem{{Party: "broken"}},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Valid() {
+		t.Fatal("selection with an invalid Party reference produced a valid plan")
+	}
+	if !strings.Contains(plan.Reason(), `global Profile "missing" was not found`) {
+		t.Fatalf("plan reason = %q", plan.Reason())
+	}
+	if _, err := os.Stat(filepath.Join(repository, ".reviewparty", "config.json")); !os.IsNotExist(err) {
+		t.Fatalf("invalid selection plan created configuration: %v", err)
 	}
 }
 

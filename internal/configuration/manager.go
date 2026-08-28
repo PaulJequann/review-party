@@ -63,6 +63,22 @@ type Options struct {
 	ValidateName func(string) error
 }
 
+// RuntimeResolver resolves one executable request into a stable runtime view.
+// The Manager is the package's implementation; the interface keeps callers
+// dependent on the typed runtime contract rather than its storage details.
+type RuntimeResolver interface {
+	ResolveRuntime(RunRequest) (RuntimeSnapshot, error)
+}
+
+// RuntimeSnapshot is the immutable configuration view used while planning one
+// run. It contains the resolved selection, effective reviewer policy, and the
+// exact executable Profile material selected for that run.
+type RuntimeSnapshot interface {
+	Selection() ResolvedReviews
+	Effective() Effective
+	ProfileFor(ExpandedProfile) (Profile, bool)
+}
+
 // Manager owns Global and Repository Configuration paths, resolution,
 // staged change plans, and atomic publication.
 type Manager struct {
@@ -74,6 +90,8 @@ type Manager struct {
 	templates        []Template
 	publication      *publicationModule
 }
+
+var _ RuntimeResolver = (*Manager)(nil)
 
 type packagedDefaults struct {
 	defaultReviewer string

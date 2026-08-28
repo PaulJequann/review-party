@@ -116,7 +116,7 @@ func (conductor *Conductor) planSelection(selection model.RunSelection) (planned
 	if err != nil {
 		return plannedSelection{}, err
 	}
-	members, err := conductor.compileSlots(repository, resolved.selections.Expanded, resolved.effective)
+	members, err := conductor.compileSlots(resolved.snapshot)
 	if err != nil {
 		return plannedSelection{}, err
 	}
@@ -130,7 +130,7 @@ func (conductor *Conductor) planSelection(selection model.RunSelection) (planned
 	for index := range members {
 		members[index].timings.SubjectResolutionMS = subjectResolutionMS
 	}
-	return plannedSelection{resolved: resolved.selections, repository: repository, subject: subject, members: members}, nil
+	return plannedSelection{resolved: resolved.snapshot.Selection(), repository: repository, subject: subject, members: members}, nil
 }
 
 // resolveSharedSubject freezes the one Review Subject every member will review,
@@ -154,34 +154,36 @@ func resolveSubjectRepository(repository string, reference model.SubjectReferenc
 	return subject.ResolveRepositoryRoot(repository)
 }
 
-// resolvedRunSelection pairs the expanded selection with its reviewer policy.
+// resolvedRunSelection carries the one configuration snapshot for a run.
 type resolvedRunSelection struct {
-	selections configuration.ResolvedReviews
-	effective  configuration.Effective
+	snapshot configuration.RuntimeSnapshot
 }
 
 func (conductor *Conductor) resolveEffectiveReviews(repository string, selection model.RunSelection) (resolvedRunSelection, error) {
+	return resolveRuntimeSelection(conductor.configuration, repository, selection)
+}
+
+// resolveRuntimeSelection keeps run planning on the typed Configuration
+// Manager seam and gives the compiler one immutable result to consume.
+func resolveRuntimeSelection(resolver configuration.RuntimeResolver, repository string, selection model.RunSelection) (resolvedRunSelection, error) {
 	repositoryID := configuration.Repository(repository)
-	resolved, err := conductor.configuration.ResolveRun(configuration.RunRequest{
+	snapshot, err := resolver.ResolveRuntime(configuration.RunRequest{
 		Repository: repositoryID, Profile: selection.Profile, Party: selection.Party,
 	})
 	if err != nil {
 		return resolvedRunSelection{}, err
 	}
-	effective, err := conductor.configuration.Resolve(configuration.Request{Repository: repositoryID})
-	if err != nil {
-		return resolvedRunSelection{}, err
-	}
-	return resolvedRunSelection{selections: resolved, effective: effective}, nil
+	return resolvedRunSelection{snapshot: snapshot}, nil
 }
 
 // compileSlots compiles every expanded Profile Revision so an incompatible
 // Reviewer fails closed before the bundle row exists and before any launch.
-func (conductor *Conductor) compileSlots(repository string, expanded []configuration.ExpandedProfile, effective configuration.Effective) ([]compiledSlot, error) {
-	slots := make([]compiledSlot, 0, len(expanded))
-	for _, slot := range expanded {
+func (conductor *Conductor) compileSlots(snapshot configuration.RuntimeSnapshot) ([]compiledSlot, error) {
+	selection := snapshot.Selection()
+	slots := make([]compiledSlot, 0, len(selection.Expanded))
+	for _, slot := range selection.Expanded {
 		compiledStarted := conductor.now().UTC()
-		profile, err := conductor.compileSlotProfile(repository, slot, effective)
+		profile, err := conductor.compileSlotProfile(snapshot, slot)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", slot.Origin, err)
 		}
@@ -194,16 +196,12 @@ func (conductor *Conductor) compileSlots(repository string, expanded []configura
 	return slots, nil
 }
 
-func (conductor *Conductor) compileSlotProfile(repository string, slot configuration.ExpandedProfile, effective configuration.Effective) (compiledProfile, error) {
-	reference := configuration.ProfileReference{Scope: slot.Scope, Profile: slot.Profile}
-	profile, found, err := conductor.configuration.ResolveProfileReference(configuration.Repository(repository), reference)
-	if err != nil {
-		return compiledProfile{}, fmt.Errorf("%s Profile %q: %w", slot.Scope, slot.Profile, err)
-	}
+func (conductor *Conductor) compileSlotProfile(snapshot configuration.RuntimeSnapshot, slot configuration.ExpandedProfile) (compiledProfile, error) {
+	profile, found := snapshot.ProfileFor(slot)
 	if !found {
 		return compiledProfile{}, fmt.Errorf("%s Profile %q was not found", slot.Scope, slot.Profile)
 	}
-	resolved, err := resolvedFromProfile(profile, effective)
+	resolved, err := resolvedFromProfile(profile, snapshot.Effective())
 	if err != nil {
 		return compiledProfile{}, fmt.Errorf("%s Profile %q: %w", slot.Scope, slot.Profile, err)
 	}

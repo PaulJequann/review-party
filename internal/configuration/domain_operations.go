@@ -76,11 +76,44 @@ func (manager *Manager) PlanProfileCopy(repository Repository, source, target Sc
 	if !found {
 		return Plan{}, fmt.Errorf("Profile %q does not exist in %s Configuration", name, source)
 	}
+	return manager.planProfileCopy(repository, target, profile)
+}
+
+// PlanProfileCopyFromReference stages a Profile copy after resolving one raw
+// qualified or precedence-based reference inside the Configuration Manager.
+func (manager *Manager) PlanProfileCopyFromReference(repository Repository, value string, target Scope) (Plan, error) {
+	source, name := ParseScopedReference(value)
+	var (
+		profile Profile
+		found   bool
+		err     error
+	)
+	if source == "" {
+		profile, found, err = manager.ResolveProfile(repository, name)
+	} else {
+		profile, found, err = manager.LoadProfile(source, repository, name)
+	}
+	if err != nil {
+		return Plan{}, err
+	}
+	if !found {
+		return Plan{}, fmt.Errorf("Profile %q was not found", name)
+	}
+	return manager.planProfileCopy(repository, target, profile)
+}
+
+func (manager *Manager) planProfileCopy(repository Repository, target Scope, profile Profile) (Plan, error) {
 	return manager.PlanProfileCreation(repository, ProfileDraft{
-		Target: target, Name: name, Reviewer: profile.Reviewer, Model: profile.Model,
+		Target: target, Name: profile.Name, Reviewer: profile.Reviewer, Model: profile.Model,
 		ReasoningEffort: profile.ReasoningEffort, AttemptDeadline: profile.AttemptDeadline,
 		Instructions: profile.Instructions, TemplateID: profile.TemplateID, TemplateRevision: profile.TemplateRevision,
 	})
+}
+
+// DefaultReviewSelection is the valid starting value for a repository's
+// first saved selection mutation.
+func DefaultReviewSelection() ReviewSelection {
+	return ReviewSelection{ConcurrencyLimit: 1}
 }
 
 // AddReviewSelection returns a typed replacement intent with one item appended.
@@ -137,9 +170,15 @@ func validateSelectionMove(length, from, to int) error {
 }
 
 func cloneReviewSelection(selection ReviewSelection) ReviewSelection {
-	selection.Global = append([]SelectionItem(nil), selection.Global...)
-	selection.Repository = append([]SelectionItem(nil), selection.Repository...)
+	selection.Global = cloneSelectionItems(selection.Global)
+	selection.Repository = cloneSelectionItems(selection.Repository)
 	return selection
+}
+
+func cloneSelectionItems(items []SelectionItem) []SelectionItem {
+	clone := make([]SelectionItem, len(items))
+	copy(clone, items)
+	return clone
 }
 
 func selectionGroup(selection *ReviewSelection, group Scope) *[]SelectionItem {

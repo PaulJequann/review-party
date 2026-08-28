@@ -36,11 +36,12 @@ type planState struct {
 }
 
 type stagedDocument struct {
-	scope    Scope
-	path     string
-	anchor   string
-	document Document
-	baseline fileState
+	scope                  Scope
+	path                   string
+	anchor                 string
+	document               Document
+	baseline               fileState
+	reviewSelectionChanged bool
 }
 
 type fileState struct {
@@ -102,9 +103,10 @@ func (manager *Manager) Plan(repository Repository, intents []Intent) (Plan, err
 		}
 		if change != nil {
 			plan.state.changes = append(plan.state.changes, *change)
+			markReviewSelectionChange(staged, intent)
 		}
 	}
-	if err := manager.validateStaged(&plan, staged, loaded); err != nil {
+	if err := manager.validateStaged(&plan, staged, loaded, repository); err != nil {
 		return plan, nil
 	}
 	plan.state.valid = true
@@ -147,7 +149,14 @@ func (manager *Manager) stageIntent(plan *Plan, staged map[Scope]*stagedDocument
 	return &Change{Field: intent.intentField(), Scope: scope, Path: path, Before: before, After: after, HadBefore: hadBefore, HadAfter: hadAfter}, nil
 }
 
-func (manager *Manager) validateStaged(plan *Plan, staged map[Scope]*stagedDocument, loaded Loaded) error {
+func markReviewSelectionChange(staged map[Scope]*stagedDocument, intent Intent) {
+	if _, ok := intent.(SetReviewSelection); !ok {
+		return
+	}
+	staged[ScopeRepository].reviewSelectionChanged = true
+}
+
+func (manager *Manager) validateStaged(plan *Plan, staged map[Scope]*stagedDocument, loaded Loaded, repository Repository) error {
 	for _, scope := range []Scope{ScopeGlobal, ScopeRepository} {
 		document, ok := staged[scope]
 		if !ok {
@@ -156,6 +165,12 @@ func (manager *Manager) validateStaged(plan *Plan, staged map[Scope]*stagedDocum
 		if err := validateDocument(document.document, document.scope, manager); err != nil {
 			plan.state.reason = invalid(document.scope, document.path, err).Error()
 			return err
+		}
+		if document.reviewSelectionChanged {
+			if err := validateReviewSelectionReferences(*document.document.Reviews, repository, manager); err != nil {
+				plan.state.reason = invalid(document.scope, document.path, err).Error()
+				return err
+			}
 		}
 		payload, err := renderDocument(document.document)
 		if err != nil {

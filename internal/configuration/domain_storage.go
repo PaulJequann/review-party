@@ -265,10 +265,15 @@ func (manager *Manager) EffectiveReviewSelection(repository Repository) (ReviewS
 	if err != nil {
 		return ReviewSelection{}, Value[ReviewSelection]{}, err
 	}
+	selection, value := manager.effectiveReviewSelection(loaded)
+	return selection, value, nil
+}
+
+func (manager *Manager) effectiveReviewSelection(loaded Loaded) (ReviewSelection, Value[ReviewSelection]) {
 	if !loaded.Repository.Present || loaded.Repository.Document.Reviews == nil {
-		return ReviewSelection{}, Value[ReviewSelection]{Source: SourcePackaged}, nil
+		return ReviewSelection{}, Value[ReviewSelection]{Source: SourcePackaged}
 	}
 	selection := *loaded.Repository.Document.Reviews
 	value := Value[ReviewSelection]{Value: selection, Authored: true, Source: SourceRepository, Path: loaded.Repository.Path}
-	return selection, value, nil
+	return selection, value
 }

@@ -151,16 +151,9 @@ func newConfigCommand(streams commandIO) *cobra.Command {
 		return printConfigurationPath(stringFlag(cmd, "config"), streams.output)
 	}}
 	file := &cobra.Command{Use: "file", Short: "Inspect authored Configuration files", Args: cobra.NoArgs, RunE: showCommandHelp}
-	show := &cobra.Command{Use: "show", Short: "Print the authored Global Configuration", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		if err := showConfiguration(stringFlag(cmd, "config"), streams.output); err != nil {
-			return commandExitError{code: printFailure(streams.errors, err)}
-		}
-		return nil
-	}}
 	addConfigurationFlag(path)
-	addConfigurationFlag(show)
-	file.AddCommand(show)
-	cmd.AddCommand(path, file)
+	file.AddCommand(newConfigFileShowCommand(streams))
+	cmd.AddCommand(path, file, newConfigShowCommand(streams), newConfigValidateCommand(streams), newConfigProfileCommand(streams), newConfigPartyCommand(streams), newConfigReviewsCommand(streams))
 	return cmd
 }
 

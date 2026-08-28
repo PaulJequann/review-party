@@ -5,21 +5,24 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
+	"reviewparty/internal/configuration"
 	"reviewparty/internal/engine"
 )
 
 const usageExitCode = 2
 
 type commandIO struct {
-	input  io.Reader
-	output io.Writer
-	errors io.Writer
+	input                io.Reader
+	output               io.Writer
+	errors               io.Writer
+	configurationManager func(string) *configuration.Manager
 }
 
 type commandExitError struct {
@@ -43,6 +46,16 @@ func execute(ctx context.Context, arguments []string, streams commandIO) int {
 }
 
 func newRootCommand(streams commandIO) *cobra.Command {
+	if streams.configurationManager == nil {
+		streams.configurationManager = func(globalConfigPath string) *configuration.Manager {
+			options := engine.ReviewPartyConfigurationOptions()
+			if globalConfigPath != "" {
+				options.GlobalRoot = filepath.Dir(globalConfigPath)
+				options.GlobalConfigPath = globalConfigPath
+			}
+			return configuration.NewManager(options)
+		}
+	}
 	root := &cobra.Command{
 		Use:           "review-party",
 		Short:         "Run bounded code reviews through coding agents",
