@@ -167,8 +167,10 @@ _Avoid_: Configuration file, merged JSON, implicit defaults
 
 Agents inspect Effective Configuration with `review-party config show` and
 inspect one authored document with `review-party config file show`. They use
-the remaining `review-party config` commands to submit typed changes that the
-Configuration Manager validates and publishes only after confirmation.
+the mutation commands under `config profile`, `config party`, and
+`config reviews` to submit typed changes that the Configuration Manager
+validates and publishes only after confirmation. `config show`, `config file
+show`, and `config validate` are read-only inspection and validation commands.
 
 **Profile Creation**:
 The operation that saves one complete executable Review Profile from a Review Profile Template or blank instructions plus a Reviewer, model, reasoning effort, and Execution Deadline. Agents invoke it with `review-party config profile create`. It is separate from Review Party Initialization.

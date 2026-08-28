@@ -175,11 +175,13 @@ Profile or Party it wants in its default run.
   considered complete.
 - `config show` reports Effective Configuration: what will run, its ordered
   expansion, warnings, and provenance.
-- `config file show --scope global|repository` reports authored storage for
-  advanced inspection. `config path` remains a path convenience.
+- `config file show [--scope global|repository]` reports authored storage for
+  advanced inspection; the scope defaults to `global`. `config path` remains a
+  path convenience.
 - Hub changes remain staged until one reviewed atomic publication. Cancellation
   before confirmation writes nothing.
-- Non-TTY `review-party config` prints guidance and makes no change.
+- Human mutations prompt for confirmation in a TTY and require `--yes`
+  otherwise. JSON mutations always require `--yes` and never prompt.
 - Accessible mode uses the same draft and intent state machine through ordinary
   prompts rather than terminal redraws.
 - Model Discovery is observational and bounded. Manual undiscovered model IDs
@@ -412,7 +414,7 @@ These commands are the Slice 6 interface. They are not part of the Slice 4 CLI.
 
 ```text
 review-party config show [--repo PATH] [--format human|json]
-review-party config file show --scope global|repository [--repo PATH] [--config PATH] [--format human|json]
+review-party config file show [--scope global|repository] [--repo PATH] [--config PATH] [--format human|json]
 review-party config validate [--scope global|repository] [--format human|json]
 review-party config profile create NAME (--template TEMPLATE|--blank) --reviewer ID --model ID --effort EFFORT --deadline DURATION [--instructions TEXT|--instructions-file PATH] [--scope global|repository] [--repo PATH] [--format human|json] [--yes]
 review-party config profile copy NAME --target-scope global|repository [--repo PATH] [--format human|json] [--yes]
