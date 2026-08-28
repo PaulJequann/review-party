@@ -63,13 +63,13 @@ func TestRunnerUsesExplicitAllowlistedEnvironment(t *testing.T) {
 	}
 }
 
-func TestTrustedExecutableSkipsRelativePathEntries(t *testing.T) {
+func TestTrustedExecutableIgnoresUntrustedPathEntries(t *testing.T) {
 	temp := t.TempDir()
 	if err := os.WriteFile(filepath.Join(temp, "sh"), []byte("#!/bin/sh\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	t.Chdir(temp)
-	resolved, err := trustedExecutable("sh", []string{"PATH=.:/bin"})
+	t.Setenv("PATH", temp)
+	resolved, err := trustedExecutable("sh")
 	if err != nil {
 		t.Fatal(err)
 	}

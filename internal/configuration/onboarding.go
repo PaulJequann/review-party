@@ -38,10 +38,11 @@ const (
 // It keeps a draft in memory until a caller validates and explicitly confirms
 // one Manager Plan. Cancellation never publishes a partial Profile.
 type ProfileOnboarding struct {
-	manager *Manager
-	draft   ProfileDraft
-	step    OnboardingStep
-	plan    Plan
+	manager          *Manager
+	draft            ProfileDraft
+	modelChoiceCheck ModelChoiceCheck
+	step             OnboardingStep
+	plan             Plan
 }
 
 // NewProfileOnboarding starts a Profile flow in the requested Configuration
@@ -55,9 +56,7 @@ func (flow *ProfileOnboarding) Step() OnboardingStep { return flow.step }
 
 // Draft returns a copy of the current in-memory Profile draft.
 func (flow *ProfileOnboarding) Draft() ProfileDraft {
-	draft := flow.draft
-	draft.ModelChoiceCheck.Choices = append([]string(nil), flow.draft.ModelChoiceCheck.Choices...)
-	return draft
+	return flow.draft
 }
 
 // ChooseTemplate selects immutable packaged instructions. The template is
@@ -76,6 +75,7 @@ func (flow *ProfileOnboarding) ChooseTemplate(id string) error {
 			flow.draft.TemplateID = id
 			flow.draft.TemplateRevision = template.Revision
 			flow.draft.Instructions = ""
+			flow.plan = Plan{}
 			flow.step = flow.nextStep()
 			return nil
 		}
@@ -92,6 +92,7 @@ func (flow *ProfileOnboarding) ChooseBlank(instructions OnboardingText) error {
 	flow.draft.TemplateID = ""
 	flow.draft.TemplateRevision = ""
 	flow.draft.Instructions = string(instructions)
+	flow.plan = Plan{}
 	flow.step = flow.nextStep()
 	return nil
 }
@@ -107,6 +108,8 @@ func (flow *ProfileOnboarding) SetInstructions(instructions OnboardingText) erro
 	flow.draft.TemplateID = ""
 	flow.draft.TemplateRevision = ""
 	flow.draft.Instructions = string(instructions)
+	flow.modelChoiceCheck = ModelChoiceCheck{}
+	flow.plan = Plan{}
 	flow.step = flow.nextStep()
 	return nil
 }
@@ -132,7 +135,7 @@ func (flow *ProfileOnboarding) Set(field OnboardingField, value OnboardingText) 
 }
 
 // SetModelChoiceCheck attaches an advisory immediate-choice check to the
-// draft. It is consumed by Validate and never changes the saved Profile.
+// flow. It is consumed by Validate and never changes the saved Profile.
 func (flow *ProfileOnboarding) SetModelChoiceCheck(check ModelChoiceCheck) error {
 	if err := flow.ensureEditable(); err != nil {
 		return err
@@ -140,7 +143,7 @@ func (flow *ProfileOnboarding) SetModelChoiceCheck(check ModelChoiceCheck) error
 	if flow.step == OnboardingReview {
 		return errors.New("onboarding choice checks cannot change after validation")
 	}
-	flow.draft.ModelChoiceCheck = ModelChoiceCheck{Checked: check.Checked, Choices: append([]string(nil), check.Choices...)}
+	flow.modelChoiceCheck = ModelChoiceCheck{Checked: check.Checked, Choices: append([]string(nil), check.Choices...)}
 	flow.plan = Plan{}
 	return nil
 }
@@ -156,7 +159,7 @@ func (flow *ProfileOnboarding) Validate(repository Repository) (Plan, error) {
 	if flow.manager == nil {
 		return Plan{}, errors.New("onboarding requires a Configuration Manager")
 	}
-	plan, err := flow.manager.PlanProfileCreation(repository, flow.draft)
+	plan, err := flow.manager.PlanProfileCreationWithModelChoiceCheck(repository, flow.draft, flow.modelChoiceCheck)
 	if err != nil {
 		return Plan{}, err
 	}
@@ -215,6 +218,7 @@ func (flow *ProfileOnboarding) Resume() error {
 // Discard clears the draft after a caller has explicitly chosen to lose it.
 func (flow *ProfileOnboarding) Discard() {
 	flow.draft = ProfileDraft{Target: flow.draft.Target}
+	flow.modelChoiceCheck = ModelChoiceCheck{}
 	flow.plan = Plan{}
 	flow.step = OnboardingChooseSource
 }
@@ -260,7 +264,7 @@ func (flow *ProfileOnboarding) clearDependentFields(step OnboardingStep) {
 		spec.write(&flow.draft, "")
 	}
 	if step == OnboardingChooseSource || onboardingFieldResetsModelChoices(step) {
-		flow.draft.ModelChoiceCheck = ModelChoiceCheck{}
+		flow.modelChoiceCheck = ModelChoiceCheck{}
 	}
 }
 

@@ -54,6 +54,50 @@ func TestProfileOnboardingCarriesModelChoiceWarningOnPlan(t *testing.T) {
 	if len(warnings) != 1 || !strings.Contains(warnings[0], "grok-custom") {
 		t.Fatalf("plan warnings = %#v", warnings)
 	}
+	if err := flow.SetModelChoiceCheck(ModelChoiceCheck{Checked: true, Choices: []string{"grok-custom"}}); err == nil {
+		t.Fatal("onboarding accepted a choice check change after validation")
+	}
+}
+
+func TestProfileOnboardingInstructionEditPreservesExecutableFields(t *testing.T) {
+	flow := completeOnboarding(t, nil)
+	requireOnboardingErrorFree(t, flow.SetInstructions("Updated instructions.\n"))
+	draft := flow.Draft()
+	for _, field := range []struct {
+		name string
+		got  string
+		want string
+	}{
+		{name: "name", got: draft.Name, want: "bugs"},
+		{name: "reviewer", got: draft.Reviewer, want: "grok"},
+		{name: "model", got: draft.Model, want: "grok-4.6"},
+		{name: "effort", got: draft.ReasoningEffort, want: "high"},
+		{name: "deadline", got: draft.AttemptDeadline, want: "1m"},
+	} {
+		if field.got != field.want {
+			t.Fatalf("instruction edit %s = %q, want %q", field.name, field.got, field.want)
+		}
+	}
+	if draft.Instructions != "Updated instructions.\n" || draft.TemplateID != "" {
+		t.Fatalf("instruction edit draft = %#v", draft)
+	}
+}
+
+func TestProfileOnboardingSourceEditInvalidatesReviewedPlan(t *testing.T) {
+	manager := NewManager(Options{
+		GlobalRoot: t.TempDir(), Reviewers: []string{"grok"},
+		ValidateName: func(string) error { return nil },
+	})
+	flow := completeOnboarding(t, manager)
+	plan, err := flow.Validate("")
+	requireValidOnboardingPlan(t, flow, plan, err)
+	requireOnboardingErrorFree(t, flow.SetInstructions("Changed instructions.\n"))
+	if flow.Plan().Valid() {
+		t.Fatal("instruction edit retained a reviewed plan")
+	}
+	if err := flow.Confirm(); err == nil {
+		t.Fatal("onboarding confirmed a plan after source edit")
+	}
 }
 
 func TestProfileOnboardingCancellationRetainsDraftWithoutWriting(t *testing.T) {
@@ -79,13 +123,7 @@ func TestProfileOnboardingCannotCancelAfterConfirmation(t *testing.T) {
 		GlobalRoot: t.TempDir(), Reviewers: []string{"grok"},
 		ValidateName: func(string) error { return nil },
 	})
-	flow := NewProfileOnboarding(manager, ScopeGlobal)
-	requireOnboardingErrorFree(t, flow.ChooseBlank("Review bugs.\n"))
-	requireOnboardingErrorFree(t, flow.Set(OnboardingFieldName, "bugs"))
-	requireOnboardingErrorFree(t, flow.Set(OnboardingFieldReviewer, "grok"))
-	requireOnboardingErrorFree(t, flow.Set(OnboardingFieldModel, "grok-4.6"))
-	requireOnboardingErrorFree(t, flow.Set(OnboardingFieldEffort, "high"))
-	requireOnboardingErrorFree(t, flow.Set(OnboardingFieldDeadline, "1m"))
+	flow := completeOnboarding(t, manager)
 	plan, err := flow.Validate("")
 	requireValidOnboardingPlan(t, flow, plan, err)
 	requireOnboardingErrorFree(t, flow.Confirm())
@@ -228,6 +266,25 @@ func requireOnboardingErrorFree(t *testing.T, err error) {
 	if err != nil {
 		t.Fatal(err)
 	}
+}
+
+func completeOnboarding(t *testing.T, manager *Manager) *ProfileOnboarding {
+	t.Helper()
+	flow := NewProfileOnboarding(manager, ScopeGlobal)
+	requireOnboardingErrorFree(t, flow.ChooseBlank("Review bugs.\n"))
+	for _, field := range []struct {
+		name  OnboardingField
+		value OnboardingText
+	}{
+		{name: OnboardingFieldName, value: "bugs"},
+		{name: OnboardingFieldReviewer, value: "grok"},
+		{name: OnboardingFieldModel, value: "grok-4.6"},
+		{name: OnboardingFieldEffort, value: "high"},
+		{name: OnboardingFieldDeadline, value: "1m"},
+	} {
+		requireOnboardingErrorFree(t, flow.Set(field.name, field.value))
+	}
+	return flow
 }
 
 func requireOnboardingStep(t *testing.T, flow *ProfileOnboarding, want OnboardingStep) {

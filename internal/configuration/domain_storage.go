@@ -15,7 +15,6 @@ type ProfileDraft struct {
 	Name             string
 	Reviewer         string
 	Model            string
-	ModelChoiceCheck ModelChoiceCheck
 	ReasoningEffort  string
 	AttemptDeadline  string
 	Instructions     string
@@ -32,6 +31,16 @@ func (manager *Manager) Templates() []Template {
 
 // PlanProfileCreation validates and stages one complete two-file Profile.
 func (manager *Manager) PlanProfileCreation(repository Repository, draft ProfileDraft) (Plan, error) {
+	return manager.planProfileCreation(repository, draft, ModelChoiceCheck{})
+}
+
+// PlanProfileCreationWithModelChoiceCheck stages a Profile plan with an
+// advisory immediate model-choice check supplied by the caller.
+func (manager *Manager) PlanProfileCreationWithModelChoiceCheck(repository Repository, draft ProfileDraft, check ModelChoiceCheck) (Plan, error) {
+	return manager.planProfileCreation(repository, draft, check)
+}
+
+func (manager *Manager) planProfileCreation(repository Repository, draft ProfileDraft, choiceCheck ModelChoiceCheck) (Plan, error) {
 	profile, instructions, err := manager.profileFromDraft(draft)
 	if err != nil {
 		return Plan{}, err
@@ -63,7 +72,7 @@ func (manager *Manager) PlanProfileCreation(repository Repository, draft Profile
 		After: profilePlanSummary(profile), HadAfter: true,
 	}
 	plan = newProfilePlan(manager, draft.Target, change, publication)
-	if warning := draft.ModelChoiceCheck.warning(profile); warning != "" {
+	if warning := choiceCheck.warning(profile); warning != "" {
 		plan.state.warnings = []string{warning}
 	}
 	return plan, nil

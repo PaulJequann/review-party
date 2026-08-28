@@ -10,7 +10,7 @@ var versionPattern = regexp.MustCompile(`(?i)(?:version|v)[^0-9]*([0-9]+(?:\.[0-
 var modelIDPattern = regexp.MustCompile(`^[A-Za-z0-9._:/-]+$`)
 
 var authenticationFailureMarkers = []string{
-	"unauthorized", "not authenticated", "token refresh", "login required", "no credentials",
+	"unauthorized", "not authenticated", "token refresh", "login required", "authentication required", "no credentials",
 	"credentials not configured", "authentication failed", "requires authentication", "missing api key",
 	"api key required", "api key not configured", "no api key", "run login", "not logged in", "sign in",
 }
@@ -36,7 +36,8 @@ func harnessVersion(ctx context.Context, runner Runner, spec humanDiscoverySpec)
 func discoverHumanModels(ctx context.Context, runner Runner, spec humanDiscoverySpec, signIn *SignInAction) (RunResult, []Model, *Observation) {
 	run := runner.Run(ctx, Command{Args: []string{spec.executable, "models"}, Environment: environmentFor(spec.executable)})
 	if commandFailed(run) {
-		if diagnostic := authenticationDiagnostic(run); diagnostic != "" {
+		if classifyCommandAuthentication(run) == AuthRequired {
+			diagnostic := authenticationDiagnostic(run)
 			failure := Observation{Status: StatusAuthenticationRequired, Authentication: Authentication{Status: AuthRequired, Diagnostic: diagnostic, SignIn: signIn}, Diagnostic: diagnostic}
 			return run, nil, &failure
 		}
@@ -51,7 +52,7 @@ func discoverHumanModels(ctx context.Context, runner Runner, spec humanDiscovery
 	if len(models) > 0 {
 		return run, models, nil
 	}
-	if isAuthenticationDiagnostic(run.Stdout) || isAuthenticationDiagnostic([]byte(rawCommandDiagnostic(run))) {
+	if classifyCommandAuthentication(run) == AuthRequired {
 		diagnostic := "discovery command reported that authentication is required"
 		failure := Observation{Status: StatusAuthenticationRequired, Authentication: Authentication{Status: AuthRequired, Diagnostic: diagnostic, SignIn: signIn}, Diagnostic: diagnostic}
 		return run, nil, &failure
@@ -65,7 +66,21 @@ func isAuthenticationDiagnostic(value []byte) bool {
 	return strings.Contains(string(value), "authentication") || strings.Contains(string(value), "credentials") || containsAuthenticationFailureMarker(value)
 }
 
-func isOpenCodeCredentialFailure(value []byte) bool {
+func classifyCommandAuthentication(run RunResult) AuthStatus {
+	if commandRequiresAuthentication(run) {
+		return AuthRequired
+	}
+	if commandFailed(run) {
+		return AuthUnknown
+	}
+	return AuthConfigured
+}
+
+func commandRequiresAuthentication(run RunResult) bool {
+	return isAuthenticationFailureText(run.Stdout) || isAuthenticationFailureText([]byte(rawCommandDiagnostic(run)))
+}
+
+func isAuthenticationFailureText(value []byte) bool {
 	value = []byte(strings.ToLower(string(value)))
 	if containsAuthenticationFailureMarker(value) {
 		return true

@@ -37,15 +37,16 @@ func (adapter openCodeAdapter) Discover(ctx context.Context) Observation {
 
 func (adapter openCodeAdapter) observeOpenCodeAuthentication(ctx context.Context, signIn *SignInAction) Authentication {
 	run := adapter.runner.Run(ctx, Command{Args: []string{"opencode", "providers", "list"}, Environment: environmentFor("opencode")})
-	if isOpenCodeCredentialFailure(run.Stdout) || isOpenCodeCredentialFailure([]byte(rawCommandDiagnostic(run))) {
+	switch classifyCommandAuthentication(run) {
+	case AuthRequired:
 		diagnostic := "OpenCode reported that provider authentication is required"
 		return Authentication{Status: AuthRequired, Diagnostic: diagnostic, SignIn: signIn}
-	}
-	diagnostic := commandDiagnostic(run)
-	if commandFailed(run) {
+	case AuthUnknown:
+		diagnostic := commandDiagnostic(run)
 		return Authentication{Status: AuthUnknown, Diagnostic: diagnostic, SignIn: signIn}
+	default:
+		return Authentication{Status: AuthConfigured, SignIn: signIn}
 	}
-	return Authentication{Status: AuthConfigured, SignIn: signIn}
 }
 
 func parseOpenCodeModels(output []byte) []Model {

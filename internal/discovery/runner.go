@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -109,7 +110,7 @@ func validateCommand(command Command) error {
 }
 
 func startDiscoveryProcess(command Command, output *combinedBoundedOutput) (*processSession, error) {
-	executable, err := trustedExecutable(command.Args[0], command.Environment)
+	executable, err := trustedExecutable(command.Args[0])
 	if err != nil {
 		return nil, err
 	}
@@ -120,21 +121,25 @@ func startDiscoveryProcess(command Command, output *combinedBoundedOutput) (*pro
 	return startProcessSession(process)
 }
 
-func trustedExecutable(name string, environment []string) (string, error) {
+func trustedExecutable(name string) (string, error) {
 	if filepath.IsAbs(name) {
 		return validateExecutablePath(name)
 	}
-	pathValue := environmentValue(environment, "PATH")
-	for _, directory := range filepath.SplitList(pathValue) {
-		if directory == "" || !filepath.IsAbs(directory) {
-			continue
-		}
+	for _, directory := range trustedExecutableRoots() {
 		candidate, err := validateExecutablePath(filepath.Join(directory, name))
 		if err == nil {
 			return candidate, nil
 		}
 	}
-	return "", fmt.Errorf("discovery executable %q was not found in trusted absolute PATH entries", name)
+	return "", fmt.Errorf("discovery executable %q was not found in trusted executable roots", name)
+}
+
+func trustedExecutableRoots() []string {
+	roots := []string{"/usr/local/bin", "/usr/bin", "/bin"}
+	if runtime.GOOS == "darwin" {
+		roots = append(roots, "/opt/homebrew/bin")
+	}
+	return roots
 }
 
 func validateExecutablePath(path string) (string, error) {
@@ -162,16 +167,6 @@ func pathWithinDirectory(directory, path string) bool {
 		return false
 	}
 	return relative == "." || (relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)))
-}
-
-func environmentValue(environment []string, name string) string {
-	for _, entry := range environment {
-		key, value, found := strings.Cut(entry, "=")
-		if found && environmentNameKey(key) == environmentNameKey(name) {
-			return value
-		}
-	}
-	return ""
 }
 
 func processStartResult(err error, ctx context.Context, output *combinedBoundedOutput) RunResult {

@@ -180,7 +180,7 @@ type execCodexSession struct {
 func newCodexSession(ctx context.Context, capture *codexCapture) (codexSession, error) {
 	_ = ctx
 	environment := environmentFor("codex")
-	executable, err := trustedExecutable("codex", environment)
+	executable, err := trustedExecutable("codex")
 	if err != nil {
 		return nil, err
 	}
