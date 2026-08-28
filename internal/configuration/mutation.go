@@ -3,6 +3,7 @@ package configuration
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 )
 
 // Change planning lives in this file. Typed intents and their field mapping
@@ -94,6 +95,22 @@ func (plan Plan) Warnings() []string {
 		return nil
 	}
 	return append([]string(nil), plan.state.warnings...)
+}
+
+// WithWarnings returns a copy of the Plan with caller-supplied advisory
+// messages. It does not change the staged publication.
+func (plan Plan) WithWarnings(warnings ...string) Plan {
+	if plan.state == nil {
+		return plan
+	}
+	state := *plan.state
+	state.warnings = append([]string(nil), state.warnings...)
+	for _, warning := range warnings {
+		if strings.TrimSpace(warning) != "" {
+			state.warnings = append(state.warnings, warning)
+		}
+	}
+	return Plan{state: &state}
 }
 
 // Plan stages typed intents against loaded documents and validates each

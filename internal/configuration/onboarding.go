@@ -159,10 +159,11 @@ func (flow *ProfileOnboarding) Validate(repository Repository) (Plan, error) {
 	if flow.manager == nil {
 		return Plan{}, errors.New("onboarding requires a Configuration Manager")
 	}
-	plan, err := flow.manager.PlanProfileCreationWithModelChoiceCheck(repository, flow.draft, flow.modelChoiceCheck)
+	plan, err := flow.manager.PlanProfileCreation(repository, flow.draft)
 	if err != nil {
 		return Plan{}, err
 	}
+	plan = plan.WithWarnings(flow.modelChoiceCheck.Warning(flow.draft.Reviewer, flow.draft.Model))
 	flow.plan = plan
 	if plan.Valid() {
 		flow.step = OnboardingReview

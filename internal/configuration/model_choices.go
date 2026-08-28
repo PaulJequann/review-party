@@ -43,8 +43,9 @@ func (manager *Manager) ProfileModelChoices(repository Repository, reviewer stri
 	return sources, nil
 }
 
-func (check ModelChoiceCheck) warning(profile Profile) string {
-	if profile.Model == "" {
+// Warning returns the advisory message for one selected Reviewer and model.
+func (check ModelChoiceCheck) Warning(reviewer, model string) string {
+	if model == "" {
 		return ""
 	}
 	switch check.Status {
@@ -53,5 +54,5 @@ func (check ModelChoiceCheck) warning(profile Profile) string {
 	case ModelChoicesUnavailable:
 		return "model choice could not be checked against configured choices"
 	}
-	return fmt.Sprintf("model %q was not reported by cached, configured, or packaged choices for Reviewer %q; confirm it explicitly", profile.Model, profile.Reviewer)
+	return fmt.Sprintf("model %q was not reported by cached, configured, or packaged choices for Reviewer %q; confirm it explicitly", model, reviewer)
 }

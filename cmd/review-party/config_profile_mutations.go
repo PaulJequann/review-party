@@ -33,10 +33,11 @@ func executeConfigProfileCreate(name string, cmd *cobra.Command, options configu
 			manager: manager, discovery: discoveryService, repository: options.repository,
 			reviewer: draft.Reviewer, model: draft.Model,
 		})
-		plan, err := manager.PlanProfileCreationWithModelChoiceCheck(configuration.Repository(options.repository), draft, check)
+		plan, err := manager.PlanProfileCreation(configuration.Repository(options.repository), draft)
 		if err != nil {
 			return 0, err
 		}
+		plan = plan.WithWarnings(check.Warning(draft.Reviewer, draft.Model))
 		return publishConfigurationPlan(manager, plan, options, streams), nil
 	})
 }
