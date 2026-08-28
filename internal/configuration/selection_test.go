@@ -119,7 +119,7 @@ func TestParseScopedReference(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.input, func(t *testing.T) {
-			scope, name := parseScopedReference(test.input)
+			scope, name := ParseScopedReference(test.input)
 			if scope != test.scope || name != test.name {
 				t.Fatalf("parseScopedReference(%q) = (%q, %q), want (%q, %q)", test.input, scope, name, test.scope, test.name)
 			}

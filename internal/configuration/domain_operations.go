@@ -82,7 +82,7 @@ func (manager *Manager) PlanProfileCopy(repository Repository, source, target Sc
 // PlanProfileCopyFromReference stages a Profile copy after resolving one raw
 // qualified or precedence-based reference inside the Configuration Manager.
 func (manager *Manager) PlanProfileCopyFromReference(repository Repository, value string, target Scope) (Plan, error) {
-	source, name := parseScopedReference(value)
+	source, name := ParseScopedReference(value)
 	var (
 		profile Profile
 		found   bool

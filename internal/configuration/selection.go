@@ -158,7 +158,9 @@ func (failure UnresolvedReferenceError) Error() string {
 	return message
 }
 
-func parseScopedReference(value string) (Scope, string) {
+// ParseScopedReference separates an optional exact scope qualifier from a
+// definition name. Unqualified names are returned with an empty scope.
+func ParseScopedReference(value string) (Scope, string) {
 	globalPrefix, repositoryPrefix := string(ScopeGlobal)+":", string(ScopeRepository)+":"
 	switch {
 	case strings.HasPrefix(value, globalPrefix):
@@ -219,7 +221,7 @@ func (resolver selectionResolver) resolve(repository Repository, request RunRequ
 // resolveExplicitProfile resolves --profile NAME to exactly one scoped
 // identity. Unqualified names prefer Repository Configuration before Global.
 func (resolver selectionResolver) resolveExplicitProfile(repository Repository, value string) (ResolvedReviews, error) {
-	qualified, unqualified := parseScopedReference(value)
+	qualified, unqualified := ParseScopedReference(value)
 	profileScope, err := resolver.explicitProfileScope(repository, qualified, unqualified)
 	if err != nil {
 		return ResolvedReviews{}, err
@@ -393,7 +395,7 @@ func partyEntry(name string, scope Scope, origin string, party Party) authoredEn
 // selectionParty loads one possibly qualified Party for a run selection,
 // preferring Repository Configuration before Global for unqualified names.
 func (resolver selectionResolver) selectionParty(repository Repository, value, origin string) (Party, Scope, error) {
-	qualified, unqualified := parseScopedReference(value)
+	qualified, unqualified := ParseScopedReference(value)
 	if qualified != "" {
 		return resolver.selectionPartyAt(repository, qualified, unqualified, origin)
 	}

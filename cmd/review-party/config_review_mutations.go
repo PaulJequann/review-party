@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
-	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -135,18 +134,6 @@ func selectionItemFromCommand(cmd *cobra.Command, scope configuration.Scope) (co
 	return parseSelectionItem(scope, profile, party)
 }
 
-func parseScopedReference(value string) (configuration.Scope, string) {
-	globalPrefix, repositoryPrefix := string(configuration.ScopeGlobal)+":", string(configuration.ScopeRepository)+":"
-	switch {
-	case strings.HasPrefix(value, globalPrefix):
-		return configuration.ScopeGlobal, strings.TrimPrefix(value, globalPrefix)
-	case strings.HasPrefix(value, repositoryPrefix):
-		return configuration.ScopeRepository, strings.TrimPrefix(value, repositoryPrefix)
-	default:
-		return "", value
-	}
-}
-
 func parseSelectionItem(scope configuration.Scope, profile, party string) (configuration.SelectionItem, error) {
 	if profile == "" && party == "" {
 		return configuration.SelectionItem{}, errors.New("choose exactly one of --profile or --party")
@@ -155,7 +142,7 @@ func parseSelectionItem(scope configuration.Scope, profile, party string) (confi
 	if value == "" {
 		value = party
 	}
-	qualified, name := parseScopedReference(value)
+	qualified, name := configuration.ParseScopedReference(value)
 	if qualified != "" && qualified != scope {
 		return configuration.SelectionItem{}, fmt.Errorf("%s selection must reference a %s definition", value, scope)
 	}
