@@ -48,24 +48,21 @@ func executeConfigurationShow(options configurationFileOptions, streams commandI
 
 func buildConfigurationShowReport(manager *configuration.Manager, repository string) (configurationShowReport, error) {
 	repositoryID := configuration.Repository(repository)
-	loaded, err := manager.Load(repositoryID)
-	if err != nil {
-		return configurationShowReport{}, err
-	}
-	effective, err := manager.ResolveLoaded(configuration.Request{Repository: repositoryID}, loaded)
-	if err != nil {
-		return configurationShowReport{}, err
-	}
-	report := configurationShowReport{Repository: repository, Effective: effectiveConfigurationViewOf(effective)}
-	selection, err := manager.ResolveRunLoaded(configuration.RunRequest{Repository: repositoryID}, loaded)
+	snapshot, err := manager.ResolveRuntime(configuration.RunRequest{Repository: repositoryID})
 	if errors.Is(err, configuration.ErrNoRepositorySelection) {
-		report.SelectionError = err.Error()
-		return report, nil
+		if snapshot == nil {
+			return configurationShowReport{}, err
+		}
+		return configurationShowReport{
+			Repository: repository, Effective: effectiveConfigurationViewOf(snapshot.Effective()),
+			SelectionError: err.Error(),
+		}, nil
 	}
 	if err != nil {
 		return configurationShowReport{}, err
 	}
-	report.Reviews = &selection
+	selection := snapshot.Selection()
+	report := configurationShowReport{Repository: repository, Effective: effectiveConfigurationViewOf(snapshot.Effective()), Reviews: &selection}
 	return report, nil
 }
 
