@@ -192,21 +192,15 @@ type runtimeLayerRequest struct {
 }
 
 func (manager *Manager) loadRuntimeLayers(repository Repository, request runtimeLayerRequest) error {
-	layers, err := manager.configurationLayers(repository, request.child)
+	entries, err := manager.definitionEntries(repository, request.child, request.description)
 	if errors.Is(err, ErrGlobalRootUnavailable) {
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	for _, layer := range layers {
-		entries, err := readDefinitionLayer(layer, request.description)
-		if err != nil {
-			return err
-		}
-		for _, entry := range entries {
-			request.capture(repository, layer, entry, request.definitions)
-		}
+	for _, definitionEntry := range entries {
+		request.capture(repository, definitionEntry.layer, definitionEntry.entry, request.definitions)
 	}
 	return nil
 }

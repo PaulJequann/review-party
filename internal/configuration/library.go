@@ -33,6 +33,11 @@ type configurationLayer struct {
 	directory string
 }
 
+type definitionEntry struct {
+	layer configurationLayer
+	entry fs.DirEntry
+}
+
 func (manager *Manager) configurationLayers(repository Repository, child string) ([]configurationLayer, error) {
 	layers := make([]configurationLayer, 0, 2)
 	if repository != "" {
@@ -45,6 +50,24 @@ func (manager *Manager) configurationLayers(repository Repository, child string)
 		return nil, err
 	}
 	return layers, nil
+}
+
+func (manager *Manager) definitionEntries(repository Repository, child, description string) ([]definitionEntry, error) {
+	layers, err := manager.configurationLayers(repository, child)
+	if err != nil {
+		return nil, err
+	}
+	entries := make([]definitionEntry, 0)
+	for _, layer := range layers {
+		layerEntries, err := readDefinitionLayer(layer, description)
+		if err != nil {
+			return nil, err
+		}
+		for _, entry := range layerEntries {
+			entries = append(entries, definitionEntry{layer: layer, entry: entry})
+		}
+	}
+	return entries, nil
 }
 
 func readDefinitionLayer(layer configurationLayer, description string) ([]fs.DirEntry, error) {

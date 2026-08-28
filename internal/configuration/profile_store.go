@@ -26,30 +26,14 @@ func (manager *Manager) ResolveProfileReference(repository Repository, reference
 // ProfileInventory returns complete and invalid authored Profiles in
 // Repository-then-Global order. Each definition is read exactly once.
 func (manager *Manager) ProfileInventory(repository Repository) ([]Definition[Profile], error) {
-	layers, err := manager.configurationLayers(repository, profileDirectoryName)
+	entries, err := manager.definitionEntries(repository, profileDirectoryName, "Profile library")
 	if err != nil {
 		return nil, err
 	}
 	inventory := make([]Definition[Profile], 0)
-	for _, layer := range layers {
-		definitions, readErr := manager.profileInventoryLayer(repository, layer)
-		if readErr != nil {
-			return nil, readErr
-		}
-		inventory = append(inventory, definitions...)
-	}
-	return inventory, nil
-}
-
-func (manager *Manager) profileInventoryLayer(repository Repository, layer configurationLayer) ([]Definition[Profile], error) {
-	entries, err := readDefinitionLayer(layer, "Profile library")
-	if err != nil {
-		return nil, err
-	}
-	inventory := make([]Definition[Profile], 0, len(entries))
-	for _, entry := range entries {
-		if entry.IsDir() {
-			inventory = append(inventory, manager.inventoryProfile(repository, profileEntryFor(layer, entry.Name())))
+	for _, definitionEntry := range entries {
+		if definitionEntry.entry.IsDir() {
+			inventory = append(inventory, manager.inventoryProfile(repository, profileEntryFor(definitionEntry.layer, definitionEntry.entry.Name())))
 		}
 	}
 	return inventory, nil
