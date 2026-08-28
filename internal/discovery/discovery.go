@@ -269,14 +269,13 @@ func (service *Service) collectDiscoveries(ctx context.Context, reviewers []stri
 			results[completion.index] = completion.result
 			completed[completion.index] = true
 		case <-ctx.Done():
-			return service.unavailableDiscoveries(reviewers, completed, ctx.Err())
+			return service.unavailableDiscoveries(reviewers, results, completed, ctx.Err())
 		}
 	}
 	return results
 }
 
-func (service *Service) unavailableDiscoveries(reviewers []string, completed []bool, cause error) []Result {
-	results := make([]Result, len(reviewers))
+func (service *Service) unavailableDiscoveries(reviewers []string, results []Result, completed []bool, cause error) []Result {
 	for index, reviewer := range reviewers {
 		if !completed[index] {
 			results[index] = unavailableDiscoveryResult(reviewer, cause, service.now())

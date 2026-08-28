@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -78,6 +79,27 @@ func TestTrustedExecutableIgnoresUntrustedPathEntries(t *testing.T) {
 	}
 }
 
+func TestTrustedExecutableIncludesKnownUserInstallationPaths(t *testing.T) {
+	home := t.TempDir()
+	bin := filepath.Join(home, ".local", "bin")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	wanted := filepath.Join(bin, "reviewer-harness")
+	if err := os.WriteFile(wanted, []byte("#!/bin/sh\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", bin)
+	resolved, err := trustedExecutable("reviewer-harness")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved != wanted {
+		t.Fatalf("trusted executable = %q, want %q", resolved, wanted)
+	}
+}
+
 func TestEnvironmentIncludesUserProfileRuntimeVariables(t *testing.T) {
 	variables := map[string]string{
 		"USERPROFILE":  "/users/review-party",
@@ -123,7 +145,7 @@ func waitForProcessExit(t *testing.T, pid int) {
 	deadline := time.Now().Add(time.Second)
 	for {
 		err := syscall.Kill(pid, 0)
-		if errors.Is(err, syscall.ESRCH) {
+		if errors.Is(err, syscall.ESRCH) || processIsZombie(pid) {
 			return
 		}
 		if err != nil && !errors.Is(err, syscall.EPERM) {
@@ -134,6 +156,22 @@ func waitForProcessExit(t *testing.T, pid int) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+}
+
+func processIsZombie(pid int) bool {
+	if runtime.GOOS != "linux" {
+		return false
+	}
+	contents, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "stat"))
+	if err != nil {
+		return false
+	}
+	closingCommand := strings.LastIndex(string(contents), ") ")
+	if closingCommand < 0 {
+		return false
+	}
+	state := strings.Fields(string(contents[closingCommand+2:]))
+	return len(state) > 0 && state[0] == "Z"
 }
 
 func runDiscoverySpawnHelper(t *testing.T) {

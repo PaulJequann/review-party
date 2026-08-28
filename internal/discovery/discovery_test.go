@@ -299,6 +299,26 @@ func TestDiscoverManyBoundsAnUncooperativeAdapter(t *testing.T) {
 	assertNoDiscoverySignal(t, cache.savedDone, 50*time.Millisecond, "late timed-out observation was cached")
 }
 
+func TestDiscoverManyPreservesCompletedResultsWhenAnotherAdapterTimesOut(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	service := NewService(Options{Deadline: 10 * time.Millisecond, Adapters: []Adapter{
+		fakeAdapter{id: "fast", observation: Observation{Status: StatusSupported, Models: []Model{{ID: "fast-model"}}}},
+		fakeAdapter{id: "slow", started: started, release: release, observation: Observation{Status: StatusSupported, Models: []Model{{ID: "slow-model"}}}},
+	}})
+	results := make(chan []Result, 1)
+	go func() { results <- service.DiscoverMany(context.Background(), []string{"fast", "slow"}) }()
+	waitForDiscoverySignal(t, started, "slow adapter did not start")
+	observations := <-results
+	if observations[0].Status != StatusSupported || observations[0].Reviewer != "fast" {
+		t.Fatalf("completed result = %#v", observations[0])
+	}
+	if observations[1].Status != StatusUnavailable || observations[1].Reviewer != "slow" {
+		t.Fatalf("timed-out result = %#v", observations[1])
+	}
+	close(release)
+}
+
 func waitForDiscoverySignal(t *testing.T, signal <-chan struct{}, message string) {
 	t.Helper()
 	select {
