@@ -95,7 +95,8 @@ func (manager *Manager) ResolveRuntime(request RunRequest) (RuntimeSnapshot, err
 	if err != nil {
 		return nil, err
 	}
-	selection, err := definitions.resolve(manager, request, loaded)
+	selectionFacts, selectionValue := manager.effectiveReviewSelection(loaded)
+	selection, err := definitions.resolve(request, selectionFacts, selectionValue)
 	if err != nil {
 		return nil, err
 	}
@@ -266,193 +267,26 @@ func addRuntimeName(names map[Scope]map[string]struct{}, scope Scope, name strin
 	names[scope][name] = struct{}{}
 }
 
-func (definitions runtimeDefinitions) resolve(manager *Manager, request RunRequest, loaded Loaded) (ResolvedReviews, error) {
-	switch {
-	case request.Profile != "":
-		return definitions.resolveExplicitProfile(request.Repository, request.Profile)
-	case request.Party != "":
-		return definitions.resolveExplicitParty(request.Repository, request.Party)
-	default:
-		return definitions.resolveDefaultSelection(manager, request.Repository, loaded)
-	}
+func (definitions runtimeDefinitions) resolve(request RunRequest, selection ReviewSelection, value Value[ReviewSelection]) (ResolvedReviews, error) {
+	return selectionResolver{lookup: definitions.selectionLookup()}.
+		resolve(request.Repository, request, selection, value)
 }
 
-func (definitions runtimeDefinitions) resolveExplicitProfile(repository Repository, value string) (ResolvedReviews, error) {
-	qualified, name := parseScopedReference(value)
-	scope, err := definitions.explicitProfileScope(repository, qualified, name)
-	if err != nil {
-		return ResolvedReviews{}, err
+func (definitions runtimeDefinitions) selectionLookup() selectionLookup {
+	return selectionLookup{
+		profileAt: func(scope Scope, name string) (Profile, bool, error) {
+			return definitions.profile(scope, name)
+		},
+		partyAt: func(scope Scope, name string) (Party, bool, error) {
+			return definitions.party(scope, name)
+		},
+		profileNames: func(scope Scope) []string {
+			return availableRuntimeNames(definitions.profileNames, scope)
+		},
+		partyNames: func(scope Scope) []string {
+			return availableRuntimeNames(definitions.partyNames, scope)
+		},
 	}
-	return ResolvedReviews{
-		Kind: SelectionExplicitProfile, Source: sourceExplicit,
-		Authored:         []SelectedDefinition{{Kind: ItemProfile, Name: name, Scope: scope}},
-		Expanded:         []ExpandedProfile{{Scope: scope, Profile: name, Origin: originExplicit}},
-		ConcurrencyLimit: 1, LimitSource: LimitExplicitProfile,
-	}, nil
-}
-
-func (definitions runtimeDefinitions) explicitProfileScope(repository Repository, qualified Scope, name string) (Scope, error) {
-	if qualified != "" {
-		return definitions.qualifiedProfileScope(qualified, name)
-	}
-	return definitions.unqualifiedProfileScope(repository, name)
-}
-
-func (definitions runtimeDefinitions) qualifiedProfileScope(scope Scope, name string) (Scope, error) {
-	_, found, err := definitions.profile(scope, name)
-	if err != nil {
-		return "", err
-	}
-	if !found {
-		return "", definitions.unresolvedProfile(name, scope, "")
-	}
-	return scope, nil
-}
-
-func (definitions runtimeDefinitions) unqualifiedProfileScope(repository Repository, name string) (Scope, error) {
-	if repository != "" {
-		_, found, err := definitions.profile(ScopeRepository, name)
-		if err != nil {
-			return "", err
-		}
-		if found {
-			return ScopeRepository, nil
-		}
-	}
-	_, found, err := definitions.profile(ScopeGlobal, name)
-	if err != nil {
-		return "", err
-	}
-	if !found {
-		return "", definitions.unresolvedProfile(name, "", "")
-	}
-	return ScopeGlobal, nil
-}
-
-func (definitions runtimeDefinitions) resolveExplicitParty(repository Repository, value string) (ResolvedReviews, error) {
-	party, scope, err := definitions.selectionParty(repository, value, "")
-	if err != nil {
-		return ResolvedReviews{}, err
-	}
-	resolved := ResolvedReviews{
-		Kind: SelectionExplicitParty, Source: sourceExplicit,
-		ConcurrencyLimit: party.ConcurrencyLimit, LimitSource: LimitParty,
-	}
-	expander := selectionExpander{}
-	expander.expand(&resolved, repository, []authoredEntry{{
-		definition: SelectedDefinition{Kind: ItemParty, Name: party.Name, Scope: scope},
-		members:    party.Profiles, hasMembers: true, origin: fmt.Sprintf("%s %s", ItemParty, party.Name),
-	}})
-	expander.finish(&resolved)
-	return resolved, nil
-}
-
-func (definitions runtimeDefinitions) resolveDefaultSelection(manager *Manager, repository Repository, loaded Loaded) (ResolvedReviews, error) {
-	selection, value := manager.effectiveReviewSelection(loaded)
-	if !value.Authored {
-		return ResolvedReviews{}, ErrNoRepositorySelection
-	}
-	entries, err := definitions.defaultEntries(repository, selection)
-	if err != nil {
-		return ResolvedReviews{}, err
-	}
-	resolved := ResolvedReviews{Kind: SelectionRepositoryDefault, Source: value.Path}
-	expander := selectionExpander{}
-	expander.expand(&resolved, repository, entries)
-	expander.finish(&resolved)
-	if len(resolved.Authored) == 0 && len(resolved.Expanded) == 0 {
-		return ResolvedReviews{}, fmt.Errorf("%w: reviews selects nothing", ErrNoRepositorySelection)
-	}
-	resolved.ConcurrencyLimit = selection.ConcurrencyLimit
-	resolved.LimitSource = LimitRepositorySelection
-	return resolved, nil
-}
-
-func (definitions runtimeDefinitions) defaultEntries(repository Repository, selection ReviewSelection) ([]authoredEntry, error) {
-	entries := make([]authoredEntry, 0, len(selection.Global)+len(selection.Repository))
-	groups := []struct {
-		name  string
-		scope Scope
-		items []SelectionItem
-	}{
-		{name: "reviews.global", scope: ScopeGlobal, items: selection.Global},
-		{name: "reviews.repository", scope: ScopeRepository, items: selection.Repository},
-	}
-	for _, group := range groups {
-		for index, item := range group.items {
-			origin := fmt.Sprintf("%s[%d]", group.name, index)
-			entry, err := definitions.selectedEntry(repository, group.scope, origin, item)
-			if err != nil {
-				return nil, err
-			}
-			entries = append(entries, entry)
-		}
-	}
-	return entries, nil
-}
-
-func (definitions runtimeDefinitions) selectedEntry(repository Repository, scope Scope, origin string, item SelectionItem) (authoredEntry, error) {
-	name, err := item.Name()
-	if err != nil {
-		return authoredEntry{}, fmt.Errorf("%s: %w", origin, err)
-	}
-	switch {
-	case selectsProfile(item):
-		_, found, err := definitions.profile(scope, name)
-		if err != nil {
-			return authoredEntry{}, fmt.Errorf("%s: %w", origin, err)
-		}
-		if !found {
-			return authoredEntry{}, definitions.unresolvedProfile(name, scope, origin)
-		}
-		return authoredEntry{definition: SelectedDefinition{Kind: ItemProfile, Name: name, Scope: scope}, origin: origin}, nil
-	case selectsParty(item):
-		party, _, err := definitions.selectionPartyAt(repository, scope, name, origin)
-		if err != nil {
-			return authoredEntry{}, err
-		}
-		return authoredEntry{
-			definition: SelectedDefinition{Kind: ItemParty, Name: name, Scope: scope},
-			members:    party.Profiles, hasMembers: true, origin: origin,
-		}, nil
-	default:
-		return authoredEntry{}, fmt.Errorf("%s: must select exactly one profile or party", origin)
-	}
-}
-
-func (definitions runtimeDefinitions) selectionParty(repository Repository, value, origin string) (Party, Scope, error) {
-	qualified, name := parseScopedReference(value)
-	if qualified != "" {
-		return definitions.selectionPartyAt(repository, qualified, name, origin)
-	}
-	if repository != "" {
-		party, found, err := definitions.party(ScopeRepository, name)
-		if err != nil {
-			return Party{}, "", err
-		}
-		if found {
-			return party, ScopeRepository, nil
-		}
-	}
-	party, found, err := definitions.party(ScopeGlobal, name)
-	if err != nil {
-		return Party{}, "", err
-	}
-	if !found {
-		return Party{}, "", definitions.unresolvedParty(name, "", origin)
-	}
-	return party, ScopeGlobal, nil
-}
-
-func (definitions runtimeDefinitions) selectionPartyAt(_ Repository, scope Scope, name, origin string) (Party, Scope, error) {
-	party, found, err := definitions.party(scope, name)
-	if err != nil {
-		return Party{}, "", err
-	}
-	if !found {
-		return Party{}, "", definitions.unresolvedParty(name, scope, origin)
-	}
-	return party, scope, nil
 }
 
 func (definitions runtimeDefinitions) profile(scope Scope, name string) (Profile, bool, error) {
@@ -475,21 +309,7 @@ func findRuntimeDefinition[T any](definitions map[runtimeDefinitionKey]Definitio
 	return definition.Value, true, nil
 }
 
-func (definitions runtimeDefinitions) unresolvedProfile(name string, scope Scope, selectedBy string) error {
-	return UnresolvedReferenceError{
-		Kind: ItemProfile, Name: name, Scope: scope, SelectedBy: selectedBy,
-		Available: definitions.availableNames(definitions.profileNames, scope),
-	}
-}
-
-func (definitions runtimeDefinitions) unresolvedParty(name string, scope Scope, selectedBy string) error {
-	return UnresolvedReferenceError{
-		Kind: ItemParty, Name: name, Scope: scope, SelectedBy: selectedBy,
-		Available: definitions.availableNames(definitions.partyNames, scope),
-	}
-}
-
-func (definitions runtimeDefinitions) availableNames(names map[Scope]map[string]struct{}, scope Scope) []string {
+func availableRuntimeNames(names map[Scope]map[string]struct{}, scope Scope) []string {
 	available := make(map[string]struct{})
 	for candidateScope, scopedNames := range names {
 		if scope != "" && candidateScope != scope {
