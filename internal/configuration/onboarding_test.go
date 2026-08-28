@@ -3,6 +3,7 @@ package configuration
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -31,6 +32,27 @@ func TestProfileOnboardingPublishesOnlyAfterConfirmation(t *testing.T) {
 	requireOnboardingStep(t, flow, OnboardingComplete)
 	if _, err := os.Stat(filepath.Join(root, "profiles", "bugs", "profile.json")); err != nil {
 		t.Fatalf("confirmed Profile missing: %v", err)
+	}
+}
+
+func TestProfileOnboardingCarriesModelChoiceWarningOnPlan(t *testing.T) {
+	manager := NewManager(Options{
+		GlobalRoot: t.TempDir(), Reviewers: []string{"grok"},
+		ValidateName: func(string) error { return nil },
+	})
+	flow := NewProfileOnboarding(manager, ScopeGlobal)
+	requireOnboardingErrorFree(t, flow.ChooseBlank("Review bugs.\n"))
+	requireOnboardingErrorFree(t, flow.Set(OnboardingFieldName, "bugs"))
+	requireOnboardingErrorFree(t, flow.Set(OnboardingFieldReviewer, "grok"))
+	requireOnboardingErrorFree(t, flow.Set(OnboardingFieldModel, "grok-custom"))
+	requireOnboardingErrorFree(t, flow.Set(OnboardingFieldEffort, "high"))
+	requireOnboardingErrorFree(t, flow.Set(OnboardingFieldDeadline, "1m"))
+	requireOnboardingErrorFree(t, flow.SetModelChoiceCheck(ModelChoiceCheck{Checked: true, Choices: []string{"grok-4.5"}}))
+	plan, err := flow.Validate("")
+	requireValidOnboardingPlan(t, flow, plan, err)
+	warnings := plan.Warnings()
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "grok-custom") {
+		t.Fatalf("plan warnings = %#v", warnings)
 	}
 }
 

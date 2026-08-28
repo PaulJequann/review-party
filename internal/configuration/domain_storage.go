@@ -15,6 +15,7 @@ type ProfileDraft struct {
 	Name             string
 	Reviewer         string
 	Model            string
+	ModelChoiceCheck ModelChoiceCheck
 	ReasoningEffort  string
 	AttemptDeadline  string
 	Instructions     string
@@ -61,7 +62,11 @@ func (manager *Manager) PlanProfileCreation(repository Repository, draft Profile
 		Field: "profiles." + draft.Name, Scope: draft.Target, Path: directory,
 		After: profilePlanSummary(profile), HadAfter: true,
 	}
-	return newProfilePlan(manager, draft.Target, change, publication), nil
+	plan = newProfilePlan(manager, draft.Target, change, publication)
+	if warning := draft.ModelChoiceCheck.warning(profile); warning != "" {
+		plan.state.warnings = []string{warning}
+	}
+	return plan, nil
 }
 
 func (manager *Manager) profileCreationTarget(scope Scope, repository Repository, name string) (string, string, string, error) {

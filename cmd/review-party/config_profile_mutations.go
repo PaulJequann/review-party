@@ -25,19 +25,22 @@ func executeConfigProfileCreate(name string, cmd *cobra.Command, options configu
 		if err != nil {
 			return 0, err
 		}
-		plan, err := manager.PlanProfileCreation(configuration.Repository(options.repository), configuration.ProfileDraft{
+		draft := configuration.ProfileDraft{
 			Target: scope, Name: name, Reviewer: stringFlag(cmd, "reviewer"), Model: stringFlag(cmd, "model"),
 			ReasoningEffort: stringFlag(cmd, "effort"), AttemptDeadline: stringFlag(cmd, "deadline"),
 			Instructions: instructions, TemplateID: templateID,
+		}
+		check, warning := modelChoiceCheck(modelWarningInput{
+			manager: manager, discovery: discoveryService, repository: options.repository,
+			reviewer: draft.Reviewer, model: draft.Model,
 		})
+		draft.ModelChoiceCheck = check
+		if warning != "" {
+			options.warnings = append(options.warnings, warning)
+		}
+		plan, err := manager.PlanProfileCreation(configuration.Repository(options.repository), draft)
 		if err != nil {
 			return 0, err
-		}
-		if warning := manualModelWarning(modelWarningInput{
-			manager: manager, discovery: discoveryService, repository: options.repository,
-			reviewer: stringFlag(cmd, "reviewer"), model: stringFlag(cmd, "model"),
-		}); warning != "" {
-			options.warnings = append(options.warnings, warning)
 		}
 		return publishConfigurationPlan(manager, plan, options, streams), nil
 	})
@@ -51,17 +54,17 @@ type modelWarningInput struct {
 	model      string
 }
 
-func manualModelWarning(input modelWarningInput) string {
+func modelChoiceCheck(input modelWarningInput) (configuration.ModelChoiceCheck, string) {
 	if input.model == "" || input.discovery == nil {
-		return ""
+		return configuration.ModelChoiceCheck{}, ""
 	}
 	effective, err := input.manager.Resolve(configuration.Request{Repository: configuration.Repository(input.repository)})
 	if err != nil {
-		return "model choice could not be checked against configured choices: " + err.Error()
+		return configuration.ModelChoiceCheck{}, "model choice could not be checked against configured choices: " + err.Error()
 	}
 	settings, found := effective.ReviewerPolicy(input.reviewer)
 	if !found {
-		return fmt.Sprintf("model %q was entered manually for unknown Reviewer %q; execution may be unavailable", input.model, input.reviewer)
+		return configuration.ModelChoiceCheck{}, fmt.Sprintf("model %q was entered manually for unknown Reviewer %q; execution may be unavailable", input.model, input.reviewer)
 	}
 	configured := append([]string{settings.Model.Value}, settings.AllowedModels.Value...)
 	packaged := []string{}
@@ -70,15 +73,17 @@ func manualModelWarning(input modelWarningInput) string {
 	}
 	service := input.discovery()
 	if service == nil {
-		return ""
+		return configuration.ModelChoiceCheck{}, ""
 	}
 	choices := service.ChoiceSnapshot(discovery.ChoiceRequest{
 		Reviewer: input.reviewer, Configured: configured, Packaged: packaged,
 	})
-	if choices.Contains(input.model) {
-		return ""
+	modelChoices := choices.Choices()
+	ids := make([]string, len(modelChoices))
+	for index, choice := range modelChoices {
+		ids[index] = choice.Model.ID
 	}
-	return fmt.Sprintf("model %q was not reported by cached, configured, or packaged choices for Reviewer %q; confirm it explicitly", input.model, input.reviewer)
+	return configuration.ModelChoiceCheck{Checked: true, Choices: ids}, ""
 }
 
 func executeConfigProfileCopy(value, targetValue string, options configurationMutationOptions, streams commandIO) int {

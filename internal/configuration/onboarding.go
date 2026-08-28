@@ -56,6 +56,7 @@ func (flow *ProfileOnboarding) Step() OnboardingStep { return flow.step }
 // Draft returns a copy of the current in-memory Profile draft.
 func (flow *ProfileOnboarding) Draft() ProfileDraft {
 	draft := flow.draft
+	draft.ModelChoiceCheck.Choices = append([]string(nil), flow.draft.ModelChoiceCheck.Choices...)
 	return draft
 }
 
@@ -128,6 +129,17 @@ func (flow *ProfileOnboarding) Set(field OnboardingField, value OnboardingText) 
 	flow.clearDependentFields(step)
 	flow.plan = Plan{}
 	flow.step = flow.nextStep()
+	return nil
+}
+
+// SetModelChoiceCheck attaches an advisory immediate-choice check to the
+// draft. It is consumed by Validate and never changes the saved Profile.
+func (flow *ProfileOnboarding) SetModelChoiceCheck(check ModelChoiceCheck) error {
+	if err := flow.ensureEditable(); err != nil {
+		return err
+	}
+	flow.draft.ModelChoiceCheck = ModelChoiceCheck{Checked: check.Checked, Choices: append([]string(nil), check.Choices...)}
+	flow.plan = Plan{}
 	return nil
 }
 
@@ -215,22 +227,43 @@ func (flow *ProfileOnboarding) ensureEditable() error {
 	return nil
 }
 
+type onboardingFieldSpec struct {
+	field OnboardingField
+	step  OnboardingStep
+	read  func(ProfileDraft) string
+	write func(*ProfileDraft, string)
+}
+
+var onboardingFieldSpecs = []onboardingFieldSpec{
+	{field: OnboardingFieldName, step: OnboardingName, read: func(draft ProfileDraft) string { return draft.Name }, write: func(draft *ProfileDraft, value string) { draft.Name = value }},
+	{field: OnboardingFieldReviewer, step: OnboardingReviewer, read: func(draft ProfileDraft) string { return draft.Reviewer }, write: func(draft *ProfileDraft, value string) { draft.Reviewer = value }},
+	{field: OnboardingFieldModel, step: OnboardingModel, read: func(draft ProfileDraft) string { return draft.Model }, write: func(draft *ProfileDraft, value string) { draft.Model = value }},
+	{field: OnboardingFieldEffort, step: OnboardingEffort, read: func(draft ProfileDraft) string { return draft.ReasoningEffort }, write: func(draft *ProfileDraft, value string) { draft.ReasoningEffort = value }},
+	{field: OnboardingFieldDeadline, step: OnboardingDeadline, read: func(draft ProfileDraft) string { return draft.AttemptDeadline }, write: func(draft *ProfileDraft, value string) { draft.AttemptDeadline = value }},
+}
+
+var onboardingModelChoiceResetSteps = map[OnboardingStep]bool{
+	OnboardingChooseSource: true,
+	OnboardingReviewer:     true,
+	OnboardingModel:        true,
+}
+
 func (flow *ProfileOnboarding) clearDependentFields(step OnboardingStep) {
-	switch step {
-	case OnboardingChooseSource:
-		flow.draft.Name = ""
-		fallthrough
-	case OnboardingName:
-		flow.draft.Reviewer = ""
-		fallthrough
-	case OnboardingReviewer:
-		flow.draft.Model = ""
-		fallthrough
-	case OnboardingModel:
-		flow.draft.ReasoningEffort = ""
-		fallthrough
-	case OnboardingEffort:
-		flow.draft.AttemptDeadline = ""
+	start := 0
+	if step != OnboardingChooseSource {
+		start = len(onboardingFieldSpecs)
+		for index, spec := range onboardingFieldSpecs {
+			if spec.step == step {
+				start = index + 1
+				break
+			}
+		}
+	}
+	for _, spec := range onboardingFieldSpecs[start:] {
+		spec.write(&flow.draft, "")
+	}
+	if onboardingModelChoiceResetSteps[step] {
+		flow.draft.ModelChoiceCheck = ModelChoiceCheck{}
 	}
 }
 
@@ -238,75 +271,51 @@ func (flow *ProfileOnboarding) nextStep() OnboardingStep {
 	if flow.draft.TemplateID == "" && !hasOnboardingText(flow.draft.Instructions) {
 		return OnboardingChooseSource
 	}
-	if !hasOnboardingText(flow.draft.Name) {
-		return OnboardingName
-	}
-	if !hasOnboardingText(flow.draft.Reviewer) {
-		return OnboardingReviewer
-	}
-	if !hasOnboardingText(flow.draft.Model) {
-		return OnboardingModel
-	}
-	if !hasOnboardingText(flow.draft.ReasoningEffort) {
-		return OnboardingEffort
-	}
-	if !hasOnboardingText(flow.draft.AttemptDeadline) {
-		return OnboardingDeadline
+	for _, spec := range onboardingFieldSpecs {
+		if !hasOnboardingText(spec.read(flow.draft)) {
+			return spec.step
+		}
 	}
 	return OnboardingValidation
 }
 
-var onboardingStepRanks = map[OnboardingStep]int{
-	OnboardingChooseSource: 0,
-	OnboardingName:         1,
-	OnboardingReviewer:     2,
-	OnboardingModel:        3,
-	OnboardingEffort:       4,
-	OnboardingDeadline:     5,
-	OnboardingValidation:   6,
-	OnboardingReview:       7,
-	OnboardingComplete:     8,
-	OnboardingCancelled:    9,
+var onboardingTerminalStepRanks = map[OnboardingStep]int{
+	OnboardingValidation: 6,
+	OnboardingReview:     7,
+	OnboardingComplete:   8,
+	OnboardingCancelled:  9,
 }
 
 func onboardingStepRank(step OnboardingStep) int {
-	rank, found := onboardingStepRanks[step]
-	if !found {
-		return -1
+	if step == OnboardingChooseSource {
+		return 0
 	}
-	return rank
+	if rank, found := onboardingTerminalStepRanks[step]; found {
+		return rank
+	}
+	for index, spec := range onboardingFieldSpecs {
+		if spec.step == step {
+			return index + 1
+		}
+	}
+	return -1
 }
 
 func onboardingFieldStep(field OnboardingField) (OnboardingStep, bool) {
-	switch field {
-	case OnboardingFieldName:
-		return OnboardingName, true
-	case OnboardingFieldReviewer:
-		return OnboardingReviewer, true
-	case OnboardingFieldModel:
-		return OnboardingModel, true
-	case OnboardingFieldEffort:
-		return OnboardingEffort, true
-	case OnboardingFieldDeadline:
-		return OnboardingDeadline, true
-	default:
-		return "", false
+	for _, spec := range onboardingFieldSpecs {
+		if spec.field == field {
+			return spec.step, true
+		}
 	}
+	return "", false
 }
 
 func setOnboardingField(draft *ProfileDraft, field OnboardingField, value OnboardingText) {
-	text := string(value)
-	switch field {
-	case OnboardingFieldName:
-		draft.Name = text
-	case OnboardingFieldReviewer:
-		draft.Reviewer = text
-	case OnboardingFieldModel:
-		draft.Model = text
-	case OnboardingFieldEffort:
-		draft.ReasoningEffort = text
-	case OnboardingFieldDeadline:
-		draft.AttemptDeadline = text
+	for _, spec := range onboardingFieldSpecs {
+		if spec.field == field {
+			spec.write(draft, string(value))
+			return
+		}
 	}
 }
 

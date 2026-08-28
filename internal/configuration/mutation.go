@@ -31,6 +31,7 @@ type planState struct {
 	changes     []Change
 	scopes      []Scope
 	paths       []string
+	warnings    []string
 	valid       bool
 	reason      string
 	publication publicationPlan
@@ -85,6 +86,14 @@ func (plan Plan) Paths() []string {
 		return nil
 	}
 	return append([]string(nil), plan.state.paths...)
+}
+
+// Warnings returns advisory validation messages for the staged changes.
+func (plan Plan) Warnings() []string {
+	if plan.state == nil {
+		return nil
+	}
+	return append([]string(nil), plan.state.warnings...)
 }
 
 // Plan stages typed intents against loaded documents and validates each
