@@ -143,7 +143,7 @@ func (flow *ProfileOnboarding) SetModelChoiceCheck(check ModelChoiceCheck) error
 	if flow.step == OnboardingReview {
 		return errors.New("onboarding choice checks cannot change after validation")
 	}
-	flow.modelChoiceCheck = ModelChoiceCheck{Checked: check.Checked, Choices: append([]string(nil), check.Choices...)}
+	flow.modelChoiceCheck = check
 	flow.plan = Plan{}
 	return nil
 }
@@ -243,7 +243,7 @@ type onboardingFieldSpec struct {
 
 type onboardingFieldSequence struct {
 	fields        []onboardingFieldSpec
-	terminalRanks map[OnboardingStep]int
+	terminalSteps []OnboardingStep
 }
 
 var onboardingFields = onboardingFieldSequence{
@@ -254,12 +254,7 @@ var onboardingFields = onboardingFieldSequence{
 		{field: OnboardingFieldEffort, step: OnboardingEffort, read: func(draft ProfileDraft) string { return draft.ReasoningEffort }, write: func(draft *ProfileDraft, value string) { draft.ReasoningEffort = value }},
 		{field: OnboardingFieldDeadline, step: OnboardingDeadline, read: func(draft ProfileDraft) string { return draft.AttemptDeadline }, write: func(draft *ProfileDraft, value string) { draft.AttemptDeadline = value }},
 	},
-	terminalRanks: map[OnboardingStep]int{
-		OnboardingValidation: 6,
-		OnboardingReview:     7,
-		OnboardingComplete:   8,
-		OnboardingCancelled:  9,
-	},
+	terminalSteps: []OnboardingStep{OnboardingValidation, OnboardingReview, OnboardingComplete, OnboardingCancelled},
 }
 
 func (flow *ProfileOnboarding) clearDependentFields(step OnboardingStep) {
@@ -267,16 +262,14 @@ func (flow *ProfileOnboarding) clearDependentFields(step OnboardingStep) {
 }
 
 func (sequence onboardingFieldSequence) clearDependent(draft *ProfileDraft, check *ModelChoiceCheck, step OnboardingStep) {
-	start := 0
-	if step != OnboardingChooseSource {
-		field, found := sequence.fieldForStep(step)
-		if !found {
-			return
-		}
-		start = field + 1
+	rank := sequence.rank(step)
+	if rank < 0 {
+		return
 	}
-	for _, spec := range sequence.fields[start:] {
-		spec.write(draft, "")
+	for index, spec := range sequence.fields {
+		if index+1 > rank {
+			spec.write(draft, "")
+		}
 	}
 	if step == OnboardingChooseSource || sequence.resetsModelChoices(step) {
 		*check = ModelChoiceCheck{}
@@ -304,18 +297,21 @@ func onboardingStepRank(step OnboardingStep) int {
 }
 
 func (sequence onboardingFieldSequence) rank(step OnboardingStep) int {
-	if step == OnboardingChooseSource {
-		return 0
-	}
-	if rank, found := sequence.terminalRanks[step]; found {
-		return rank
-	}
-	for index, spec := range sequence.fields {
-		if spec.step == step {
-			return index + 1
+	for index, candidate := range sequence.orderedSteps() {
+		if candidate == step {
+			return index
 		}
 	}
 	return -1
+}
+
+func (sequence onboardingFieldSequence) orderedSteps() []OnboardingStep {
+	steps := make([]OnboardingStep, 0, len(sequence.fields)+len(sequence.terminalSteps)+1)
+	steps = append(steps, OnboardingChooseSource)
+	for _, spec := range sequence.fields {
+		steps = append(steps, spec.step)
+	}
+	return append(steps, sequence.terminalSteps...)
 }
 
 func onboardingFieldStep(field OnboardingField) (OnboardingStep, bool) {
@@ -344,18 +340,13 @@ func (sequence onboardingFieldSequence) set(draft *ProfileDraft, field Onboardin
 	}
 }
 
-func (sequence onboardingFieldSequence) fieldForStep(step OnboardingStep) (int, bool) {
-	for index, spec := range sequence.fields {
+func (sequence onboardingFieldSequence) resetsModelChoices(step OnboardingStep) bool {
+	for _, spec := range sequence.fields {
 		if spec.step == step {
-			return index, true
+			return spec.resetModelChoices
 		}
 	}
-	return 0, false
-}
-
-func (sequence onboardingFieldSequence) resetsModelChoices(step OnboardingStep) bool {
-	field, found := sequence.fieldForStep(step)
-	return found && sequence.fields[field].resetModelChoices
+	return false
 }
 
 func hasOnboardingText(value string) bool {

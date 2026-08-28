@@ -47,14 +47,14 @@ func TestProfileOnboardingCarriesModelChoiceWarningOnPlan(t *testing.T) {
 	requireOnboardingErrorFree(t, flow.Set(OnboardingFieldModel, "grok-custom"))
 	requireOnboardingErrorFree(t, flow.Set(OnboardingFieldEffort, "high"))
 	requireOnboardingErrorFree(t, flow.Set(OnboardingFieldDeadline, "1m"))
-	requireOnboardingErrorFree(t, flow.SetModelChoiceCheck(ModelChoiceCheck{Checked: true, Choices: []string{"grok-4.5"}}))
+	requireOnboardingErrorFree(t, flow.SetModelChoiceCheck(ModelChoiceCheck{Checked: true, Known: false}))
 	plan, err := flow.Validate("")
 	requireValidOnboardingPlan(t, flow, plan, err)
 	warnings := plan.Warnings()
 	if len(warnings) != 1 || !strings.Contains(warnings[0], "grok-custom") {
 		t.Fatalf("plan warnings = %#v", warnings)
 	}
-	if err := flow.SetModelChoiceCheck(ModelChoiceCheck{Checked: true, Choices: []string{"grok-custom"}}); err == nil {
+	if err := flow.SetModelChoiceCheck(ModelChoiceCheck{Checked: true, Known: true}); err == nil {
 		t.Fatal("onboarding accepted a choice check change after validation")
 	}
 }

@@ -125,9 +125,11 @@ func trustedExecutable(name string) (string, error) {
 		return validateExecutablePath(name)
 	}
 	for _, directory := range trustedExecutableRoots() {
-		candidate, err := validateExecutablePath(filepath.Join(directory, name))
-		if err == nil {
-			return candidate, nil
+		for _, path := range executableCandidates(directory, name) {
+			candidate, err := validateExecutablePath(path)
+			if err == nil {
+				return candidate, nil
+			}
 		}
 	}
 	return "", fmt.Errorf("discovery executable %q was not found in trusted executable roots", name)

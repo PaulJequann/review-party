@@ -5,6 +5,7 @@ package discovery
 import (
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 func trustedExecutableRoots() []string {
@@ -18,4 +19,12 @@ func trustedExecutableRoots() []string {
 		}
 	}
 	return roots
+}
+
+func executableCandidates(directory, name string) []string {
+	path := filepath.Join(directory, name)
+	if strings.Contains(filepath.Base(name), ".") {
+		return []string{path}
+	}
+	return []string{path + ".exe", path + ".com", path + ".bat", path + ".cmd", path}
 }

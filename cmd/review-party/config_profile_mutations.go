@@ -67,12 +67,7 @@ func modelChoiceCheck(input modelWarningInput) (configuration.ModelChoiceCheck, 
 	choices := service.ChoiceSnapshot(discovery.ChoiceRequest{
 		Reviewer: input.reviewer, Configured: sources.Configured, Packaged: sources.Packaged,
 	})
-	modelChoices := choices.Choices()
-	ids := make([]string, len(modelChoices))
-	for index, choice := range modelChoices {
-		ids[index] = choice.Model.ID
-	}
-	return configuration.ModelChoiceCheck{Checked: true, Choices: ids}, ""
+	return configuration.ModelChoiceCheck{Checked: true, Known: choices.Contains(input.model)}, ""
 }
 
 func executeConfigProfileCopy(value, targetValue string, options configurationMutationOptions, streams commandIO) int {
