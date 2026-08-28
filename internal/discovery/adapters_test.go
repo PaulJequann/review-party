@@ -263,23 +263,24 @@ func TestCommandDiagnosticDoesNotExposeHarnessSecrets(t *testing.T) {
 	if !strings.Contains(diagnostic, "provider quota exhausted") {
 		t.Fatalf("diagnostic %q omitted provider failure", diagnostic)
 	}
-	for _, secret := range []string{"secret-value", "acct-secret", "token-secret"} {
-		if strings.Contains(diagnostic, secret) {
-			t.Fatalf("diagnostic %q exposed %q", diagnostic, secret)
-		}
-	}
+	requireDiagnosticHides(t, diagnostic, "secret-value", "acct-secret", "token-secret")
 	if authenticationDiagnostic(run) == "" {
 		t.Fatal("secret-bearing authentication diagnostic was not classified")
 	}
 	jsonDiagnostic := commandDiagnostic(RunResult{Err: errors.New(`{"api_key":"secret","account_id":"acct-secret","account_email":"user@example.com"}`)})
-	for _, secret := range []string{"secret", "acct-secret", "user@example.com"} {
-		if strings.Contains(jsonDiagnostic, secret) {
-			t.Fatalf("JSON diagnostic %q exposed %q", jsonDiagnostic, secret)
-		}
-	}
+	requireDiagnosticHides(t, jsonDiagnostic, "secret", "acct-secret", "user@example.com")
 	envDiagnostic := commandDiagnostic(RunResult{Err: errors.New("OPENAI_API_KEY=secret-value")})
-	if strings.Contains(envDiagnostic, "secret-value") {
-		t.Fatalf("environment diagnostic %q exposed an API key", envDiagnostic)
+	requireDiagnosticHides(t, envDiagnostic, "secret-value")
+	awsDiagnostic := commandDiagnostic(RunResult{Err: errors.New("AWS_ACCESS_KEY_ID=aws-id AWS_SECRET_ACCESS_KEY=aws-secret")})
+	requireDiagnosticHides(t, awsDiagnostic, "aws-id", "aws-secret")
+}
+
+func requireDiagnosticHides(t *testing.T, diagnostic string, secrets ...string) {
+	t.Helper()
+	for _, secret := range secrets {
+		if strings.Contains(diagnostic, secret) {
+			t.Fatalf("diagnostic %q exposed %q", diagnostic, secret)
+		}
 	}
 }
 

@@ -18,7 +18,7 @@ import (
 const maxCaptureBytes = 4 * 1024 * 1024
 const processCleanupGrace = time.Second
 
-var diagnosticSecretPattern = regexp.MustCompile(`(?i)\b((?:[a-z0-9]+_)*(?:api[_ -]?key|access[_ -]?token|refresh[_ -]?token|authorization|bearer|token|secret|password|account(?:[_ -]?(?:id|email))?|user(?:[_ -]?(?:id|email))?|email))\b["']?\s*[:=]\s*(?:bearer\s+)?(?:"[^"]*"|'[^']*'|[^\s,;]+)`)
+var diagnosticSecretPattern = regexp.MustCompile(`(?i)\b((?:[a-z0-9]+_)*(?:api[_ -]?key|access[_ -]?(?:key|token)(?:[_ -]?(?:id|secret))?|refresh[_ -]?token|authorization|bearer|token|secret|password|account(?:[_ -]?(?:id|email))?|user(?:[_ -]?(?:id|email))?|email))\b["']?\s*[:=]\s*(?:bearer\s+)?(?:"[^"]*"|'[^']*'|[^\s,;]+)`)
 var diagnosticTokenPattern = regexp.MustCompile(`(?i)\b(?:sk-[A-Za-z0-9_-]{8,}|xai-[A-Za-z0-9_-]{8,}|gh[pousr]_[A-Za-z0-9_-]{8,})\b`)
 
 // Command is an argv-based external command. No shell is involved.
