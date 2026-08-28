@@ -170,45 +170,6 @@ func parseScopedReference(value string) (Scope, string) {
 	}
 }
 
-// ParseSelectionItem parses one raw selection reference while preserving the
-// scope owned by the selected review group. Definition existence is validated
-// later by Manager.Plan with the complete resulting document.
-func ParseSelectionItem(scope Scope, profile, party string) (SelectionItem, error) {
-	if profile == "" && party == "" {
-		return SelectionItem{}, errors.New("choose exactly one of --profile or --party")
-	}
-	value := profile
-	if value == "" {
-		value = party
-	}
-	qualified, name := parseScopedReference(value)
-	if qualified != "" && qualified != scope {
-		return SelectionItem{}, fmt.Errorf("%s selection must reference a %s definition", value, scope)
-	}
-	if profile != "" {
-		return SelectionItem{Profile: name}, nil
-	}
-	return SelectionItem{Party: name}, nil
-}
-
-// ParseProfileReferences parses raw Party member references with one shared
-// scope grammar. Party creation validates the resulting references in its
-// complete Plan.
-func ParseProfileReferences(defaultScope Scope, values []string) ([]ProfileReference, error) {
-	profiles := make([]ProfileReference, 0, len(values))
-	for _, value := range values {
-		scope, name := parseScopedReference(value)
-		if scope == "" {
-			scope = defaultScope
-		}
-		if scope != ScopeGlobal && scope != ScopeRepository {
-			return nil, fmt.Errorf("Profile reference %q has an unknown scope", value)
-		}
-		profiles = append(profiles, ProfileReference{Scope: scope, Profile: name})
-	}
-	return profiles, nil
-}
-
 // scopedKey is one exact scoped identity used for deduplication.
 type scopedKey struct {
 	scope   Scope

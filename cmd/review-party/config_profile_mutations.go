@@ -80,5 +80,13 @@ func parseProfileReferences(cmd *cobra.Command) ([]configuration.ProfileReferenc
 	if err != nil {
 		return nil, err
 	}
-	return configuration.ParseProfileReferences(defaultScope, values)
+	profiles := make([]configuration.ProfileReference, 0, len(values))
+	for _, value := range values {
+		scope, name := parseScopedReference(value)
+		if scope == "" {
+			scope = defaultScope
+		}
+		profiles = append(profiles, configuration.ProfileReference{Scope: scope, Profile: name})
+	}
+	return profiles, nil
 }

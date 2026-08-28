@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -131,7 +132,37 @@ func currentReviewSelection(manager *configuration.Manager, repository configura
 
 func selectionItemFromCommand(cmd *cobra.Command, scope configuration.Scope) (configuration.SelectionItem, error) {
 	profile, party := stringFlag(cmd, "profile"), stringFlag(cmd, "party")
-	return configuration.ParseSelectionItem(scope, profile, party)
+	return parseSelectionItem(scope, profile, party)
+}
+
+func parseScopedReference(value string) (configuration.Scope, string) {
+	globalPrefix, repositoryPrefix := string(configuration.ScopeGlobal)+":", string(configuration.ScopeRepository)+":"
+	switch {
+	case strings.HasPrefix(value, globalPrefix):
+		return configuration.ScopeGlobal, strings.TrimPrefix(value, globalPrefix)
+	case strings.HasPrefix(value, repositoryPrefix):
+		return configuration.ScopeRepository, strings.TrimPrefix(value, repositoryPrefix)
+	default:
+		return "", value
+	}
+}
+
+func parseSelectionItem(scope configuration.Scope, profile, party string) (configuration.SelectionItem, error) {
+	if profile == "" && party == "" {
+		return configuration.SelectionItem{}, errors.New("choose exactly one of --profile or --party")
+	}
+	value := profile
+	if value == "" {
+		value = party
+	}
+	qualified, name := parseScopedReference(value)
+	if qualified != "" && qualified != scope {
+		return configuration.SelectionItem{}, fmt.Errorf("%s selection must reference a %s definition", value, scope)
+	}
+	if profile != "" {
+		return configuration.SelectionItem{Profile: name}, nil
+	}
+	return configuration.SelectionItem{Party: name}, nil
 }
 
 func removalIndex(cmd *cobra.Command, selection configuration.ReviewSelection, scope configuration.Scope) (int, error) {
@@ -147,7 +178,7 @@ func removalIndex(cmd *cobra.Command, selection configuration.ReviewSelection, s
 }
 
 func selectionIndex(selection configuration.ReviewSelection, scope configuration.Scope, profile, party string) (int, error) {
-	item, err := configuration.ParseSelectionItem(scope, profile, party)
+	item, err := parseSelectionItem(scope, profile, party)
 	if err != nil {
 		return 0, err
 	}
