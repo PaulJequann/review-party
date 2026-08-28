@@ -88,10 +88,8 @@ func validateConfiguration(manager *configuration.Manager, requested string, rep
 }
 
 func validateEffectiveConfiguration(manager *configuration.Manager, repository configuration.Repository, scopes []configuration.Scope, inspection configuration.AuthoredInspection) error {
-	if containsScope(scopes, configuration.ScopeGlobal) && containsScope(scopes, configuration.ScopeRepository) {
-		if _, err := manager.ResolveAuthored(configuration.Request{Repository: repository}, inspection); err != nil {
-			return err
-		}
+	if _, err := manager.ResolveAuthored(configuration.Request{Repository: repository}, inspection); err != nil {
+		return err
 	}
 	if !containsScope(scopes, configuration.ScopeRepository) {
 		return nil

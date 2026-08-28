@@ -136,6 +136,21 @@ func TestConfigValidateReportsInvalidScopeWithoutWriting(t *testing.T) {
 	}
 }
 
+func TestConfigValidateGlobalScopeChecksEffectiveReviewerPolicy(t *testing.T) {
+	configRoot := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", configRoot)
+	path := filepath.Join(configRoot, "review-party", "config.json")
+	writeTestFile(t, testFile{path: path, contents: `{"schema_version":1,"reviewers":{"grok":{"model":"bad-model","allowed_models":["good-model"]}}}`})
+
+	result := runConfigCommand(t, []string{
+		"config", "validate", "--scope", "global", "--format", "json",
+	})
+	requireValidationFailure(t, result, path)
+	if !strings.Contains(result.stdout, "not in allowed_models") {
+		t.Fatalf("validation result = %q, missing effective policy diagnostic", result.stdout)
+	}
+}
+
 func TestConfigValidateReportsAbsentFilesInJSONWithoutWriting(t *testing.T) {
 	configRoot := t.TempDir()
 	repository := t.TempDir()
