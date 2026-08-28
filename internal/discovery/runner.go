@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -132,14 +131,6 @@ func trustedExecutable(name string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("discovery executable %q was not found in trusted executable roots", name)
-}
-
-func trustedExecutableRoots() []string {
-	roots := []string{"/usr/local/bin", "/usr/bin", "/bin"}
-	if runtime.GOOS == "darwin" {
-		roots = append(roots, "/opt/homebrew/bin")
-	}
-	return roots
 }
 
 func validateExecutablePath(path string) (string, error) {

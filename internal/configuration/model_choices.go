@@ -9,22 +9,29 @@ type ModelChoiceCheck struct {
 	Choices []string
 }
 
+// ProfileModelChoiceSources returns the configured and packaged model choices
+// for a Reviewer. Missing policy is represented by empty configured choices.
+type ProfileModelChoiceSources struct {
+	Configured []string
+	Packaged   []string
+}
+
 // ProfileModelChoices returns the configured and packaged model choices for a
-// Reviewer. The boolean reports whether the Reviewer has an effective policy.
-func (manager *Manager) ProfileModelChoices(repository Repository, reviewer string) ([]string, bool, error) {
+// Reviewer. Missing policy is not an error because packaged choices may exist.
+func (manager *Manager) ProfileModelChoices(repository Repository, reviewer string) (ProfileModelChoiceSources, error) {
 	effective, err := manager.Resolve(Request{Repository: repository})
 	if err != nil {
-		return nil, false, err
+		return ProfileModelChoiceSources{}, err
 	}
+	sources := ProfileModelChoiceSources{}
 	settings, found := effective.ReviewerPolicy(reviewer)
-	if !found {
-		return nil, false, nil
+	if found {
+		sources.Configured = append([]string{settings.Model.Value}, settings.AllowedModels.Value...)
 	}
-	choices := append([]string{settings.Model.Value}, settings.AllowedModels.Value...)
 	if packaged := manager.PackagedReviewerModel(reviewer); packaged != "" {
-		choices = append(choices, packaged)
+		sources.Packaged = []string{packaged}
 	}
-	return choices, true, nil
+	return sources, nil
 }
 
 func (check ModelChoiceCheck) warning(profile Profile) string {

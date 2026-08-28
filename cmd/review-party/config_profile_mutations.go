@@ -2,7 +2,6 @@ package main
 
 import (
 	"errors"
-	"fmt"
 
 	"github.com/spf13/cobra"
 
@@ -57,19 +56,16 @@ func modelChoiceCheck(input modelWarningInput) (configuration.ModelChoiceCheck, 
 	if input.model == "" || input.discovery == nil {
 		return configuration.ModelChoiceCheck{}, ""
 	}
-	configured, found, err := input.manager.ProfileModelChoices(configuration.Repository(input.repository), input.reviewer)
+	sources, err := input.manager.ProfileModelChoices(configuration.Repository(input.repository), input.reviewer)
 	if err != nil {
 		return configuration.ModelChoiceCheck{}, "model choice could not be checked against configured choices: " + err.Error()
-	}
-	if !found {
-		return configuration.ModelChoiceCheck{}, fmt.Sprintf("model %q was entered manually for unknown Reviewer %q; execution may be unavailable", input.model, input.reviewer)
 	}
 	service := input.discovery()
 	if service == nil {
 		return configuration.ModelChoiceCheck{}, ""
 	}
 	choices := service.ChoiceSnapshot(discovery.ChoiceRequest{
-		Reviewer: input.reviewer, Configured: configured,
+		Reviewer: input.reviewer, Configured: sources.Configured, Packaged: sources.Packaged,
 	})
 	modelChoices := choices.Choices()
 	ids := make([]string, len(modelChoices))
