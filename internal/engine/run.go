@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"reviewparty/internal/configuration"
 	"reviewparty/internal/model"
@@ -168,9 +169,14 @@ func (conductor *Conductor) compileSlotProfile(snapshot configuration.RuntimeSna
 	if !found {
 		return compiledProfile{}, fmt.Errorf("%s Profile %q was not found", slot.Scope, slot.Profile)
 	}
-	resolved, err := resolvedFromProfile(profile, snapshot.Effective())
+	deadline, err := time.ParseDuration(profile.AttemptDeadline)
 	if err != nil {
 		return compiledProfile{}, fmt.Errorf("%s Profile %q: %w", slot.Scope, slot.Profile, err)
 	}
-	return conductor.compileResolvedProfile(resolved)
+	return conductor.compileProfile(profileCompileRequest{
+		profile:   profile,
+		effective: snapshot.Effective(),
+		selection: model.ProfileSelection{Profile: profile.Name, Reviewer: profile.Reviewer, Model: profile.Model, Effort: profile.ReasoningEffort},
+		deadline:  deadline,
+	})
 }

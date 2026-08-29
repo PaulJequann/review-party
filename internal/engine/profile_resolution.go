@@ -23,21 +23,12 @@ func (conductor *Conductor) compileExperimentProfile(selection model.ProfileSele
 
 func (conductor *Conductor) compileResolvedExperimentProfile(selection model.ProfileSelection, resolved resolvedProfile) (compiledProfile, error) {
 	resolved.deadline = conductor.evalDefaultDeadline
-	if selection.Reviewer == "" {
-		selection.Reviewer = resolved.reviewer
-	}
-	if selection.Model == "" {
-		selection.Model = resolved.model
-	}
-	if selection.Effort == "" {
-		selection.Effort = resolved.effort
-	}
-	return conductor.compileProfile(selection, resolved)
+	return conductor.compileProfile(profileCompileRequest{profile: resolved.configurationProfile(), effective: resolved.effective, selection: selection, deadline: resolved.deadline})
 }
 
 func (conductor *Conductor) compileResolvedProfile(resolved resolvedProfile) (compiledProfile, error) {
 	selection := model.ProfileSelection{Profile: resolved.name, Reviewer: resolved.reviewer, Model: resolved.model, Effort: resolved.effort}
-	return conductor.compileProfile(selection, resolved)
+	return conductor.compileProfile(profileCompileRequest{profile: resolved.configurationProfile(), effective: resolved.effective, selection: selection, deadline: resolved.deadline})
 }
 
 type profileRequest struct {
@@ -72,6 +63,10 @@ func resolvedFromProfile(profile configuration.Profile, effective configuration.
 		return resolvedProfile{}, err
 	}
 	return resolvedProfile{name: profile.Name, instructions: profile.Instructions, source: profile.Source, digest: profile.SourceDigest, reviewer: profile.Reviewer, model: profile.Model, effort: profile.ReasoningEffort, deadline: deadline, effective: effective}, nil
+}
+
+func (profile resolvedProfile) configurationProfile() configuration.Profile {
+	return configuration.Profile{Name: profile.name, Reviewer: profile.reviewer, Model: profile.model, ReasoningEffort: profile.effort, Instructions: profile.instructions, Source: profile.source, SourceDigest: profile.digest}
 }
 
 type profileInventoryFilter func(configuration.Definition[configuration.Profile]) bool

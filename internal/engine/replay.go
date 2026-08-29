@@ -105,13 +105,12 @@ func validateRecordedTransport(registration reviewerRegistration, revision model
 }
 
 func replayCompiledProfile(revision model.ProfileRevision, snapshot model.ProfileSnapshot, registration reviewerRegistration) compiledProfile {
-	resolved := resolvedProfile{name: snapshot.Name, instructions: snapshot.Instructions, source: snapshot.Source, digest: snapshot.SourceDigest}
 	return compiledProfile{
 		revision: revision,
 		snapshot: snapshot,
 		reviewer: registration,
 		buildPrompt: func(subject model.ReviewSubject) string {
-			return renderReviewPrompt(resolved, subject)
+			return renderReviewPrompt(snapshot, subject)
 		},
 	}
 }
