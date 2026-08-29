@@ -105,16 +105,53 @@ func TestTemplateSeedsProfileWithoutBecomingExecutable(t *testing.T) {
 	}
 }
 
+func TestProfileCopyUsesFrozenInstructionsAfterTemplateRevisionChanges(t *testing.T) {
+	root := t.TempDir()
+	repository := t.TempDir()
+	manager := testManager(t, root)
+	manager.templates = []Template{{ID: "bugs", Revision: "v1", Instructions: "Find bugs in v1.\n"}}
+	profilePlan, err := manager.PlanProfileCreation(Repository(repository), ProfileDraft{
+		Target: ScopeRepository, Name: "bugs", Reviewer: "opencode", Model: "muse",
+		ReasoningEffort: "high", AttemptDeadline: "2m", TemplateID: "bugs",
+	})
+	requireValidPlan(t, "source Profile", profilePlan, err)
+	if err := manager.Publish(profilePlan); err != nil {
+		t.Fatal(err)
+	}
+	manager.templates = []Template{{ID: "bugs", Revision: "v2", Instructions: "Find bugs in v2.\n"}}
+
+	copyPlan, err := manager.PlanProfileCopy(Repository(repository), ScopeRepository, ScopeGlobal, "bugs")
+	requireValidPlan(t, "copy Profile", copyPlan, err)
+	if err := manager.Publish(copyPlan); err != nil {
+		t.Fatal(err)
+	}
+	copied := requireProfile(t, manager, ScopeGlobal, "bugs")
+	if copied.TemplateID != "bugs" {
+		t.Fatalf("copied Template ID = %q", copied.TemplateID)
+	}
+	if copied.TemplateRevision != "v1" {
+		t.Fatalf("copied Template revision = %q", copied.TemplateRevision)
+	}
+	if copied.Instructions != "Find bugs in v1.\n" {
+		t.Fatalf("copied instructions = %q", copied.Instructions)
+	}
+}
+
+func requireValidPlan(t *testing.T, label string, plan Plan, err error) Plan {
+	t.Helper()
+	if err != nil {
+		t.Fatalf("%s plan error = %v", label, err)
+	}
+	if !plan.Valid() {
+		t.Fatalf("%s plan invalid: %s", label, plan.Reason())
+	}
+	return plan
+}
+
 func requireProfilePlan(t *testing.T, manager *Manager, draft ProfileDraft) Plan {
 	t.Helper()
 	plan, err := manager.PlanProfileCreation("", draft)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !plan.Valid() {
-		t.Fatalf("invalid plan: %s", plan.Reason())
-	}
-	return plan
+	return requireValidPlan(t, "Profile", plan, err)
 }
 
 func requireProfile(t *testing.T, manager *Manager, scope Scope, name string) Profile {

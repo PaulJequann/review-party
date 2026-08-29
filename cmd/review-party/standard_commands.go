@@ -147,7 +147,13 @@ func newLibraryListCommand(spec libraryListSpec, streams commandIO) *cobra.Comma
 
 func newConfigCommand(streams commandIO) *cobra.Command {
 	dependencies := defaultConfigurationDependencies()
-	cmd := &cobra.Command{Use: "config", Short: "Inspect or manage Review Party configuration", Args: cobra.NoArgs, RunE: showCommandHelp}
+	cmd := &cobra.Command{Use: "config", Short: "Open the Configuration Hub or use explicit configuration commands", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		options := configurationHubOptions{repository: stringFlag(cmd, "repo"), configuration: stringFlag(cmd, "config"), accessible: boolFlag(cmd, "accessible")}
+		return commandResult(executeConfigurationHub(cmd.Context(), options, streams))
+	}}
+	addRepositoryFlag(cmd, "Repository whose configuration should be managed")
+	addConfigurationFlag(cmd)
+	cmd.Flags().Bool("accessible", false, "Use the non-redrawing accessible Hub")
 	path := &cobra.Command{Use: "path", Short: "Print the Global Configuration path", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		return printConfigurationPath(stringFlag(cmd, "config"), streams.output)
 	}}

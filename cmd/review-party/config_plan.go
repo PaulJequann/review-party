@@ -119,28 +119,11 @@ func scopesAsStrings(scopes []configuration.Scope) []string {
 }
 
 func printHumanPlan(output io.Writer, plan configuration.Plan) error {
-	return writeCommandOutput(output, func(output *commandOutput) {
-		output.write("configuration plan:\n")
-		for _, change := range plan.Changes() {
-			before := "<absent>"
-			if change.HadBefore {
-				before = change.Before
-			}
-			after := "<absent>"
-			if change.HadAfter {
-				after = change.After
-			}
-			output.write("  %s %s %q: %s -> %s\n", change.Scope, change.Field, change.Path, before, after)
-		}
-	})
+	return configuration.RenderPlanHuman(output, plan)
 }
 
 func printHumanWarnings(output io.Writer, warnings []string) error {
-	return writeCommandOutput(output, func(writer *commandOutput) {
-		for _, warning := range warnings {
-			writer.write("warning: %s\n", warning)
-		}
-	})
+	return configuration.RenderPlanWarningsHuman(output, warnings)
 }
 
 func confirmConfigurationPlan(input io.Reader, output io.Writer) (bool, error) {

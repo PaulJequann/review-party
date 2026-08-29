@@ -35,12 +35,16 @@ func (manager *Manager) PlanProfileCreation(repository Repository, draft Profile
 	if err != nil {
 		return Plan{}, err
 	}
+	return manager.planProfile(repository, draft.Target, profile, instructions)
+}
+
+func (manager *Manager) planProfile(repository Repository, target Scope, profile Profile, instructions string) (Plan, error) {
 	plan := Plan{state: &planState{owner: manager}}
 	if err := manager.validateProfile(profile, instructions); err != nil {
 		plan.state.reason = err.Error()
 		return plan, nil
 	}
-	anchor, directory, conflict, err := manager.profileCreationTarget(draft.Target, repository, draft.Name)
+	anchor, directory, conflict, err := manager.profileCreationTarget(target, repository, profile.Name)
 	if err != nil {
 		return Plan{}, err
 	}
@@ -52,16 +56,16 @@ func (manager *Manager) PlanProfileCreation(repository Repository, draft Profile
 	if err != nil {
 		return Plan{}, err
 	}
-	publication := pendingProfilePublication{scope: draft.Target, anchor: anchor, directory: directory, metadata: metadata, instructions: []byte(instructions)}
+	publication := pendingProfilePublication{scope: target, anchor: anchor, directory: directory, metadata: metadata, instructions: []byte(instructions)}
 	if err := publication.validateSize(); err != nil {
 		plan.state.reason = err.Error()
 		return plan, nil
 	}
 	change := Change{
-		Field: "profiles." + draft.Name, Scope: draft.Target, Path: directory,
+		Field: "profiles." + profile.Name, Scope: target, Path: directory,
 		After: profilePlanSummary(profile), HadAfter: true,
 	}
-	plan = newProfilePlan(manager, draft.Target, change, publication)
+	plan = newProfilePlan(manager, target, change, publication)
 	return plan, nil
 }
 
@@ -105,7 +109,7 @@ func (manager *Manager) profileFromDraft(draft ProfileDraft) (Profile, string, e
 	if draft.TemplateID == "" {
 		return profile, draft.Instructions, nil
 	}
-	template, found := manager.template(draft.TemplateID)
+	template, found := manager.Template(draft.TemplateID)
 	if !found {
 		return Profile{}, "", fmt.Errorf("unknown Review Profile Template %q", draft.TemplateID)
 	}
@@ -196,15 +200,6 @@ func (manager *Manager) decodeProfile(metadata, instructions []byte, scope Scope
 	profile.Instructions, profile.Scope = string(instructions), scope
 	profile.Source, profile.SourceDigest = authoredProfileSource(scope, name), profileSourceRevision(profile, instructions)
 	return profile, true, nil
-}
-
-func (manager *Manager) template(id string) (Template, bool) {
-	for _, template := range manager.templates {
-		if template.ID == id {
-			return template, true
-		}
-	}
-	return Template{}, false
 }
 
 func renderProfile(profile Profile) ([]byte, error) {

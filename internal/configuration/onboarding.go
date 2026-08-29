@@ -176,6 +176,22 @@ func (flow *ProfileOnboarding) Validate(repository Repository) (Plan, error) {
 // Plan returns the last validation plan for the Hub's review screen.
 func (flow *ProfileOnboarding) Plan() Plan { return flow.plan }
 
+// Revise returns a retained, validated draft to its first editable field.
+// It clears the reviewed Plan but keeps the selected source and executable
+// values so a caller can correct and validate the draft again.
+func (flow *ProfileOnboarding) Revise() error {
+	if err := flow.ensureEditable(); err != nil {
+		return err
+	}
+	if flow.step != OnboardingValidation && flow.step != OnboardingReview {
+		return errors.New("onboarding can only be revised after validation")
+	}
+	flow.modelChoiceCheck = ModelChoiceCheck{}
+	flow.plan = Plan{}
+	flow.step = OnboardingName
+	return nil
+}
+
 // Confirm publishes the last valid plan. The caller owns the human or
 // machine-facing confirmation immediately before calling this method.
 func (flow *ProfileOnboarding) Confirm() error {
