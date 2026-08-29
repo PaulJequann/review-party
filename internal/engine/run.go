@@ -2,16 +2,11 @@ package engine
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"time"
 
 	"reviewparty/internal/configuration"
 	"reviewparty/internal/model"
-	"reviewparty/internal/store"
 	"reviewparty/internal/subject"
 )
 
@@ -19,11 +14,6 @@ import (
 // compiles it into an executable, inspectable Review Bundle. Every reference
 // and Profile Revision is validated here, before Subject resolution or any
 // Reviewer launch; execution mechanics live in party.go.
-
-type preparedBundle struct {
-	bundle  model.ReviewBundle
-	members []preparedReview
-}
 
 // Run executes one ordinary review request: the repository's saved selection,
 // or one explicit Profile or Party that replaces it for this run.
@@ -79,29 +69,6 @@ type compiledSlot struct {
 	slot    configuration.ExpandedProfile
 	profile compiledProfile
 	timings model.ReviewTimings
-}
-
-func (conductor *Conductor) prepareRun(selection model.RunSelection) (preparedBundle, store.BundleStore, error) {
-	planned, err := conductor.planSelection(selection)
-	if err != nil {
-		return preparedBundle{}, nil, err
-	}
-	ledger, ok := conductor.store.(store.BundleStore)
-	if !ok {
-		return preparedBundle{}, nil, errors.New("run execution requires the SQLite ledger")
-	}
-	bundle, err := newPendingBundle(conductor.now().UTC(), planned)
-	if err != nil {
-		return preparedBundle{}, nil, err
-	}
-	if err := ledger.CreateReviewBundle(bundle); err != nil {
-		return preparedBundle{}, nil, err
-	}
-	members := make([]preparedReview, 0, len(planned.members))
-	for _, slot := range planned.members {
-		members = append(members, preparedReview{subject: planned.subject, profile: slot.profile, timings: slot.timings, deadline: slot.profile.deadline})
-	}
-	return preparedBundle{bundle: bundle, members: members}, ledger, nil
 }
 
 // planSelection preflights the complete selection before anything persists or
@@ -206,112 +173,4 @@ func (conductor *Conductor) compileSlotProfile(snapshot configuration.RuntimeSna
 		return compiledProfile{}, fmt.Errorf("%s Profile %q: %w", slot.Scope, slot.Profile, err)
 	}
 	return conductor.compileResolvedProfile(resolved)
-}
-
-// newPendingBundle records the authored selection, the expanded execution list
-// with exact Profile Revisions, deduplication facts, warnings, limit
-// provenance, and a revision digest binding all of them.
-func newPendingBundle(created time.Time, plan plannedSelection) (model.ReviewBundle, error) {
-	id, err := newDomainID("rb", created)
-	if err != nil {
-		return model.ReviewBundle{}, err
-	}
-	bundle := model.ReviewBundle{
-		ID:               model.ReviewBundleID(id),
-		Description:      bundleDescription(plan),
-		Revision:         selectionRevisionIdentity(plan.resolved, plan.members),
-		Repository:       plan.repository,
-		SubjectKind:      plan.subject.Kind,
-		SubjectIdentity:  plan.subject.Identity,
-		Lifecycle:        model.LifecyclePending,
-		Selection:        bundleSelection(plan.resolved),
-		Warnings:         bundleWarnings(plan.resolved.Warnings),
-		Deduplicated:     bundleSkippedDuplicates(plan.resolved.Deduplicated),
-		Members:          make([]model.BundleMember, 0, len(plan.members)),
-		ConcurrencyLimit: plan.resolved.ConcurrencyLimit,
-		CreatedAt:        created,
-		UpdatedAt:        created,
-	}
-	for _, member := range plan.members {
-		bundle.Members = append(bundle.Members, model.BundleMember{
-			Scope:           string(member.slot.Scope),
-			Profile:         member.profile.revision.Name,
-			ProfileRevision: member.profile.revision.Revision,
-			Origin:          member.slot.Origin,
-			Lifecycle:       model.LifecyclePending,
-		})
-	}
-	return bundle, nil
-}
-
-func bundleDescription(plan plannedSelection) string {
-	if plan.resolved.Kind == configuration.SelectionExplicitParty {
-		return fmt.Sprintf("explicit Party %q", plan.resolved.Authored[0].Name)
-	}
-	return ""
-}
-
-func bundleSelection(resolved configuration.ResolvedReviews) *model.BundleSelection {
-	selection := &model.BundleSelection{
-		Kind:             string(resolved.Kind),
-		Source:           resolved.Source,
-		ConcurrencyLimit: resolved.ConcurrencyLimit,
-		LimitSource:      string(resolved.LimitSource),
-	}
-	for _, authored := range resolved.Authored {
-		selection.Authored = append(selection.Authored, model.BundleAuthoredItem{
-			Kind: string(authored.Kind), Name: authored.Name, Scope: string(authored.Scope),
-		})
-	}
-	return selection
-}
-
-func bundleWarnings(warnings []configuration.ResolverWarning) []model.BundleWarning {
-	bundled := make([]model.BundleWarning, 0, len(warnings))
-	for _, warning := range warnings {
-		bundled = append(bundled, model.BundleWarning{Category: string(warning.Category), Name: warning.Name, Message: warning.Message})
-	}
-	return bundled
-}
-
-func bundleSkippedDuplicates(skipped []configuration.SkippedProfile) []model.SkippedDuplicate {
-	duplicates := make([]model.SkippedDuplicate, 0, len(skipped))
-	for _, occurrence := range skipped {
-		duplicates = append(duplicates, model.SkippedDuplicate{
-			Scope: string(occurrence.Scope), Profile: occurrence.Profile, Origin: occurrence.Origin, KeptOrigin: occurrence.KeptOrigin,
-		})
-	}
-	return duplicates
-}
-
-// selectionRevisionIdentity freezes the effective composition: kind,
-// Concurrency Limit, and each executed slot's scoped identity plus its exact
-// compiled Profile Revision. Configuration changes therefore produce a
-// distinct revision instead of silently reusing recorded provenance.
-func selectionRevisionIdentity(resolved configuration.ResolvedReviews, members []compiledSlot) string {
-	type revisionMember struct {
-		Scope           string `json:"scope"`
-		Profile         string `json:"profile"`
-		ProfileRevision string `json:"profile_revision"`
-	}
-	composition := struct {
-		SchemaVersion    int              `json:"schema_version"`
-		Kind             string           `json:"kind"`
-		ConcurrencyLimit int              `json:"concurrency_limit"`
-		LimitSource      string           `json:"limit_source"`
-		Members          []revisionMember `json:"members"`
-	}{SchemaVersion: 1, Kind: string(resolved.Kind), ConcurrencyLimit: resolved.ConcurrencyLimit, LimitSource: string(resolved.LimitSource)}
-	for _, member := range members {
-		composition.Members = append(composition.Members, revisionMember{
-			Scope:           string(member.slot.Scope),
-			Profile:         member.slot.Profile,
-			ProfileRevision: member.profile.revision.Revision,
-		})
-	}
-	payload, err := json.Marshal(composition)
-	if err != nil {
-		panic(fmt.Sprintf("encode selection Revision identity: %v", err))
-	}
-	digest := sha256.Sum256(payload)
-	return hex.EncodeToString(digest[:])
 }

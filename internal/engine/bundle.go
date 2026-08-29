@@ -2,16 +2,130 @@ package engine
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"time"
 
+	"reviewparty/internal/configuration"
 	"reviewparty/internal/model"
 	"reviewparty/internal/store"
 )
 
-// This file owns Review Bundle execution mechanics for every resolved
-// selection: sequential and concurrent member launches, absorption of member
-// outcomes, lifecycle finalization, and bundle inspection. Resolution-driven
-// planning lives in run.go.
+// This file owns Review Bundle construction, execution, persistence, and
+// inspection. Selection resolution and Profile compilation remain in run.go.
+
+type preparedBundle struct {
+	bundle  model.ReviewBundle
+	members []preparedReview
+}
+
+func (conductor *Conductor) prepareRun(selection model.RunSelection) (preparedBundle, store.BundleStore, error) {
+	planned, err := conductor.planSelection(selection)
+	if err != nil {
+		return preparedBundle{}, nil, err
+	}
+	ledger, ok := conductor.store.(store.BundleStore)
+	if !ok {
+		return preparedBundle{}, nil, errors.New("run execution requires the SQLite ledger")
+	}
+	bundle, err := newPendingBundle(conductor.now().UTC(), planned)
+	if err != nil {
+		return preparedBundle{}, nil, err
+	}
+	if err := ledger.CreateReviewBundle(bundle); err != nil {
+		return preparedBundle{}, nil, err
+	}
+	members := make([]preparedReview, 0, len(planned.members))
+	for _, slot := range planned.members {
+		members = append(members, preparedReview{subject: planned.subject, profile: slot.profile, timings: slot.timings, deadline: slot.profile.deadline})
+	}
+	return preparedBundle{bundle: bundle, members: members}, ledger, nil
+}
+
+// newPendingBundle records the authored selection, expanded execution list,
+// Profile Revisions, provenance, warnings, and concurrency-limit facts before
+// the first member launches.
+func newPendingBundle(created time.Time, plan plannedSelection) (model.ReviewBundle, error) {
+	id, err := newDomainID("rb", created)
+	if err != nil {
+		return model.ReviewBundle{}, err
+	}
+	bundle := model.ReviewBundle{
+		ID: model.ReviewBundleID(id), Description: bundleDescription(plan),
+		Revision: selectionRevisionIdentity(plan.resolved, plan.members), Repository: plan.repository,
+		SubjectKind: plan.subject.Kind, SubjectIdentity: plan.subject.Identity,
+		Lifecycle: model.LifecyclePending, Selection: bundleSelection(plan.resolved),
+		Warnings: bundleWarnings(plan.resolved.Warnings), Deduplicated: bundleSkippedDuplicates(plan.resolved.Deduplicated),
+		Members: make([]model.BundleMember, 0, len(plan.members)), ConcurrencyLimit: plan.resolved.ConcurrencyLimit,
+		CreatedAt: created, UpdatedAt: created,
+	}
+	for _, member := range plan.members {
+		bundle.Members = append(bundle.Members, model.BundleMember{
+			Scope: string(member.slot.Scope), Profile: member.profile.revision.Name,
+			ProfileRevision: member.profile.revision.Revision, Origin: member.slot.Origin,
+			Lifecycle: model.LifecyclePending,
+		})
+	}
+	return bundle, nil
+}
+
+func bundleDescription(plan plannedSelection) string {
+	if plan.resolved.Kind == configuration.SelectionExplicitParty {
+		return fmt.Sprintf("explicit Party %q", plan.resolved.Authored[0].Name)
+	}
+	return ""
+}
+
+func bundleSelection(resolved configuration.ResolvedReviews) *model.BundleSelection {
+	selection := &model.BundleSelection{Kind: string(resolved.Kind), Source: resolved.Source, ConcurrencyLimit: resolved.ConcurrencyLimit, LimitSource: string(resolved.LimitSource)}
+	for _, authored := range resolved.Authored {
+		selection.Authored = append(selection.Authored, model.BundleAuthoredItem{Kind: string(authored.Kind), Name: authored.Name, Scope: string(authored.Scope)})
+	}
+	return selection
+}
+
+func bundleWarnings(warnings []configuration.ResolverWarning) []model.BundleWarning {
+	bundled := make([]model.BundleWarning, 0, len(warnings))
+	for _, warning := range warnings {
+		bundled = append(bundled, model.BundleWarning{Category: string(warning.Category), Name: warning.Name, Message: warning.Message})
+	}
+	return bundled
+}
+
+func bundleSkippedDuplicates(skipped []configuration.SkippedProfile) []model.SkippedDuplicate {
+	duplicates := make([]model.SkippedDuplicate, 0, len(skipped))
+	for _, occurrence := range skipped {
+		duplicates = append(duplicates, model.SkippedDuplicate{Scope: string(occurrence.Scope), Profile: occurrence.Profile, Origin: occurrence.Origin, KeptOrigin: occurrence.KeptOrigin})
+	}
+	return duplicates
+}
+
+func selectionRevisionIdentity(resolved configuration.ResolvedReviews, members []compiledSlot) string {
+	type revisionMember struct {
+		Scope           string `json:"scope"`
+		Profile         string `json:"profile"`
+		ProfileRevision string `json:"profile_revision"`
+	}
+	composition := struct {
+		SchemaVersion    int              `json:"schema_version"`
+		Kind             string           `json:"kind"`
+		ConcurrencyLimit int              `json:"concurrency_limit"`
+		LimitSource      string           `json:"limit_source"`
+		Members          []revisionMember `json:"members"`
+	}{SchemaVersion: 1, Kind: string(resolved.Kind), ConcurrencyLimit: resolved.ConcurrencyLimit, LimitSource: string(resolved.LimitSource)}
+	for _, member := range members {
+		composition.Members = append(composition.Members, revisionMember{Scope: string(member.slot.Scope), Profile: member.slot.Profile, ProfileRevision: member.profile.revision.Revision})
+	}
+	payload, err := json.Marshal(composition)
+	if err != nil {
+		panic(fmt.Sprintf("encode selection Revision identity: %v", err))
+	}
+	digest := sha256.Sum256(payload)
+	return hex.EncodeToString(digest[:])
+}
 
 type concurrentMemberResult struct {
 	index  int
@@ -38,9 +152,8 @@ func (conductor *Conductor) executeBundleSequential(ctx context.Context, ledger 
 			return conductor.stopBundle(ledger, &bundle, evalFailureCategory(err), err)
 		}
 		record, err := conductor.runPreparedReview(ctx, prepared.members[index], nil, conductor.now().UTC())
-		result := concurrentMemberResult{index: index, record: record, err: err}
-		next, hardErr := conductor.absorbBundleMember(ledger, bundle, result)
-		bundle = next
+		var hardErr error
+		bundle, hardErr = conductor.absorbBundleMember(ledger, bundle, concurrentMemberResult{index: index, record: record, err: err})
 		if hardErr != nil {
 			return conductor.stopBundle(ledger, &bundle, evalFailureCategory(hardErr), hardErr)
 		}
@@ -71,8 +184,8 @@ func (conductor *Conductor) executeBundleConcurrent(ctx context.Context, ledger 
 	for consumed < launched {
 		result := <-results
 		consumed++
-		next, hardErr := conductor.absorbBundleMember(ledger, bundle, result)
-		bundle = next
+		var hardErr error
+		bundle, hardErr = conductor.absorbBundleMember(ledger, bundle, result)
 		if hardErr != nil {
 			cancel()
 			var absorbErr error
@@ -99,24 +212,17 @@ func (conductor *Conductor) launchBundleMembers(ctx context.Context, prepared pr
 	return started, nil
 }
 
-// absorbPendingBundleResults drains results of members that were already
-// launched when a hard stop happened, so every persisted child Review stays
-// linked in the bundle instead of being orphaned as a pending member.
 func (conductor *Conductor) absorbPendingBundleResults(ledger store.BundleStore, bundle model.ReviewBundle, results chan concurrentMemberResult, pending int) (model.ReviewBundle, error) {
 	var absorbErr error
 	for drained := 0; drained < pending; drained++ {
 		result := <-results
-		next, err := conductor.absorbBundleMember(ledger, bundle, result)
-		bundle = next
+		var err error
+		bundle, err = conductor.absorbBundleMember(ledger, bundle, result)
 		absorbErr = errors.Join(absorbErr, err)
 	}
 	return bundle, absorbErr
 }
 
-// absorbBundleMember records one terminal member outcome on the bundle. A child
-// Incomplete lifecycle is an honest member outcome; only persistence or
-// cancellation-class errors are hard failures that stop remaining work. The
-// member's scoped identity, origin, and Profile Revision survive the update.
 func (conductor *Conductor) absorbBundleMember(ledger store.BundleStore, bundle model.ReviewBundle, result concurrentMemberResult) (model.ReviewBundle, error) {
 	member := bundle.Members[result.index]
 	member.ReviewID = result.record.ID
