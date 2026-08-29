@@ -226,13 +226,50 @@ type codexModelPage struct {
 	NextCursor *string      `json:"nextCursor"`
 }
 
+type codexReasoningEffortOption struct {
+	ReasoningEffort string `json:"reasoningEffort"`
+	Effort          string `json:"effort"`
+}
+
+type codexReasoningEfforts []string
+
+func (efforts *codexReasoningEfforts) UnmarshalJSON(payload []byte) error {
+	names, err := decodeCodexReasoningEfforts(payload)
+	if err != nil {
+		return err
+	}
+	*efforts = names
+	return nil
+}
+
+func decodeCodexReasoningEfforts(payload []byte) ([]string, error) {
+	if string(payload) == "null" {
+		return nil, nil
+	}
+	var names []string
+	if json.Unmarshal(payload, &names) == nil {
+		return names, nil
+	}
+	var options []codexReasoningEffortOption
+	if err := json.Unmarshal(payload, &options); err != nil {
+		return nil, err
+	}
+	names = make([]string, 0, len(options))
+	for _, option := range options {
+		if name := strings.TrimSpace(firstNonempty(option.ReasoningEffort, option.Effort)); name != "" {
+			names = append(names, name)
+		}
+	}
+	return names, nil
+}
+
 type codexModel struct {
-	ID               string   `json:"id"`
-	DisplayName      string   `json:"displayName"`
-	Name             string   `json:"name"`
-	Default          bool     `json:"isDefault"`
-	LegacyDefault    bool     `json:"default"`
-	ReasoningEfforts []string `json:"supportedReasoningEfforts"`
+	ID               string                `json:"id"`
+	DisplayName      string                `json:"displayName"`
+	Name             string                `json:"name"`
+	Default          bool                  `json:"isDefault"`
+	LegacyDefault    bool                  `json:"default"`
+	ReasoningEfforts codexReasoningEfforts `json:"supportedReasoningEfforts"`
 }
 
 func (model codexModel) toModel() Model {

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"reflect"
@@ -24,6 +25,14 @@ func (runner *scriptedRunner) Run(_ context.Context, command Command) RunResult 
 
 func TestGrokParserHandlesHumanOutputAndDefault(t *testing.T) {
 	got := parseGrokModels([]byte("Found 2 models:\nAvailable models:\n  grok-4.6 (default)\n  grok-4.5\n"))
+	want := []Model{{ID: "grok-4.6", Default: true}, {ID: "grok-4.5"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("models = %#v, want %#v", got, want)
+	}
+}
+
+func TestGrokParserHandlesBulletListOutput(t *testing.T) {
+	got := parseGrokModels([]byte("You are logged in with grok.com.\n\nDefault model: grok-4.6\n\nAvailable models:\n  * grok-4.6 (default)\n  - grok-4.5\n"))
 	want := []Model{{ID: "grok-4.6", Default: true}, {ID: "grok-4.5"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("models = %#v, want %#v", got, want)
@@ -158,6 +167,24 @@ func TestOpenCodeGlobalAuthenticationFailureIsExplicit(t *testing.T) {
 func TestOpenCodePositiveAuthenticationTextIsConfigured(t *testing.T) {
 	result := discoverOpenCodeWithProviders(t, "openai: logged in\nopenai: API key configured\n")
 	requireDiscoveryStatus(t, result, StatusSupported, AuthConfigured)
+}
+
+func TestCodexModelListDecodesObjectReasoningEfforts(t *testing.T) {
+	payload := []byte(`{"data":[{"id":"gpt-5.4","displayName":"GPT-5.4","isDefault":true,"supportedReasoningEfforts":[{"reasoningEffort":"low","description":"Lower latency"},{"effort":"high","description":"Deep reasoning"}]}]}`)
+	got := mustDecodeCodexModels(t, payload)
+	want := []Model{{ID: "gpt-5.4", DisplayName: "GPT-5.4", Default: true, ReasoningEfforts: []string{"low", "high"}}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("models = %#v, want %#v", got, want)
+	}
+}
+
+func TestCodexModelListDecodesStringReasoningEfforts(t *testing.T) {
+	payload := []byte(`{"data":[{"id":"gpt-5.6-luna","supportedReasoningEfforts":["low","high"]}]}`)
+	got := mustDecodeCodexModels(t, payload)
+	want := []Model{{ID: "gpt-5.6-luna", ReasoningEfforts: []string{"low", "high"}}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("models = %#v, want %#v", got, want)
+	}
 }
 
 func TestCodexAuthenticationPayloadDoesNotExposeAccount(t *testing.T) {
@@ -309,6 +336,15 @@ func TestCodexEnvironmentIncludesConfiguredHome(t *testing.T) {
 		}
 	}
 	t.Fatal("CODEX_HOME was omitted from the Codex environment allowlist")
+}
+
+func mustDecodeCodexModels(t *testing.T, payload []byte) []Model {
+	t.Helper()
+	var page codexModelPage
+	if err := json.Unmarshal(payload, &page); err != nil {
+		t.Fatal(err)
+	}
+	return page.ModelsAsModels()
 }
 
 func requireDiscoveryStatus(t *testing.T, result Result, wantStatus Status, wantAuth AuthStatus) {

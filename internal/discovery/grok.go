@@ -43,13 +43,29 @@ func parseGrokModels(output []byte) []Model {
 			continue
 		}
 		isDefault := strings.Contains(lower, "default")
-		fields := strings.Fields(line)
+		fields := skipGrokListMarker(strings.Fields(line))
 		if len(fields) == 0 || !validGrokModelLine(fields) {
 			continue
 		}
 		models = append(models, Model{ID: modelID([]byte(fields[0])), Default: isDefault})
 	}
 	return deduplicateModels(models)
+}
+
+func skipGrokListMarker(fields []string) []string {
+	if len(fields) == 0 || !grokListMarker(fields[0]) {
+		return fields
+	}
+	return fields[1:]
+}
+
+func grokListMarker(field string) bool {
+	switch field {
+	case "*", "-":
+		return true
+	default:
+		return false
+	}
 }
 
 func validGrokModelLine(fields []string) bool {
