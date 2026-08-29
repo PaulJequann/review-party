@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"strconv"
-	"strings"
 
 	"charm.land/huh/v2"
 
@@ -56,35 +55,7 @@ func renderReviewSelectionPreview(output io.Writer, manager *configuration.Manag
 	if err != nil {
 		return fmt.Errorf("resolve staged review selection: %w", err)
 	}
-	var preview strings.Builder
-	preview.WriteString("resolved review selection:\n")
-	for index, profile := range resolved.Expanded {
-		preview.WriteString("  ")
-		preview.WriteString(strconv.Itoa(index + 1))
-		preview.WriteString(". [")
-		preview.WriteString(string(profile.Scope))
-		preview.WriteString("] ")
-		preview.WriteString(profile.Profile)
-		preview.WriteString(" (")
-		preview.WriteString(profile.Origin)
-		preview.WriteString(")\n")
-	}
-	for _, skipped := range resolved.Deduplicated {
-		preview.WriteString("  deduplicated [")
-		preview.WriteString(string(skipped.Scope))
-		preview.WriteString("] ")
-		preview.WriteString(skipped.Profile)
-		preview.WriteString(" from ")
-		preview.WriteString(skipped.Origin)
-		preview.WriteString(" (kept by ")
-		preview.WriteString(skipped.KeptOrigin)
-		preview.WriteString(")\n")
-	}
-	for _, warning := range resolved.Warnings {
-		preview.WriteString("  warning: " + warning.Message + "\n")
-	}
-	_, err = io.WriteString(output, preview.String())
-	return err
+	return configuration.RenderResolvedReviewsHuman(output, resolved)
 }
 
 func (e *editor) reviewIntent(operation string, selection configuration.ReviewSelection) (configuration.SetReviewSelection, error) {

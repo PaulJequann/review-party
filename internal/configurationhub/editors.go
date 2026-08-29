@@ -19,7 +19,7 @@ type editor struct {
 }
 
 type draftSet struct {
-	profile  *configuration.ProfileOnboarding
+	profile  configuration.ProfileDraft
 	party    partyFormDraft
 	copyName string
 	reviews  reviewFormDraft
@@ -27,13 +27,12 @@ type draftSet struct {
 
 func (drafts *draftSet) clear() { *drafts = draftSet{} }
 func (drafts draftSet) empty() bool {
-	return drafts.profile == nil && drafts.party == (partyFormDraft{}) && drafts.copyName == "" && drafts.reviews == (reviewFormDraft{})
+	return drafts.profile == (configuration.ProfileDraft{}) && drafts.party == (partyFormDraft{}) && drafts.copyName == "" && drafts.reviews == (reviewFormDraft{})
 }
 func (drafts draftSet) descriptions() []string {
 	var result []string
-	if drafts.profile != nil {
-		draft := drafts.profile.Draft()
-		result = append(result, fmt.Sprintf("Profile %q (%s)", draft.Name, draft.Target))
+	if drafts.profile != (configuration.ProfileDraft{}) {
+		result = append(result, fmt.Sprintf("Profile %q (%s)", drafts.profile.Name, drafts.profile.Target))
 	}
 	if drafts.party != (partyFormDraft{}) {
 		result = append(result, fmt.Sprintf("Party %q (%s)", drafts.party.name, drafts.party.scope))

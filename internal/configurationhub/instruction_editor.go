@@ -65,7 +65,6 @@ func runEditorCommand(ctx context.Context, command *exec.Cmd) error {
 func stopEditorProcess(command *exec.Cmd, finished <-chan error) error {
 	terminateEditorProcessGroup(command)
 	if editorProcessStopped(finished, editorProcessCleanupGrace) {
-		killEditorProcessGroup(command)
 		return nil
 	}
 	killEditorProcessGroup(command)

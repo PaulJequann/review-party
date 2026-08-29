@@ -2,6 +2,7 @@ package configurationhub
 
 import (
 	"fmt"
+	"strings"
 
 	"charm.land/huh/v2"
 
@@ -12,90 +13,150 @@ func (e *editor) createProfile() error {
 	if err := e.ensureProfileFlow(); err != nil {
 		return err
 	}
+	draft := &e.drafts.profile
+	if profileNeedsSource(*draft) {
+		if err := e.chooseProfileSource(draft); err != nil {
+			return err
+		}
+	}
+	if err := e.editProfileFields(draft); err != nil {
+		return err
+	}
+	return e.completeProfile(draft)
+}
+
+func profileNeedsSource(draft configuration.ProfileDraft) bool {
+	if draft.TemplateID != "" {
+		return false
+	}
+	return strings.TrimSpace(draft.Instructions) == ""
+}
+
+func (e *editor) completeProfile(draft *configuration.ProfileDraft) error {
 	for {
-		finished, err := e.runProfileStep()
+		if err := e.editProfileFields(draft); err != nil {
+			return err
+		}
+		plan, err := e.planProfile(*draft)
+		if err != nil {
+			if reviseErr := e.reviseProfileAfterError(draft, err); reviseErr != nil {
+				return reviseErr
+			}
+			continue
+		}
+		published, err := e.reviewAndPublish(plan, func() error { return e.manager.Publish(plan) })
+		if published {
+			e.drafts.profile = configuration.ProfileDraft{}
+			return nil
+		}
 		if err != nil {
 			return err
 		}
-		if finished {
-			return nil
+		if err := e.reviseProfile(draft); err != nil {
+			return err
 		}
 	}
 }
 
 func (e *editor) ensureProfileFlow() error {
-	if e.drafts.profile != nil {
+	if e.drafts.profile != (configuration.ProfileDraft{}) {
 		return nil
 	}
 	var scope string
 	if err := e.form(huh.NewSelect[string]().Title("Configuration scope").Options(scopeOptions()...).Value(&scope)); err != nil {
 		return err
 	}
-	e.drafts.profile = configuration.NewProfileOnboarding(e.manager, configuration.Scope(scope))
+	e.drafts.profile.Target = configuration.Scope(scope)
 	return nil
 }
 
-func (e *editor) runProfileStep() (bool, error) {
-	flow := e.drafts.profile
-	step := flow.Step()
-	switch step {
-	case configuration.OnboardingChooseSource:
-		return false, e.chooseProfileSource(flow)
-	case configuration.OnboardingInstructions:
-		return false, e.reviseProfileInstructions(flow)
-	case configuration.OnboardingName, configuration.OnboardingReviewer, configuration.OnboardingModel,
-		configuration.OnboardingEffort, configuration.OnboardingDeadline:
-		return false, e.editProfileField(flow, profileFieldSpecs[step])
-	case configuration.OnboardingValidation:
-		return true, e.validateAndReviewProfile(flow)
-	case configuration.OnboardingReview:
-		return true, e.reviewProfile(flow)
-	case configuration.OnboardingComplete:
-		e.drafts.profile = nil
-		return true, nil
-	case configuration.OnboardingCancelled:
-		return false, flow.Resume()
-	default:
-		return true, fmt.Errorf("unknown Profile onboarding step %q", step)
-	}
-}
-
-func (e *editor) validateAndReviewProfile(flow *configuration.ProfileOnboarding) error {
-	if e.ModelChoiceCheck != nil {
-		draft := flow.Draft()
-		if err := flow.SetModelChoiceCheck(e.ModelChoiceCheck(draft.Reviewer, draft.Model)); err != nil {
+func (e *editor) editProfileFields(draft *configuration.ProfileDraft) error {
+	for _, spec := range profileFieldSpecs {
+		if strings.TrimSpace(spec.value(*draft)) != "" {
+			continue
+		}
+		if err := e.editProfileField(draft, spec); err != nil {
 			return err
 		}
 	}
-	plan, err := flow.Validate(e.Repository)
-	if err != nil {
-		return e.reviseProfileAfterError(flow, err)
-	}
-	if !plan.Valid() {
-		return e.reviseProfileAfterError(flow, fmt.Errorf("invalid configuration plan: %s", plan.Reason()))
-	}
-	return e.reviewProfile(flow)
+	return nil
 }
 
-func (e *editor) reviseProfileAfterError(flow *configuration.ProfileOnboarding, cause error) error {
-	if err := flow.Revise(); err != nil {
+func (e *editor) planProfile(draft configuration.ProfileDraft) (configuration.Plan, error) {
+	plan, err := e.manager.PlanProfileCreation(e.Repository, draft)
+	if err != nil {
+		return configuration.Plan{}, err
+	}
+	if !plan.Valid() {
+		return configuration.Plan{}, fmt.Errorf("invalid configuration plan: %s", plan.Reason())
+	}
+	if e.ModelChoiceCheck != nil {
+		check := e.ModelChoiceCheck(draft.Reviewer, draft.Model)
+		plan = plan.WithWarnings(check.Warning(draft.Reviewer, draft.Model))
+	}
+	return plan, nil
+}
+
+func (e *editor) reviseProfileAfterError(draft *configuration.ProfileDraft, cause error) error {
+	if _, err := fmt.Fprintf(e.Output, "Profile planning failed: %v\n", cause); err != nil {
 		return err
 	}
-	return cause
+	return e.reviseProfile(draft)
 }
 
 type profileFieldSpec struct {
-	field configuration.OnboardingField
+	name  string
 	title string
 	value func(configuration.ProfileDraft) string
+	set   func(*configuration.ProfileDraft, string)
 }
 
-var profileFieldSpecs = map[configuration.OnboardingStep]profileFieldSpec{
-	configuration.OnboardingName:     {field: configuration.OnboardingFieldName, title: "Profile name", value: func(draft configuration.ProfileDraft) string { return draft.Name }},
-	configuration.OnboardingReviewer: {field: configuration.OnboardingFieldReviewer, title: "Reviewer", value: func(draft configuration.ProfileDraft) string { return draft.Reviewer }},
-	configuration.OnboardingModel:    {field: configuration.OnboardingFieldModel, title: "Model", value: func(draft configuration.ProfileDraft) string { return draft.Model }},
-	configuration.OnboardingEffort:   {field: configuration.OnboardingFieldEffort, title: "Reasoning effort", value: func(draft configuration.ProfileDraft) string { return draft.ReasoningEffort }},
-	configuration.OnboardingDeadline: {field: configuration.OnboardingFieldDeadline, title: "Attempt deadline (for example 8m)", value: func(draft configuration.ProfileDraft) string { return draft.AttemptDeadline }},
+const profileInstructionsField = "instructions"
+
+var profileFieldSpecs = [...]profileFieldSpec{
+	{
+		name:  "name",
+		title: "Profile name",
+		value: func(draft configuration.ProfileDraft) string { return draft.Name },
+		set:   func(draft *configuration.ProfileDraft, value string) { draft.Name = value },
+	},
+	{
+		name:  "reviewer",
+		title: "Reviewer",
+		value: func(draft configuration.ProfileDraft) string { return draft.Reviewer },
+		set: func(draft *configuration.ProfileDraft, value string) {
+			if draft.Reviewer != value {
+				draft.Reviewer = value
+				draft.Model = ""
+				draft.ReasoningEffort = ""
+				draft.AttemptDeadline = ""
+			}
+		},
+	},
+	{
+		name:  "model",
+		title: "Model",
+		value: func(draft configuration.ProfileDraft) string { return draft.Model },
+		set: func(draft *configuration.ProfileDraft, value string) {
+			if draft.Model != value {
+				draft.Model = value
+				draft.ReasoningEffort = ""
+				draft.AttemptDeadline = ""
+			}
+		},
+	},
+	{
+		name:  "effort",
+		title: "Reasoning effort",
+		value: func(draft configuration.ProfileDraft) string { return draft.ReasoningEffort },
+		set:   func(draft *configuration.ProfileDraft, value string) { draft.ReasoningEffort = value },
+	},
+	{
+		name:  "deadline",
+		title: "Attempt deadline (for example 8m)",
+		value: func(draft configuration.ProfileDraft) string { return draft.AttemptDeadline },
+		set:   func(draft *configuration.ProfileDraft, value string) { draft.AttemptDeadline = value },
+	},
 }
 
 func profileTemplateOptions(templates []configuration.Template) []huh.Option[string] {
@@ -106,60 +167,55 @@ func profileTemplateOptions(templates []configuration.Template) []huh.Option[str
 	return options
 }
 
-func (e *editor) chooseProfileSource(flow *configuration.ProfileOnboarding) error {
+func (e *editor) chooseProfileSource(draft *configuration.ProfileDraft) error {
 	var source string
 	if err := e.form(huh.NewSelect[string]().Title("Instruction source").Options(huh.NewOption("Template", "template"), huh.NewOption("Blank", "blank")).Value(&source)); err != nil {
 		return err
 	}
-	instructions, err := e.chooseProfileInstructions(flow, source)
-	if err != nil {
-		return err
-	}
-	return e.maybeEditProfileInstructions(flow, instructions)
-}
-
-func (e *editor) chooseProfileInstructions(flow *configuration.ProfileOnboarding, source string) (string, error) {
 	switch source {
 	case "template":
-		return e.chooseProfileTemplate(flow)
+		return e.chooseProfileTemplate(draft)
 	case "blank":
-		return e.chooseBlankProfileInstructions(flow)
+		return e.chooseBlankProfileInstructions(draft)
 	default:
-		return "", fmt.Errorf("unknown instruction source %q", source)
+		return fmt.Errorf("unknown instruction source %q", source)
 	}
 }
 
-func (e *editor) chooseProfileTemplate(flow *configuration.ProfileOnboarding) (string, error) {
+func (e *editor) chooseProfileTemplate(draft *configuration.ProfileDraft) error {
 	templates := profileTemplateOptions(e.manager.Templates())
 	if len(templates) == 0 {
-		return "", fmt.Errorf("no packaged Review Profile Templates are available; choose blank instructions")
+		return fmt.Errorf("no packaged Review Profile Templates are available; choose blank instructions")
 	}
 	var templateID string
 	if err := e.form(huh.NewSelect[string]().Title("Template").Options(templates...).Value(&templateID)); err != nil {
-		return "", err
-	}
-	if err := flow.ChooseTemplate(templateID); err != nil {
-		return "", err
+		return err
 	}
 	template, found := e.manager.Template(templateID)
 	if !found {
-		return "", fmt.Errorf("unknown Review Profile Template %q", templateID)
+		return fmt.Errorf("unknown Review Profile Template %q", templateID)
 	}
-	return template.Instructions, nil
+	draft.TemplateID = template.ID
+	draft.TemplateRevision = template.Revision
+	draft.Instructions = ""
+	return e.maybeEditProfileInstructions(draft, template.Instructions)
 }
 
-func (e *editor) chooseBlankProfileInstructions(flow *configuration.ProfileOnboarding) (string, error) {
+func (e *editor) chooseBlankProfileInstructions(draft *configuration.ProfileDraft) error {
 	var instructions string
 	if err := e.form(huh.NewText().Title("Instructions").Value(&instructions)); err != nil {
-		return instructions, retainProfileSourceOnFormError(flow, instructions, err)
+		draft.TemplateID = ""
+		draft.TemplateRevision = ""
+		draft.Instructions = instructions
+		return err
 	}
-	if err := flow.ChooseBlank(configuration.OnboardingText(instructions)); err != nil {
-		return "", err
-	}
-	return instructions, nil
+	draft.TemplateID = ""
+	draft.TemplateRevision = ""
+	draft.Instructions = instructions
+	return e.maybeEditProfileInstructions(draft, instructions)
 }
 
-func (e *editor) maybeEditProfileInstructions(flow *configuration.ProfileOnboarding, instructions string) error {
+func (e *editor) maybeEditProfileInstructions(draft *configuration.ProfileDraft, instructions string) error {
 	var useEditor bool
 	if err := e.form(huh.NewConfirm().Title("Edit instructions with $EDITOR?").Value(&useEditor)); err != nil {
 		return err
@@ -171,46 +227,84 @@ func (e *editor) maybeEditProfileInstructions(flow *configuration.ProfileOnboard
 	if err != nil {
 		return err
 	}
-	return flow.SetInstructions(configuration.OnboardingText(edited))
+	draft.TemplateID = ""
+	draft.TemplateRevision = ""
+	draft.Instructions = edited
+	return nil
 }
 
-func (e *editor) reviseProfileInstructions(flow *configuration.ProfileOnboarding) error {
-	if err := e.maybeEditProfileInstructions(flow, flow.Draft().Instructions); err != nil {
+func (e *editor) reviseProfileInstructions(draft *configuration.ProfileDraft) error {
+	instructions := profileInstructions(*draft, e.manager)
+	var useEditor bool
+	if err := e.form(huh.NewConfirm().Title("Edit instructions with $EDITOR?").Value(&useEditor)); err != nil {
 		return err
 	}
-	if flow.Step() != configuration.OnboardingInstructions {
-		return nil
-	}
-	return flow.ContinueRevision()
-}
-
-func (e *editor) editProfileField(flow *configuration.ProfileOnboarding, spec profileFieldSpec) error {
-	value := spec.value(flow.Draft())
-	err := e.form(huh.NewInput().Title(spec.title).Value(&value))
-	if err != nil {
-		if setErr := flow.Set(spec.field, configuration.OnboardingText(value)); setErr != nil {
-			return setErr
+	if useEditor {
+		edited, err := editInstructions(e.Context, instructions, e.Input, e.Output)
+		if err != nil {
+			return err
 		}
+		instructions = edited
+	} else if err := e.form(huh.NewText().Title("Instructions").Value(&instructions)); err != nil {
+		draft.TemplateID = ""
+		draft.TemplateRevision = ""
+		draft.Instructions = instructions
 		return err
 	}
-	return flow.Set(spec.field, configuration.OnboardingText(value))
+	draft.TemplateID = ""
+	draft.TemplateRevision = ""
+	draft.Instructions = instructions
+	return nil
 }
 
-func (e *editor) reviewProfile(flow *configuration.ProfileOnboarding) error {
-	published, err := e.reviewAndPublish(flow.Plan(), flow.Confirm)
-	if published {
-		e.drafts.profile = nil
-	} else if err == nil {
-		if reviseErr := flow.Revise(); reviseErr != nil {
-			return reviseErr
+func profileInstructions(draft configuration.ProfileDraft, manager *configuration.Manager) string {
+	if draft.Instructions != "" {
+		return draft.Instructions
+	}
+	if draft.TemplateID == "" || manager == nil {
+		return draft.Instructions
+	}
+	template, found := manager.Template(draft.TemplateID)
+	if !found {
+		return draft.Instructions
+	}
+	return template.Instructions
+}
+
+func (e *editor) editProfileField(draft *configuration.ProfileDraft, spec profileFieldSpec) error {
+	value := spec.value(*draft)
+	if err := e.form(huh.NewInput().Title(spec.title).Value(&value)); err != nil {
+		spec.set(draft, value)
+		return err
+	}
+	spec.set(draft, value)
+	return nil
+}
+
+func (e *editor) reviseProfile(draft *configuration.ProfileDraft) error {
+	options := []huh.Option[string]{huh.NewOption("Instructions", profileInstructionsField)}
+	for _, spec := range profileFieldSpecs {
+		options = append(options, huh.NewOption(spec.title, spec.name))
+	}
+	var field string
+	if err := e.form(huh.NewSelect[string]().Title("Revise Profile value").Options(options...).Value(&field)); err != nil {
+		return err
+	}
+	if field == profileInstructionsField {
+		return e.reviseProfileInstructions(draft)
+	}
+	spec, found := profileFieldSpecFor(field)
+	if !found {
+		return fmt.Errorf("unknown Profile revision field %q", field)
+	}
+	return e.editProfileField(draft, spec)
+}
+
+func profileFieldSpecFor(name string) (profileFieldSpec, bool) {
+	for _, spec := range profileFieldSpecs {
+		if spec.name == name {
+			return spec, true
 		}
 	}
-	return err
-}
-
-func retainProfileSourceOnFormError(flow *configuration.ProfileOnboarding, instructions string, formErr error) error {
-	if err := flow.ChooseBlank(configuration.OnboardingText(instructions)); err != nil {
-		return err
-	}
-	return formErr
+	return profileFieldSpec{}, false
 }

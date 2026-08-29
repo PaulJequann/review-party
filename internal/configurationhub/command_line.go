@@ -92,8 +92,6 @@ func (parser *posixCommandLineParser) flush() {
 	parser.current.Reset()
 }
 
-type backslashRun int
-
 type windowsCommandLineParser struct {
 	arguments []string
 	current   strings.Builder
@@ -168,8 +166,8 @@ func (parser *windowsCommandLineParser) consumeBackslashes() {
 	parser.consumeEvenBackslashesBeforeQuote()
 }
 
-func (parser *windowsCommandLineParser) consumeBackslashRun() backslashRun {
-	count := backslashRun(1)
+func (parser *windowsCommandLineParser) consumeBackslashRun() int {
+	count := 1
 	for parser.atBackslash() {
 		parser.index++
 		count++
@@ -213,7 +211,7 @@ func (parser *windowsCommandLineParser) write(char commandLineCharacter) {
 	parser.started = true
 }
 
-func (parser *windowsCommandLineParser) writeBackslashes(count backslashRun) {
+func (parser *windowsCommandLineParser) writeBackslashes(count int) {
 	for range count {
 		parser.current.WriteRune('\\')
 	}

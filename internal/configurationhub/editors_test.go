@@ -92,6 +92,30 @@ func (input *blockingInput) Close() error {
 	return nil
 }
 
+type lineInput struct {
+	data []byte
+}
+
+func newLineInput(value string) *lineInput { return &lineInput{data: []byte(value)} }
+
+func (input *lineInput) Read(p []byte) (int, error) {
+	if len(input.data) == 0 {
+		return 0, io.EOF
+	}
+	n := len(input.data)
+	if newline := bytes.IndexByte(input.data, '\n'); newline >= 0 {
+		n = newline + 1
+	}
+	if n > len(p) {
+		n = len(p)
+	}
+	copy(p, input.data[:n])
+	input.data = input.data[n:]
+	return n, nil
+}
+
+func (*lineInput) Close() error { return nil }
+
 func TestCancelledReviewedPlanWritesNothing(t *testing.T) {
 	root := t.TempDir()
 	manager := configuration.NewManager(configuration.Options{
@@ -119,43 +143,108 @@ func TestCancelledReviewedPlanWritesNothing(t *testing.T) {
 	}
 }
 
-func TestDeclinedProfileReviewReturnsToEditableDraft(t *testing.T) {
+func TestProfileInstructionRevisionUsesTextFallback(t *testing.T) {
+	draft := completeProfileDraft()
+	editor := editor{RunOptions: RunOptions{Input: newLineInput("n\nUpdated instructions\n"), Output: &bytes.Buffer{}, Accessible: true}}
+	if err := editor.reviseProfileInstructions(&draft); err != nil {
+		t.Fatal(err)
+	}
+	if draft.Instructions != "Updated instructions" {
+		t.Fatalf("instructions = %q, want Updated instructions", draft.Instructions)
+	}
+	if draft.TemplateID != "" || draft.TemplateRevision != "" {
+		t.Fatalf("edited instructions retained template provenance: %#v", draft)
+	}
+}
+
+func TestCreateProfilePublishesDirectDraft(t *testing.T) {
 	root := t.TempDir()
 	manager := configuration.NewManager(configuration.Options{
 		GlobalRoot: root, Reviewers: []string{"codex"},
 		ValidateName: func(string) error { return nil },
 	})
-	flow := completeProfileFlow(t, manager)
-	if _, err := flow.Validate(""); err != nil {
+	input := "1\n2\nReview bugs.\nn\nbugs\ncodex\nluna\nhigh\n8m\ny\n"
+	editor := editor{manager: manager, RunOptions: RunOptions{Input: newLineInput(input), Output: &bytes.Buffer{}, Accessible: true}}
+	if err := editor.createProfile(); err != nil {
 		t.Fatal(err)
 	}
-	editor := editor{manager: manager, drafts: draftSet{profile: flow}, RunOptions: RunOptions{Input: io.NopCloser(strings.NewReader("n\n")), Output: &bytes.Buffer{}, Accessible: true}}
-	if err := editor.reviewProfile(flow); err != nil {
-		t.Fatal(err)
+	if editor.drafts.profile != (configuration.ProfileDraft{}) {
+		t.Fatalf("published draft was retained: %#v", editor.drafts.profile)
 	}
-	if flow.Step() != configuration.OnboardingInstructions {
-		t.Fatalf("step after declined review = %q, want %q", flow.Step(), configuration.OnboardingInstructions)
+	if _, found, err := manager.LoadProfile(configuration.ScopeGlobal, "", "bugs"); err != nil || !found {
+		t.Fatalf("published Profile found=%v, err=%v", found, err)
 	}
 }
 
-func TestProfileInstructionRevisionCanContinueWithoutEditing(t *testing.T) {
+func TestProfilePlanningErrorOffersDirectDraftRevision(t *testing.T) {
+	root := t.TempDir()
 	manager := configuration.NewManager(configuration.Options{
-		GlobalRoot: t.TempDir(), Reviewers: []string{"codex"},
+		GlobalRoot: root, Reviewers: []string{"codex"},
+		ValidateName: func(name string) error {
+			if name == "bad" {
+				return errors.New("name is reserved")
+			}
+			return nil
+		},
+	})
+	draft := completeProfileDraft()
+	draft.Name = "bad"
+	var output bytes.Buffer
+	editor := editor{manager: manager, drafts: draftSet{profile: draft}, RunOptions: RunOptions{
+		Input: newLineInput("2\nquality\ny\n"), Output: &output, Accessible: true,
+	}}
+	if err := editor.createProfile(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "name is reserved") {
+		t.Fatalf("planning error was not displayed: %q", output.String())
+	}
+	if _, found, err := manager.LoadProfile(configuration.ScopeGlobal, "", "quality"); err != nil || !found {
+		t.Fatalf("revised Profile found=%v, err=%v", found, err)
+	}
+}
+
+func TestDeclinedProfileReviewOffersDraftRevision(t *testing.T) {
+	manager := configuration.NewManager(configuration.Options{
+		GlobalRoot: t.TempDir(), Reviewers: []string{"codex", "grok"},
 		ValidateName: func(string) error { return nil },
 	})
-	flow := completeProfileFlow(t, manager)
-	if _, err := flow.Validate(""); err != nil {
+	draft := completeProfileDraft()
+	plan, err := manager.PlanProfileCreation("", draft)
+	if err != nil || !plan.Valid() {
+		t.Fatalf("plan = valid %v, err = %v, reason = %s", plan.Valid(), err, plan.Reason())
+	}
+	editor := editor{manager: manager, drafts: draftSet{profile: draft}, RunOptions: RunOptions{
+		Input: newLineInput("n\n4\nnew-model\n"), Output: &bytes.Buffer{}, Accessible: true,
+	}}
+	published, err := editor.reviewAndPublish(plan, func() error { return manager.Publish(plan) })
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := flow.Revise(); err != nil {
+	if published {
+		t.Fatal("declined review reported publication")
+	}
+	if err := editor.reviseProfile(&editor.drafts.profile); err != nil {
 		t.Fatal(err)
 	}
-	editor := editor{RunOptions: RunOptions{Input: io.NopCloser(strings.NewReader("n\n")), Output: &bytes.Buffer{}, Accessible: true}}
-	if err := editor.reviseProfileInstructions(flow); err != nil {
+	if editor.drafts.profile.Model != "new-model" {
+		t.Fatalf("revised model = %q, want new-model", editor.drafts.profile.Model)
+	}
+}
+
+func TestChangingReviewerClearsDependentExecutionFields(t *testing.T) {
+	draft := completeProfileDraft()
+	editor := editor{RunOptions: RunOptions{
+		Input: newLineInput("3\ngrok\n"), Output: &bytes.Buffer{}, Accessible: true,
+	}}
+	if err := editor.reviseProfile(&draft); err != nil {
 		t.Fatal(err)
 	}
-	if flow.Step() != configuration.OnboardingName {
-		t.Fatalf("step after retaining instructions = %q, want %q", flow.Step(), configuration.OnboardingName)
+	if draft.Reviewer != "grok" {
+		t.Fatalf("reviewer = %q, want grok", draft.Reviewer)
+	}
+	if draft.Model != "" || draft.ReasoningEffort != "" || draft.AttemptDeadline != "" {
+		t.Fatalf("dependent fields not cleared: model=%q, effort=%q, deadline=%q", draft.Model, draft.ReasoningEffort, draft.AttemptDeadline)
 	}
 }
 
@@ -217,101 +306,59 @@ func TestProfileValidationUsesModelChoiceCheck(t *testing.T) {
 		GlobalRoot: t.TempDir(), Reviewers: []string{"codex"},
 		ValidateName: func(string) error { return nil },
 	})
-	flow := completeProfileFlow(t, manager)
+	draft := completeProfileDraft()
 	var selected string
-	var output bytes.Buffer
 	editor := editor{manager: manager, RunOptions: RunOptions{
-		Input: io.NopCloser(strings.NewReader("n\n")), Output: &output, Accessible: true,
 		ModelChoiceCheck: func(reviewer, model string) configuration.ModelChoiceCheck {
 			selected = reviewer + "/" + model
 			return configuration.ModelChoiceCheck{Status: configuration.ModelChoicesUnknown}
 		},
 	}}
-	if err := editor.validateAndReviewProfile(flow); err != nil {
+	plan, err := editor.planProfile(draft)
+	if err != nil {
 		t.Fatal(err)
 	}
 	if selected != "codex/luna" {
 		t.Fatalf("model choice checked = %q, want codex/luna", selected)
 	}
-	if !strings.Contains(output.String(), `model "luna"`) {
-		t.Fatalf("review output omitted model warning: %q", output.String())
+	if len(plan.Warnings()) != 1 || !strings.Contains(plan.Warnings()[0], `model "luna"`) {
+		t.Fatalf("plan warnings omitted model warning: %#v", plan.Warnings())
 	}
 }
 
 func TestProfileFlowChangingBlankToTemplateClearsStaleInstructions(t *testing.T) {
-	flow := newProfileFlowWithTemplate(t)
-	if err := flow.ChooseBlank("old blank instructions"); err != nil {
+	manager := configuration.NewManager(configuration.Options{Templates: []configuration.Template{{ID: "bugs", Revision: "v1", Instructions: "template instructions"}}})
+	draft := configuration.ProfileDraft{Target: configuration.ScopeGlobal, Instructions: "old blank instructions"}
+	editor := editor{manager: manager, RunOptions: RunOptions{Input: newLineInput("1\nn\n"), Output: &bytes.Buffer{}, Accessible: true}}
+	if err := editor.chooseProfileTemplate(&draft); err != nil {
 		t.Fatal(err)
 	}
-	if err := flow.ChooseTemplate("bugs"); err != nil {
-		t.Fatal(err)
-	}
-	draft := flow.Draft()
-	if draft.Instructions != "" || draft.TemplateID != "bugs" {
+	if draft.Instructions != "" || draft.TemplateID != "bugs" || draft.TemplateRevision != "v1" {
 		t.Fatalf("draft = %#v", draft)
 	}
 }
 
 func TestProfileFlowChangingTemplateToBlankUsesBlankInstructions(t *testing.T) {
-	flow := newProfileFlowWithTemplate(t)
-	if err := flow.ChooseTemplate("bugs"); err != nil {
+	manager := configuration.NewManager(configuration.Options{Templates: []configuration.Template{{ID: "bugs", Revision: "v1", Instructions: "template instructions"}}})
+	draft := configuration.ProfileDraft{Target: configuration.ScopeGlobal, TemplateID: "bugs", TemplateRevision: "v1"}
+	editor := editor{manager: manager, RunOptions: RunOptions{Input: newLineInput("blank instructions\nn\n"), Output: &bytes.Buffer{}, Accessible: true}}
+	if err := editor.chooseBlankProfileInstructions(&draft); err != nil {
 		t.Fatal(err)
 	}
-	if err := flow.ChooseBlank("blank instructions"); err != nil {
-		t.Fatal(err)
-	}
-	draft := flow.Draft()
 	if draft.TemplateID != "" || draft.Instructions != "blank instructions" {
 		t.Fatalf("draft = %#v", draft)
 	}
 }
 
-func newProfileFlowWithTemplate(t *testing.T) *configuration.ProfileOnboarding {
-	t.Helper()
-	manager := configuration.NewManager(configuration.Options{Templates: []configuration.Template{{ID: "bugs", Revision: "v1", Instructions: "template instructions"}}})
-	return configuration.NewProfileOnboarding(manager, configuration.ScopeGlobal)
-}
-
-func completeProfileFlow(t *testing.T, manager *configuration.Manager) *configuration.ProfileOnboarding {
-	t.Helper()
-	flow := configuration.NewProfileOnboarding(manager, configuration.ScopeGlobal)
-	if err := flow.ChooseBlank("Review carefully."); err != nil {
-		t.Fatal(err)
-	}
-	for _, field := range []struct {
-		name  configuration.OnboardingField
-		value configuration.OnboardingText
-	}{
-		{name: configuration.OnboardingFieldName, value: "quality"},
-		{name: configuration.OnboardingFieldReviewer, value: "codex"},
-		{name: configuration.OnboardingFieldModel, value: "luna"},
-		{name: configuration.OnboardingFieldEffort, value: "high"},
-		{name: configuration.OnboardingFieldDeadline, value: "8m"},
-	} {
-		if err := flow.Set(field.name, field.value); err != nil {
-			t.Fatal(err)
-		}
-	}
-	return flow
-}
-
-func TestCancelledBlankProfileFormRetainsPartialInstructions(t *testing.T) {
-	flow := configuration.NewProfileOnboarding(nil, configuration.ScopeGlobal)
-	err := retainProfileSourceOnFormError(flow, "partial instructions", huh.ErrUserAborted)
-	if !errors.Is(err, huh.ErrUserAborted) {
-		t.Fatalf("error = %v, want %v", err, huh.ErrUserAborted)
-	}
-	if got := flow.Draft().Instructions; got != "partial instructions" {
-		t.Fatalf("retained instructions = %q, want partial instructions", got)
+func completeProfileDraft() configuration.ProfileDraft {
+	return configuration.ProfileDraft{
+		Target: configuration.ScopeGlobal, Name: "quality", Reviewer: "codex", Model: "luna",
+		ReasoningEffort: "high", AttemptDeadline: "8m", Instructions: "Review carefully.",
 	}
 }
 
 func TestExitCanReturnToRetainedDraft(t *testing.T) {
-	flow := configuration.NewProfileOnboarding(nil, configuration.ScopeGlobal)
-	if err := flow.ChooseBlank("instructions"); err != nil {
-		t.Fatal(err)
-	}
-	editor := editor{drafts: draftSet{profile: flow}, RunOptions: RunOptions{Input: io.NopCloser(strings.NewReader("n\n")), Output: &bytes.Buffer{}, Accessible: true}}
+	editor := editor{drafts: draftSet{profile: configuration.ProfileDraft{Target: configuration.ScopeGlobal, Instructions: "instructions"}}, RunOptions: RunOptions{Input: io.NopCloser(strings.NewReader("n\n")), Output: &bytes.Buffer{}, Accessible: true}}
 	exit, err := editor.confirmExit()
 	if err != nil {
 		t.Fatalf("confirm exit: %v", err)
@@ -319,7 +366,7 @@ func TestExitCanReturnToRetainedDraft(t *testing.T) {
 	if exit {
 		t.Fatal("exit confirmed despite return choice")
 	}
-	if editor.drafts.profile == nil || editor.drafts.profile.Draft().Instructions != "instructions" {
+	if editor.drafts.profile.Instructions != "instructions" {
 		t.Fatal("draft was discarded")
 	}
 }

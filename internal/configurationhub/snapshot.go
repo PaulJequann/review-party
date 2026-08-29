@@ -48,12 +48,7 @@ func appendResolvedPreview(manager *configuration.Manager, repository configurat
 		snapshot.Warnings = append(snapshot.Warnings, "effective selection: "+err.Error())
 		return
 	}
-	for index, profile := range resolved.Expanded {
-		snapshot.Overview = append(snapshot.Overview, fmt.Sprintf("  %d. [%s] %s (%s)", index+1, profile.Scope, profile.Profile, profile.Origin))
-	}
-	for _, skipped := range resolved.Deduplicated {
-		snapshot.Overview = append(snapshot.Overview, fmt.Sprintf("  deduplicated [%s] %s from %s", skipped.Scope, skipped.Profile, skipped.Origin))
-	}
+	snapshot.Overview = append(snapshot.Overview, configuration.RenderResolvedReviewLinesHuman(resolved)...)
 	for _, warning := range resolved.Warnings {
 		snapshot.Warnings = append(snapshot.Warnings, warning.Message)
 	}
