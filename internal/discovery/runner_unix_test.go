@@ -18,19 +18,25 @@ import (
 )
 
 func TestRunnerForceKillsAProcessGroupAfterGracePeriod(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	pidFile := filepath.Join(t.TempDir(), "child.pid")
 	environment := []string{"DISCOVERY_RUNNER_HELPER=spawn", "DISCOVERY_RUNNER_PID_FILE=" + pidFile}
 	started := time.Now()
-	run := NewDefaultRunner().Run(ctx, Command{
-		Args:        []string{os.Args[0], "-test.run=TestDiscoveryRunnerHelper"},
-		Environment: environment,
-	})
+	runDone := make(chan RunResult, 1)
+	go func() {
+		runDone <- NewDefaultRunner().Run(ctx, Command{
+			Args:        []string{os.Args[0], "-test.run=TestDiscoveryRunnerHelper"},
+			Environment: environment,
+		})
+	}()
+	waitForFile(t, pidFile)
+	cancel()
+	run := <-runDone
 	if elapsed := time.Since(started); elapsed > 3*time.Second {
 		t.Fatalf("runner waited %s for a SIGTERM-resistant process group", elapsed)
 	}
-	if !run.TimedOut || run.Err == nil {
+	if !run.Canceled || run.Err == nil {
 		t.Fatalf("run = %#v", run)
 	}
 	contents, err := os.ReadFile(pidFile)
@@ -42,6 +48,22 @@ func TestRunnerForceKillsAProcessGroupAfterGracePeriod(t *testing.T) {
 		t.Fatalf("parse child PID %q: %v", contents, err)
 	}
 	waitForProcessExit(t, pid)
+}
+
+func waitForFile(t *testing.T, path string) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for {
+		if _, err := os.Stat(path); err == nil {
+			return
+		} else if !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("check readiness file: %v", err)
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("readiness file %q was not created", path)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 func TestRunnerReportsAlreadyCancelledProcessAsIncomplete(t *testing.T) {

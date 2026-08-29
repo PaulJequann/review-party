@@ -297,6 +297,25 @@ func TestDiscoveryDoesNotKnowUnknownReviewer(t *testing.T) {
 	}
 }
 
+func TestDiscoverSkipsAdapterAfterCancellation(t *testing.T) {
+	started := make(chan struct{})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	service := NewService(Options{Adapters: []Adapter{fakeAdapter{
+		id: "grok", started: started,
+		observation: Observation{Status: StatusSupported, Models: []Model{{ID: "grok-4.6"}}},
+	}}})
+	result := service.Discover(ctx, "grok")
+	if result.Status != StatusUnavailable || result.Authentication.Status != AuthUnavailable {
+		t.Fatalf("cancelled discovery = %#v", result)
+	}
+	select {
+	case <-started:
+		t.Fatal("cancelled discovery launched the adapter")
+	default:
+	}
+}
+
 func TestDiscoverManyBoundsAnUncooperativeAdapter(t *testing.T) {
 	started := make(chan struct{})
 	release := make(chan struct{})

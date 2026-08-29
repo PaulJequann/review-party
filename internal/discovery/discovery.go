@@ -182,6 +182,9 @@ func (service *Service) Discover(ctx context.Context, reviewer string) Result {
 
 func (service *Service) discover(ctx context.Context, reviewer string) Result {
 	result := Result{Reviewer: reviewer, HarnessVersion: "unknown", ObservedAt: service.now().UTC()}
+	if cause := ctx.Err(); cause != nil {
+		return unavailableDiscoveryResult(reviewer, cause, result.ObservedAt)
+	}
 	adapter, found := service.adapters[reviewer]
 	if !found {
 		result.Status = StatusUnsupported
