@@ -146,6 +146,7 @@ func newLibraryListCommand(spec libraryListSpec, streams commandIO) *cobra.Comma
 }
 
 func newConfigCommand(streams commandIO) *cobra.Command {
+	dependencies := defaultConfigurationDependencies()
 	cmd := &cobra.Command{Use: "config", Short: "Inspect or manage Review Party configuration", Args: cobra.NoArgs, RunE: showCommandHelp}
 	path := &cobra.Command{Use: "path", Short: "Print the Global Configuration path", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		return printConfigurationPath(stringFlag(cmd, "config"), streams.output)
@@ -153,7 +154,7 @@ func newConfigCommand(streams commandIO) *cobra.Command {
 	file := &cobra.Command{Use: "file", Short: "Inspect authored Configuration files", Args: cobra.NoArgs, RunE: showCommandHelp}
 	addConfigurationFlag(path)
 	file.AddCommand(newConfigFileShowCommand(streams))
-	cmd.AddCommand(path, file, newConfigShowCommand(streams), newConfigValidateCommand(streams), newConfigProfileCommand(streams), newConfigPartyCommand(streams), newConfigReviewsCommand(streams))
+	cmd.AddCommand(path, file, newConfigShowCommand(streams), newConfigValidateCommand(streams), newConfigDiscoveryCommand(streams, dependencies), newConfigProfileCommand(streams, dependencies), newConfigPartyCommand(streams), newConfigReviewsCommand(streams))
 	return cmd
 }
 

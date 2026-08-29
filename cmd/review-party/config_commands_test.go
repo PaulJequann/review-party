@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+
+	"reviewparty/internal/discovery"
 )
 
 type configCommandResult struct {
@@ -77,32 +79,20 @@ func TestConfigShowReportsEffectiveSelectionAndProvenance(t *testing.T) {
 }
 
 func TestConfigFileShowReadsRequestedRepositoryScope(t *testing.T) {
-	configRoot := t.TempDir()
-	repository := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", configRoot)
 	payload := "{\n  \"schema_version\": 1,\n  \"reviews\": {\n    \"concurrency_limit\": 1,\n    \"global\": [],\n    \"repository\": []\n  }\n}\n"
-	path := filepath.Join(repository, ".reviewparty", "config.json")
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte(payload), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	result := runConfigCommand(t, []string{
-		"config", "file", "show", "--scope", "repository", "--repo", repository, "--format", "json",
-	})
-	requireCommandSuccess(t, result)
-	if result.stdout != payload {
-		t.Fatalf("authored payload = %q, want %q", result.stdout, payload)
-	}
+	requireConfigFileShow(t, payload, payload)
 }
 
 func TestConfigFileShowTerminatesPayloadWithoutNewline(t *testing.T) {
+	payload := `{"schema_version":1}`
+	requireConfigFileShow(t, payload, payload+"\n")
+}
+
+func requireConfigFileShow(t *testing.T, payload, want string) {
+	t.Helper()
 	configRoot := t.TempDir()
 	repository := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", configRoot)
-	payload := `{"schema_version":1}`
 	path := filepath.Join(repository, ".reviewparty", "config.json")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
@@ -115,8 +105,8 @@ func TestConfigFileShowTerminatesPayloadWithoutNewline(t *testing.T) {
 		"config", "file", "show", "--scope", "repository", "--repo", repository, "--format", "json",
 	})
 	requireCommandSuccess(t, result)
-	if result.stdout != payload+"\n" {
-		t.Fatalf("authored payload = %q, want %q", result.stdout, payload+"\n")
+	if result.stdout != want {
+		t.Fatalf("authored payload = %q, want %q", result.stdout, want)
 	}
 }
 
@@ -237,6 +227,79 @@ func TestConfigValidateReportsAbsentFilesInHumanOutput(t *testing.T) {
 		if !strings.Contains(result.stdout, want) {
 			t.Fatalf("human validation output = %q, missing %q", result.stdout, want)
 		}
+	}
+}
+
+func TestConfigDiscoveryReportsStructuredObservationWithoutLogin(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	service := discovery.NewService(discovery.Options{Adapters: []discovery.Adapter{discoveryTestAdapter{}}})
+	streams := productionCommandIO(bytes.NewBuffer(nil), &stdout, &stderr)
+	if exit := executeConfigurationDiscovery(context.Background(), "grok", "json", streams, func() *discovery.Service { return service }); exit != 0 {
+		t.Fatalf("exit = %d, stderr = %q", exit, stderr.String())
+	}
+	var result discovery.Result
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatalf("discovery output = %q: %v", stdout.String(), err)
+	}
+	if result.Status != discovery.StatusSupported || result.Models[0].ID != "grok-4.6" {
+		t.Fatalf("result = %#v", result)
+	}
+	if strings.Contains(stdout.String(), "login") {
+		t.Fatalf("discovery unexpectedly launched or exposed a login flow: %q", stdout.String())
+	}
+}
+
+func TestConfigDiscoveryWrapsOneResultWhenReviewerIsOmitted(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	service := discovery.NewService(discovery.Options{Adapters: []discovery.Adapter{discoveryTestAdapter{}}})
+	streams := productionCommandIO(bytes.NewBuffer(nil), &stdout, &stderr)
+	if exit := executeConfigurationDiscovery(context.Background(), "", "json", streams, func() *discovery.Service { return service }); exit != 0 {
+		t.Fatalf("exit = %d, stderr = %q", exit, stderr.String())
+	}
+	var report discoveryReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("discovery output = %q: %v", stdout.String(), err)
+	}
+	if len(report.Results) != 1 || report.Results[0].Reviewer != "grok" {
+		t.Fatalf("report = %#v", report)
+	}
+}
+
+type discoveryTestAdapter struct{}
+
+func (discoveryTestAdapter) Reviewer() string { return "grok" }
+
+func (discoveryTestAdapter) Discover(context.Context) discovery.Observation {
+	return discovery.Observation{Status: discovery.StatusSupported, Models: []discovery.Model{{ID: "grok-4.6"}}}
+}
+
+func TestProfileCreateWarnsForManualUndiscoveredModel(t *testing.T) {
+	requireProfileCreateWarnings(t, "manual", "grok-custom", 1)
+}
+
+func TestProfileCreateRecognizesPackagedModelWithoutWarning(t *testing.T) {
+	requireProfileCreateWarnings(t, "packaged", "grok-4.5", 0)
+}
+
+func requireProfileCreateWarnings(t *testing.T, name, model string, count int) {
+	t.Helper()
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	result := runConfigCommand(t, []string{
+		"config", "profile", "create", name, "--blank", "--instructions", "Review bugs.\n",
+		"--reviewer", "grok", "--model", model, "--effort", "high", "--deadline", "1m",
+		"--yes", "--format", "json",
+	})
+	requireCommandSuccess(t, result)
+	var plan configurationPlanResult
+	if err := json.Unmarshal([]byte(result.stdout), &plan); err != nil {
+		t.Fatalf("plan output = %q: %v", result.stdout, err)
+	}
+	if len(plan.Warnings) != count {
+		t.Fatalf("warnings = %#v", plan.Warnings)
+	}
+	if count > 0 && !strings.Contains(plan.Warnings[0], model) {
+		t.Fatalf("warnings = %#v, want model %q", plan.Warnings, model)
 	}
 }
 

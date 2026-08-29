@@ -2,7 +2,7 @@
 
 <!-- Stashbox: https://stashbox.local.bysliek.com/0XZZMwVbSdKL -->
 
-Status: Slices 1-6 complete; Slice 7 is next
+Status: Slices 1-7 complete; Slice 8 is next
 Last reconciled: 2026-08-27
 
 This plan replaces Review Party's current configuration and execution model with
@@ -186,10 +186,14 @@ Profile or Party it wants in its default run.
   prompts rather than terminal redraws.
 - Model Discovery is observational and bounded. Manual undiscovered model IDs
   remain available after an explicit warning.
-- Saving validates structural compatibility and discovered choices. A
-  temporarily unavailable harness may be saved after warning, but execution
-  still fails closed if it remains unavailable.
+- Saving validates structural compatibility and reports whether the selected
+  model is immediately known. An undiscovered model remains available after
+  warning; a temporarily unavailable harness may be saved after warning, but
+  execution still fails closed if it remains unavailable.
 - Review Party never stores provider credentials or authenticates implicitly.
+  Discovery may pass already configured, allowlisted harness credentials to a
+  read-only provider query when that harness requires them; it never starts a
+  login flow.
 
 ### Recovery and pre-release replacement
 
@@ -246,7 +250,7 @@ Slice 3  Cobra command tree                                      Complete
 Slice 4  Domain and storage reset                                Complete
 Slice 5  Resolution and review-party run                         Complete (PR #13)
 Slice 6  Agent-facing configuration commands                Complete
-Slice 7  Discovery and onboarding
+Slice 7  Discovery and onboarding                            Complete
 Slice 8  Hub shell and core editors
 Slice 9  Template updates, recovery, and release polish
 ```
@@ -281,6 +285,8 @@ and Lip Gloss `v2.0.6` under Go 1.26. The scratch integration proved embedded
 form transitions, cancellation, narrow resizing, and terminal restoration.
 Reviewer discovery and authentication findings live in
 [`research/configuration-hub-dependencies-and-harness-discovery-2026-08-20.md`](research/configuration-hub-dependencies-and-harness-discovery-2026-08-20.md).
+The typed discovery and onboarding seams are implemented in Slice 7; the
+interactive Hub path remains deferred to Slice 8.
 
 ## Slice 2: scoped Configuration Manager
 
@@ -478,7 +484,7 @@ references use the selected scope.
 
 ## Slice 7: discovery and onboarding
 
-Status: **Pending**
+Status: **Complete**
 
 ### Goal
 
@@ -490,18 +496,52 @@ Reviewers, accessible models, effort, or cost tolerance.
 - Implement bounded Reviewer-specific Model Discovery and disposable caching.
 - Open consumers from cached, configured, and packaged choices before refresh
   completes.
-- Keep manual model entry with a warning and explicit confirmation.
+- Keep manual model entry. Unknown model IDs require a warning and explicit
+  confirmation.
 - Detect authentication requirements without implicit login; expose explicit
   documented sign-in actions only.
-- Guide interactive onboarding through Template or blank instructions, Profile
-  name, Reviewer, model, effort, deadline, validation, and reviewed save.
+- Define the typed onboarding flow through Template or blank instructions,
+  Profile name, Reviewer, model, effort, deadline, validation, and reviewed
+  save. The interactive terminal editor is Slice 8 work.
 - Let noninteractive initialization prepare managed state without inventing a
   Profile.
 
+### Shipped behavior
+
+- `internal/discovery` provides independent Reviewer adapters for Grok,
+  OpenCode, Codex, and Copilot. Observations use a ten-second deadline and a
+  bounded four-megabyte capture budget; one harness failure does not cancel the
+  others.
+- `review-party config discover [REVIEWER]` reports structured model,
+  harness-version, authentication, diagnostic, and documented sign-in facts.
+  Discovering all Reviewers launches observations concurrently in stable output
+  order. Discovery never writes Review Party-owned configuration, stores
+  credentials, or starts a login flow. An external harness may use existing
+  allowlisted credentials for the provider's read-only query and write its own
+  state under its normal HOME/XDG/CODEX_HOME locations.
+- Successful observations may be cached as disposable entries under the user
+  cache root. Profile consumers can merge cached, configured, and packaged
+  choices immediately while a live observation is still pending; cached data is
+  never treated as proof of current access.
+- Profile creation warns when its exact model ID is not among immediately known
+  cached, configured, or packaged choices. The existing reviewed Plan and
+  explicit `--yes` or TTY confirmation remain required to publish it.
+- `ProfileOnboarding` holds Template or blank instructions and all executable
+  fields in memory, validates through a Configuration Manager Plan, and only
+  publishes after review confirmation. Cancellation retains the draft until the
+  caller discards it.
+- Initialization remains state preparation only. It does not invent a Profile;
+  `run` continues to fail closed with configuration guidance when no executable
+  repository selection exists.
+
+Slice 8 still owns the recurring Bubble Tea Hub shell and its focused editors;
+Slice 7 supplies the typed discovery and onboarding seams those editors use.
+
 ### Acceptance
 
-- Interactive onboarding ends with at least one validated executable Global
-  Profile.
+- Noninteractive Profile creation and the typed onboarding flow can end with at
+  least one validated executable Global Profile. The interactive terminal path
+  is accepted with the Slice 8 Hub editor.
 - A slow or broken harness cannot block other Reviewers or the Hub.
 - Discovery never changes configuration or launches authentication implicitly.
 - `review-party run` refuses clearly when no executable repository selection
@@ -604,6 +644,9 @@ are written.
 | Slice 5: unqualified explicit names resolve Repository first | An explicit name launches the Global copy although a Repository copy exists | Selection resolver | The resolved scope follows Repository-before-Global; qualified names are exact |
 | Slice 5: the roll-up owns its Concurrency Limit | A Party limit replaces the repository limit or vice versa | Selection resolver and bundle persistence | Expanded list carries the authoring limit's provenance |
 | Slice 5: an unconfigured run refuses cleanly | A missing selection starts reviews with nothing selected or writes fallback state | Public run command | Nonzero exit names the configuration gap; no Reviewer launches and no files are written |
+| Discovery is observational | A model lookup writes configuration or launches an implicit login | Reviewer adapter boundary | Discovery only returns bounded observations and documented sign-in actions |
+| Reviewer discovery is isolated | One hung harness prevents choices for every Reviewer | Discovery service | Other Reviewer observations and cached choices remain available |
+| Onboarding publication is reviewed | A cancelled or partially filled flow leaves an executable Profile | Onboarding state and Configuration Manager | Draft survives cancellation, while files remain unchanged until Plan confirmation |
 
 ## Explicit non-goals
 

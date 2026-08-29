@@ -35,7 +35,7 @@ result contract does not require every agent to use the same wire protocol.
 For a bounded local dogfood Review, install the current checkout with
 `./scripts/install-local.sh` and invoke that installed binary from `PATH`. Use
 complete saved Profiles configured with the Codex agent, model
-`gpt-5.6-luna`, maximum supported reasoning (`high`), and a three-minute
+`gpt-5.6-luna`, maximum supported reasoning (`high`), and an eight-minute
 Attempt deadline. Ordinary Review commands execute those settings exactly.
 Treat missing Profiles as unavailable rather than substituting another agent or
 model. Before initialization, run `./scripts/sync-local-profiles.sh` to publish
@@ -52,6 +52,7 @@ mkdir -p scratch
 REVIEW_PARTY_DOGFOOD_REVIEWER=codex \
 REVIEW_PARTY_DOGFOOD_MODEL=gpt-5.6-luna \
 REVIEW_PARTY_DOGFOOD_EFFORT=high \
+REVIEW_PARTY_DOGFOOD_DEADLINE=8m \
   ./scripts/sync-local-profiles.sh "$PWD/scratch/dogfood-config/review-party/profiles"
 ./scripts/smoke-installed.sh "$(command -v review-party)"
 XDG_STATE_HOME="$PWD/scratch/dogfood-state" \

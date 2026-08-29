@@ -19,7 +19,7 @@ type PartyDraft struct {
 // PlanPartyCreation validates and stages one flat Party definition.
 func (manager *Manager) PlanPartyCreation(repository Repository, draft PartyDraft) (Plan, error) {
 	party := Party{SchemaVersion: SchemaVersion, Name: draft.Name, Description: draft.Description, ConcurrencyLimit: draft.ConcurrencyLimit, Profiles: append([]ProfileReference(nil), draft.Profiles...)}
-	plan := Plan{state: &planState{}}
+	plan := Plan{state: &planState{owner: manager}}
 	if err := manager.validatePartyCreation(repository, draft.Target, party); err != nil {
 		plan.state.reason = err.Error()
 		return plan, nil
@@ -47,7 +47,7 @@ func (manager *Manager) PlanPartyCreation(repository Repository, draft PartyDraf
 		Field: "parties." + party.Name, Scope: draft.Target, Path: entry.Path,
 		After: fmt.Sprintf("profiles=%d concurrency=%d", len(party.Profiles), party.ConcurrencyLimit), HadAfter: true,
 	}
-	return newFilePlan(draft.Target, change, []pendingWrite{write}), nil
+	return newFilePlan(manager, draft.Target, change, []pendingWrite{write}), nil
 }
 
 func (manager *Manager) validatePartyCreation(repository Repository, scope Scope, party Party) error {

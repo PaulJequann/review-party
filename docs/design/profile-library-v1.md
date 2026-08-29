@@ -56,8 +56,33 @@ A Template never participates in Profile lookup. Profile Creation copies Templat
 ## Publication
 
 Profile Creation and copy produce reviewed, snapshot-bound plans. The agent-facing commands are `config profile create` and `config profile copy`. Publication writes `profile.json` and `instructions.md` as one rollback-protected unit. A failure cannot leave new metadata paired with absent or stale instructions. Existing Profiles are never overwritten by creation or copy.
+The same Configuration Manager instance must validate and publish a Plan; a
+Plan cannot be published through a different Manager instance.
 
 Opening configuration, listing Templates, and resolving absent Profiles create no files or directories.
+
+## Discovery and onboarding
+
+Profile editors may present cached, configured, and packaged model choices
+immediately, then refresh one Reviewer-specific observation in the background.
+The discovery boundary is bounded and observational: it does not write
+Review Party-owned configuration, persist credentials, or launch
+authentication. An external harness may read already configured, allowlisted
+credentials for its read-only provider query and write its own state under its
+normal HOME/XDG/CODEX_HOME locations. Successful
+observations are disposable cache material and are not proof that a later paid
+Review will succeed.
+
+Manual model IDs remain valid when discovery is unavailable, incomplete, or
+unsupported. The CLI reports a warning when the exact ID is not immediately
+known, and the reviewed Plan still requires normal TTY confirmation or explicit
+`--yes` authorization before publication. Authentication results expose only
+status, diagnostics, and a documented sign-in action for the Caller to choose.
+
+The typed `ProfileOnboarding` flow holds Template or blank instructions and the
+complete Profile draft in memory, validates through `PlanProfileCreation`, and
+publishes only after the reviewed Plan is confirmed. Cancellation retains the
+draft without changing either Profile file; explicit discard clears it.
 
 ## Non-goals
 

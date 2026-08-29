@@ -3,6 +3,7 @@ package configuration
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 )
 
 // Change planning lives in this file. Typed intents and their field mapping
@@ -27,9 +28,11 @@ type Plan struct {
 }
 
 type planState struct {
+	owner       *Manager
 	changes     []Change
 	scopes      []Scope
 	paths       []string
+	warnings    []string
 	valid       bool
 	reason      string
 	publication publicationPlan
@@ -86,6 +89,30 @@ func (plan Plan) Paths() []string {
 	return append([]string(nil), plan.state.paths...)
 }
 
+// Warnings returns advisory validation messages for the staged changes.
+func (plan Plan) Warnings() []string {
+	if plan.state == nil {
+		return nil
+	}
+	return append([]string(nil), plan.state.warnings...)
+}
+
+// WithWarnings returns a copy of the Plan with caller-supplied advisory
+// messages. It does not change the staged publication.
+func (plan Plan) WithWarnings(warnings ...string) Plan {
+	if plan.state == nil {
+		return plan
+	}
+	state := *plan.state
+	state.warnings = append([]string(nil), state.warnings...)
+	for _, warning := range warnings {
+		if strings.TrimSpace(warning) != "" {
+			state.warnings = append(state.warnings, warning)
+		}
+	}
+	return Plan{state: &state}
+}
+
 // Plan stages typed intents against loaded documents and validates each
 // complete resulting document. Planning writes nothing and creates no files.
 func (manager *Manager) Plan(repository Repository, intents []Intent) (Plan, error) {
@@ -94,7 +121,7 @@ func (manager *Manager) Plan(repository Repository, intents []Intent) (Plan, err
 		return Plan{}, err
 	}
 	staged := map[Scope]*stagedDocument{}
-	plan := Plan{state: &planState{}}
+	plan := Plan{state: &planState{owner: manager}}
 	for _, intent := range intents {
 		change, err := manager.stageIntent(&plan, staged, loaded, repository, intent)
 		if err != nil {
@@ -211,15 +238,15 @@ func loadedScopeFor(loaded Loaded, scope Scope) LoadedDocument {
 	return loaded.Global
 }
 
-func newFilePlan(scope Scope, change Change, writes []pendingWrite) Plan {
-	state := &planState{valid: true, changes: []Change{change}}
+func newFilePlan(manager *Manager, scope Scope, change Change, writes []pendingWrite) Plan {
+	state := &planState{owner: manager, valid: true, changes: []Change{change}}
 	addPlanFiles(state, scope, writes)
 	return Plan{state: state}
 }
 
-func newProfilePlan(scope Scope, change Change, publication pendingProfilePublication) Plan {
+func newProfilePlan(manager *Manager, scope Scope, change Change, publication pendingProfilePublication) Plan {
 	state := &planState{
-		valid: true, scopes: []Scope{scope}, changes: []Change{change}, publication: publicationPlan{profiles: []pendingProfilePublication{publication}},
+		owner: manager, valid: true, scopes: []Scope{scope}, changes: []Change{change}, publication: publicationPlan{profiles: []pendingProfilePublication{publication}},
 		paths: []string{filepath.Join(publication.directory, "profile.json"), filepath.Join(publication.directory, "instructions.md")},
 	}
 	return Plan{state: state}

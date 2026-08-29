@@ -172,6 +172,16 @@ the mutation commands under `config profile`, `config party`, and
 validates and publishes only after confirmation. `config show`, `config file
 show`, and `config validate` are read-only inspection and validation commands.
 
+Agents can use `review-party config discover [REVIEWER]` for a bounded,
+read-only observation of model choices, harness version, authentication status,
+diagnostics, and an explicit documented sign-in action when one is available.
+Discovery does not write Review Party-owned configuration, store credentials,
+or authenticate implicitly. An external harness may read already configured,
+allowlisted credentials for a read-only provider query and write its own state
+under its normal HOME/XDG/CODEX_HOME locations. Cached choices are advisory.
+Manual model IDs remain valid Profile inputs. `config profile create` warns when
+the selected model is not immediately known.
+
 **Profile Creation**:
 The operation that saves one complete executable Review Profile from a Review Profile Template or blank instructions plus a Reviewer, model, reasoning effort, and Execution Deadline. Agents invoke it with `review-party config profile create`. It is separate from Review Party Initialization.
 _Avoid_: Profile init, template selection alone, unnamed profile material

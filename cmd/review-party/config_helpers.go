@@ -42,6 +42,7 @@ type configurationPlanResult struct {
 	Valid     bool                  `json:"valid"`
 	Published bool                  `json:"published"`
 	Reason    string                `json:"reason,omitempty"`
+	Warnings  []string              `json:"warnings,omitempty"`
 	Scopes    []string              `json:"scopes,omitempty"`
 	Paths     []string              `json:"paths,omitempty"`
 	Changes   []configurationChange `json:"changes,omitempty"`

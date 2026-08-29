@@ -6,9 +6,10 @@ import (
 	"github.com/spf13/cobra"
 
 	"reviewparty/internal/configuration"
+	"reviewparty/internal/discovery"
 )
 
-func executeConfigProfileCreate(name string, cmd *cobra.Command, options configurationMutationOptions, streams commandIO) int {
+func executeConfigProfileCreate(name string, cmd *cobra.Command, options configurationMutationOptions, streams commandIO, discoveryService func() *discovery.Service) int {
 	return runConfigurationCommand(options.format, options.configuration, streams, func(manager *configuration.Manager) (int, error) {
 		scope, err := parseConfigurationScope(stringFlag(cmd, "scope"))
 		if err != nil {
@@ -23,16 +24,52 @@ func executeConfigProfileCreate(name string, cmd *cobra.Command, options configu
 		if err != nil {
 			return 0, err
 		}
-		plan, err := manager.PlanProfileCreation(configuration.Repository(options.repository), configuration.ProfileDraft{
+		draft := configuration.ProfileDraft{
 			Target: scope, Name: name, Reviewer: stringFlag(cmd, "reviewer"), Model: stringFlag(cmd, "model"),
 			ReasoningEffort: stringFlag(cmd, "effort"), AttemptDeadline: stringFlag(cmd, "deadline"),
 			Instructions: instructions, TemplateID: templateID,
+		}
+		check := modelChoiceCheck(modelWarningInput{
+			manager: manager, discovery: discoveryService, repository: options.repository,
+			reviewer: draft.Reviewer, model: draft.Model,
 		})
+		plan, err := manager.PlanProfileCreation(configuration.Repository(options.repository), draft)
 		if err != nil {
 			return 0, err
 		}
+		plan = plan.WithWarnings(check.Warning(draft.Reviewer, draft.Model))
 		return publishConfigurationPlan(manager, plan, options, streams), nil
 	})
+}
+
+type modelWarningInput struct {
+	manager    *configuration.Manager
+	discovery  func() *discovery.Service
+	repository string
+	reviewer   string
+	model      string
+}
+
+func modelChoiceCheck(input modelWarningInput) configuration.ModelChoiceCheck {
+	if input.model == "" || input.discovery == nil {
+		return configuration.ModelChoiceCheck{}
+	}
+	sources, err := input.manager.ProfileModelChoices(configuration.Repository(input.repository), input.reviewer)
+	if err != nil {
+		return configuration.ModelChoiceCheck{Status: configuration.ModelChoicesUnavailable}
+	}
+	service := input.discovery()
+	if service == nil {
+		return configuration.ModelChoiceCheck{}
+	}
+	choices := service.ChoiceSnapshot(discovery.ChoiceRequest{
+		Reviewer: input.reviewer, Configured: sources.Configured, Packaged: sources.Packaged,
+	})
+	status := configuration.ModelChoicesUnknown
+	if choices.Contains(input.model) {
+		status = configuration.ModelChoicesKnown
+	}
+	return configuration.ModelChoiceCheck{Status: status}
 }
 
 func executeConfigProfileCopy(value, targetValue string, options configurationMutationOptions, streams commandIO) int {

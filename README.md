@@ -36,6 +36,7 @@ variables named `REVIEW_PARTY_DOGFOOD_REVIEWER`,
 `REVIEW_PARTY_DOGFOOD_MODEL`, `REVIEW_PARTY_DOGFOOD_EFFORT`, and
 `REVIEW_PARTY_DOGFOOD_DEADLINE` may explicitly select different settings. Pass
 a Profiles directory as the first argument to target an isolated configuration.
+The default dogfood Attempt deadline is eight minutes.
 
 Run the installed-binary smoke check from an isolated repository and isolated
 XDG roots with:
@@ -50,7 +51,7 @@ dogfood Reviews.
 
 ## Current CLI
 
-> Configuration Hub Slices 5 and 6 resolve the repository's saved review selection
+> Configuration Hub Slices 5 through 7 resolve the repository's saved review selection
 > and expose it through `review-party run` and `review-party config ...`.
 > The transitional `review` and `party run` commands are replaced with no
 > aliases. See
@@ -80,8 +81,9 @@ for current state. Review, inspect, and history refuse to create state. Review P
 ledger schemas; select a fresh `XDG_STATE_HOME` or `--state-dir` and run
 `review-party init` when an old ledger is incompatible.
 
-List and explain saved executable Review Profiles without launching an Agent
-Harness or creating a Review Record:
+List and explain saved executable Review Profiles without creating a Review
+Record. `config discover` is the explicit bounded observational command in
+this group and may launch a Reviewer harness; the other commands are local:
 
 ```sh
 review-party profiles
@@ -90,7 +92,12 @@ review-party config path
 review-party config show --repo . --format json
 review-party config file show --scope global --format json
 review-party config validate --repo . --format json
+review-party config discover --format json
 ```
+
+For `config discover --format json`, specifying a Reviewer returns one
+`Result` object. Omitting the Reviewer returns an object with a `results` array
+containing one result per known Reviewer.
 
 Agents and automation use the `config` command family for configuration
 changes. Read the effective configuration with `config show`; use `config file`
@@ -458,3 +465,20 @@ Configuration Manager's typed `PlanProfileCreation`, `PlanProfileCopy`, and
 The retired `profiles/<name>.md` representation has no Configuration Manager
 reader. Use `config profile create` or `config profile copy` for agent-facing
 Profile operations. See [`docs/design/profile-library-v1.md`](docs/design/profile-library-v1.md).
+
+Use `review-party config discover [REVIEWER]` for a bounded provider-read-only
+observation of available models and authentication status. It does not mutate
+Review Party-owned configuration or store credentials. The external harness may
+read its configured credentials and write its own state under its normal
+HOME/XDG/CODEX_HOME locations. Successful results may be cached under the user
+cache root for responsive selection; the cache is advisory and does not prove
+current access. Discovery never logs in implicitly.
+Where a harness requires it, discovery may use already configured, allowlisted
+credentials for its read-only provider query; it never starts authentication or
+stores credentials.
+When a manually entered model is not among the immediately known choices,
+Profile creation reports a warning and requires TTY confirmation or explicit
+`--yes` authorization. Noninteractive callers must pass `--yes` to receive the
+plan and warning in the command result; without it, the command exits before
+displaying the warning. Copilot currently reports discovery as unsupported with
+its documented login action.
