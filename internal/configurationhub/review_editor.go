@@ -2,7 +2,9 @@ package configurationhub
 
 import (
 	"fmt"
+	"io"
 	"strconv"
+	"strings"
 
 	"charm.land/huh/v2"
 
@@ -36,10 +38,52 @@ func (e *editor) editReviews() error {
 	if err != nil {
 		return err
 	}
-	published, err := e.reviewAndPublish(plan, func() error { return e.manager.Publish(plan) })
+	published, err := e.reviewAndPublishWithPreview(
+		plan,
+		func() error { return e.manager.Publish(plan) },
+		func(output io.Writer) error {
+			return renderReviewSelectionPreview(output, e.manager, e.Repository, intent.Selection)
+		},
+	)
 	if published {
 		e.drafts.reviews = reviewFormDraft{}
 	}
+	return err
+}
+
+func renderReviewSelectionPreview(output io.Writer, manager *configuration.Manager, repository configuration.Repository, selection configuration.ReviewSelection) error {
+	resolved, err := manager.ResolveReviewSelection(repository, selection)
+	if err != nil {
+		return fmt.Errorf("resolve staged review selection: %w", err)
+	}
+	var preview strings.Builder
+	preview.WriteString("resolved review selection:\n")
+	for index, profile := range resolved.Expanded {
+		preview.WriteString("  ")
+		preview.WriteString(strconv.Itoa(index + 1))
+		preview.WriteString(". [")
+		preview.WriteString(string(profile.Scope))
+		preview.WriteString("] ")
+		preview.WriteString(profile.Profile)
+		preview.WriteString(" (")
+		preview.WriteString(profile.Origin)
+		preview.WriteString(")\n")
+	}
+	for _, skipped := range resolved.Deduplicated {
+		preview.WriteString("  deduplicated [")
+		preview.WriteString(string(skipped.Scope))
+		preview.WriteString("] ")
+		preview.WriteString(skipped.Profile)
+		preview.WriteString(" from ")
+		preview.WriteString(skipped.Origin)
+		preview.WriteString(" (kept by ")
+		preview.WriteString(skipped.KeptOrigin)
+		preview.WriteString(")\n")
+	}
+	for _, warning := range resolved.Warnings {
+		preview.WriteString("  warning: " + warning.Message + "\n")
+	}
+	_, err = io.WriteString(output, preview.String())
 	return err
 }
 
@@ -70,7 +114,7 @@ func (e *editor) addReview(selection configuration.ReviewSelection) (configurati
 
 func (e *editor) removeReview(selection configuration.ReviewSelection) (configuration.SetReviewSelection, error) {
 	draft := &e.drafts.reviews
-	if err := e.form(huh.NewSelect[string]().Title("Selection group").Options(scopeOptions()...).Value(&draft.scope), huh.NewInput().Title("Zero-based index").Value(&draft.index)); err != nil {
+	if err := e.reviewScope(draft, huh.NewInput().Title("Zero-based index").Value(&draft.index)); err != nil {
 		return configuration.SetReviewSelection{}, err
 	}
 	index, err := strconv.Atoi(draft.index)
@@ -82,7 +126,7 @@ func (e *editor) removeReview(selection configuration.ReviewSelection) (configur
 
 func (e *editor) moveReview(selection configuration.ReviewSelection) (configuration.SetReviewSelection, error) {
 	draft := &e.drafts.reviews
-	if err := e.form(huh.NewSelect[string]().Title("Selection group").Options(scopeOptions()...).Value(&draft.scope), huh.NewInput().Title("From index").Value(&draft.from), huh.NewInput().Title("To index").Value(&draft.to)); err != nil {
+	if err := e.reviewScope(draft, huh.NewInput().Title("From index").Value(&draft.from), huh.NewInput().Title("To index").Value(&draft.to)); err != nil {
 		return configuration.SetReviewSelection{}, err
 	}
 	from, err := strconv.Atoi(draft.from)
@@ -94,6 +138,11 @@ func (e *editor) moveReview(selection configuration.ReviewSelection) (configurat
 		return configuration.SetReviewSelection{}, err
 	}
 	return configuration.MoveReviewSelection(selection, configuration.Scope(draft.scope), from, to)
+}
+
+func (e *editor) reviewScope(draft *reviewFormDraft, fields ...huh.Field) error {
+	fields = append([]huh.Field{huh.NewSelect[string]().Title("Selection group").Options(scopeOptions()...).Value(&draft.scope)}, fields...)
+	return e.form(fields...)
 }
 
 func (e *editor) concurrencyReview(selection configuration.ReviewSelection) (configuration.SetReviewSelection, error) {

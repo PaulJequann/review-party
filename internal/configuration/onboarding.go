@@ -17,6 +17,7 @@ type OnboardingField string
 
 const (
 	OnboardingChooseSource OnboardingStep = "choose_source"
+	OnboardingInstructions OnboardingStep = "instructions"
 	OnboardingName         OnboardingStep = "name"
 	OnboardingReviewer     OnboardingStep = "reviewer"
 	OnboardingModel        OnboardingStep = "model"
@@ -111,10 +112,27 @@ func (flow *ProfileOnboarding) SetInstructions(instructions OnboardingText) erro
 	flow.draft.TemplateID = ""
 	flow.draft.TemplateRevision = ""
 	flow.draft.Instructions = string(instructions)
-	flow.revising = false
 	flow.modelChoiceCheck = ModelChoiceCheck{}
 	flow.plan = Plan{}
+	if flow.revising {
+		flow.step = OnboardingName
+		return nil
+	}
+	flow.revising = false
 	flow.step = flow.nextStep()
+	return nil
+}
+
+// ContinueRevision skips instruction changes and starts the retained field
+// traversal. It is used when a caller wants to keep the current source.
+func (flow *ProfileOnboarding) ContinueRevision() error {
+	if err := flow.ensureEditable(); err != nil {
+		return err
+	}
+	if flow.step != OnboardingInstructions {
+		return errors.New("onboarding is not waiting for instruction revision")
+	}
+	flow.step = OnboardingName
 	return nil
 }
 
@@ -203,7 +221,7 @@ func (flow *ProfileOnboarding) Revise() error {
 	flow.modelChoiceCheck = ModelChoiceCheck{}
 	flow.plan = Plan{}
 	flow.revising = true
-	flow.step = OnboardingName
+	flow.step = OnboardingInstructions
 	return nil
 }
 
@@ -242,6 +260,10 @@ func (flow *ProfileOnboarding) Resume() error {
 	}
 	if flow.step != OnboardingCancelled {
 		return errors.New("onboarding is not cancelled")
+	}
+	if flow.revising {
+		flow.step = OnboardingInstructions
+		return nil
 	}
 	flow.step = flow.nextStep()
 	return nil

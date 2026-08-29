@@ -133,8 +133,82 @@ func TestDeclinedProfileReviewReturnsToEditableDraft(t *testing.T) {
 	if err := editor.reviewProfile(flow); err != nil {
 		t.Fatal(err)
 	}
+	if flow.Step() != configuration.OnboardingInstructions {
+		t.Fatalf("step after declined review = %q, want %q", flow.Step(), configuration.OnboardingInstructions)
+	}
+}
+
+func TestProfileInstructionRevisionCanContinueWithoutEditing(t *testing.T) {
+	manager := configuration.NewManager(configuration.Options{
+		GlobalRoot: t.TempDir(), Reviewers: []string{"codex"},
+		ValidateName: func(string) error { return nil },
+	})
+	flow := completeProfileFlow(t, manager)
+	if _, err := flow.Validate(""); err != nil {
+		t.Fatal(err)
+	}
+	if err := flow.Revise(); err != nil {
+		t.Fatal(err)
+	}
+	editor := editor{RunOptions: RunOptions{Input: io.NopCloser(strings.NewReader("n\n")), Output: &bytes.Buffer{}, Accessible: true}}
+	if err := editor.reviseProfileInstructions(flow); err != nil {
+		t.Fatal(err)
+	}
 	if flow.Step() != configuration.OnboardingName {
-		t.Fatalf("step after declined review = %q, want %q", flow.Step(), configuration.OnboardingName)
+		t.Fatalf("step after retaining instructions = %q, want %q", flow.Step(), configuration.OnboardingName)
+	}
+}
+
+func TestReviewSelectionPreviewShowsProposedExpansion(t *testing.T) {
+	root := t.TempDir()
+	repository := configuration.Repository(t.TempDir())
+	manager := configuration.NewManager(configuration.Options{
+		GlobalRoot: root, Reviewers: []string{"codex"},
+		ValidateName: func(string) error { return nil },
+	})
+	publishPreviewProfile(t, manager, configuration.ScopeGlobal, "")
+	publishPreviewProfile(t, manager, configuration.ScopeRepository, repository)
+
+	selection := configuration.ReviewSelection{
+		ConcurrencyLimit: 1,
+		Global:           []configuration.SelectionItem{{Profile: "shared"}},
+		Repository:       []configuration.SelectionItem{{Profile: "shared"}, {Profile: "shared"}},
+	}
+	var output bytes.Buffer
+	if err := renderReviewSelectionPreview(&output, manager, repository, selection); err != nil {
+		t.Fatal(err)
+	}
+	preview := output.String()
+	requirePreviewContains(t, preview, "resolved review selection:")
+	requirePreviewContains(t, preview, "[global] shared")
+	requirePreviewContains(t, preview, "[repository] shared")
+	requirePreviewContains(t, preview, "deduplicated [repository] shared")
+	requirePreviewContains(t, preview, `Profiles named "shared" from both Global and Repository Configuration`)
+	if _, value, err := manager.EffectiveReviewSelection(repository); err != nil {
+		t.Fatal(err)
+	} else if value.Authored {
+		t.Fatal("preview published the proposed selection")
+	}
+}
+
+func publishPreviewProfile(t *testing.T, manager *configuration.Manager, target configuration.Scope, repository configuration.Repository) {
+	t.Helper()
+	plan, err := manager.PlanProfileCreation(repository, configuration.ProfileDraft{
+		Target: target, Name: "shared", Reviewer: "codex", Model: "luna",
+		ReasoningEffort: "high", AttemptDeadline: "1m", Instructions: "Review shared.\n",
+	})
+	if err != nil || !plan.Valid() {
+		t.Fatalf("%s profile plan = valid %v, error %v, reason %s", target, plan.Valid(), err, plan.Reason())
+	}
+	if err := manager.Publish(plan); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func requirePreviewContains(t *testing.T, preview, want string) {
+	t.Helper()
+	if !strings.Contains(preview, want) {
+		t.Fatalf("preview = %q, missing %q", preview, want)
 	}
 }
 

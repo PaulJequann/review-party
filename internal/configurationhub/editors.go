@@ -165,6 +165,10 @@ func (e *editor) run(action hubAction) (bool, error) {
 }
 
 func (e *editor) reviewAndPublish(plan configuration.Plan, publish func() error) (bool, error) {
+	return e.reviewAndPublishWithPreview(plan, publish, func(io.Writer) error { return nil })
+}
+
+func (e *editor) reviewAndPublishWithPreview(plan configuration.Plan, publish func() error, preview func(io.Writer) error) (bool, error) {
 	if !plan.Valid() {
 		return false, fmt.Errorf("invalid configuration plan: %s", plan.Reason())
 	}
@@ -172,6 +176,9 @@ func (e *editor) reviewAndPublish(plan configuration.Plan, publish func() error)
 		return false, err
 	}
 	if err := configuration.RenderPlanWarningsHuman(e.Output, plan.Warnings()); err != nil {
+		return false, err
+	}
+	if err := preview(e.Output); err != nil {
 		return false, err
 	}
 	var confirm bool

@@ -41,13 +41,11 @@ func (e *editor) runProfileStep() (bool, error) {
 	switch step {
 	case configuration.OnboardingChooseSource:
 		return false, e.chooseProfileSource(flow)
+	case configuration.OnboardingInstructions:
+		return false, e.reviseProfileInstructions(flow)
 	case configuration.OnboardingName, configuration.OnboardingReviewer, configuration.OnboardingModel,
 		configuration.OnboardingEffort, configuration.OnboardingDeadline:
-		field, found := profileFieldSpecs[step]
-		if !found {
-			return true, fmt.Errorf("unknown Profile onboarding field step %q", step)
-		}
-		return false, e.editProfileField(flow, field)
+		return false, e.editProfileField(flow, profileFieldSpecs[step])
 	case configuration.OnboardingValidation:
 		return true, e.validateAndReviewProfile(flow)
 	case configuration.OnboardingReview:
@@ -174,6 +172,16 @@ func (e *editor) maybeEditProfileInstructions(flow *configuration.ProfileOnboard
 		return err
 	}
 	return flow.SetInstructions(configuration.OnboardingText(edited))
+}
+
+func (e *editor) reviseProfileInstructions(flow *configuration.ProfileOnboarding) error {
+	if err := e.maybeEditProfileInstructions(flow, flow.Draft().Instructions); err != nil {
+		return err
+	}
+	if flow.Step() != configuration.OnboardingInstructions {
+		return nil
+	}
+	return flow.ContinueRevision()
 }
 
 func (e *editor) editProfileField(flow *configuration.ProfileOnboarding, spec profileFieldSpec) error {

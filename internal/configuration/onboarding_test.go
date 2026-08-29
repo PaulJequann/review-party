@@ -109,6 +109,8 @@ func TestProfileOnboardingRevisionKeepsUnchangedLaterFields(t *testing.T) {
 	plan, err := flow.Validate("")
 	requireValidOnboardingPlan(t, flow, plan, err)
 	requireOnboardingErrorFree(t, flow.Revise())
+	requireOnboardingStep(t, flow, OnboardingInstructions)
+	requireOnboardingErrorFree(t, flow.ContinueRevision())
 	requireOnboardingErrorFree(t, flow.Set(OnboardingFieldName, "bugs"))
 	draft := flow.Draft()
 	for _, field := range []struct {
@@ -149,6 +151,7 @@ func TestProfileOnboardingRevisionCanEditRetainedLaterField(t *testing.T) {
 		t.Fatal("invalid retained deadline passed validation")
 	}
 	requireOnboardingErrorFree(t, flow.Revise())
+	requireOnboardingErrorFree(t, flow.ContinueRevision())
 	for _, field := range []struct {
 		name  OnboardingField
 		value OnboardingText
@@ -164,6 +167,41 @@ func TestProfileOnboardingRevisionCanEditRetainedLaterField(t *testing.T) {
 	}
 	requireOnboardingErrorFree(t, flow.Set(OnboardingFieldDeadline, "1m"))
 	requireOnboardingStep(t, flow, OnboardingValidation)
+}
+
+func TestProfileOnboardingRevisionCanEditInstructions(t *testing.T) {
+	manager := NewManager(Options{
+		GlobalRoot: t.TempDir(), Reviewers: []string{"grok"},
+		ValidateName: func(string) error { return nil },
+	})
+	flow := completeOnboarding(t, manager)
+	plan, err := flow.Validate("")
+	requireValidOnboardingPlan(t, flow, plan, err)
+	requireOnboardingErrorFree(t, flow.Revise())
+	requireOnboardingErrorFree(t, flow.SetInstructions("Updated instructions.\n"))
+	draft := flow.Draft()
+	if draft.Instructions != "Updated instructions.\n" {
+		t.Fatalf("revised instructions draft = %#v", draft)
+	}
+	if draft.TemplateID != "" {
+		t.Fatalf("revised instructions retained a template = %#v", draft)
+	}
+	for _, field := range []struct {
+		name string
+		got  string
+		want string
+	}{
+		{name: "name", got: draft.Name, want: "bugs"},
+		{name: "reviewer", got: draft.Reviewer, want: "grok"},
+		{name: "model", got: draft.Model, want: "grok-4.6"},
+		{name: "reasoning effort", got: draft.ReasoningEffort, want: "high"},
+		{name: "deadline", got: draft.AttemptDeadline, want: "1m"},
+	} {
+		if field.got != field.want {
+			t.Fatalf("revised executable %s = %q, want %q", field.name, field.got, field.want)
+		}
+	}
+	requireOnboardingStep(t, flow, OnboardingName)
 }
 
 func TestProfileOnboardingCancellationRetainsDraftWithoutWriting(t *testing.T) {
