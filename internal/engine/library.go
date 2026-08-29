@@ -35,38 +35,48 @@ type resolvedProfile struct {
 	effective    configuration.Effective
 }
 
-func (conductor *Conductor) compileProfile(selection model.ProfileSelection, resolved resolvedProfile) (compiledProfile, error) {
-	reviewers := applyEffectiveReviewerPolicies(conductor.reviewers, resolved.effective)
-	reviewerWasDefault := selection.Reviewer == ""
-	selection.Profile = resolved.name
+func (conductor *Conductor) compileProfile(request profileCompileRequest) (compiledProfile, error) {
+	profile := request.profile
+	selection := request.selection
+	selection.Profile = profile.Name
 	if selection.Reviewer == "" {
-		selection.Reviewer = resolved.reviewer
+		selection.Reviewer = profile.Reviewer
 	}
-	definition, err := profileDefinitionFor(resolved)
+	if selection.Model == "" {
+		selection.Model = profile.Model
+	}
+	if selection.Effort == "" {
+		selection.Effort = profile.ReasoningEffort
+	}
+	definition, err := profileDefinitionFor(profile)
 	if err != nil {
 		return compiledProfile{}, err
 	}
-	profile, err := compileProfileDefinition(reviewers, selection, resolved.deadline, definition)
+	compiled, err := compileProfileDefinition(applyEffectiveReviewerPolicies(conductor.reviewers, request.effective), selection, request.deadline, definition)
 	if err != nil {
 		return compiledProfile{}, err
 	}
-	profile.revision.Source = resolved.source
-	profile.revision.SourceDigest = resolved.digest
-	profile.revision.CompilerRevision = profileCompilerRevision
-	profile.revision.Revision = profileRevisionIdentity(profile.revision)
-	profile.snapshot = model.ProfileSnapshot{Name: resolved.name, Source: resolved.source, SourceDigest: resolved.digest, Instructions: resolved.instructions}
-	profile.reviewerWasDefault = reviewerWasDefault
-	profile.buildPrompt = func(subject model.ReviewSubject) string { return renderReviewPrompt(resolved, subject) }
-	return profile, nil
+	compiled.revision.AttemptLimit = request.attemptLimit
+	if compiled.revision.AttemptLimit == 0 {
+		compiled.revision.AttemptLimit = 1
+	}
+	compiled.revision.Source = profile.Source
+	compiled.revision.SourceDigest = profile.SourceDigest
+	compiled.revision.CompilerRevision = profileCompilerRevision
+	compiled.revision.Revision = profileRevisionIdentity(compiled.revision)
+	compiled.snapshot = model.ProfileSnapshot{Name: profile.Name, Source: profile.Source, SourceDigest: profile.SourceDigest, Instructions: profile.Instructions}
+	compiled.reviewerWasDefault = request.selection.Reviewer == ""
+	compiled.buildPrompt = func(subject model.ReviewSubject) string { return renderReviewPrompt(compiled.snapshot, subject) }
+	return compiled, nil
 }
 
-func profileDefinitionFor(profile resolvedProfile) (profileDefinition, error) {
+func profileDefinitionFor(profile configuration.Profile) (profileDefinition, error) {
 	return profileDefinition{
-		name:                 profile.name,
+		name:                 profile.Name,
 		description:          "User-defined review Profile",
 		purpose:              "Apply the authored review instructions to the Review Subject.",
 		materialityThreshold: "A concrete actionable issue under the authored Profile instructions.",
-		pass:                 model.ReviewPassRevision{Name: filesystemPassName(profile.name), Required: true, Purpose: "Apply the authored Profile.", PromptRevision: profileCompilerRevision + ":" + profile.digest},
+		pass:                 model.ReviewPassRevision{Name: filesystemPassName(profile.Name), Required: true, Purpose: "Apply the authored Profile.", PromptRevision: profileCompilerRevision + ":" + profile.SourceDigest},
 		requiredCapabilities: restrictedReviewCapabilities(),
 	}, nil
 }
@@ -91,7 +101,7 @@ func (conductor *Conductor) profileSummaries(repository string) ([]model.Profile
 	for _, definition := range inventory {
 		summary := profileInventorySummary(definition)
 		if definition.Err == nil {
-			summaryProfile(conductor.reviewers, effective, definition.Value, &summary)
+			summaryProfile(conductor, effective, definition.Value, &summary)
 		}
 		summaries = append(summaries, summary)
 	}
@@ -99,29 +109,24 @@ func (conductor *Conductor) profileSummaries(repository string) ([]model.Profile
 	return summaries, nil
 }
 
-func summaryProfile(reviewers reviewerCatalog, effective configuration.Effective, profile configuration.Profile, summary *model.ProfileSummary) {
-	resolved, err := resolvedFromProfile(profile, effective)
+func summaryProfile(conductor *Conductor, effective configuration.Effective, profile configuration.Profile, summary *model.ProfileSummary) {
+	deadline, err := time.ParseDuration(profile.AttemptDeadline)
 	if err != nil {
 		summary.Error = err.Error()
 		return
 	}
-	definition, err := profileDefinitionFor(resolved)
+	compiled, err := conductor.compileProfile(profileCompileRequest{profile: profile, effective: effective, deadline: deadline})
 	if err != nil {
 		summary.Error = err.Error()
 		return
 	}
-	registration, err := applyEffectiveReviewerPolicies(reviewers, effective).resolve(resolved.reviewer)
-	if err != nil {
-		summary.Error = err.Error()
-		return
-	}
-	summary.Description = definition.description
-	summary.DefaultReviewer = registration.candidate.provenance()
-	summary.Passes = []model.ReviewPassRevision{definition.pass}
-	summary.RequiredCapabilities = canonicalCapabilities(definition.requiredCapabilities)
+	summary.Description = compiled.revision.Description
+	summary.DefaultReviewer = compiled.revision.Reviewer
+	summary.Passes = compiled.revision.Passes
+	summary.RequiredCapabilities = compiled.revision.RequiredCapabilities
 }
 
-func renderReviewPrompt(profile resolvedProfile, subject model.ReviewSubject) string {
+func renderReviewPrompt(profile model.ProfileSnapshot, subject model.ReviewSubject) string {
 	return fmt.Sprintf(`%s
 
 Use repository-scoped read and search tools only. Do not use shell, terminal,
@@ -143,5 +148,5 @@ Changed paths:
 %s
 
 --- PATCH ---
-%s`, profile.instructions, result.CanonicalReviewResultContract.Instructions(), subject.Identity, joinLines(subject.ChangedPaths), subject.Patch)
+%s`, profile.Instructions, result.CanonicalReviewResultContract.Instructions(), subject.Identity, joinLines(subject.ChangedPaths), subject.Patch)
 }

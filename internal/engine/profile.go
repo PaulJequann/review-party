@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"reviewparty/internal/configuration"
 	"reviewparty/internal/model"
 	"reviewparty/internal/result"
 	"sort"
@@ -19,6 +20,14 @@ type compiledProfile struct {
 	deadline           time.Duration
 	reviewerWasDefault bool
 	buildPrompt        func(model.ReviewSubject) string
+}
+
+type profileCompileRequest struct {
+	profile      configuration.Profile
+	effective    configuration.Effective
+	selection    model.ProfileSelection
+	deadline     time.Duration
+	attemptLimit int
 }
 
 type profileDefinition struct {
