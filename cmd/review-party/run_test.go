@@ -13,6 +13,7 @@ import (
 
 type fakeRunConductor struct {
 	record       model.ReviewRecord
+	runBundle    model.ReviewBundle
 	profileCalls int
 	runCalls     int
 }
@@ -28,6 +29,9 @@ func (conductor *fakeRunConductor) ReviewExplicitProfile(context.Context, model.
 
 func (conductor *fakeRunConductor) Run(context.Context, model.RunSelection) (model.ReviewBundle, error) {
 	conductor.runCalls++
+	if conductor.runBundle.ID != "" {
+		return conductor.runBundle, nil
+	}
 	return model.ReviewBundle{ID: "rb_unexpected"}, nil
 }
 
