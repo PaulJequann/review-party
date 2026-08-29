@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"reviewparty/internal/model"
+	"reviewparty/internal/store"
 )
 
 func TestPrintBundlePreservesHumanPresentation(t *testing.T) {
@@ -59,18 +61,34 @@ func TestExecuteRunReturnsUsageExitForIncompleteBundle(t *testing.T) {
 }
 
 func TestInspectDispatchesBundleIDsToBundleInspection(t *testing.T) {
-	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	stateHome := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", stateHome)
 	repository := testGitRepository(t)
 	var initOut, initErr bytes.Buffer
 	if exit := run(context.Background(), []string{"init", "--repo", repository}, &initOut, &initErr); exit != 0 {
 		t.Fatalf("init exit = %d, stderr = %q", exit, initErr.String())
 	}
-	var stdout, stderr bytes.Buffer
-	exit := executeInspect(context.Background(), inspectOptions{id: "rb_missing", format: "json"}, &stdout, &stderr)
-	if exit == 0 {
-		t.Fatal("missing Bundle inspection returned success")
+	bundle := model.ReviewBundle{ID: "rb_dispatch", Lifecycle: model.LifecycleCompleted}
+	ledger, err := store.NewLedgerRecordStore(filepath.Join(stateHome, "review-party"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	if stderr.Len() == 0 {
-		t.Fatal("Bundle inspection failure produced no diagnostic")
+	if err := ledger.CreateReviewBundle(bundle); err != nil {
+		t.Fatal(err)
+	}
+	if err := ledger.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	exit := executeInspect(context.Background(), inspectOptions{id: model.ReviewID(bundle.ID), format: "json"}, &stdout, &stderr)
+	if exit != 0 {
+		t.Fatalf("Bundle inspection exit = %d, stderr = %q", exit, stderr.String())
+	}
+	var inspected model.ReviewBundle
+	if err := json.Unmarshal(stdout.Bytes(), &inspected); err != nil {
+		t.Fatal(err)
+	}
+	if inspected.ID != bundle.ID || inspected.Lifecycle != bundle.Lifecycle {
+		t.Fatalf("inspected = %#v, want %#v", inspected, bundle)
 	}
 }
