@@ -192,7 +192,9 @@ func newCodexSession(ctx context.Context, capture *codexCapture) (codexSession, 
 	}
 	stdout, err := process.StdoutPipe()
 	if err != nil {
-		_ = stdin.Close()
+		if closeErr := stdin.Close(); closeErr != nil {
+			err = errors.Join(err, closeErr)
+		}
 		return nil, err
 	}
 	process.Stderr = capture
@@ -364,7 +366,9 @@ type codexCapture struct {
 func (capture *codexCapture) Write(value []byte) (int, error) {
 	allowed := capture.reserve(len(value))
 	if allowed > 0 {
-		capture.stderr.Write(value[:allowed])
+		if _, err := capture.stderr.Write(value[:allowed]); err != nil {
+			return 0, err
+		}
 	}
 	return len(value), nil
 }

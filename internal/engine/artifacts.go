@@ -1,8 +1,9 @@
 package engine
 
-import "reviewparty/internal/artifact"
-
 import (
+	"errors"
+
+	"reviewparty/internal/artifact"
 	"reviewparty/internal/model"
 )
 
@@ -33,21 +34,23 @@ func (publisher *artifactPublisher) publishAttemptArtifacts(id model.ReviewID, n
 		contents := boundedArtifactContents(input.contents)
 		reference, err := publisher.store.Publish(id, number, input.kind, contents, input.truncated)
 		if err != nil {
-			publisher.removeArtifacts(references)
-			return nil, err
+			cleanupErr := publisher.removeArtifacts(references)
+			return nil, errors.Join(err, cleanupErr)
 		}
 		references = append(references, reference)
 	}
 	return references, nil
 }
 
-func (publisher *artifactPublisher) removeArtifacts(references []model.ArtifactReference) {
+func (publisher *artifactPublisher) removeArtifacts(references []model.ArtifactReference) error {
 	if publisher.store == nil {
-		return
+		return nil
 	}
+	var cleanupErr error
 	for _, reference := range references {
-		_ = publisher.store.Remove(reference)
+		cleanupErr = errors.Join(cleanupErr, publisher.store.Remove(reference))
 	}
+	return cleanupErr
 }
 
 func (publisher *artifactPublisher) verifyArtifacts(record model.ReviewRecord) error {

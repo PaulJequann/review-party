@@ -53,6 +53,8 @@ func (check ModelChoiceCheck) Warning(reviewer, model string) string {
 		return ""
 	case ModelChoicesUnavailable:
 		return "model choice could not be checked against configured choices"
+	case ModelChoicesUnknown:
+		return fmt.Sprintf("model %q was not reported by cached, configured, or packaged choices for Reviewer %q; confirm it explicitly", model, reviewer)
 	}
-	return fmt.Sprintf("model %q was not reported by cached, configured, or packaged choices for Reviewer %q; confirm it explicitly", model, reviewer)
+	return ""
 }

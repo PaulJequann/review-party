@@ -213,7 +213,9 @@ func (service *Service) saveCachedResult(reviewer string, result Result) {
 		if newerCacheExists(current, found, err, cached.ObservedAt) {
 			return
 		}
-		_ = service.cache.Save(reviewer, cached)
+		if err := service.cache.Save(reviewer, cached); err != nil {
+			return
+		}
 	}()
 }
 

@@ -62,8 +62,10 @@ func (conductor *Conductor) executeBundleConcurrent(ctx context.Context, ledger 
 	launched, launchErr := conductor.launchBundleMembers(runContext, prepared, results)
 	if launchErr != nil {
 		cancel()
-		bundle = conductor.absorbPendingBundleResults(ledger, bundle, results, launched)
-		return conductor.stopBundle(ledger, &bundle, evalFailureCategory(launchErr), launchErr)
+		var absorbErr error
+		bundle, absorbErr = conductor.absorbPendingBundleResults(ledger, bundle, results, launched)
+		cause := errors.Join(launchErr, absorbErr)
+		return conductor.stopBundle(ledger, &bundle, evalFailureCategory(cause), cause)
 	}
 	consumed := 0
 	for consumed < launched {
@@ -73,8 +75,10 @@ func (conductor *Conductor) executeBundleConcurrent(ctx context.Context, ledger 
 		bundle = next
 		if hardErr != nil {
 			cancel()
-			bundle = conductor.absorbPendingBundleResults(ledger, bundle, results, launched-consumed)
-			return conductor.stopBundle(ledger, &bundle, evalFailureCategory(hardErr), hardErr)
+			var absorbErr error
+			bundle, absorbErr = conductor.absorbPendingBundleResults(ledger, bundle, results, launched-consumed)
+			cause := errors.Join(hardErr, absorbErr)
+			return conductor.stopBundle(ledger, &bundle, evalFailureCategory(cause), cause)
 		}
 	}
 	return conductor.finalizeBundle(ledger, bundle)
@@ -98,13 +102,15 @@ func (conductor *Conductor) launchBundleMembers(ctx context.Context, prepared pr
 // absorbPendingBundleResults drains results of members that were already
 // launched when a hard stop happened, so every persisted child Review stays
 // linked in the bundle instead of being orphaned as a pending member.
-func (conductor *Conductor) absorbPendingBundleResults(ledger store.BundleStore, bundle model.ReviewBundle, results chan concurrentMemberResult, pending int) model.ReviewBundle {
+func (conductor *Conductor) absorbPendingBundleResults(ledger store.BundleStore, bundle model.ReviewBundle, results chan concurrentMemberResult, pending int) (model.ReviewBundle, error) {
+	var absorbErr error
 	for drained := 0; drained < pending; drained++ {
 		result := <-results
-		next, _ := conductor.absorbBundleMember(ledger, bundle, result)
+		next, err := conductor.absorbBundleMember(ledger, bundle, result)
 		bundle = next
+		absorbErr = errors.Join(absorbErr, err)
 	}
-	return bundle
+	return bundle, absorbErr
 }
 
 // absorbBundleMember records one terminal member outcome on the bundle. A child

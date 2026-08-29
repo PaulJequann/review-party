@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 
 	"github.com/spf13/cobra"
@@ -51,8 +50,8 @@ the saved selection for this one run and never changes configuration.`,
 	}
 	cmd.Flags().String("profile", "", "Run exactly this Profile instead of the saved selection; prefix global: or repository: for an exact scope")
 	cmd.Flags().String("party", "", "Run exactly this Party instead of the saved selection; prefix global: or repository: for an exact scope")
-	_ = cmd.RegisterFlagCompletionFunc("profile", completeProfileNames)
-	_ = cmd.RegisterFlagCompletionFunc("party", completePartyNames)
+	cmd.RegisterFlagCompletionFunc("profile", completeProfileNames) //nolint:errcheck // Cobra completion registration is best-effort
+	cmd.RegisterFlagCompletionFunc("party", completePartyNames)     //nolint:errcheck // Cobra completion registration is best-effort
 	cmd.MarkFlagsMutuallyExclusive("profile", "party")
 	addReviewFlags(cmd)
 	return cmd
@@ -70,8 +69,7 @@ type runOptions struct {
 func executeRun(ctx context.Context, options runOptions, stdout, stderr io.Writer) int {
 	conductor, err := engine.New(engine.Config{UserConfigurationPath: options.configuration})
 	if err != nil {
-		fmt.Fprintf(stderr, "review-party: %v\n", err)
-		return 1
+		return printFailure(stderr, err)
 	}
 	return executeRunWithConductor(ctx, conductor, options, commandIO{output: stdout, errors: stderr})
 }
@@ -91,12 +89,10 @@ func executeRunWithConductor(ctx context.Context, conductor runConductor, option
 	if options.profile != "" {
 		record, err := conductor.ReviewExplicitProfile(ctx, selection)
 		if err != nil {
-			fmt.Fprintf(streams.errors, "review-party: %v\n", err)
-			return 1
+			return printFailure(streams.errors, err)
 		}
 		if err := printRecordWithConfiguration(streams.output, record, options.format, options.configuration); err != nil {
-			fmt.Fprintf(streams.errors, "review-party: %v\n", err)
-			return 1
+			return printFailure(streams.errors, err)
 		}
 		if record.Lifecycle == model.LifecycleIncomplete {
 			return usageExitCode
@@ -105,12 +101,10 @@ func executeRunWithConductor(ctx context.Context, conductor runConductor, option
 	}
 	bundle, err := conductor.Run(ctx, selection)
 	if err != nil {
-		fmt.Fprintf(streams.errors, "review-party: %v\n", err)
-		return 1
+		return printFailure(streams.errors, err)
 	}
 	if err := printBundle(streams.output, bundle, options.format); err != nil {
-		fmt.Fprintf(streams.errors, "review-party: %v\n", err)
-		return 1
+		return printFailure(streams.errors, err)
 	}
 	if bundle.Lifecycle == model.LifecycleIncomplete {
 		return usageExitCode

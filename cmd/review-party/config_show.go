@@ -2,8 +2,6 @@ package main
 
 import (
 	"errors"
-	"fmt"
-	"io"
 	"sort"
 
 	"reviewparty/internal/configuration"
@@ -41,7 +39,11 @@ func executeConfigurationShow(options configurationFileOptions, streams commandI
 			}
 			return 0, nil
 		}
-		printHumanConfigurationShow(streams.output, report)
+		if err := writeCommandOutput(streams.output, func(output *commandOutput) {
+			printHumanConfigurationShow(output, report)
+		}); err != nil {
+			return 0, err
+		}
 		return 0, nil
 	})
 }
@@ -83,33 +85,33 @@ func effectiveConfigurationViewOf(effective configuration.Effective) effectiveCo
 	return report
 }
 
-func printHumanConfigurationShow(output io.Writer, report configurationShowReport) {
-	fmt.Fprintf(output, "repository: %s\n", report.Repository)
+func printHumanConfigurationShow(output *commandOutput, report configurationShowReport) {
+	output.write("repository: %s\n", report.Repository)
 	printHumanValue(output, "default reviewer", report.Effective.DefaultReviewer)
 	printHumanValue(output, "state directory", report.Effective.StateDirectory)
 	for _, id := range sortedReviewerReportIDs(report.Effective.Reviewers) {
 		settings := report.Effective.Reviewers[id]
-		fmt.Fprintf(output, "reviewer: %s\n", id)
+		output.write("reviewer: %s\n", id)
 		printHumanValue(output, "  enabled", settings.Enabled)
 		printHumanValue(output, "  model", settings.Model)
 		printHumanValue(output, "  allowed models", settings.AllowedModels)
 	}
 	if report.Reviews == nil {
-		fmt.Fprintf(output, "reviews: unavailable (%s)\n", report.SelectionError)
+		output.write("reviews: unavailable (%s)\n", report.SelectionError)
 		return
 	}
-	fmt.Fprintf(output, "reviews: %s, limit %d (%s)\n", report.Reviews.Kind, report.Reviews.ConcurrencyLimit, report.Reviews.LimitSource)
+	output.write("reviews: %s, limit %d (%s)\n", report.Reviews.Kind, report.Reviews.ConcurrencyLimit, report.Reviews.LimitSource)
 	for _, authored := range report.Reviews.Authored {
-		fmt.Fprintf(output, "  selected: %s:%s\n", authored.Scope, authored.Name)
+		output.write("  selected: %s:%s\n", authored.Scope, authored.Name)
 	}
 	for _, expanded := range report.Reviews.Expanded {
-		fmt.Fprintf(output, "  run: %s:%s (%s)\n", expanded.Scope, expanded.Profile, expanded.Origin)
+		output.write("  run: %s:%s (%s)\n", expanded.Scope, expanded.Profile, expanded.Origin)
 	}
 	for _, duplicate := range report.Reviews.Deduplicated {
-		fmt.Fprintf(output, "  deduplicated: %s:%s (%s, kept %s)\n", duplicate.Scope, duplicate.Profile, duplicate.Origin, duplicate.KeptOrigin)
+		output.write("  deduplicated: %s:%s (%s, kept %s)\n", duplicate.Scope, duplicate.Profile, duplicate.Origin, duplicate.KeptOrigin)
 	}
 	for _, warning := range report.Reviews.Warnings {
-		fmt.Fprintf(output, "  warning: %s\n", warning.Message)
+		output.write("  warning: %s\n", warning.Message)
 	}
 }
 
@@ -152,7 +154,11 @@ func printMissingConfigurationFile(manager *configuration.Manager, scope configu
 		}
 		return 0
 	}
-	fmt.Fprintf(streams.output, "%s Configuration is not authored at %s\n", scope, path)
+	if err := writeCommandOutput(streams.output, func(output *commandOutput) {
+		output.write("%s Configuration is not authored at %s\n", scope, path)
+	}); err != nil {
+		return printConfigFailure(options.format, streams.output, streams.errors, err)
+	}
 	return 0
 }
 
@@ -161,7 +167,11 @@ func printAuthoredPayload(file configuration.AuthoredFile, streams commandIO) in
 		return printFailure(streams.errors, err)
 	}
 	if !file.HasTrailingNewline() {
-		_, _ = io.WriteString(streams.output, "\n")
+		if err := writeCommandOutput(streams.output, func(output *commandOutput) {
+			output.write("\n")
+		}); err != nil {
+			return printFailure(streams.errors, err)
+		}
 	}
 	return 0
 }

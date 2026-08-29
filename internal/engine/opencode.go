@@ -1,11 +1,7 @@
 package engine
 
 import (
-	"bufio"
-	"bytes"
 	"context"
-	"encoding/json"
-	"fmt"
 	"os/exec"
 	"strings"
 )
@@ -86,22 +82,12 @@ type openCodeEvent struct {
 }
 
 func decodeOpenCodeOutput(output []byte) (decodedOpenCodeOutput, error) {
-	scanner := bufio.NewScanner(bytes.NewReader(output))
-	scanner.Buffer(make([]byte, 64*1024), 2*1024*1024)
 	var decoded decodedOpenCodeOutput
 	var text strings.Builder
-	for scanner.Scan() {
-		if strings.TrimSpace(scanner.Text()) == "" {
-			continue
-		}
-		var event openCodeEvent
-		if err := json.Unmarshal(scanner.Bytes(), &event); err != nil {
-			return decodedOpenCodeOutput{}, fmt.Errorf("decode opencode event: %w", err)
-		}
+	if err := scanJSONLines[openCodeEvent](output, "opencode", func(event openCodeEvent) {
 		applyOpenCodeEvent(&decoded, &text, event)
-	}
-	if err := scanner.Err(); err != nil {
-		return decodedOpenCodeOutput{}, fmt.Errorf("scan opencode output: %w", err)
+	}); err != nil {
+		return decodedOpenCodeOutput{}, err
 	}
 	decoded.assistantText = text.String()
 	return decoded, nil

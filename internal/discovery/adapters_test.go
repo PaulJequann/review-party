@@ -243,17 +243,29 @@ func (session *testCodexSession) Stdin() io.WriteCloser { return session.stdin }
 func (session *testCodexSession) Stdout() io.ReadCloser { return session.stdout }
 func (session *testCodexSession) Close() {
 	session.closed = true
-	_ = session.stdin.Close()
-	_ = session.stdout.Close()
+	if err := session.stdin.Close(); err != nil {
+		return
+	}
+	if err := session.stdout.Close(); err != nil {
+		return
+	}
 }
 
 func TestCodexCaptureUsesOneAggregateBudget(t *testing.T) {
 	cancelled := false
 	capture := &codexCapture{boundedCapture: boundedCapture{limit: 4, cancel: func() { cancelled = true }}}
-	if got, _ := capture.Write([]byte("abc")); got != 3 {
+	got, err := capture.Write([]byte("abc"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != 3 {
 		t.Fatalf("first write = %d, want 3", got)
 	}
-	if got, _ := capture.Write([]byte("def")); got != 3 {
+	got, err = capture.Write([]byte("def"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != 3 {
 		t.Fatalf("second write = %d, want 3", got)
 	}
 	if capture.stderr.String() != "abcd" {
@@ -269,7 +281,11 @@ func TestCodexCaptureUsesOneAggregateBudget(t *testing.T) {
 
 func TestCodexRPCReadHonorsContextCancellation(t *testing.T) {
 	reader, writer := io.Pipe()
-	defer reader.Close()
+	defer func() {
+		if err := reader.Close(); err != nil {
+			t.Errorf("close reader: %v", err)
+		}
+	}()
 	capture := &codexCapture{boundedCapture: boundedCapture{limit: maxCaptureBytes}}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
@@ -281,7 +297,9 @@ func TestCodexRPCReadHonorsContextCancellation(t *testing.T) {
 	if elapsed := time.Since(started); elapsed > time.Second {
 		t.Fatalf("context-aware RPC read took %s", elapsed)
 	}
-	_ = writer.Close()
+	if err := writer.Close(); err != nil && !errors.Is(err, io.ErrClosedPipe) {
+		t.Errorf("close writer: %v", err)
+	}
 }
 
 func TestCommandDiagnosticDoesNotExposeHarnessSecrets(t *testing.T) {

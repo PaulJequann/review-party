@@ -1,3 +1,4 @@
+// Package model defines Review Party domain types.
 package model
 
 import "time"

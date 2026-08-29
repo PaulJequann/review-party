@@ -40,12 +40,14 @@ func validateStateDirectory(directory string) error {
 	return nil
 }
 
-func validateExistingLedger(path string) error {
+func validateExistingLedger(path string) (returnErr error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return fmt.Errorf("open review ledger %q: %w", path, err)
 	}
-	defer file.Close()
+	defer func() {
+		returnErr = errors.Join(returnErr, file.Close())
+	}()
 	header := make([]byte, 16)
 	if _, err := io.ReadFull(file, header); err != nil {
 		return fmt.Errorf("review ledger %q is corrupt: %w", path, err)

@@ -27,7 +27,6 @@ type resolvedProfile struct {
 	name         string
 	instructions string
 	source       string
-	path         string
 	digest       string
 	reviewer     string
 	model        string
@@ -106,7 +105,11 @@ func summaryProfile(reviewers reviewerCatalog, effective configuration.Effective
 		summary.Error = err.Error()
 		return
 	}
-	definition, _ := profileDefinitionFor(resolved)
+	definition, err := profileDefinitionFor(resolved)
+	if err != nil {
+		summary.Error = err.Error()
+		return
+	}
 	registration, err := applyEffectiveReviewerPolicies(reviewers, effective).resolve(resolved.reviewer)
 	if err != nil {
 		summary.Error = err.Error()

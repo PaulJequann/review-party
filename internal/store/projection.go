@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reviewparty/internal/model"
 	"time"
@@ -14,7 +15,7 @@ type reviewRecordProjection struct {
 	db *sql.DB
 }
 
-func (p reviewRecordProjection) save(record model.ReviewRecord) error {
+func (p reviewRecordProjection) save(record model.ReviewRecord) (returnErr error) {
 	if record.SchemaVersion != model.CurrentReviewRecordSchemaVersion {
 		return fmt.Errorf("save review record schema %d: current schema is %d", record.SchemaVersion, model.CurrentReviewRecordSchemaVersion)
 	}
@@ -22,7 +23,9 @@ func (p reviewRecordProjection) save(record model.ReviewRecord) error {
 	if err != nil {
 		return fmt.Errorf("begin review ledger write: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() {
+		returnErr = errors.Join(returnErr, rollbackTransaction(tx))
+	}()
 	if err := writeReviewAggregate(tx, record); err != nil {
 		return err
 	}
@@ -235,12 +238,14 @@ func decodeProjectionValue(payload []byte, target any) error {
 	return nil
 }
 
-func (p reviewRecordProjection) loadPasses(record *model.ReviewRecord) error {
+func (p reviewRecordProjection) loadPasses(record *model.ReviewRecord) (returnErr error) {
 	rows, err := p.db.Query("SELECT ordinal,name,required FROM passes WHERE review_id=? ORDER BY ordinal", record.ID)
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() {
+		returnErr = errors.Join(returnErr, rows.Close())
+	}()
 	for rows.Next() {
 		var ordinal int
 		var pass model.PassRecord
@@ -257,13 +262,15 @@ func (p reviewRecordProjection) loadPasses(record *model.ReviewRecord) error {
 	return rows.Err()
 }
 
-func (p reviewRecordProjection) loadAttempts(id model.ReviewID, passOrdinal int) ([]model.AttemptRecord, error) {
+func (p reviewRecordProjection) loadAttempts(id model.ReviewID, passOrdinal int) (attempts []model.AttemptRecord, returnErr error) {
 	rows, err := p.db.Query("SELECT ordinal,number,outcome,provenance,diagnostic,raw_output,retry_after_ms,started_at,completed_at FROM attempts WHERE review_id=? AND pass_ordinal=? ORDER BY ordinal", id, passOrdinal)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	attempts := []model.AttemptRecord{}
+	defer func() {
+		returnErr = errors.Join(returnErr, rows.Close())
+	}()
+	attempts = []model.AttemptRecord{}
 	for rows.Next() {
 		var ordinal int
 		var attempt model.AttemptRecord
@@ -284,13 +291,14 @@ func (p reviewRecordProjection) loadAttempts(id model.ReviewID, passOrdinal int)
 	return attempts, rows.Err()
 }
 
-func (p reviewRecordProjection) loadArtifacts(id model.ReviewID, passOrdinal, attemptOrdinal int) ([]model.ArtifactReference, error) {
+func (p reviewRecordProjection) loadArtifacts(id model.ReviewID, passOrdinal, attemptOrdinal int) (artifacts []model.ArtifactReference, returnErr error) {
 	rows, err := p.db.Query("SELECT kind,path,size,digest,truncated FROM artifacts WHERE review_id=? AND pass_ordinal=? AND attempt_ordinal=? ORDER BY ordinal", id, passOrdinal, attemptOrdinal)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var artifacts []model.ArtifactReference
+	defer func() {
+		returnErr = errors.Join(returnErr, rows.Close())
+	}()
 	for rows.Next() {
 		var artifact model.ArtifactReference
 		if err := rows.Scan(&artifact.Kind, &artifact.Path, &artifact.Size, &artifact.Digest, &artifact.Truncated); err != nil {
@@ -301,12 +309,14 @@ func (p reviewRecordProjection) loadArtifacts(id model.ReviewID, passOrdinal, at
 	return artifacts, rows.Err()
 }
 
-func (p reviewRecordProjection) loadFindings(id model.ReviewID, result *model.ReviewResult) error {
+func (p reviewRecordProjection) loadFindings(id model.ReviewID, result *model.ReviewResult) (returnErr error) {
 	rows, err := p.db.Query("SELECT ordinal,severity,category,location,failure,evidence,fix,test FROM findings WHERE review_id=? ORDER BY ordinal", id)
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() {
+		returnErr = errors.Join(returnErr, rows.Close())
+	}()
 	for rows.Next() {
 		var finding model.Finding
 		if err := rows.Scan(&finding.Ordinal, &finding.Severity, &finding.Category, &finding.Location, &finding.Failure, &finding.Evidence, &finding.Fix, &finding.Test); err != nil {

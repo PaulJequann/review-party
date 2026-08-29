@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"io"
 
 	"reviewparty/internal/engine"
@@ -21,22 +20,25 @@ func executeInit(options initOptions, stdout, stderr io.Writer) int {
 		UseDefaultConfiguration: options.configuration == defaultUserConfigurationPath(),
 	})
 	if err != nil {
-		fmt.Fprintf(stderr, "review-party: %v\n", err)
-		return 1
+		return printFailure(stderr, err)
 	}
-	printInitialization(stdout, result)
+	if err := printInitialization(stdout, result); err != nil {
+		return printFailure(stderr, err)
+	}
 	return 0
 }
 
-func printInitialization(output io.Writer, result engine.ReviewPartyInitializationResult) {
-	fmt.Fprintf(output, "Review Party is ready for %s.\n", result.Repository)
-	if result.AdvancedState {
-		fmt.Fprintf(output, "Advanced state location: %s\n", result.StateDirectory)
-	} else {
-		fmt.Fprintln(output, "State is managed automatically.")
-	}
-	if result.AlreadyReady {
-		fmt.Fprintln(output, "Existing state was kept unchanged.")
-	}
-	fmt.Fprintf(output, "Next: configure a saved Review Profile for %s.\n", result.Repository)
+func printInitialization(output io.Writer, result engine.ReviewPartyInitializationResult) error {
+	return writeCommandOutput(output, func(output *commandOutput) {
+		output.write("Review Party is ready for %s.\n", result.Repository)
+		if result.AdvancedState {
+			output.write("Advanced state location: %s\n", result.StateDirectory)
+		} else {
+			output.write("State is managed automatically.\n")
+		}
+		if result.AlreadyReady {
+			output.write("Existing state was kept unchanged.\n")
+		}
+		output.write("Next: configure a saved Review Profile for %s.\n", result.Repository)
+	})
 }

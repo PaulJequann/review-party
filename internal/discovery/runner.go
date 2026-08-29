@@ -66,7 +66,12 @@ func startProcessSession(process *exec.Cmd, resources ...io.Closer) (*processSes
 
 func closeProcessResources(resources []io.Closer) {
 	for _, resource := range resources {
-		_ = resource.Close()
+		if resource == nil {
+			continue
+		}
+		if err := resource.Close(); err != nil {
+			continue
+		}
 	}
 }
 
@@ -77,7 +82,9 @@ func (session *processSession) Stop() error {
 func (session *processSession) Close() {
 	session.closeOnce.Do(func() {
 		closeProcessResources(session.resources)
-		_ = session.Stop()
+		if err := session.Stop(); err != nil {
+			return
+		}
 	})
 }
 
@@ -236,7 +243,9 @@ type boundedStream struct {
 func (stream *boundedStream) Write(value []byte) (int, error) {
 	allowed := stream.output.reserve(len(value))
 	if allowed > 0 {
-		stream.target.Write(value[:allowed])
+		if _, err := stream.target.Write(value[:allowed]); err != nil {
+			return 0, err
+		}
 	}
 	return len(value), nil
 }

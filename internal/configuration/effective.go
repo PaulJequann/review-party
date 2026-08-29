@@ -228,6 +228,8 @@ func (settings *ReviewerSettings) applyAllowedModels(models []string, origin val
 
 func sourceFor(scope Scope) Source {
 	switch scope {
+	case ScopeGlobal:
+		return SourceGlobal
 	case ScopeRepository:
 		return SourceRepository
 	default:

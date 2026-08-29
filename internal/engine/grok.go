@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -33,7 +34,7 @@ func (grokAdapter) Prepare(spec attemptSpec) (preparedAttempt, error) {
 	command := exec.Command(arguments[0], arguments[1:]...)
 	command.Dir = spec.Repository
 	command.Env = reviewerEnvironment(spec.Candidate.ID)
-	return preparedAttempt{command: command, cleanup: func() { _ = os.Remove(promptPath) }}, nil
+	return preparedAttempt{command: command, cleanup: func() error { return os.Remove(promptPath) }}, nil
 }
 
 func (grokAdapter) Decode(output []byte) (decodedHarnessOutput, error) {
@@ -99,13 +100,10 @@ func writePromptFile(prompt string) (string, error) {
 	}
 	path := file.Name()
 	if _, err := file.WriteString(prompt); err != nil {
-		file.Close()
-		os.Remove(path)
-		return "", fmt.Errorf("write grok prompt file: %w", err)
+		return "", errors.Join(fmt.Errorf("write grok prompt file: %w", err), file.Close(), os.Remove(path))
 	}
 	if err := file.Close(); err != nil {
-		os.Remove(path)
-		return "", fmt.Errorf("close grok prompt file: %w", err)
+		return "", errors.Join(fmt.Errorf("close grok prompt file: %w", err), os.Remove(path))
 	}
 	return path, nil
 }

@@ -36,21 +36,6 @@ func (failure ReviewerModelNotAllowedError) Error() string {
 	return fmt.Sprintf("model %q is not allowed for reviewer %q; expected %v", failure.Model, failure.Reviewer, failure.Allowed)
 }
 
-// configureReviewerCatalog applies Effective Configuration to the packaged
-// reviewer catalog and validates the effective default.
-func configureReviewerCatalog(catalog reviewerCatalog, effective configuration.Effective) (reviewerCatalog, error) {
-	configured := applyEffectiveReviewerPolicies(catalog, effective)
-	if effective.DefaultReviewer.Authored {
-		if err := applyDefaultReviewer(&configured, effective.DefaultReviewer.Value); err != nil {
-			return reviewerCatalog{}, InvalidConfigurationError{Path: effective.DefaultReviewer.Path, Reason: err.Error()}
-		}
-	}
-	if err := validateEffectiveDefault(configured); err != nil {
-		return reviewerCatalog{}, InvalidConfigurationError{Path: effective.DefaultReviewer.Path, Reason: err.Error()}
-	}
-	return configured, nil
-}
-
 // applyEffectiveReviewerPolicies applies validated repository and Global
 // reviewer settings without requiring the caller to know their precedence.
 func applyEffectiveReviewerPolicies(catalog reviewerCatalog, effective configuration.Effective) reviewerCatalog {
@@ -78,39 +63,6 @@ func applyReviewerPolicy(registration reviewerRegistration, settings configurati
 		registration.candidate.Model = settings.Model.Value
 	}
 	return registration
-}
-
-func applyDefaultReviewer(catalog *reviewerCatalog, reviewer string) error {
-	if reviewer == "" {
-		return nil
-	}
-	registration, exists := catalog.registrations[reviewer]
-	if !exists {
-		return fmt.Errorf("unknown default reviewer %q", reviewer)
-	}
-	if registration.isDisabled() {
-		return fmt.Errorf("default reviewer %q is disabled", reviewer)
-	}
-	catalog.defaultReviewer = reviewer
-	return nil
-}
-
-func validateEffectiveDefault(catalog reviewerCatalog) error {
-	reviewer := catalog.defaultReviewer
-	if reviewer == "" {
-		reviewer = defaultReviewer
-	}
-	registration, exists := catalog.registrations[reviewer]
-	if !exists {
-		return fmt.Errorf("unknown effective default reviewer %q", reviewer)
-	}
-	if registration.isDisabled() {
-		return fmt.Errorf("effective default reviewer %q is disabled", reviewer)
-	}
-	if registration.candidate.Model == "" {
-		return fmt.Errorf("effective default reviewer %q requires a model", reviewer)
-	}
-	return nil
 }
 
 func cloneReviewerCatalog(catalog reviewerCatalog) reviewerCatalog {

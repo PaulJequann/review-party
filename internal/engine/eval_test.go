@@ -104,8 +104,14 @@ func TestEvalDoesNotRetryAuthenticationFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	evalRun, _ := conductor.InspectEvalRun(context.Background(), run.EvalRunIDs[0])
-	review, _ := conductor.Inspect(context.Background(), evalRun.ReviewID)
+	evalRun, err := conductor.InspectEvalRun(context.Background(), run.EvalRunIDs[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	review, err := conductor.Inspect(context.Background(), evalRun.ReviewID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if review.AttemptCount() != 1 || evalRun.ExecutionState != model.EvalIncomplete {
 		t.Fatalf("attempts=%d eval=%s", review.AttemptCount(), evalRun.ExecutionState)
 	}
@@ -126,8 +132,14 @@ func TestEvalContinuesAfterRetryExhaustion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	first, _ := conductor.InspectEvalRun(context.Background(), run.EvalRunIDs[0])
-	second, _ := conductor.InspectEvalRun(context.Background(), run.EvalRunIDs[1])
+	first, err := conductor.InspectEvalRun(context.Background(), run.EvalRunIDs[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := conductor.InspectEvalRun(context.Background(), run.EvalRunIDs[1])
+	if err != nil {
+		t.Fatal(err)
+	}
 	if first.ExecutionState != model.EvalIncomplete {
 		t.Fatalf("first = %s", first.ExecutionState)
 	}
@@ -333,7 +345,7 @@ func TestCallerOwnedEvalPreservesGoModText(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(suite.cleanup)
+	t.Cleanup(checkedCleanup(t, "cleanup eval suite", suite.cleanup))
 	for _, fixture := range []string{suite.cases[0].base, suite.cases[0].head} {
 		if _, err := os.Stat(filepath.Join(fixture, "go.mod.txt")); err != nil {
 			t.Fatalf("caller-owned fixture lost go.mod.txt: %v", err)
@@ -349,7 +361,7 @@ func TestPackagedCodeQualityEvalSuiteLoadsDeclaredCases(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(suite.cleanup)
+	t.Cleanup(checkedCleanup(t, "cleanup eval suite", suite.cleanup))
 	if suite.name != "global:code-quality" || suite.revision != "code-quality-v1" {
 		t.Fatalf("suite identity = %q@%q", suite.name, suite.revision)
 	}
@@ -448,7 +460,10 @@ func (executor *evalSequenceExecutor) Execute(_ context.Context, spec attemptSpe
 	if _, err := os.Stat(filepath.Join(spec.Repository, "expected.json")); err == nil {
 		executor.sawExpected = true
 	}
-	count, authority, goModule := inspectReviewerRepository(spec.Repository)
+	count, authority, goModule, err := inspectReviewerRepository(spec.Repository)
+	if err != nil {
+		return failedExecution(model.AttemptUnknownFailure, model.TerminationUnknownFailure, model.PhaseReviewerExecution, err.Error())
+	}
 	executor.fileCounts = append(executor.fileCounts, count)
 	executor.sawAuthority = executor.sawAuthority || authority
 	executor.sawGoModule = executor.sawGoModule || goModule
@@ -457,11 +472,11 @@ func (executor *evalSequenceExecutor) Execute(_ context.Context, spec attemptSpe
 	return attemptExecution{AssistantText: output, Outcome: model.AttemptCompleted}
 }
 
-func inspectReviewerRepository(repository string) (int, bool, bool) {
+func inspectReviewerRepository(repository string) (int, bool, bool, error) {
 	count := 0
 	authority := false
 	goModule := false
-	_ = filepath.WalkDir(repository, func(path string, entry os.DirEntry, err error) error {
+	if err := filepath.WalkDir(repository, func(path string, entry os.DirEntry, err error) error {
 		if err != nil || entry.IsDir() {
 			return err
 		}
@@ -474,8 +489,10 @@ func inspectReviewerRepository(repository string) (int, bool, bool) {
 			goModule = true
 		}
 		return nil
-	})
-	return count, authority, goModule
+	}); err != nil {
+		return 0, false, false, err
+	}
+	return count, authority, goModule, nil
 }
 
 func evalAuthorityFile(name string) bool {
@@ -493,7 +510,7 @@ func testEvalConductor(t *testing.T, executor attemptExecutor) *Conductor {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = ledger.Close() })
+	t.Cleanup(checkedCleanup(t, "close ledger", ledger.Close))
 	conductor, err := newConductorWithManager(ledger, catalogWithExecutors(map[string]attemptExecutor{defaultReviewer: executor}), newTestConfigurationManager(t), time.Second)
 	if err != nil {
 		t.Fatal(err)

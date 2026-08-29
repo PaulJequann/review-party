@@ -166,9 +166,9 @@ func (write *pendingWrite) prepare() error {
 	return nil
 }
 
-func (profile *pendingProfilePublication) prepare() error {
-	if _, err := os.Lstat(profile.directory); err == nil {
-		return fmt.Errorf("refuse to publish stale change plan: Profile %q changed after planning", profile.directory)
+func (publication *pendingProfilePublication) prepare() error {
+	if _, err := os.Lstat(publication.directory); err == nil {
+		return fmt.Errorf("refuse to publish stale change plan: Profile %q changed after planning", publication.directory)
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
@@ -204,12 +204,14 @@ func readCurrentContents(anchor, path string) ([]byte, fs.FileMode, bool, error)
 	return payload, info.Mode().Perm(), true, nil
 }
 
-func writeProfileAtomically(publication *pendingProfilePublication) error {
+func writeProfileAtomically(publication *pendingProfilePublication) (returnErr error) {
 	root, err := os.OpenRoot(publication.anchor)
 	if err != nil {
 		return err
 	}
-	defer root.Close()
+	defer func() {
+		returnErr = errors.Join(returnErr, root.Close())
+	}()
 	relative, err := filepath.Rel(publication.anchor, publication.directory)
 	if err != nil {
 		return err
@@ -218,7 +220,9 @@ func writeProfileAtomically(publication *pendingProfilePublication) error {
 	if err != nil {
 		return err
 	}
-	defer root.RemoveAll(temporary)
+	defer func() {
+		returnErr = errors.Join(returnErr, removeAllRootedPath(root, temporary))
+	}()
 	if err := root.Rename(temporary, relative); err != nil {
 		return fmt.Errorf("publish Profile %q: %w", publication.directory, err)
 	}
@@ -240,12 +244,10 @@ func stageProfileDirectory(root *os.Root, relative string, publication *pendingP
 		return "", err
 	}
 	if err := writeRootedProfilePart(root, filepath.Join(temporary, "profile.json"), publication.metadata, publication.scope); err != nil {
-		root.RemoveAll(temporary)
-		return "", err
+		return "", errors.Join(err, removeAllRootedPath(root, temporary))
 	}
 	if err := writeRootedProfilePart(root, filepath.Join(temporary, "instructions.md"), publication.instructions, publication.scope); err != nil {
-		root.RemoveAll(temporary)
-		return "", err
+		return "", errors.Join(err, removeAllRootedPath(root, temporary))
 	}
 	return temporary, nil
 }
@@ -266,21 +268,25 @@ func writeRootedProfilePart(root *os.Root, path string, payload []byte, scope Sc
 	return writeTemporaryPayload(file, payload, filePermissions(scope))
 }
 
-func syncRootedDirectory(root *os.Root, path string) error {
+func syncRootedDirectory(root *os.Root, path string) (returnErr error) {
 	directory, err := root.Open(path)
 	if err != nil {
 		return err
 	}
-	defer directory.Close()
+	defer func() {
+		returnErr = errors.Join(returnErr, directory.Close())
+	}()
 	return directory.Sync()
 }
 
-func writeAtomically(write *pendingWrite) error {
+func writeAtomically(write *pendingWrite) (returnErr error) {
 	root, err := os.OpenRoot(write.anchor)
 	if err != nil {
 		return err
 	}
-	defer root.Close()
+	defer func() {
+		returnErr = errors.Join(returnErr, root.Close())
+	}()
 	relative, err := filepath.Rel(write.anchor, write.path)
 	if err != nil {
 		return err
@@ -298,7 +304,9 @@ func writeAtomically(write *pendingWrite) error {
 	if err != nil {
 		return err
 	}
-	defer root.Remove(temporary)
+	defer func() {
+		returnErr = errors.Join(returnErr, removeRootedPath(root, temporary))
+	}()
 	if err := writeTemporaryPayload(file, write.payload, filePermissions(write.scope)); err != nil {
 		return err
 	}
@@ -311,26 +319,25 @@ func writeAtomically(write *pendingWrite) error {
 
 func writeTemporaryPayload(file *os.File, payload []byte, permissions fs.FileMode) error {
 	if err := file.Chmod(permissions); err != nil {
-		file.Close()
-		return fmt.Errorf("restrict temporary configuration: %w", err)
+		return errors.Join(fmt.Errorf("restrict temporary configuration: %w", err), file.Close())
 	}
 	if _, err := file.Write(payload); err != nil {
-		file.Close()
-		return fmt.Errorf("write temporary configuration: %w", err)
+		return errors.Join(fmt.Errorf("write temporary configuration: %w", err), file.Close())
 	}
 	if err := file.Sync(); err != nil {
-		file.Close()
-		return fmt.Errorf("sync temporary configuration: %w", err)
+		return errors.Join(fmt.Errorf("sync temporary configuration: %w", err), file.Close())
 	}
 	return file.Close()
 }
 
-func removeProfilePublication(publication pendingProfilePublication) error {
+func removeProfilePublication(publication pendingProfilePublication) (returnErr error) {
 	root, err := os.OpenRoot(publication.anchor)
 	if err != nil {
 		return err
 	}
-	defer root.Close()
+	defer func() {
+		returnErr = errors.Join(returnErr, root.Close())
+	}()
 	relative, err := filepath.Rel(publication.anchor, publication.directory)
 	if err != nil {
 		return err
@@ -341,12 +348,14 @@ func removeProfilePublication(publication pendingProfilePublication) error {
 	return syncRootedDirectory(root, filepath.Dir(relative))
 }
 
-func restoreFile(write pendingWrite) error {
+func restoreFile(write pendingWrite) (returnErr error) {
 	root, err := os.OpenRoot(write.anchor)
 	if err != nil {
 		return err
 	}
-	defer root.Close()
+	defer func() {
+		returnErr = errors.Join(returnErr, root.Close())
+	}()
 	relative, err := filepath.Rel(write.anchor, write.path)
 	if err != nil {
 		return err
@@ -359,13 +368,27 @@ func restoreFile(write pendingWrite) error {
 }
 
 func removeRootedWrite(root *os.Root, relative, directory string) error {
-	if err := root.Remove(relative); err != nil && !errors.Is(err, os.ErrNotExist) {
+	if err := removeRootedPath(root, relative); err != nil {
 		return err
 	}
 	return syncRootedDirectory(root, directory)
 }
 
-func restoreRootedWrite(root *os.Root, relative, directory string, write pendingWrite) error {
+func removeRootedPath(root *os.Root, path string) error {
+	if err := root.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+func removeAllRootedPath(root *os.Root, path string) error {
+	if err := root.RemoveAll(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+func restoreRootedWrite(root *os.Root, relative, directory string, write pendingWrite) (returnErr error) {
 	suffix, err := randomSuffix()
 	if err != nil {
 		return err
@@ -375,7 +398,9 @@ func restoreRootedWrite(root *os.Root, relative, directory string, write pending
 	if err != nil {
 		return err
 	}
-	defer root.Remove(temporary)
+	defer func() {
+		returnErr = errors.Join(returnErr, removeRootedPath(root, temporary))
+	}()
 	if err := writeTemporaryPayload(file, write.backup, write.mode); err != nil {
 		return err
 	}

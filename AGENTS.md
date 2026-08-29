@@ -17,6 +17,24 @@ result contract does not require every agent to use the same wire protocol.
 - Stop development servers, watchers, and other long-running verification
   processes when focused verification is complete.
 - Do not add or install dependencies without explicit user approval.
+- Repository-pinned tools from `scripts/` may be bootstrapped.
+- Use `./scripts/lint.sh` as the lint entrypoint; do not invoke a global
+  `golangci-lint`.
+- Do not install or bump tools globally.
+- Do not edit lint policy files unless the task explicitly authorizes a policy
+  change: `.golangci.yml`, `.golangci-lint-version`, `scripts/lint.sh`,
+  `scripts/verify-lint-suppressions.sh`, the lint workflow, and `depguard`
+  rules.
+- Treat shape findings (`cyclop`, `gocognit`, `funlen`, `dupl`, and
+  `interfacebloat`) as design evidence, not extraction orders. Improve the
+  owning module or add a specific, explained `//nolint:<linter>` exception when
+  the existing design is preferable. Keep `inspectRootedPath` and
+  `applyCodexEvent` unshredded; use the shared JSONL scanner in
+  `internal/engine/jsonl.go` as the positive extraction example. Do not extract
+  one-use pass-through helpers, widen an interface, or scatter one module's
+  knowledge.
+- A lint failure is not permission to weaken `.golangci.yml`, raise thresholds,
+  add path exclusions, skip the suppression auditor, or edit `depguard`.
 - Treat incomplete external-agent runs as incomplete, never clean.
 - Do not silently substitute an agent, model, transport, profile, or weaker
   capability contract. Report the unavailable choice and require the caller's

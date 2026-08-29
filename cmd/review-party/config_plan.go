@@ -44,8 +44,12 @@ func confirmConfigurationPlanIfNeeded(options configurationMutationOptions, plan
 	if !isTerminalInput(streams.input) {
 		return errors.New("configuration mutation requires --yes when stdin is not a terminal")
 	}
-	printHumanPlan(streams.output, plan)
-	printHumanWarnings(streams.output, warningsForPlan(plan))
+	if err := printHumanPlan(streams.output, plan); err != nil {
+		return err
+	}
+	if err := printHumanWarnings(streams.output, warningsForPlan(plan)); err != nil {
+		return err
+	}
 	confirmed, err := confirmConfigurationPlan(streams.input, streams.output)
 	if err != nil {
 		return err
@@ -61,9 +65,17 @@ func printPublishedConfigurationPlan(plan configuration.Plan, options configurat
 	if options.format == "json" {
 		return writeConfigurationPlanJSON(result, options.format, streams, 0)
 	}
-	printHumanPlan(streams.output, plan)
-	printHumanWarnings(streams.output, warningsForPlan(plan))
-	fmt.Fprintln(streams.output, "published")
+	if err := printHumanPlan(streams.output, plan); err != nil {
+		return printConfigFailure(options.format, streams.output, streams.errors, err)
+	}
+	if err := printHumanWarnings(streams.output, warningsForPlan(plan)); err != nil {
+		return printConfigFailure(options.format, streams.output, streams.errors, err)
+	}
+	if err := writeCommandOutput(streams.output, func(output *commandOutput) {
+		output.write("published\n")
+	}); err != nil {
+		return printConfigFailure(options.format, streams.output, streams.errors, err)
+	}
 	return 0
 }
 
@@ -106,25 +118,29 @@ func scopesAsStrings(scopes []configuration.Scope) []string {
 	return result
 }
 
-func printHumanPlan(output io.Writer, plan configuration.Plan) {
-	fmt.Fprintln(output, "configuration plan:")
-	for _, change := range plan.Changes() {
-		before := "<absent>"
-		if change.HadBefore {
-			before = change.Before
+func printHumanPlan(output io.Writer, plan configuration.Plan) error {
+	return writeCommandOutput(output, func(output *commandOutput) {
+		output.write("configuration plan:\n")
+		for _, change := range plan.Changes() {
+			before := "<absent>"
+			if change.HadBefore {
+				before = change.Before
+			}
+			after := "<absent>"
+			if change.HadAfter {
+				after = change.After
+			}
+			output.write("  %s %s %q: %s -> %s\n", change.Scope, change.Field, change.Path, before, after)
 		}
-		after := "<absent>"
-		if change.HadAfter {
-			after = change.After
-		}
-		fmt.Fprintf(output, "  %s %s %q: %s -> %s\n", change.Scope, change.Field, change.Path, before, after)
-	}
+	})
 }
 
-func printHumanWarnings(output io.Writer, warnings []string) {
-	for _, warning := range warnings {
-		fmt.Fprintf(output, "warning: %s\n", warning)
-	}
+func printHumanWarnings(output io.Writer, warnings []string) error {
+	return writeCommandOutput(output, func(writer *commandOutput) {
+		for _, warning := range warnings {
+			writer.write("warning: %s\n", warning)
+		}
+	})
 }
 
 func confirmConfigurationPlan(input io.Reader, output io.Writer) (bool, error) {

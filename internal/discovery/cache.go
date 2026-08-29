@@ -124,13 +124,21 @@ func writeCacheFile(entry cacheEntry, payload []byte) error {
 		return fmt.Errorf("create discovery cache temporary file: %w", err)
 	}
 	temporaryPath := temporary.Name()
-	defer os.Remove(temporaryPath)
+	defer func() {
+		if removeErr := os.Remove(temporaryPath); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+			return
+		}
+	}()
 	if err := temporary.Chmod(0o600); err != nil {
-		_ = temporary.Close()
+		if closeErr := temporary.Close(); closeErr != nil {
+			err = errors.Join(err, closeErr)
+		}
 		return fmt.Errorf("set discovery cache permissions: %w", err)
 	}
 	if _, err := temporary.Write(payload); err != nil {
-		_ = temporary.Close()
+		if closeErr := temporary.Close(); closeErr != nil {
+			err = errors.Join(err, closeErr)
+		}
 		return fmt.Errorf("write discovery cache: %w", err)
 	}
 	if err := temporary.Close(); err != nil {

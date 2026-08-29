@@ -16,23 +16,19 @@ import (
 func executeHistory(ctx context.Context, options historyOptions, stdout, stderr io.Writer) int {
 	query, err := validatedHistoryQuery(options)
 	if err != nil {
-		fmt.Fprintf(stderr, "review-party: %v\n", err)
-		return usageExitCode
+		return printCommandError(stderr, usageExitCode, err)
 	}
 	conductor, err := engine.New(engine.Config{UserConfigurationPath: options.configuration})
 	if err != nil {
-		fmt.Fprintf(stderr, "review-party: %v\n", err)
-		return 1
+		return printFailure(stderr, err)
 	}
 	query.Repository, err = resolvedHistoryRepository(query.Repository)
 	if err != nil {
-		fmt.Fprintf(stderr, "review-party: %v\n", err)
-		return 1
+		return printFailure(stderr, err)
 	}
 	page, err := conductor.History(ctx, query)
 	if err != nil {
-		fmt.Fprintf(stderr, "review-party: %v\n", err)
-		return 1
+		return printFailure(stderr, err)
 	}
 	return printHistory(page, options.format, stdout, stderr)
 }
@@ -72,19 +68,18 @@ func printHistory(page store.HistoryPage, format string, stdout, stderr io.Write
 			page.Entries = []store.HistoryEntry{}
 		}
 		if err := json.NewEncoder(stdout).Encode(page); err != nil {
-			fmt.Fprintf(stderr, "review-party: %v\n", err)
-			return 1
+			return printFailure(stderr, err)
 		}
 		return 0
 	}
 	if format != "human" {
-		fmt.Fprintf(stderr, "review-party: unknown output format %q\n", format)
-		return 1
+		return printFailure(stderr, fmt.Errorf("unknown output format %q", format))
 	}
-	for _, entry := range page.Entries {
-		fmt.Fprintln(stdout, formatHistoryEntry(entry))
-	}
-	return 0
+	return printCommandOutput(stdout, stderr, func(output *commandOutput) {
+		for _, entry := range page.Entries {
+			output.write("%s\n", formatHistoryEntry(entry))
+		}
+	})
 }
 
 func formatHistoryEntry(entry store.HistoryEntry) string {

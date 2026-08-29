@@ -12,6 +12,15 @@ import (
 	"reviewparty/internal/store"
 )
 
+func checkedCleanup(t *testing.T, description string, cleanup func() error) func() {
+	t.Helper()
+	return func() {
+		if err := cleanup(); err != nil {
+			t.Errorf("%s: %v", description, err)
+		}
+	}
+}
+
 func TestEvalPlansEveryRunBeforeFirstHarnessLaunch(t *testing.T) {
 	suite := writeEvalTestSuite(t, []testEvalCase{{id: "first"}, {id: "second"}, {id: "third"}})
 	ledger, observed := newObservedEvalStore(t)
@@ -247,7 +256,7 @@ func newObservedEvalStore(t *testing.T) (*store.LedgerRecordStore, *observingEva
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = ledger.Close() })
+	t.Cleanup(checkedCleanup(t, "close ledger", ledger.Close))
 	return ledger, &observingEvalStore{LedgerRecordStore: ledger}
 }
 

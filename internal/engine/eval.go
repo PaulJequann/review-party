@@ -12,13 +12,18 @@ import (
 	"reviewparty/internal/store"
 )
 
-func (conductor *Conductor) RunEvalSuite(ctx context.Context, selection model.EvalSuiteSelection) (model.EvalSuiteRun, error) {
+func (conductor *Conductor) RunEvalSuite(ctx context.Context, selection model.EvalSuiteSelection) (run model.EvalSuiteRun, returnErr error) {
 	suite, ledger, run, err := conductor.prepareEvalSuiteRun(selection)
 	if err != nil {
 		return model.EvalSuiteRun{}, err
 	}
-	defer suite.cleanup()
-	deadline, _ := time.ParseDuration(run.Experiment.Deadline)
+	defer func() {
+		returnErr = errors.Join(returnErr, suite.cleanup())
+	}()
+	deadline, err := time.ParseDuration(run.Experiment.Deadline)
+	if err != nil {
+		return model.EvalSuiteRun{}, fmt.Errorf("eval experiment has invalid deadline %q: %w", run.Experiment.Deadline, err)
+	}
 	executionContext, cancel := context.WithTimeout(ctx, deadline)
 	defer cancel()
 	return conductor.executeEvalCases(executionContext, suite, ledger, run)
@@ -37,20 +42,24 @@ func (conductor *Conductor) prepareEvalSuiteRun(selection model.EvalSuiteSelecti
 	}
 	ledger, ok := conductor.store.(store.EvalRunStore)
 	if !ok {
-		suite.cleanup()
-		return loadedEvalSuite{}, nil, model.EvalSuiteRun{}, errors.New("eval execution requires the SQLite ledger")
+		return loadedEvalSuite{}, nil, model.EvalSuiteRun{}, cleanupEvalSuite(suite, errors.New("eval execution requires the SQLite ledger"))
 	}
 	started := conductor.now().UTC()
 	run, evalRuns, err := conductor.newEvalSuiteRun(suite, selection.Experiment, started)
 	if err != nil {
-		suite.cleanup()
-		return loadedEvalSuite{}, nil, model.EvalSuiteRun{}, err
+		return loadedEvalSuite{}, nil, model.EvalSuiteRun{}, cleanupEvalSuite(suite, err)
 	}
 	if err := ledger.CreateEvalSuiteRun(run, evalRuns); err != nil {
-		suite.cleanup()
-		return loadedEvalSuite{}, nil, model.EvalSuiteRun{}, err
+		return loadedEvalSuite{}, nil, model.EvalSuiteRun{}, cleanupEvalSuite(suite, err)
 	}
 	return suite, ledger, run, nil
+}
+
+func cleanupEvalSuite(suite loadedEvalSuite, cause error) error {
+	if suite.cleanup == nil {
+		return cause
+	}
+	return errors.Join(cause, suite.cleanup())
 }
 
 func (conductor *Conductor) newEvalSuiteRun(suite loadedEvalSuite, experiment model.ExperimentConfiguration, started time.Time) (model.EvalSuiteRun, []model.EvalRun, error) {
@@ -301,6 +310,8 @@ func evalExecutionState(review model.ReviewRecord) model.EvalExecutionState {
 
 func addEvalExecutionCount(run *model.EvalSuiteRun, state model.EvalExecutionState) {
 	switch state {
+	case model.EvalPending, model.EvalRunning:
+		return
 	case model.EvalCompletedClean:
 		run.CompletedCleanCount++
 	case model.EvalCompletedFindings:

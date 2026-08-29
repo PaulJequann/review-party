@@ -13,12 +13,12 @@ func configureProcessGroup(command *exec.Cmd) {
 
 func terminateProcessGroup(command *exec.Cmd) {
 	if command.Process != nil {
-		_ = syscall.Kill(-command.Process.Pid, syscall.SIGTERM)
+		syscall.Kill(-command.Process.Pid, syscall.SIGTERM) //nolint:errcheck // Process-group signaling is best-effort.
 	}
 }
 
 func killProcessGroup(command *exec.Cmd) {
 	if command.Process != nil {
-		_ = syscall.Kill(-command.Process.Pid, syscall.SIGKILL)
+		syscall.Kill(-command.Process.Pid, syscall.SIGKILL) //nolint:errcheck // Process-group signaling is best-effort.
 	}
 }

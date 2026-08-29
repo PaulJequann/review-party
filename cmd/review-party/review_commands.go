@@ -23,17 +23,14 @@ type replayOptions struct {
 func executeReplay(ctx context.Context, options replayOptions, stdout, stderr io.Writer) int {
 	conductor, err := engine.New(engine.Config{UserConfigurationPath: options.configuration})
 	if err != nil {
-		fmt.Fprintf(stderr, "review-party: %v\n", err)
-		return 1
+		return printFailure(stderr, err)
 	}
 	record, err := conductor.Replay(ctx, model.ReplaySelection{SourceReviewID: options.id, Reviewer: options.reviewer, Model: options.model, Effort: options.effort})
 	if err != nil {
-		fmt.Fprintf(stderr, "review-party: %v\n", err)
-		return 1
+		return printFailure(stderr, err)
 	}
 	if err := printRecordWithConfiguration(stdout, record, options.format, options.configuration); err != nil {
-		fmt.Fprintf(stderr, "review-party: %v\n", err)
-		return 1
+		return printFailure(stderr, err)
 	}
 	if record.Lifecycle == model.LifecycleIncomplete {
 		return 2
@@ -47,23 +44,19 @@ func executeInspect(ctx context.Context, options inspectOptions, stdout, stderr 
 	}
 	conductor, err := engine.New(engine.Config{UserConfigurationPath: options.configuration})
 	if err != nil {
-		fmt.Fprintf(stderr, "review-party: %v\n", err)
-		return 1
+		return printFailure(stderr, err)
 	}
 	record, err := conductor.Inspect(ctx, options.id)
 	if err != nil {
-		fmt.Fprintf(stderr, "review-party: %v\n", err)
-		return 1
+		return printFailure(stderr, err)
 	}
 	if options.verifyArtifacts {
 		if err := conductor.VerifyArtifacts(record); err != nil {
-			fmt.Fprintf(stderr, "review-party: verify artifacts: %v\n", err)
-			return 1
+			return printFailure(stderr, fmt.Errorf("verify artifacts: %w", err))
 		}
 	}
 	if err := printRecordWithConfiguration(stdout, record, options.format, options.configuration); err != nil {
-		fmt.Fprintf(stderr, "review-party: %v\n", err)
-		return 1
+		return printFailure(stderr, err)
 	}
 	return 0
 }
@@ -78,17 +71,14 @@ type inspectOptions struct {
 func runInspectBundle(ctx context.Context, options inspectOptions, stdout, stderr io.Writer) int {
 	conductor, err := engine.New(engine.Config{UserConfigurationPath: options.configuration})
 	if err != nil {
-		fmt.Fprintf(stderr, "review-party: %v\n", err)
-		return 1
+		return printFailure(stderr, err)
 	}
 	bundle, err := conductor.InspectBundle(ctx, model.ReviewBundleID(options.id))
 	if err != nil {
-		fmt.Fprintf(stderr, "review-party: %v\n", err)
-		return 1
+		return printFailure(stderr, err)
 	}
 	if err := printBundle(stdout, bundle, options.format); err != nil {
-		fmt.Fprintf(stderr, "review-party: %v\n", err)
-		return 1
+		return printFailure(stderr, err)
 	}
 	return 0
 }
@@ -106,39 +96,40 @@ func printRecordWithConfiguration(output io.Writer, record model.ReviewRecord, f
 	if format != "human" {
 		return fmt.Errorf("unknown output format %q", format)
 	}
-	printHumanRecord(output, record, configuration)
-	return nil
+	return printHumanRecord(output, record, configuration)
 }
 
-func printHumanRecord(output io.Writer, record model.ReviewRecord, configuration string) {
-	findings := 0
-	if record.Result != nil {
-		findings = record.Result.FindingCount()
-	}
-	fmt.Fprintf(output, "review %s\n", record.ID)
-	printReplayLineage(output, record.ReplaysReviewID)
-	provenance := latestProvenance(record)
-	fmt.Fprintf(output, "%s · %d finding(s) · %s/%s (%s)\n", record.Lifecycle, findings, provenance.ReviewerID, provenance.Model, provenance.Effort)
-	if record.ProfileRevision.Source != "" {
-		fmt.Fprintf(output, "profile: %s · %s\n", record.ProfileRevision.Name, record.ProfileRevision.Source)
-	}
-	if record.Result != nil {
-		fmt.Fprintln(output, record.Result.Raw)
-	}
-	printArtifactReferences(output, record)
-	if record.Termination != nil {
-		fmt.Fprintf(output, "incomplete: %s at %s: %s\n", record.Termination.Category, record.Termination.Phase, record.Termination.Message)
-	}
-	fmt.Fprintf(output, "inspect: review-party inspect %s", record.ID)
-	if configuration != defaultUserConfigurationPath() {
-		fmt.Fprintf(output, " --config %s", shellQuoteArgument(configuration))
-	}
-	fmt.Fprintln(output)
+func printHumanRecord(output io.Writer, record model.ReviewRecord, configuration string) error {
+	return writeCommandOutput(output, func(output *commandOutput) {
+		findings := 0
+		if record.Result != nil {
+			findings = record.Result.FindingCount()
+		}
+		output.write("review %s\n", record.ID)
+		printReplayLineage(output, record.ReplaysReviewID)
+		provenance := latestProvenance(record)
+		output.write("%s · %d finding(s) · %s/%s (%s)\n", record.Lifecycle, findings, provenance.ReviewerID, provenance.Model, provenance.Effort)
+		if record.ProfileRevision.Source != "" {
+			output.write("profile: %s · %s\n", record.ProfileRevision.Name, record.ProfileRevision.Source)
+		}
+		if record.Result != nil {
+			output.write("%s\n", record.Result.Raw)
+		}
+		printArtifactReferences(output, record)
+		if record.Termination != nil {
+			output.write("incomplete: %s at %s: %s\n", record.Termination.Category, record.Termination.Phase, record.Termination.Message)
+		}
+		output.write("inspect: review-party inspect %s", record.ID)
+		if configuration != defaultUserConfigurationPath() {
+			output.write(" --config %s", shellQuoteArgument(configuration))
+		}
+		output.write("\n")
+	})
 }
 
-func printReplayLineage(output io.Writer, source *model.ReviewID) {
+func printReplayLineage(output *commandOutput, source *model.ReviewID) {
 	if source != nil {
-		fmt.Fprintf(output, "replays: %s\n", *source)
+		output.write("replays: %s\n", *source)
 	}
 }
 

@@ -57,7 +57,7 @@ type loadedEvalSuite struct {
 	revision string
 	digest   string
 	cases    []preparedEvalCase
-	cleanup  func()
+	cleanup  func() error
 }
 
 type evalCaseLoad struct {
@@ -122,10 +122,9 @@ func loadEvalSuiteSource(source fs.FS, root string, packaged bool) (loadedEvalSu
 	}
 	suite, err := materializeEvalCases(evalSuiteMaterialization{source: source, root: root, temporary: temporary, manifest: manifest, manifestPayload: payload, packaged: packaged})
 	if err != nil {
-		_ = os.RemoveAll(temporary)
-		return loadedEvalSuite{}, err
+		return loadedEvalSuite{}, errors.Join(err, os.RemoveAll(temporary))
 	}
-	suite.cleanup = func() { _ = os.RemoveAll(temporary) }
+	suite.cleanup = func() error { return os.RemoveAll(temporary) }
 	return suite, nil
 }
 
@@ -174,7 +173,9 @@ func materializeEvalCases(request evalSuiteMaterialization) (loadedEvalSuite, er
 			return loadedEvalSuite{}, fmt.Errorf("duplicate eval case id %q", prepared.revision.ID)
 		}
 		seen[prepared.revision.ID] = true
-		writeDigestPayloads(hash, payloads)
+		if err := writeDigestPayloads(hash, payloads); err != nil {
+			return loadedEvalSuite{}, fmt.Errorf("digest eval case %q: %w", prepared.revision.ID, err)
+		}
 		cases = append(cases, prepared)
 	}
 	return loadedEvalSuite{name: request.manifest.Name, revision: request.manifest.Revision, digest: hex.EncodeToString(hash.Sum(nil)), cases: cases}, nil
@@ -199,7 +200,10 @@ func loadEvalCase(request evalCaseLoad) (preparedEvalCase, [][]byte, error) {
 		return preparedEvalCase{}, nil, err
 	}
 	payloads = append([][]byte{payload}, payloads...)
-	revision := evalCaseRevision(definition, payloads)
+	revision, err := evalCaseRevision(definition, payloads)
+	if err != nil {
+		return preparedEvalCase{}, nil, fmt.Errorf("compute eval case revision: %w", err)
+	}
 	return preparedEvalCase{revision: revision, base: base, head: head}, payloads, nil
 }
 
@@ -269,21 +273,26 @@ func materializeSeedFixture(request evalFixtureCopy, payloads [][]byte) ([][]byt
 	return append(payloads, seedPayload), nil
 }
 
-func evalCaseRevision(definition evalCaseFile, payloads [][]byte) model.EvalCaseRevision {
+func evalCaseRevision(definition evalCaseFile, payloads [][]byte) (model.EvalCaseRevision, error) {
 	hash := sha256.New()
-	writeDigestPayloads(hash, payloads)
+	if err := writeDigestPayloads(hash, payloads); err != nil {
+		return model.EvalCaseRevision{}, err
+	}
 	revision := model.EvalCaseRevision{ID: definition.ID, SchemaVersion: definition.SchemaVersion, Digest: hex.EncodeToString(hash.Sum(nil)), Mode: definition.Mode, Classification: definition.Classification, ExpectedFindings: definition.ExpectedFindings, CleanEvidence: definition.CleanEvidence}
 	if definition.Seed != nil {
 		patchDigest := sha256.Sum256(payloads[len(payloads)-1])
 		revision.Seed = &model.SeedRevision{ID: definition.Seed.ID, SourceCommit: definition.Seed.SourceCommit, PatchDigest: hex.EncodeToString(patchDigest[:]), ExpectedFiles: append([]string(nil), definition.Seed.ExpectedFiles...)}
 	}
-	return revision
+	return revision, nil
 }
 
-func writeDigestPayloads(destination io.Writer, payloads [][]byte) {
+func writeDigestPayloads(destination io.Writer, payloads [][]byte) error {
 	for _, payload := range payloads {
-		_, _ = destination.Write(payload)
+		if _, err := destination.Write(payload); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 func validateEvalCase(definition evalCaseFile) error {

@@ -10,7 +10,10 @@ import (
 type attemptGateContextKey struct{}
 
 func attemptGateFromContext(ctx context.Context) chan struct{} {
-	gate, _ := ctx.Value(attemptGateContextKey{}).(chan struct{})
+	gate, ok := ctx.Value(attemptGateContextKey{}).(chan struct{})
+	if !ok {
+		return nil
+	}
 	return gate
 }
 

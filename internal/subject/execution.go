@@ -55,6 +55,8 @@ func PrepareExecution(subject model.ReviewSubject, owner string) (*ExecutionChec
 		return prepareCapturedExecution(subject, owner)
 	case model.SubjectCommittedRange:
 		return prepareCommittedExecution(subject, owner)
+	case model.SubjectWorkingChanges:
+		return &ExecutionCheckout{Repository: subject.Repository}, nil
 	default:
 		return &ExecutionCheckout{Repository: subject.Repository}, nil
 	}
@@ -81,8 +83,7 @@ func prepareCommittedExecution(subject model.ReviewSubject, owner string) (*Exec
 		return nil, err
 	}
 	if _, err := gitOutput(subject.Repository, "worktree", "add", "--detach", path, subject.HeadObject); err != nil {
-		_ = os.Remove(string(metadata))
-		return nil, fmt.Errorf("create Subject execution checkout: %w", err)
+		return nil, errors.Join(fmt.Errorf("create Subject execution checkout: %w", err), os.Remove(string(metadata)))
 	}
 	checkout := ownedCheckout{root: root, metadata: metadata, owner: owned}
 	return &ExecutionCheckout{Repository: path, close: func() error { return removeOwnedCheckout(checkout) }}, nil
@@ -101,8 +102,7 @@ func prepareCapturedExecution(subject model.ReviewSubject, owner string) (*Execu
 		return nil, err
 	}
 	if err := copyCapturedTree(subject.ExecutionRepository, destination); err != nil {
-		_ = os.RemoveAll(destination)
-		return nil, err
+		return nil, errors.Join(err, os.RemoveAll(destination))
 	}
 	return &ExecutionCheckout{Repository: destination, close: func() error { return os.RemoveAll(destination) }}, nil
 }

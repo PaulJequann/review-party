@@ -15,12 +15,19 @@ import (
 	"reviewparty/internal/model"
 )
 
+func closeTestResource(t *testing.T, closeResource func() error) {
+	t.Helper()
+	if err := closeResource(); err != nil {
+		t.Errorf("close resource: %v", err)
+	}
+}
+
 func TestLedgerRoundTripsCompleteAndIncompleteReviews(t *testing.T) {
 	store, err := NewLedgerRecordStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	defer closeTestResource(t, store.Close)
 	clean := ledgerFixture(model.LifecycleCompleted)
 	clean.Result = &model.ReviewResult{Status: model.ResultClean, Summary: "clean", Raw: "raw", Findings: []model.Finding{}}
 	withoutAttempts := ledgerFixture(model.LifecycleIncomplete)
@@ -65,7 +72,7 @@ func TestLedgerPreparationIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer reopened.Close()
+	defer closeTestResource(t, reopened.Close)
 	history, err := reopened.History(HistoryQuery{Limit: 10})
 	if err != nil {
 		t.Fatal(err)
@@ -80,7 +87,7 @@ func TestLedgerAggregateWriteRollsBackAfterChildFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	defer closeTestResource(t, store.Close)
 	original := ledgerFixture(model.LifecycleCompleted)
 	if err := store.Save(original); err != nil {
 		t.Fatal(err)
@@ -171,7 +178,7 @@ func TestLedgerRestrictsManagedStatePermissions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	defer closeTestResource(t, store.Close)
 	for _, path := range []string{directory, filepath.Join(directory, ledgerFilename)} {
 		info, err := os.Stat(path)
 		if err != nil {
@@ -203,7 +210,7 @@ func TestLedgerHistoryBreaksTimestampTiesByReviewID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	defer closeTestResource(t, store.Close)
 	first, second := ledgerFixture(model.LifecycleCompleted), ledgerFixture(model.LifecycleCompleted)
 	first.ID, second.ID = "rp_1723200000000_aaaaaaaaaaaaaaaa", "rp_1723200000000_bbbbbbbbbbbbbbbb"
 	if err := store.Save(first); err != nil {
@@ -223,7 +230,7 @@ func TestLedgerHistoryBreaksTimestampTiesByReviewID(t *testing.T) {
 
 func TestLedgerHistoryCombinesRecordedFilters(t *testing.T) {
 	ledger := newTestLedger(t, t.TempDir())
-	defer ledger.Close()
+	defer closeTestResource(t, ledger.Close)
 	matching := ledgerFixture(model.LifecycleIncomplete)
 	matching.ID = "rp_1723200000000_aaaaaaaaaaaaaaaa"
 	matching.Subject.Repository = "/repo/one"
@@ -256,7 +263,7 @@ func TestLedgerHistoryCombinesRecordedFilters(t *testing.T) {
 
 func TestLedgerHistoryEnforcesLimitAndReportsMore(t *testing.T) {
 	ledger := newTestLedger(t, t.TempDir())
-	defer ledger.Close()
+	defer closeTestResource(t, ledger.Close)
 	first, second := ledgerFixture(model.LifecycleCompleted), ledgerFixture(model.LifecycleCompleted)
 	second.ID = "rp_1723200000000_bbbbbbbbbbbbbbbb"
 	saveTestReviews(t, ledger, first, second)
@@ -277,7 +284,7 @@ func TestLedgerHistoryEnforcesLimitAndReportsMore(t *testing.T) {
 
 func TestLedgerHistoryReviewerQueryUsesApprovedIndex(t *testing.T) {
 	ledger := newTestLedger(t, t.TempDir())
-	defer ledger.Close()
+	defer closeTestResource(t, ledger.Close)
 	for index := 0; index < 32; index++ {
 		record := ledgerFixture(model.LifecycleCompleted)
 		record.ID = model.ReviewID(fmt.Sprintf("rp_1723200000000_%016x", index))
@@ -298,7 +305,11 @@ func historyReviewerQueryPlan(t *testing.T, ledger *LedgerRecordStore) []string 
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			t.Errorf("close rows: %v", err)
+		}
+	}()
 	var details []string
 	for rows.Next() {
 		var id, parent, unused int
@@ -355,12 +366,12 @@ func TestLedgerRejectsLegacyFirstSchemaCollision(t *testing.T) {
 }
 
 func TestPrepareReplacesObsoleteLedgersInPlace(t *testing.T) {
-	for name, seed := range map[string]func(sql.Tx) error{
-		"obsolete-chain-schema": func(tx sql.Tx) error {
+	for name, seed := range map[string]func(*sql.Tx) error{
+		"obsolete-chain-schema": func(tx *sql.Tx) error {
 			_, err := tx.Exec("UPDATE schema_migrations SET version=8")
 			return err
 		},
-		"legacy-first-version": func(tx sql.Tx) error {
+		"legacy-first-version": func(tx *sql.Tx) error {
 			_, err := tx.Exec("DROP TABLE reviews; UPDATE schema_migrations SET version=1; CREATE TABLE reviews (id TEXT PRIMARY KEY)")
 			return err
 		},
@@ -383,7 +394,7 @@ func TestPrepareReplacesObsoleteLedgersInPlace(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := seed(*tx); err != nil {
+			if err := seed(tx); err != nil {
 				t.Fatal(err)
 			}
 			if err := tx.Commit(); err != nil {
@@ -400,7 +411,7 @@ func TestPrepareReplacesObsoleteLedgersInPlace(t *testing.T) {
 			if err != nil {
 				t.Fatalf("reopen = %v", err)
 			}
-			defer reopened.Close()
+			defer closeTestResource(t, reopened.Close)
 			loaded, err := reopened.Load(review.ID)
 			if err == nil {
 				t.Fatalf("loaded obsolete record %q after replacement", loaded.ID)
@@ -418,7 +429,7 @@ func TestPrepareReplacesObsoleteLedgersInPlace(t *testing.T) {
 
 func TestAdjudicationCorrectionsPreserveImmutableRevisions(t *testing.T) {
 	ledger := newTestLedger(t, t.TempDir())
-	defer ledger.Close()
+	defer closeTestResource(t, ledger.Close)
 	now := time.Now().UTC()
 	review := ledgerFixture(model.LifecycleCompleted)
 	if err := ledger.Save(review); err != nil {
@@ -501,7 +512,9 @@ func TestLedgerRejectsNewerSchema(t *testing.T) {
 	if _, err := db.Exec("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY); INSERT INTO schema_migrations(version) VALUES(99)"); err != nil {
 		t.Fatal(err)
 	}
-	db.Close()
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := NewLedgerRecordStore(directory); err == nil {
 		t.Fatal("expected newer schema error")
 	}
@@ -528,7 +541,7 @@ func writeSchemaVersion(t *testing.T, directory string, version int) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer closeTestResource(t, db.Close)
 	if _, err := db.Exec("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY); INSERT INTO schema_migrations(version) VALUES(?)", version); err != nil {
 		t.Fatal(err)
 	}
@@ -540,7 +553,7 @@ func readSchemaVersion(t *testing.T, directory string) int {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer closeTestResource(t, db.Close)
 	var version int
 	if err := db.QueryRow("SELECT MAX(version) FROM schema_migrations").Scan(&version); err != nil {
 		t.Fatal(err)

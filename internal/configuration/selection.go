@@ -253,13 +253,21 @@ func (resolver selectionResolver) availableNames(kind AuthoredItemKind, scope Sc
 func inventoryNames(manager *Manager, repository Repository, scope Scope, kind AuthoredItemKind) []string {
 	switch kind {
 	case ItemParty:
-		definitions, _ := manager.PartyInventory(repository)
+		definitions, err := manager.PartyInventory(repository)
+		if err != nil {
+			return nil
+		}
 		names := inventoriedNames(scope, definitions, func(definition Definition[Party]) string { return definition.Name })
 		return sortedKeySet(names)
-	default:
-		definitions, _ := manager.ProfileInventory(repository)
+	case ItemProfile:
+		definitions, err := manager.ProfileInventory(repository)
+		if err != nil {
+			return nil
+		}
 		names := inventoriedNames(scope, definitions, func(definition Definition[Profile]) string { return definition.Name })
 		return sortedKeySet(names)
+	default:
+		return nil
 	}
 }
 

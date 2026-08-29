@@ -84,7 +84,7 @@ type attemptExecutor interface {
 
 type preparedAttempt struct {
 	command *exec.Cmd
-	cleanup func()
+	cleanup func() error
 }
 
 type decodedHarnessOutput struct {
@@ -114,7 +114,7 @@ func (executor directExecutor) Check(ctx context.Context, candidate reviewerCand
 	return executor.adapter.Check(ctx, candidate)
 }
 
-func (executor directExecutor) Execute(ctx context.Context, spec attemptSpec) attemptExecution {
+func (executor directExecutor) Execute(ctx context.Context, spec attemptSpec) (execution attemptExecution) {
 	prepared, err := executor.adapter.Prepare(spec)
 	if err != nil {
 		return failedExecution(model.AttemptUnknownFailure, model.TerminationUnknownFailure, model.PhaseHarnessLaunch, err.Error())
@@ -123,9 +123,24 @@ func (executor directExecutor) Execute(ctx context.Context, spec attemptSpec) at
 		return failedExecution(model.AttemptUnknownFailure, model.TerminationUnknownFailure, model.PhaseHarnessLaunch, executor.adapter.Name()+" prepared no command")
 	}
 	if prepared.cleanup != nil {
-		defer prepared.cleanup()
+		defer func() {
+			execution = applyCleanupError(execution, prepared.cleanup())
+		}()
 	}
 	return executor.executePrepared(ctx, spec, prepared.command)
+}
+
+func applyCleanupError(execution attemptExecution, cleanupErr error) attemptExecution {
+	if cleanupErr == nil {
+		return execution
+	}
+	execution.Diagnostic = strings.TrimSpace(strings.Join([]string{execution.Diagnostic, "cleanup failed: " + cleanupErr.Error()}, " "))
+	if execution.Outcome == "" || execution.Outcome == model.AttemptCompleted {
+		execution.Outcome = model.AttemptUnknownFailure
+		execution.FailureCategory = model.TerminationUnknownFailure
+		execution.FailurePhase = model.PhaseReviewerExecution
+	}
+	return execution
 }
 
 func (executor directExecutor) executePrepared(ctx context.Context, spec attemptSpec, command *exec.Cmd) attemptExecution {
@@ -366,6 +381,8 @@ func attemptOutcomeForTermination(category model.TerminationCategory) model.Atte
 		return model.AttemptCancelled
 	case model.TerminationMalformedOutput, model.TerminationResultValidationFailure:
 		return model.AttemptInvalidResult
+	case model.TerminationUnknownFailure:
+		return model.AttemptUnknownFailure
 	default:
 		return model.AttemptUnknownFailure
 	}

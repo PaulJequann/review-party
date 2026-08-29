@@ -1,6 +1,7 @@
 package configuration
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"path/filepath"
@@ -70,7 +71,7 @@ func (manager *Manager) definitionEntries(repository Repository, child, descript
 	return entries, nil
 }
 
-func readDefinitionLayer(layer configurationLayer, description string) ([]fs.DirEntry, error) {
+func readDefinitionLayer(layer configurationLayer, description string) (entries []fs.DirEntry, returnErr error) {
 	relative, err := filepath.Rel(layer.anchor, layer.directory)
 	if err != nil {
 		return nil, err
@@ -79,8 +80,10 @@ func readDefinitionLayer(layer configurationLayer, description string) ([]fs.Dir
 	if err != nil || !found {
 		return nil, err
 	}
-	defer root.Close()
-	entries, found, err := readRootedDirectory(root, directoryReadRequest{relative: relative, path: layer.directory, description: description})
+	defer func() {
+		returnErr = errors.Join(returnErr, root.Close())
+	}()
+	entries, found, err = readRootedDirectory(root, directoryReadRequest{relative: relative, path: layer.directory, description: description})
 	if err != nil || !found {
 		return nil, err
 	}

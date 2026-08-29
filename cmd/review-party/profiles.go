@@ -66,14 +66,15 @@ func printProfiles(output io.Writer, profiles []model.ProfileSummary, format str
 	if format != "human" {
 		return fmt.Errorf("unknown output format %q", format)
 	}
-	for _, profile := range profiles {
-		if profile.Error != "" {
-			fmt.Fprintf(output, "%s\tinvalid: %s\n", profile.Name, profile.Error)
-			continue
+	return writeCommandOutput(output, func(output *commandOutput) {
+		for _, profile := range profiles {
+			if profile.Error != "" {
+				output.write("%s\tinvalid: %s\n", profile.Name, profile.Error)
+				continue
+			}
+			output.write("%s\t%s\t%s\tdefault %s/%s via %s/%s\n", profile.Name, profile.Source, profile.Description, profile.DefaultReviewer.ReviewerID, profile.DefaultReviewer.Model, profile.DefaultReviewer.Harness, profile.DefaultReviewer.Transport)
 		}
-		fmt.Fprintf(output, "%s\t%s\t%s\tdefault %s/%s via %s/%s\n", profile.Name, profile.Source, profile.Description, profile.DefaultReviewer.ReviewerID, profile.DefaultReviewer.Model, profile.DefaultReviewer.Harness, profile.DefaultReviewer.Transport)
-	}
-	return nil
+	})
 }
 
 func printProfileExplanation(output io.Writer, explanation model.ProfileExplanation, format string) error {
@@ -83,29 +84,30 @@ func printProfileExplanation(output io.Writer, explanation model.ProfileExplanat
 	if format != "human" {
 		return fmt.Errorf("unknown output format %q", format)
 	}
-	revision := explanation.ProfileRevision
-	selection := "explicit"
-	if explanation.ReviewerWasDefault {
-		selection = "default"
-	}
-	fmt.Fprintf(output, "profile: %s\n", revision.Name)
-	fmt.Fprintf(output, "revision: %s\n", revision.Revision)
-	fmt.Fprintf(output, "source: %s\n", revision.Source)
-	fmt.Fprintf(output, "purpose: %s\n", revision.Purpose)
-	fmt.Fprintf(output, "materiality: %s\n", revision.MaterialityThreshold)
-	fmt.Fprintf(output, "reviewer: %s (%s)\n", revision.Reviewer.ReviewerID, selection)
-	fmt.Fprintf(output, "model/effort: %s/%s\n", revision.Reviewer.Model, revision.Reviewer.Effort)
-	fmt.Fprintf(output, "harness/transport: %s/%s\n", revision.Reviewer.Harness, revision.Reviewer.Transport)
-	for _, pass := range revision.Passes {
-		fmt.Fprintf(output, "pass: %s (required=%t, prompt=%s)\n", pass.Name, pass.Required, pass.PromptRevision)
-	}
-	fmt.Fprintf(output, "requires: %s\n", joinCapabilities(revision.RequiredCapabilities))
-	fmt.Fprintf(output, "budget: %d attempt, %s deadline\n", revision.AttemptLimit, revision.ExecutionDeadline)
-	fmt.Fprintf(output, "result contract: %s\n", revision.ResultContract)
-	fmt.Fprintln(output, "availability: not checked")
-	fmt.Fprintln(output, "no Agent Harness launched; no Review Record created")
-	fmt.Fprintf(output, "\n--- PROFILE MARKDOWN ---\n%s\n", explanation.Instructions)
-	return nil
+	return writeCommandOutput(output, func(output *commandOutput) {
+		revision := explanation.ProfileRevision
+		selection := "explicit"
+		if explanation.ReviewerWasDefault {
+			selection = "default"
+		}
+		output.write("profile: %s\n", revision.Name)
+		output.write("revision: %s\n", revision.Revision)
+		output.write("source: %s\n", revision.Source)
+		output.write("purpose: %s\n", revision.Purpose)
+		output.write("materiality: %s\n", revision.MaterialityThreshold)
+		output.write("reviewer: %s (%s)\n", revision.Reviewer.ReviewerID, selection)
+		output.write("model/effort: %s/%s\n", revision.Reviewer.Model, revision.Reviewer.Effort)
+		output.write("harness/transport: %s/%s\n", revision.Reviewer.Harness, revision.Reviewer.Transport)
+		for _, pass := range revision.Passes {
+			output.write("pass: %s (required=%t, prompt=%s)\n", pass.Name, pass.Required, pass.PromptRevision)
+		}
+		output.write("requires: %s\n", joinCapabilities(revision.RequiredCapabilities))
+		output.write("budget: %d attempt, %s deadline\n", revision.AttemptLimit, revision.ExecutionDeadline)
+		output.write("result contract: %s\n", revision.ResultContract)
+		output.write("availability: not checked\n")
+		output.write("no Agent Harness launched; no Review Record created\n")
+		output.write("\n--- PROFILE MARKDOWN ---\n%s\n", explanation.Instructions)
+	})
 }
 
 func joinCapabilities(capabilities []model.Capability) string {
@@ -120,9 +122,4 @@ func writeJSON(output io.Writer, value any) error {
 	encoder := json.NewEncoder(output)
 	encoder.SetIndent("", "  ")
 	return encoder.Encode(value)
-}
-
-func printFailure(output io.Writer, err error) int {
-	fmt.Fprintf(output, "review-party: %v\n", err)
-	return 1
 }

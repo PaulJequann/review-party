@@ -1,0 +1,134 @@
+version: "2"
+
+run:
+  relative-path-mode: gomod
+  tests: true
+  modules-download-mode: readonly
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+linters:
+  default: none
+  enable:
+    - govet
+    - staticcheck
+    - ineffassign
+    - unused
+    - exhaustive
+    - durationcheck
+    - errcheck
+    - errorlint
+    - nilnesserr
+    - rowserrcheck
+    - sqlclosecheck
+    - cyclop
+    - gocognit
+    - funlen
+    - dupl
+    - interfacebloat
+    - iface
+    - depguard
+    - nolintlint
+  settings:
+    errcheck:
+      check-type-assertions: true
+      check-blank: true
+    staticcheck:
+      checks:
+        - all
+        - -ST1005
+    cyclop:
+      max-complexity: 20
+    gocognit:
+      min-complexity: 25
+    funlen:
+      lines: 80
+      statements: 50
+    dupl:
+      threshold: 120
+    interfacebloat:
+      max: 5
+    iface:
+      enable:
+        - identical
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+      allow-unused: false
+    depguard:
+      rules:
+        model:
+          files:
+            - "**/internal/model/*.go"
+          allow:
+            - $gostd
+        configuration:
+          files:
+            - "**/internal/configuration/*.go"
+          allow:
+            - $gostd
+            - reviewparty/internal/configuration$
+        discovery:
+          files:
+            - "**/internal/discovery/*.go"
+          allow:
+            - $gostd
+        leaf-model-only:
+          files:
+            - "**/internal/artifact/*.go"
+            - "**/internal/provenance/*.go"
+            - "**/internal/result/*.go"
+            - "**/internal/subject/*.go"
+          allow:
+            - $gostd
+            - reviewparty/internal/model$
+        store:
+          files:
+            - "**/internal/store/*.go"
+          allow:
+            - $gostd
+            - reviewparty/internal/model$
+            - modernc.org/sqlite
+        engine:
+          files:
+            - "**/internal/engine/*.go"
+          allow:
+            - $gostd
+            - reviewparty/internal/artifact$
+            - reviewparty/internal/configuration$
+            - reviewparty/internal/model$
+            - reviewparty/internal/provenance$
+            - reviewparty/internal/result$
+            - reviewparty/internal/store$
+            - reviewparty/internal/subject$
+        cmd:
+          files:
+            - "**/cmd/review-party/*.go"
+          allow:
+            - $gostd
+            - reviewparty/internal/configuration$
+            - reviewparty/internal/engine$
+            - reviewparty/internal/model$
+            - reviewparty/internal/provenance$
+            - reviewparty/internal/store$
+            - reviewparty/internal/subject$
+            - reviewparty/internal/discovery$
+            - github.com/spf13/cobra
+            - github.com/spf13/pflag
+            - github.com/mattn/go-isatty
+  exclusions:
+    generated: strict
+    warn-unused: true
+    rules:
+      - path: _test\.go
+        linters:
+          - cyclop
+          - gocognit
+          - funlen
+
+formatters:
+  enable:
+    - gofmt

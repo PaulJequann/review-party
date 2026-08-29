@@ -147,7 +147,7 @@ func (manager *Manager) LoadProfile(scope Scope, repository Repository, name str
 	return manager.decodeProfile(metadata, instructions, scope, name)
 }
 
-func (manager *Manager) missingProfileMetadata(scope Scope, repository Repository, name string) (Profile, bool, error) {
+func (manager *Manager) missingProfileMetadata(scope Scope, repository Repository, name string) (profile Profile, found bool, returnErr error) {
 	entry, anchor, err := manager.profileEntry(scope, repository, name)
 	if err != nil {
 		return Profile{}, false, err
@@ -156,7 +156,9 @@ func (manager *Manager) missingProfileMetadata(scope Scope, repository Repositor
 	if err != nil || !found {
 		return Profile{}, false, err
 	}
-	defer root.Close()
+	defer func() {
+		returnErr = errors.Join(returnErr, root.Close())
+	}()
 	directory := filepath.Dir(entry.Path)
 	relative, err := filepath.Rel(anchor, directory)
 	if err != nil {
