@@ -120,15 +120,18 @@ func (flow *ProfileOnboarding) Set(field OnboardingField, value OnboardingText) 
 	if err := flow.ensureEditable(); err != nil {
 		return err
 	}
-	step, found := onboardingFieldStep(field)
+	spec, found := onboardingFieldSpecFor(field)
 	if !found {
 		return fmt.Errorf("unknown onboarding field %q", field)
 	}
-	if !onboardingFieldReady(flow.draft, step) {
-		return fmt.Errorf("onboarding is not ready for %s", step)
+	if !onboardingFieldReady(flow.draft, spec.step) {
+		return fmt.Errorf("onboarding is not ready for %s", spec.step)
 	}
-	setOnboardingField(&flow.draft, field, value)
-	flow.clearDependentFields(step)
+	previous := spec.read(flow.draft)
+	spec.write(&flow.draft, string(value))
+	if previous != string(value) {
+		flow.clearDependentFields(spec.step)
+	}
 	flow.plan = Plan{}
 	flow.step = flow.nextStep()
 	return nil
@@ -282,22 +285,13 @@ func (flow *ProfileOnboarding) nextStep() OnboardingStep {
 	return OnboardingValidation
 }
 
-func onboardingFieldStep(field OnboardingField) (OnboardingStep, bool) {
+func onboardingFieldSpecFor(field OnboardingField) (onboardingFieldSpec, bool) {
 	for _, spec := range onboardingFields {
 		if spec.field == field {
-			return spec.step, true
+			return spec, true
 		}
 	}
-	return "", false
-}
-
-func setOnboardingField(draft *ProfileDraft, field OnboardingField, value OnboardingText) {
-	for _, spec := range onboardingFields {
-		if spec.field == field {
-			spec.write(draft, string(value))
-			return
-		}
-	}
+	return onboardingFieldSpec{}, false
 }
 
 func onboardingFieldReady(draft ProfileDraft, target OnboardingStep) bool {

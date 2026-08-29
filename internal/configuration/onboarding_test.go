@@ -100,6 +100,34 @@ func TestProfileOnboardingSourceEditInvalidatesReviewedPlan(t *testing.T) {
 	}
 }
 
+func TestProfileOnboardingRevisionKeepsUnchangedLaterFields(t *testing.T) {
+	manager := NewManager(Options{
+		GlobalRoot: t.TempDir(), Reviewers: []string{"grok"},
+		ValidateName: func(string) error { return nil },
+	})
+	flow := completeOnboarding(t, manager)
+	plan, err := flow.Validate("")
+	requireValidOnboardingPlan(t, flow, plan, err)
+	requireOnboardingErrorFree(t, flow.Revise())
+	requireOnboardingErrorFree(t, flow.Set(OnboardingFieldName, "bugs"))
+	draft := flow.Draft()
+	for _, field := range []struct {
+		name string
+		got  string
+		want string
+	}{
+		{name: "reviewer", got: draft.Reviewer, want: "grok"},
+		{name: "model", got: draft.Model, want: "grok-4.6"},
+		{name: "reasoning effort", got: draft.ReasoningEffort, want: "high"},
+		{name: "deadline", got: draft.AttemptDeadline, want: "1m"},
+	} {
+		if field.got != field.want {
+			t.Fatalf("revised draft %s = %q, want %q", field.name, field.got, field.want)
+		}
+	}
+	requireOnboardingStep(t, flow, OnboardingValidation)
+}
+
 func TestProfileOnboardingCancellationRetainsDraftWithoutWriting(t *testing.T) {
 	flow := NewProfileOnboarding(nil, ScopeGlobal)
 	requireOnboardingErrorFree(t, flow.ChooseBlank("Review documentation.\n"))
