@@ -50,71 +50,8 @@ result contract does not require every agent to use the same wire protocol.
 
 ## Dogfooding
 
-For a bounded local dogfood Review, install the current checkout with
-`./scripts/install-local.sh` and invoke that installed binary from `PATH`. Use
-complete saved Profiles configured with the Codex agent, model
-`gpt-5.6-luna`, maximum supported reasoning (`high`), and an eight-minute
-Attempt deadline. Ordinary Review commands execute those settings exactly.
-Treat missing Profiles as unavailable rather than substituting another agent or
-model. Before initialization, run `./scripts/sync-local-profiles.sh` to publish
-`bugs`, `code-quality`, and `documentation` from the tracked Templates into the
-selected Global Configuration. Pass
-`$XDG_CONFIG_HOME/review-party/profiles` as its first argument when using an
-isolated configuration, and set the dogfood Reviewer, model, and effort
-explicitly. The sync replaces those three complete Profiles; `init` prepares
-record state and never creates Profiles.
-
-```sh
-mkdir -p scratch
-./scripts/install-local.sh
-REVIEW_PARTY_DOGFOOD_REVIEWER=codex \
-REVIEW_PARTY_DOGFOOD_MODEL=gpt-5.6-luna \
-REVIEW_PARTY_DOGFOOD_EFFORT=high \
-REVIEW_PARTY_DOGFOOD_DEADLINE=8m \
-  ./scripts/sync-local-profiles.sh "$PWD/scratch/dogfood-config/review-party/profiles"
-./scripts/smoke-installed.sh "$(command -v review-party)"
-XDG_STATE_HOME="$PWD/scratch/dogfood-state" \
-XDG_CONFIG_HOME="$PWD/scratch/dogfood-config" \
-  review-party init --repo .
-```
-
-Treat dogfooding as a small multi-Profile review exercise, not a formal Party or
-Review Bundle: after initialization, run the `bugs` and `code-quality` Profiles
-against the same unchanged Subject using the same isolated state and
-configuration. Add `documentation` when the change touches documentation. Each
-Profile produces its own ordinary Review Record; compare their findings and
-provenance rather than merging raw Reviewer text. Launch every selected Profile
-run concurrently against that same unchanged Subject: start each command in the
-background, then wait only after all selected runs have started.
-
-```sh
-XDG_STATE_HOME="$PWD/scratch/dogfood-state" \
-XDG_CONFIG_HOME="$PWD/scratch/dogfood-config" \
-  review-party run --profile bugs --repo . --format json \
-  > scratch/dogfood-bugs.json &
-bugs_pid=$!
-XDG_STATE_HOME="$PWD/scratch/dogfood-state" \
-XDG_CONFIG_HOME="$PWD/scratch/dogfood-config" \
-  review-party run --profile code-quality --repo . --format json \
-  > scratch/dogfood-code-quality.json &
-code_quality_pid=$!
-# If documentation changed, launch this before the wait and add its PID.
-# XDG_STATE_HOME="$PWD/scratch/dogfood-state" \
-# XDG_CONFIG_HOME="$PWD/scratch/dogfood-config" \
-#   review-party run --profile documentation --repo . --format json \
-#   > scratch/dogfood-documentation.json &
-# documentation_pid=$!
-wait "$bugs_pid" "$code_quality_pid" ${documentation_pid:+"$documentation_pid"}
-```
-
-- Inspect the persisted record with the same isolated `XDG_STATE_HOME` and
-  `XDG_CONFIG_HOME` and
-  `--format json`; verify the recorded Reviewer/model provenance and result
-  contract revision.
-- Treat an unavailable, malformed, or timed-out Codex run as Incomplete. A
-  different agent or model requires explicit caller authorization.
-- Keep dogfood state and temporary builds under `scratch/`; they are evidence
-  for the current session, not durable repository records.
+When running Review Party against the current checkout as a bounded local
+dogfood review, load and follow the `dogfood-review-party` skill.
 
 ## No Deletions (Absolute)
 
