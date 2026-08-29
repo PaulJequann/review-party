@@ -8,7 +8,10 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 )
+
+const editorProcessCleanupGrace = time.Second
 
 func editInstructions(ctx context.Context, instructions string, input io.Reader, output io.Writer) (string, error) {
 	editorCommand, err := parseCommandLine(os.Getenv("EDITOR"))
@@ -26,13 +29,55 @@ func editInstructions(ctx context.Context, instructions string, input io.Reader,
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	command := exec.CommandContext(ctx, editorCommand[0], append(editorCommand[1:], path)...)
+	command := exec.Command(editorCommand[0], append(editorCommand[1:], path)...)
 	command.Stdin, command.Stdout, command.Stderr = input, output, output
-	if err := command.Run(); err != nil {
+	if err := runEditorCommand(ctx, command); err != nil {
 		return "", fmt.Errorf("run $EDITOR: %w", err)
 	}
 	payload, err := os.ReadFile(path)
 	return string(payload), err
+}
+
+func runEditorCommand(ctx context.Context, command *exec.Cmd) error {
+	configureEditorProcessGroup(command)
+	if err := command.Start(); err != nil {
+		return err
+	}
+	finished := make(chan error, 1)
+	go func() { finished <- command.Wait() }()
+	select {
+	case err := <-finished:
+		return err
+	case <-ctx.Done():
+		if err := stopEditorProcess(command, finished); err != nil {
+			return errors.Join(ctx.Err(), err)
+		}
+		return ctx.Err()
+	}
+}
+
+func stopEditorProcess(command *exec.Cmd, finished <-chan error) error {
+	terminateEditorProcessGroup(command)
+	if editorProcessStopped(finished, editorProcessCleanupGrace) {
+		killEditorProcessGroup(command)
+		return nil
+	}
+	killEditorProcessGroup(command)
+	if editorProcessStopped(finished, editorProcessCleanupGrace) {
+		return nil
+	}
+	return errors.New("editor process did not terminate after forced cleanup")
+}
+
+func editorProcessStopped(finished <-chan error, timeout time.Duration) bool {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-finished:
+		return true
+	case <-timer.C:
+		return false
+	}
 }
 
 type commandLineParser struct {
