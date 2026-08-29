@@ -51,8 +51,13 @@ dogfood Reviews.
 
 ## Current CLI
 
-> Configuration Hub Slices 5 through 7 resolve the repository's saved review selection
-> and expose it through `review-party run` and `review-party config ...`.
+> Configuration and execution slices 5 through 7 resolve the repository's saved review selection
+> and expose it through `review-party run` and explicit `review-party config ...`
+> commands. Slice 8 adds the recurring Hub: `review-party config` opens its
+> scoped, searchable overview and focused Profile creation, Party creation,
+> Repository Reviews, and Repository-to-Global Profile-copy flows in a
+> terminal, and refuses without writes outside a terminal. The explicit
+> commands below remain the automation interface.
 > The transitional `review` and `party run` commands are replaced with no
 > aliases. See
 > [`docs/configuration-hub-implementation-plan.md`](docs/configuration-hub-implementation-plan.md).
@@ -99,11 +104,25 @@ For `config discover --format json`, specifying a Reviewer returns one
 `Result` object. Omitting the Reviewer returns an object with a `results` array
 containing one result per known Reviewer.
 
-Agents and automation use the `config` command family for configuration
-changes. Read the effective configuration with `config show`; use `config file`
-only to inspect one authored document. Mutation commands return a semantic Plan
-with before and after values. Confirm mutations in a TTY or pass `--yes`; JSON
-and non-TTY mutations require `--yes`.
+Humans can open the recurring terminal shell for the current repository with
+`review-party config`; pass `--repo PATH` for another repository and use
+`--accessible` for the same configuration operations through non-redrawing
+prompts in a terminal. An accessible form abort exits the Hub without
+publishing; ordinary focused-form cancellation returns to the Hub with its
+draft. Accessible mode still requires terminal input; non-TTY callers must use
+explicit commands. Opening, searching, navigating, cancelling an editor, and
+exiting the shell do not publish configuration. The Hub creates new Profiles
+and Parties; it does not edit existing definitions. It assembles Repository
+Reviews and copies a Repository Profile only to Global Configuration. Each
+focused editor previews and confirms its Configuration Manager Plan before
+atomic publication. Instruction editing uses `$EDITOR`; export an argv-style
+editor command such as `export EDITOR=vim`. If it is unset or cannot launch, the
+Hub reports the failure and retains the draft. Agents and automation use the
+explicit `config` command family for configuration changes. Read the effective
+configuration with `config show`; use `config file` only to inspect one authored
+document. Mutation commands return a semantic Plan with before and after
+values. Confirm mutations in a TTY or pass `--yes`; JSON and non-TTY mutations
+require `--yes`.
 
 Review-selection `add` and `remove` accept qualified references only when they
 match `--scope`: use `global:NAME` with `--scope global` and

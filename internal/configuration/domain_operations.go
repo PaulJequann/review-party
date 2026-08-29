@@ -103,11 +103,7 @@ func (manager *Manager) PlanProfileCopyFromReference(repository Repository, valu
 }
 
 func (manager *Manager) planProfileCopy(repository Repository, target Scope, profile Profile) (Plan, error) {
-	return manager.PlanProfileCreation(repository, ProfileDraft{
-		Target: target, Name: profile.Name, Reviewer: profile.Reviewer, Model: profile.Model,
-		ReasoningEffort: profile.ReasoningEffort, AttemptDeadline: profile.AttemptDeadline,
-		Instructions: profile.Instructions, TemplateID: profile.TemplateID, TemplateRevision: profile.TemplateRevision,
-	})
+	return manager.planProfile(repository, target, profile, profile.Instructions)
 }
 
 // DefaultReviewSelection is the valid starting value for a repository's

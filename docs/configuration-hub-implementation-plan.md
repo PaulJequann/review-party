@@ -2,7 +2,7 @@
 
 <!-- Stashbox: https://stashbox.local.bysliek.com/0XZZMwVbSdKL -->
 
-Status: Slices 1-7 complete; Slice 8 is next
+Status: Slices 1-8 complete; Slice 9 is next
 Last reconciled: 2026-08-27
 
 This plan replaces Review Party's current configuration and execution model with
@@ -285,8 +285,8 @@ and Lip Gloss `v2.0.6` under Go 1.26. The scratch integration proved embedded
 form transitions, cancellation, narrow resizing, and terminal restoration.
 Reviewer discovery and authentication findings live in
 [`research/configuration-hub-dependencies-and-harness-discovery-2026-08-20.md`](research/configuration-hub-dependencies-and-harness-discovery-2026-08-20.md).
-The typed discovery and onboarding seams are implemented in Slice 7; the
-interactive Hub path remains deferred to Slice 8.
+The typed discovery and onboarding seams are implemented in Slice 7; Slice 8
+delivered the interactive Hub path over those seams.
 
 ## Slice 2: scoped Configuration Manager
 
@@ -388,9 +388,8 @@ it through the ordinary Review path.
   moved to version 10; preparation replaces prior pre-release ledgers in place
   per the established no-migration policy, including earlier single-schema
   versions such as 9.
-- An interactive unconfigured run currently refuses with guidance to
-  initialize and configure; opening the Hub belongs to Slice 8, so both modes
-  refuse without writes or launches this slice.
+- Slice 5 shipped interactive and noninteractive refusal without writes or
+  launches. Slice 8 subsequently delivered the explicit `config` Hub.
 - Sequential execution preserves authored order; Concurrency Limits above one
   gate attempts through the existing bounded launch mechanism while bundle rows
   stay ordered by authored position.
@@ -403,7 +402,7 @@ it through the ordinary Review path.
 - Exact overlaps run once without making ordinary configuration feel broken.
 - Same-named Global and Repository Profiles both run with a strong warning.
 - Both interactive and noninteractive unconfigured runs refuse with guidance
-  and launch no Reviewer. Hub opening is deferred to Slice 8.
+  and launch no Reviewer; Slice 8 later delivered Hub opening through `config`.
 
 ## Slice 6: agent-facing configuration commands
 
@@ -502,7 +501,7 @@ Reviewers, accessible models, effort, or cost tolerance.
   documented sign-in actions only.
 - Define the typed onboarding flow through Template or blank instructions,
   Profile name, Reviewer, model, effort, deadline, validation, and reviewed
-  save. The interactive terminal editor is Slice 8 work.
+  save. Slice 8 subsequently delivered the interactive terminal editor.
 - Let noninteractive initialization prepare managed state without inventing a
   Profile.
 
@@ -534,14 +533,15 @@ Reviewers, accessible models, effort, or cost tolerance.
   `run` continues to fail closed with configuration guidance when no executable
   repository selection exists.
 
-Slice 8 still owns the recurring Bubble Tea Hub shell and its focused editors;
-Slice 7 supplies the typed discovery and onboarding seams those editors use.
+Slice 8 delivered the recurring Bubble Tea Hub shell and focused editors over
+the same Configuration Manager planning and publication operations as the typed
+commands. Slice 7's discovery choices remain available to Profile consumers.
 
 ### Acceptance
 
 - Noninteractive Profile creation and the typed onboarding flow can end with at
-  least one validated executable Global Profile. The interactive terminal path
-  is accepted with the Slice 8 Hub editor.
+  least one validated executable Global Profile; Slice 8 delivered the accepted
+  interactive terminal path.
 - A slow or broken harness cannot block other Reviewers or the Hub.
 - Discovery never changes configuration or launches authentication implicitly.
 - `review-party run` refuses clearly when no executable repository selection
@@ -549,7 +549,7 @@ Slice 7 supplies the typed discovery and onboarding seams those editors use.
 
 ## Slice 8: Hub shell and core editors
 
-Status: **Pending**
+Status: **Complete**
 
 ### Goal
 
@@ -575,6 +575,14 @@ mechanics.
 - Preserve draft edits across cancelled focused forms. Exiting still offers
   discard or return.
 - Provide accessible prompts over the same draft state machine.
+
+### Shipped behavior
+
+- Bare `review-party config` opens a recurring Bubble Tea shell in a terminal. It presents explicit Global and Repository counts, searchable scope-labelled Templates, Profiles, Parties, and Repository Review entries. When a Repository Review selection is authored, the overview also presents its resolved expansion, deduplication facts, warnings, and provenance; otherwise it reports that reviews are not configured.
+- Enter opens focused Huh editors for Profile and flat Party creation, ordered Repository Review add/remove/move/concurrency operations, and Repository-to-Global Profile copy. Profile instructions can be handed to an explicitly configured `$EDITOR` through an argv-based subprocess; launch failures retain the draft and return an actionable error.
+- Focused editors retain their values while active, validate through Configuration Manager Plans, show the complete affected paths and warnings, and publish only after a final confirmation. Cancellation publishes nothing; publication remains atomic at the Configuration Manager boundary.
+- Dogfood remediation keeps focused-form values in Hub memory when a form returns to the Hub or its reviewed publication is declined, and prompts to discard or return when exiting with unfinished drafts. Accessible forms own a closable input, close it on cancellation, and join the prompt before returning; an accessible process abort exits without publication.
+- `--accessible` exposes the same editor operations as ordinary non-redrawing prompts. An accessible process abort exits without publishing rather than returning to redraw the Hub. Non-TTY invocation refuses with explicit-command guidance and writes nothing.
 
 ### Acceptance
 
@@ -638,7 +646,7 @@ are written.
 | Manual model entry remains possible | Incomplete discovery blocks a valid model | Profile editor and command | Warning can be confirmed and exact model ID is saved |
 | Template updates are explicit | A product update overwrites customized judgment | Hub and Configuration Manager | No Profile changes before reviewed confirmation |
 | Recovery preserves retired state | Fresh initialization destroys an incompatible ledger | Real filesystem recovery | Ledger and sidecars exist in backup before new state preparation |
-| Hub cancellation is clean | Leaving a form publishes part of a Profile | Hub and Configuration Manager | Cancel and exit before final confirmation write nothing |
+| Hub cancellation is clean | Leaving a focused editor, closing the Hub, or a failed publication leaks one or more staged writes | Hub draft state plus real Configuration Manager filesystem publication | Cancel each editor and exit from Review Changes; assert configuration paths remain byte-for-byte absent or unchanged until the single reviewed publication succeeds |
 | Machine mutation never blocks on prompts | An agent waits forever without a terminal | Config command | Mutation refuses unless `--yes` supplies authorization |
 | Slice 5: an explicit choice replaces the saved default | `--profile code-quality` silently appends to the repository roll-up | Public run command | Exactly the named Profile or Party executes; conflicting flags are refused |
 | Slice 5: unqualified explicit names resolve Repository first | An explicit name launches the Global copy although a Repository copy exists | Selection resolver | The resolved scope follows Repository-before-Global; qualified names are exact |

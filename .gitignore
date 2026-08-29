@@ -1,3 +1,6 @@
+/.agents/
+/.backpassrc.json
+/.claude/
 /scratch/
 /bin/
 /dist/

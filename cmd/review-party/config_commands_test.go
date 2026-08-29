@@ -14,6 +14,27 @@ import (
 	"reviewparty/internal/discovery"
 )
 
+func TestConfigHubOutsideTerminalPrintsGuidanceWithoutWriting(t *testing.T) {
+	result := runConfigCommand(t, []string{"config", "--repo", t.TempDir()})
+	if result.exitCode == 0 {
+		t.Fatal("config without a terminal unexpectedly succeeded")
+	}
+	if !strings.Contains(result.stderr, "requires a terminal") || !strings.Contains(result.stderr, "explicit 'review-party config' subcommands") {
+		t.Fatalf("stderr = %q", result.stderr)
+	}
+}
+
+func TestConfigurationHubContextInheritsCommandCancellation(t *testing.T) {
+	parent, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ctx, stop := configurationHubContext(parent)
+	defer stop()
+	cancel()
+	if ctx.Err() == nil {
+		t.Fatal("Hub context did not inherit command cancellation")
+	}
+}
+
 type configCommandResult struct {
 	stdout   string
 	stderr   string

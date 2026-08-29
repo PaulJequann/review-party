@@ -104,14 +104,12 @@ func printHumanConfigurationShow(output *commandOutput, report configurationShow
 	for _, authored := range report.Reviews.Authored {
 		output.write("  selected: %s:%s\n", authored.Scope, authored.Name)
 	}
-	for _, expanded := range report.Reviews.Expanded {
-		output.write("  run: %s:%s (%s)\n", expanded.Scope, expanded.Profile, expanded.Origin)
+	if output.err != nil {
+		return
 	}
-	for _, duplicate := range report.Reviews.Deduplicated {
-		output.write("  deduplicated: %s:%s (%s, kept %s)\n", duplicate.Scope, duplicate.Profile, duplicate.Origin, duplicate.KeptOrigin)
-	}
-	for _, warning := range report.Reviews.Warnings {
-		output.write("  warning: %s\n", warning.Message)
+	output.err = configuration.RenderResolvedReviewsHuman(output.writer, *report.Reviews)
+	if output.err != nil {
+		return
 	}
 }
 

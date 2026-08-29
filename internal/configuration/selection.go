@@ -47,6 +47,7 @@ var ErrNoRepositorySelection = errors.New("repository has no executable review s
 
 const (
 	sourceExplicit = "explicit"
+	sourceStaged   = "staged"
 	originExplicit = "explicit"
 )
 
@@ -131,6 +132,19 @@ func (manager *Manager) ResolveRunLoaded(request RunRequest, loaded Loaded) (Res
 	selection, value := manager.effectiveReviewSelection(loaded)
 	return selectionResolver{lookup: manager.selectionLookup(request.Repository)}.
 		resolve(request.Repository, request, selection, value)
+}
+
+// ResolveReviewSelection expands a proposed repository-owned selection
+// without reading or publishing that selection. Callers use it to preview
+// staged changes while resolving all referenced Profiles and Parties normally.
+func (manager *Manager) ResolveReviewSelection(repository Repository, selection ReviewSelection) (ResolvedReviews, error) {
+	resolved, err := selectionResolver{lookup: manager.selectionLookup(repository)}.
+		resolveDefaultSelection(repository, selection, Value[ReviewSelection]{Value: selection, Authored: true})
+	if err != nil {
+		return ResolvedReviews{}, err
+	}
+	resolved.Source = sourceStaged
+	return resolved, nil
 }
 
 // UnresolvedReferenceError reports a selection whose referenced definition is
