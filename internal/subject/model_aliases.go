@@ -2,7 +2,7 @@ package subject
 
 import "reviewparty/internal/model"
 
-// Model type aliases for tests and internal helpers that still use unqualified names.
+// SubjectFacts is an alias for the model type used by subject-package tests and helpers.
 type SubjectFacts = model.SubjectFacts
 type ReviewSubject = model.ReviewSubject
 type SubjectReference = model.SubjectReference

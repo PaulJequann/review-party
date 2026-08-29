@@ -68,12 +68,6 @@ func (executor *scriptedExecutor) checkCount() int {
 	return executor.checks
 }
 
-func (executor *scriptedExecutor) lastAttempt() attemptSpec {
-	executor.mu.Lock()
-	defer executor.mu.Unlock()
-	return executor.attempts[len(executor.attempts)-1]
-}
-
 func TestReviewFreezesWorkingChangesBeforeExecution(t *testing.T) {
 	repository := testRepository(t)
 	writeTestFile(t, filepath.Join(repository, "review.go"), "package demo\n\nconst state = \"first change\"\n")

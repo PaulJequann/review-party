@@ -110,6 +110,13 @@ func printConfigFailure(format string, stdout, stderr io.Writer, err error) int 
 	return printFailure(stderr, err)
 }
 
+func printConfigOutput(streams commandIO, render func(*commandOutput)) int {
+	if err := writeCommandOutput(streams.output, render); err != nil {
+		return printConfigFailure("human", streams.output, streams.errors, err)
+	}
+	return 0
+}
+
 func instructionFlags(cmd *cobra.Command) (string, error) {
 	instructions := stringFlag(cmd, "instructions")
 	path := stringFlag(cmd, "instructions-file")
@@ -127,10 +134,10 @@ func valueReportOf[T any](value configuration.Value[T]) valueReport[T] {
 	return valueReport[T]{Value: value.Value, Authored: value.Authored, Source: string(value.Source), Path: value.Path}
 }
 
-func printHumanValue[T any](output io.Writer, label string, value valueReport[T]) {
+func printHumanValue[T any](output *commandOutput, label string, value valueReport[T]) {
 	if value.Authored {
-		fmt.Fprintf(output, "%s: %v (%s %s)\n", label, value.Value, value.Source, value.Path)
+		output.write("%s: %v (%s %s)\n", label, value.Value, value.Source, value.Path)
 		return
 	}
-	fmt.Fprintf(output, "%s: %v (%s)\n", label, value.Value, value.Source)
+	output.write("%s: %v (%s)\n", label, value.Value, value.Source)
 }

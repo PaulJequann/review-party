@@ -30,22 +30,18 @@ type evalCompareOptions struct {
 
 func executeEvalCompare(ctx context.Context, options evalCompareOptions, stdout, stderr io.Writer) int {
 	if options.baseline == "" || options.candidate == "" {
-		fmt.Fprintln(stderr, "review-party: eval compare requires --baseline AR_ID and --candidate AR_ID")
-		return usageExitCode
+		return printCommandError(stderr, usageExitCode, errors.New("eval compare requires --baseline AR_ID and --candidate AR_ID"))
 	}
 	if !strings.HasPrefix(options.baseline, "ar_") || !strings.HasPrefix(options.candidate, "ar_") {
-		fmt.Fprintln(stderr, "review-party: eval compare requires adjudication revision ids beginning with ar_")
-		return usageExitCode
+		return printCommandError(stderr, usageExitCode, errors.New("eval compare requires adjudication revision ids beginning with ar_"))
 	}
 	conductor, err := engine.New(engine.Config{UserConfigurationPath: options.configuration})
 	if err != nil {
-		fmt.Fprintf(stderr, "review-party: %v\n", err)
-		return 1
+		return printFailure(stderr, err)
 	}
 	comparison, err := conductor.CompareAdjudications(ctx, model.AdjudicationRevisionID(options.baseline), model.AdjudicationRevisionID(options.candidate))
 	if err != nil {
-		fmt.Fprintf(stderr, "review-party: %v\n", err)
-		return 1
+		return printFailure(stderr, err)
 	}
 	return printEvalComparison(comparison, options.format, stdout, stderr)
 }
@@ -58,18 +54,18 @@ func printEvalComparison(comparison model.EvalComparison, format string, stdout,
 		return 0
 	}
 	if format != "human" {
-		fmt.Fprintf(stderr, "review-party: unknown output format %q\n", format)
-		return 1
+		return printFailure(stderr, fmt.Errorf("unknown output format %q", format))
 	}
-	fmt.Fprintf(stdout, "comparison %s vs %s · %d/%d shared cases\n", comparison.BaselineAdjudication, comparison.CandidateAdjudication, comparison.Coverage.ComparedCases, comparison.Coverage.BaselineCases)
-	fmt.Fprintf(stdout, "baseline: %s %s · %s · %s\n", comparison.BaselineIdentity.Experiment.Reviewer, comparison.BaselineIdentity.Experiment.Model, comparison.BaselineIdentity.Experiment.Effort, comparison.BaselineIdentity.Runtime.VCSRevision)
-	fmt.Fprintf(stdout, "candidate: %s %s · %s · %s\n", comparison.CandidateIdentity.Experiment.Reviewer, comparison.CandidateIdentity.Experiment.Model, comparison.CandidateIdentity.Experiment.Effort, comparison.CandidateIdentity.Runtime.VCSRevision)
-	fmt.Fprintf(stdout, "recall %s → %s · precision %s → %s · clean accuracy %s → %s · completion %s → %s\n", formatRatio(comparison.DefectRecall.Baseline), formatRatio(comparison.DefectRecall.Candidate), formatRatio(comparison.FindingPrecision.Baseline), formatRatio(comparison.FindingPrecision.Candidate), formatRatio(comparison.CleanCaseAccuracy.Baseline), formatRatio(comparison.CleanCaseAccuracy.Candidate), formatRatio(comparison.CompletionRate.Baseline), formatRatio(comparison.CompletionRate.Candidate))
-	fmt.Fprintf(stdout, "runtime %dms → %dms (%+dms)\n", comparison.BaselineRuntime.TotalMS, comparison.CandidateRuntime.TotalMS, comparison.RuntimeDeltaMS)
-	if comparisonHasCoverageGaps(comparison) {
-		fmt.Fprintf(stdout, "omitted baseline=%v candidate=%v mismatched=%v\n", comparison.Coverage.OmittedBaselineIDs, comparison.Coverage.OmittedCandidateIDs, comparison.Coverage.MismatchedCaseIDs)
-	}
-	return 0
+	return printCommandOutput(stdout, stderr, func(output *commandOutput) {
+		output.write("comparison %s vs %s · %d/%d shared cases\n", comparison.BaselineAdjudication, comparison.CandidateAdjudication, comparison.Coverage.ComparedCases, comparison.Coverage.BaselineCases)
+		output.write("baseline: %s %s · %s · %s\n", comparison.BaselineIdentity.Experiment.Reviewer, comparison.BaselineIdentity.Experiment.Model, comparison.BaselineIdentity.Experiment.Effort, comparison.BaselineIdentity.Runtime.VCSRevision)
+		output.write("candidate: %s %s · %s · %s\n", comparison.CandidateIdentity.Experiment.Reviewer, comparison.CandidateIdentity.Experiment.Model, comparison.CandidateIdentity.Experiment.Effort, comparison.CandidateIdentity.Runtime.VCSRevision)
+		output.write("recall %s → %s · precision %s → %s · clean accuracy %s → %s · completion %s → %s\n", formatRatio(comparison.DefectRecall.Baseline), formatRatio(comparison.DefectRecall.Candidate), formatRatio(comparison.FindingPrecision.Baseline), formatRatio(comparison.FindingPrecision.Candidate), formatRatio(comparison.CleanCaseAccuracy.Baseline), formatRatio(comparison.CleanCaseAccuracy.Candidate), formatRatio(comparison.CompletionRate.Baseline), formatRatio(comparison.CompletionRate.Candidate))
+		output.write("runtime %dms → %dms (%+dms)\n", comparison.BaselineRuntime.TotalMS, comparison.CandidateRuntime.TotalMS, comparison.RuntimeDeltaMS)
+		if comparisonHasCoverageGaps(comparison) {
+			output.write("omitted baseline=%v candidate=%v mismatched=%v\n", comparison.Coverage.OmittedBaselineIDs, comparison.Coverage.OmittedCandidateIDs, comparison.Coverage.MismatchedCaseIDs)
+		}
+	})
 }
 
 func comparisonHasCoverageGaps(comparison model.EvalComparison) bool {
@@ -80,18 +76,15 @@ func comparisonHasCoverageGaps(comparison model.EvalComparison) bool {
 func executeEvalSuite(ctx context.Context, options evalRunOptions, stdout, stderr io.Writer) int {
 	experiment, effectiveDeadline, err := resolveEvalExperiment(options)
 	if err != nil {
-		fmt.Fprintf(stderr, "review-party: %v\n", err)
-		return 2
+		return printCommandError(stderr, 2, err)
 	}
 	conductor, err := engine.New(engine.Config{AttemptDeadline: effectiveDeadline, UserConfigurationPath: options.configuration})
 	if err != nil {
-		fmt.Fprintf(stderr, "review-party: %v\n", err)
-		return 1
+		return printFailure(stderr, err)
 	}
 	run, err := conductor.RunEvalSuite(ctx, model.EvalSuiteSelection{Suite: options.suite, Experiment: experiment})
 	if err != nil {
-		fmt.Fprintf(stderr, "review-party: %v\n", err)
-		return 1
+		return printFailure(stderr, err)
 	}
 	return printEvalSuiteRun(run, options.format, stdout, stderr)
 }
@@ -196,8 +189,7 @@ type evalInspectOptions struct {
 func executeEvalInspect(ctx context.Context, options evalInspectOptions, stdout, stderr io.Writer) int {
 	conductor, err := engine.New(engine.Config{UserConfigurationPath: options.configuration})
 	if err != nil {
-		fmt.Fprintf(stderr, "review-party: %v\n", err)
-		return 1
+		return printFailure(stderr, err)
 	}
 	command := evalInspectCommand{ctx: ctx, conductor: conductor, id: options.id, format: options.format, stdout: stdout, stderr: stderr}
 	if strings.HasPrefix(options.id, "esr_") {
@@ -217,13 +209,11 @@ type evalAdjudicationOptions struct {
 func executeEvalAdjudication(ctx context.Context, options evalAdjudicationOptions, stdout, stderr io.Writer) int {
 	conductor, err := engine.New(engine.Config{UserConfigurationPath: options.configuration})
 	if err != nil {
-		fmt.Fprintf(stderr, "review-party: %v\n", err)
-		return 1
+		return printFailure(stderr, err)
 	}
 	document, err := conductor.ExportAdjudication(ctx, model.EvalSuiteRunID(options.id))
 	if err != nil {
-		fmt.Fprintf(stderr, "review-party: %v\n", err)
-		return 1
+		return printFailure(stderr, err)
 	}
 	encoder := json.NewEncoder(stdout)
 	encoder.SetIndent("", "  ")
@@ -242,23 +232,19 @@ type evalScoreOptions struct {
 
 func executeEvalScore(ctx context.Context, options evalScoreOptions, stdout, stderr io.Writer) int {
 	if options.adjudicationPath == "" {
-		fmt.Fprintln(stderr, "review-party: eval score requires one Eval Suite Run id and --adjudication PATH")
-		return usageExitCode
+		return printCommandError(stderr, usageExitCode, errors.New("eval score requires one Eval Suite Run id and --adjudication PATH"))
 	}
 	document, err := loadAdjudication(options.id, options.adjudicationPath)
 	if err != nil {
-		fmt.Fprintf(stderr, "review-party: %v\n", err)
-		return 2
+		return printCommandError(stderr, 2, err)
 	}
 	conductor, err := engine.New(engine.Config{UserConfigurationPath: options.configuration})
 	if err != nil {
-		fmt.Fprintf(stderr, "review-party: %v\n", err)
-		return 1
+		return printFailure(stderr, err)
 	}
 	revision, err := conductor.PublishAdjudication(ctx, document)
 	if err != nil {
-		fmt.Fprintf(stderr, "review-party: %v\n", err)
-		return 1
+		return printFailure(stderr, err)
 	}
 	return printAdjudication(revision, options.format, stdout, stderr)
 }
@@ -294,8 +280,7 @@ func decodeJSONFile(path string, destination any) error {
 func inspectAdjudication(command evalInspectCommand) int {
 	revision, err := command.conductor.InspectAdjudication(command.ctx, model.AdjudicationRevisionID(command.id))
 	if err != nil {
-		fmt.Fprintf(command.stderr, "review-party: %v\n", err)
-		return 1
+		return printFailure(command.stderr, err)
 	}
 	return printAdjudication(revision, command.format, command.stdout, command.stderr)
 }
@@ -308,15 +293,15 @@ func printAdjudication(revision model.AdjudicationRevision, format string, stdou
 		return 0
 	}
 	if format != "human" {
-		fmt.Fprintf(stderr, "review-party: unknown output format %q\n", format)
-		return 1
+		return printFailure(stderr, fmt.Errorf("unknown output format %q", format))
 	}
-	fmt.Fprintf(stdout, "adjudication %s · suite %s · revision %d\n", revision.ID, revision.SuiteRunID, revision.RevisionNumber)
-	for _, adjudication := range revision.Document.Cases {
-		fmt.Fprintf(stdout, "case %s · %s · %d expected · %d reported\n", adjudication.CaseID, adjudication.ExecutionState, len(adjudication.ExpectedFindings), len(adjudication.ReportedFindings))
-	}
-	fmt.Fprintf(stdout, "recall %s · precision %s · clean accuracy %s · completion %s\n", formatRatio(revision.Score.DefectRecall), formatRatio(revision.Score.FindingPrecision), formatRatio(revision.Score.CleanCaseAccuracy), formatRatio(revision.Score.CompletionRate))
-	return 0
+	return printCommandOutput(stdout, stderr, func(output *commandOutput) {
+		output.write("adjudication %s · suite %s · revision %d\n", revision.ID, revision.SuiteRunID, revision.RevisionNumber)
+		for _, adjudication := range revision.Document.Cases {
+			output.write("case %s · %s · %d expected · %d reported\n", adjudication.CaseID, adjudication.ExecutionState, len(adjudication.ExpectedFindings), len(adjudication.ReportedFindings))
+		}
+		output.write("recall %s · precision %s · clean accuracy %s · completion %s\n", formatRatio(revision.Score.DefectRecall), formatRatio(revision.Score.FindingPrecision), formatRatio(revision.Score.CleanCaseAccuracy), formatRatio(revision.Score.CompletionRate))
+	})
 }
 
 func formatRatio(metric model.RatioMetric) string {
@@ -338,8 +323,7 @@ type evalInspectCommand struct {
 func inspectEvalSuiteRun(command evalInspectCommand) int {
 	run, err := command.conductor.InspectEvalSuiteRun(command.ctx, model.EvalSuiteRunID(command.id))
 	if err != nil {
-		fmt.Fprintf(command.stderr, "review-party: %v\n", err)
-		return 1
+		return printFailure(command.stderr, err)
 	}
 	return printEvalSuiteRun(run, command.format, command.stdout, command.stderr)
 }
@@ -347,8 +331,7 @@ func inspectEvalSuiteRun(command evalInspectCommand) int {
 func inspectEvalRun(command evalInspectCommand) int {
 	run, err := command.conductor.InspectEvalRun(command.ctx, model.EvalRunID(command.id))
 	if err != nil {
-		fmt.Fprintf(command.stderr, "review-party: %v\n", err)
-		return 1
+		return printFailure(command.stderr, err)
 	}
 	if command.format == "json" {
 		if err := json.NewEncoder(command.stdout).Encode(run); err != nil {
@@ -357,15 +340,15 @@ func inspectEvalRun(command evalInspectCommand) int {
 		return 0
 	}
 	if command.format != "human" {
-		fmt.Fprintf(command.stderr, "review-party: unknown output format %q\n", command.format)
-		return 1
+		return printFailure(command.stderr, fmt.Errorf("unknown output format %q", command.format))
 	}
 	review := "not started"
 	if run.ReviewID != "" {
 		review = string(run.ReviewID)
 	}
-	fmt.Fprintf(command.stdout, "eval %s · case %s · %s · review %s · %s\n", run.ID, run.Case.ID, run.ExecutionState, review, run.AdjudicationState)
-	return 0
+	return printCommandOutput(command.stdout, command.stderr, func(output *commandOutput) {
+		output.write("eval %s · case %s · %s · review %s · %s\n", run.ID, run.Case.ID, run.ExecutionState, review, run.AdjudicationState)
+	})
 }
 
 func printEvalSuiteRun(run model.EvalSuiteRun, format string, stdout, stderr io.Writer) int {
@@ -376,12 +359,12 @@ func printEvalSuiteRun(run model.EvalSuiteRun, format string, stdout, stderr io.
 		return 0
 	}
 	if format != "human" {
-		fmt.Fprintf(stderr, "review-party: unknown output format %q\n", format)
-		return 1
+		return printFailure(stderr, fmt.Errorf("unknown output format %q", format))
 	}
-	fmt.Fprintf(stdout, "eval suite %s · %s · %s@%s · %d clean · %d findings · %d incomplete\n", run.ID, run.Lifecycle, run.Suite, run.SuiteRevision, run.CompletedCleanCount, run.CompletedFindingCount, run.IncompleteCount)
-	for _, id := range run.EvalRunIDs {
-		fmt.Fprintf(stdout, "eval: review-party eval inspect %s\n", id)
-	}
-	return 0
+	return printCommandOutput(stdout, stderr, func(output *commandOutput) {
+		output.write("eval suite %s · %s · %s@%s · %d clean · %d findings · %d incomplete\n", run.ID, run.Lifecycle, run.Suite, run.SuiteRevision, run.CompletedCleanCount, run.CompletedFindingCount, run.IncompleteCount)
+		for _, id := range run.EvalRunIDs {
+			output.write("eval: review-party eval inspect %s\n", id)
+		}
+	})
 }

@@ -113,6 +113,8 @@ func retryableTermination(termination *model.ReviewTermination) bool {
 	switch termination.Category {
 	case model.TerminationReviewerUnavailable, model.TerminationDeadlineExceeded, model.TerminationTransportFailure, model.TerminationMalformedOutput, model.TerminationResultValidationFailure:
 		return true
+	case model.TerminationAuthenticationFailure, model.TerminationCancelled, model.TerminationUnknownFailure:
+		return false
 	default:
 		return false
 	}
@@ -127,8 +129,13 @@ func lastRetryAfterMS(record model.ReviewRecord) int64 {
 }
 
 func retryDelay(policy model.RetryPolicy, attempt int, providerDelay time.Duration) time.Duration {
-	initial, _ := time.ParseDuration(policy.InitialBackoff)
-	maximum, _ := time.ParseDuration(policy.MaxBackoff)
+	initial, initialErr := time.ParseDuration(policy.InitialBackoff)
+	maximum, maximumErr := time.ParseDuration(policy.MaxBackoff)
+	if initialErr != nil || maximumErr != nil {
+		// Retry policies are validated before execution; zero is the defensive
+		// fallback for an invalid policy passed directly to this helper.
+		return 0
+	}
 	delay := initial
 	for step := 1; step < attempt && delay < maximum; step++ {
 		delay *= 2

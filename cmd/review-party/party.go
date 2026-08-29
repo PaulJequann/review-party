@@ -21,17 +21,14 @@ type partiesOptions struct {
 func executeParties(ctx context.Context, options partiesOptions, stdout, stderr io.Writer) int {
 	conductor, err := engine.New(engine.Config{UserConfigurationPath: options.configuration})
 	if err != nil {
-		fmt.Fprintf(stderr, "review-party: %v\n", err)
-		return 1
+		return printFailure(stderr, err)
 	}
 	summaries, err := conductor.PartiesForRepository(options.repository)
 	if err != nil {
-		fmt.Fprintf(stderr, "review-party: %v\n", err)
-		return 1
+		return printFailure(stderr, err)
 	}
 	if options.format != "json" && options.format != "human" {
-		fmt.Fprintf(stderr, "review-party: unknown output format %q\n", options.format)
-		return usageExitCode
+		return printCommandError(stderr, usageExitCode, fmt.Errorf("unknown output format %q", options.format))
 	}
 	return printPartySummaries(stdout, summaries, options.format)
 }
@@ -45,18 +42,22 @@ func printPartySummaries(stdout io.Writer, summaries []model.PartySummary, forma
 		}
 		return 0
 	}
-	printHumanPartySummaries(stdout, summaries)
+	if err := writeCommandOutput(stdout, func(output *commandOutput) {
+		printHumanPartySummaries(output, summaries)
+	}); err != nil {
+		return 1
+	}
 	return 0
 }
 
-func printHumanPartySummaries(stdout io.Writer, summaries []model.PartySummary) {
+func printHumanPartySummaries(stdout *commandOutput, summaries []model.PartySummary) {
 	for _, summary := range summaries {
 		description := summary.Description
 		if summary.Error != "" {
 			description = summary.Error
 		}
-		fmt.Fprintf(stdout, "%s · %s · %s\n", summary.Name, summary.Source, description)
-		fmt.Fprintf(stdout, "  profiles: %s\n", strings.Join(partySummaryMembers(summary.Members), ", "))
+		stdout.write("%s · %s · %s\n", summary.Name, summary.Source, description)
+		stdout.write("  profiles: %s\n", strings.Join(partySummaryMembers(summary.Members), ", "))
 	}
 }
 
@@ -77,32 +78,33 @@ func printBundle(output io.Writer, bundle model.ReviewBundle, format string) err
 	if format != "human" {
 		return errors.New("unknown output format " + format)
 	}
-	printHumanBundle(output, bundle)
-	return nil
+	return writeCommandOutput(output, func(output *commandOutput) {
+		printHumanBundle(output, bundle)
+	})
 }
 
-func printHumanBundle(output io.Writer, bundle model.ReviewBundle) {
-	fmt.Fprintf(output, "bundle %s\n", bundle.ID)
-	fmt.Fprintf(output, "%s · %d/%d review(s) completed\n", bundle.Lifecycle, completedBundleMembers(bundle), len(bundle.Members))
+func printHumanBundle(output *commandOutput, bundle model.ReviewBundle) {
+	output.write("bundle %s\n", bundle.ID)
+	output.write("%s · %d/%d review(s) completed\n", bundle.Lifecycle, completedBundleMembers(bundle), len(bundle.Members))
 	if partyName := explicitPartyName(bundle); partyName != "" {
-		fmt.Fprintf(output, "party: %s\n", partyName)
+		output.write("party: %s\n", partyName)
 	}
-	fmt.Fprintf(output, "revision: %s\n", bundle.Revision)
+	output.write("revision: %s\n", bundle.Revision)
 	printBundleSelection(output, bundle.Selection)
 	printBundleWarnings(output, bundle.Warnings)
 	printBundleDeduplication(output, bundle.Deduplicated)
-	fmt.Fprintf(output, "subject: %s %s\n", bundle.SubjectKind, shortIdentity(bundle.SubjectIdentity))
+	output.write("subject: %s %s\n", bundle.SubjectKind, shortIdentity(bundle.SubjectIdentity))
 	for _, member := range bundle.Members {
 		line := fmt.Sprintf("  %-16s %s", scopedMemberName(member), memberStatus(member))
 		if member.Status != "" && member.ReviewID != "" {
 			line += fmt.Sprintf(" (%d finding(s))", member.FindingCount)
 		}
-		fmt.Fprintln(output, line)
+		output.write("%s\n", line)
 	}
 	if bundle.Termination != nil {
-		fmt.Fprintf(output, "incomplete: %s: %s\n", bundle.Termination.Category, bundle.Termination.Message)
+		output.write("incomplete: %s: %s\n", bundle.Termination.Category, bundle.Termination.Message)
 	}
-	fmt.Fprintf(output, "inspect: review-party inspect %s\n", bundle.ID)
+	output.write("inspect: review-party inspect %s\n", bundle.ID)
 }
 
 // explicitPartyName names the Party behind an explicit-party selection.
@@ -118,28 +120,28 @@ func explicitPartyName(bundle model.ReviewBundle) string {
 }
 
 // printBundleSelection reports which authored choice produced this run.
-func printBundleSelection(output io.Writer, selection *model.BundleSelection) {
+func printBundleSelection(output *commandOutput, selection *model.BundleSelection) {
 	if selection == nil || selection.Source == "" {
 		return
 	}
-	fmt.Fprintf(output, "selection: %s", selection.Kind)
+	output.write("selection: %s", selection.Kind)
 	if selection.LimitSource != "" {
-		fmt.Fprintf(output, " · limit %d (%s)", selection.ConcurrencyLimit, selection.LimitSource)
+		output.write(" · limit %d (%s)", selection.ConcurrencyLimit, selection.LimitSource)
 	}
-	fmt.Fprint(output, "\n")
+	output.write("\n")
 }
 
-func printBundleWarnings(output io.Writer, warnings []model.BundleWarning) {
+func printBundleWarnings(output *commandOutput, warnings []model.BundleWarning) {
 	for _, warning := range warnings {
-		fmt.Fprintf(output, "warning: %s\n", warning.Message)
+		output.write("warning: %s\n", warning.Message)
 	}
 }
 
 // printBundleDeduplication explains every occurrence removed by exact-identity
 // deduplication and where its first execution remains.
-func printBundleDeduplication(output io.Writer, duplicates []model.SkippedDuplicate) {
+func printBundleDeduplication(output *commandOutput, duplicates []model.SkippedDuplicate) {
 	for _, duplicate := range duplicates {
-		fmt.Fprintf(output, "deduplicated: %s:%s selected again by %s; first run kept at %s\n", duplicate.Scope, duplicate.Profile, duplicate.Origin, duplicate.KeptOrigin)
+		output.write("deduplicated: %s:%s selected again by %s; first run kept at %s\n", duplicate.Scope, duplicate.Profile, duplicate.Origin, duplicate.KeptOrigin)
 	}
 }
 

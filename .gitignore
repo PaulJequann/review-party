@@ -2,6 +2,7 @@
 /bin/
 /dist/
 /coverage/
+/.tools/
 *.out
 *.test
 /review-party

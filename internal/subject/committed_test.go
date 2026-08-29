@@ -157,7 +157,11 @@ func TestCommittedExecutionReconcilesOnlyInactiveOwnedCheckout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer fresh.Close()
+	defer func() {
+		if err := fresh.Close(); err != nil {
+			t.Errorf("close fresh checkout: %v", err)
+		}
+	}()
 	if _, err := os.Stat(stalePath); !os.IsNotExist(err) {
 		t.Fatalf("stale checkout remains: %v", err)
 	}

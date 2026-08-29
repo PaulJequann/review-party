@@ -2,6 +2,7 @@ package subject
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os/exec"
 	"reviewparty/internal/model"
@@ -16,7 +17,8 @@ func measureCapturedPatch(repositoryRoot string, patch []byte) ([]string, model.
 	command.Stdin = bytes.NewReader(patch)
 	output, err := command.Output()
 	if err != nil {
-		if exitError, ok := err.(*exec.ExitError); ok {
+		var exitError *exec.ExitError
+		if errors.As(err, &exitError) {
 			return nil, model.SubjectFacts{}, fmt.Errorf("measure captured patch: %s", strings.TrimSpace(string(exitError.Stderr)))
 		}
 		return nil, model.SubjectFacts{}, fmt.Errorf("measure captured patch: %w", err)

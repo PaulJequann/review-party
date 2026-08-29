@@ -22,7 +22,7 @@ func TestOlderSchemaRequiresPreparation(t *testing.T) {
 
 func TestEvalCheckpointRollsBackChildWhenParentUpdateFails(t *testing.T) {
 	ledger := newTestLedger(t, t.TempDir())
-	defer ledger.Close()
+	defer closeTestResource(t, ledger.Close)
 	suite, run := pendingEvalRecords(time.Now().UTC())
 	if err := ledger.CreateEvalSuiteRun(suite, []model.EvalRun{run}); err != nil {
 		t.Fatal(err)

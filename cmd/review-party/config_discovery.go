@@ -56,7 +56,9 @@ func executeConfigurationDiscovery(ctx context.Context, reviewer, format string,
 func flushDiscoveryCache(ctx context.Context, service *discovery.Service) {
 	flushContext, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
-	_ = service.Flush(flushContext)
+	if err := service.Flush(flushContext); err != nil {
+		return
+	}
 }
 
 type discoveryOutput struct {
@@ -70,11 +72,15 @@ func printDiscoveryResults(output discoveryOutput, results []discovery.Result) i
 	if output.format == "json" {
 		return printDiscoveryJSON(output, results)
 	}
-	for index, result := range results {
-		if index > 0 {
-			fmt.Fprintln(output.stdout)
+	if err := writeCommandOutput(output.stdout, func(writer *commandOutput) {
+		for index, result := range results {
+			if index > 0 {
+				writer.write("\n")
+			}
+			writeHumanDiscovery(writer, result)
 		}
-		printHumanDiscovery(output.stdout, result)
+	}); err != nil {
+		return printConfigFailure(output.format, output.stdout, output.stderr, err)
 	}
 	return 0
 }
@@ -92,44 +98,27 @@ func printDiscoveryJSON(output discoveryOutput, results []discovery.Result) int 
 	return 0
 }
 
-func printHumanDiscovery(output io.Writer, result discovery.Result) {
-	fmt.Fprintf(output, "reviewer: %s\nstatus: %s\n", result.Reviewer, result.Status)
-	printHarnessVersion(output, result)
-	fmt.Fprintf(output, "authentication: %s\n", result.Authentication.Status)
-	printDiscoveryModels(output, result.Models)
-	printSignInAction(output, result.Authentication.SignIn)
-	printDiscoveryDiagnostic(output, result.Diagnostic)
-}
-
-func printHarnessVersion(output io.Writer, result discovery.Result) {
+func writeHumanDiscovery(output *commandOutput, result discovery.Result) {
+	output.write("reviewer: %s\nstatus: %s\n", result.Reviewer, result.Status)
 	if result.HarnessVersion != "" {
-		fmt.Fprintf(output, "harness version: %s\n", result.HarnessVersion)
+		output.write("harness version: %s\n", result.HarnessVersion)
 	}
-}
-
-func printDiscoveryModels(output io.Writer, models []discovery.Model) {
-	for _, model := range models {
+	output.write("authentication: %s\n", result.Authentication.Status)
+	for _, model := range result.Models {
 		defaultMarker := ""
 		if model.Default {
 			defaultMarker = " (default)"
 		}
-		fmt.Fprintf(output, "  model: %s%s\n", model.ID, defaultMarker)
+		output.write("  model: %s%s\n", model.ID, defaultMarker)
 	}
-}
-
-func printSignInAction(output io.Writer, signIn *discovery.SignInAction) {
-	if signIn == nil {
-		return
+	if signIn := result.Authentication.SignIn; signIn != nil {
+		output.write("sign in: %s\n", joinCommand(signIn.Command))
+		if signIn.DocumentationURL != "" {
+			output.write("  documentation: %s\n", signIn.DocumentationURL)
+		}
 	}
-	fmt.Fprintf(output, "sign in: %s\n", joinCommand(signIn.Command))
-	if signIn.DocumentationURL != "" {
-		fmt.Fprintf(output, "  documentation: %s\n", signIn.DocumentationURL)
-	}
-}
-
-func printDiscoveryDiagnostic(output io.Writer, diagnostic string) {
-	if diagnostic != "" {
-		fmt.Fprintf(output, "diagnostic: %s\n", diagnostic)
+	if result.Diagnostic != "" {
+		output.write("diagnostic: %s\n", result.Diagnostic)
 	}
 }
 

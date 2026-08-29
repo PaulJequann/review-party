@@ -44,9 +44,10 @@ func (adapter openCodeAdapter) observeOpenCodeAuthentication(ctx context.Context
 	case AuthUnknown:
 		diagnostic := commandDiagnostic(run)
 		return Authentication{Status: AuthUnknown, Diagnostic: diagnostic, SignIn: signIn}
-	default:
+	case AuthAvailable, AuthConfigured, AuthUnsupported, AuthUnavailable:
 		return Authentication{Status: AuthConfigured, SignIn: signIn}
 	}
+	return Authentication{Status: AuthConfigured, SignIn: signIn}
 }
 
 func parseOpenCodeModels(output []byte) []Model {

@@ -1,3 +1,4 @@
+// Package result defines the review result contract.
 package result
 
 import (

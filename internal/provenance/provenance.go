@@ -1,3 +1,4 @@
+// Package provenance records runtime and experiment identity.
 package provenance
 
 import (

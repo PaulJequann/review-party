@@ -51,11 +51,12 @@ func printValidationSuccess(result configurationValidationResult, options config
 		}
 		return 0
 	}
-	fmt.Fprintf(streams.output, "valid configuration: %s\n", strings.Join(result.Scopes, ", "))
-	for _, file := range result.Files {
-		fmt.Fprintf(streams.output, "  %s: %s (%s)\n", file.Scope, file.Path, validationFileStatus(file))
-	}
-	return 0
+	return printConfigOutput(streams, func(output *commandOutput) {
+		output.write("valid configuration: %s\n", strings.Join(result.Scopes, ", "))
+		for _, file := range result.Files {
+			output.write("  %s: %s (%s)\n", file.Scope, file.Path, validationFileStatus(file))
+		}
+	})
 }
 
 func validationFileStatus(file configurationFileStatus) string {

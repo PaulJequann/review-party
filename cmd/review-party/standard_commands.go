@@ -127,7 +127,7 @@ func profileListSpec() libraryListSpec {
 
 func partyListSpec() libraryListSpec {
 	return libraryListSpec{use: "parties", label: "Review Parties", execute: func(ctx context.Context, options libraryListOptions, streams commandIO) int {
-		return executeParties(ctx, partiesOptions{repository: options.repository, format: options.format, configuration: options.configuration}, streams.output, streams.errors)
+		return executeParties(ctx, partiesOptions(options), streams.output, streams.errors)
 	}}
 }
 

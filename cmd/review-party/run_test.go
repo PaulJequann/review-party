@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -15,6 +16,10 @@ type fakeRunConductor struct {
 	profileCalls int
 	runCalls     int
 }
+
+type failingCommandWriter struct{ err error }
+
+func (writer failingCommandWriter) Write([]byte) (int, error) { return 0, writer.err }
 
 func (conductor *fakeRunConductor) ReviewExplicitProfile(context.Context, model.RunSelection) (model.ReviewRecord, error) {
 	conductor.profileCalls++
@@ -47,5 +52,19 @@ func TestExecuteRunExplicitProfileUsesOrdinaryReviewRecord(t *testing.T) {
 	}
 	if strings.Contains(stdout.String(), "rb_unexpected") {
 		t.Fatalf("output = %q, must not render a bundle", stdout.String())
+	}
+}
+
+func TestExecuteRunFailsWhenHumanOutputCannotBeWritten(t *testing.T) {
+	conductor := &fakeRunConductor{record: model.ReviewRecord{ID: "rp_output_failure", Lifecycle: model.LifecycleCompleted}}
+	var stderr bytes.Buffer
+	exit := executeRunWithConductor(context.Background(), conductor, runOptions{
+		profile: "bugs", format: "human", configuration: defaultUserConfigurationPath(), subject: model.WorkingChanges(),
+	}, commandIO{output: failingCommandWriter{err: errors.New("output is closed")}, errors: &stderr})
+	if exit == 0 {
+		t.Fatal("output failure returned a successful command result")
+	}
+	if !strings.Contains(stderr.String(), "write command output") {
+		t.Fatalf("stderr = %q, want write diagnostic", stderr.String())
 	}
 }

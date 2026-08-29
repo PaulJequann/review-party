@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"reviewparty/internal/model"
 	"reviewparty/internal/result"
@@ -138,8 +139,8 @@ func (runner *reviewRunner) executePass(ctx context.Context, pass passExecution)
 	record.Passes[0].Attempts = append(record.Passes[0].Attempts, attempt)
 	runner.finalizeOperationalRecord(&record, pass.reviewStarted)
 	if err := runner.store.Save(record); err != nil {
-		runner.publisher.removeArtifacts(attempt.Artifacts)
-		return record, err
+		cleanupErr := runner.publisher.removeArtifacts(attempt.Artifacts)
+		return record, errors.Join(err, cleanupErr)
 	}
 	if cleanupErr != nil {
 		return record, fmt.Errorf("Review %s was persisted but its Subject execution checkout could not be cleaned: %w", record.ID, cleanupErr)
@@ -174,22 +175,24 @@ func applyAttemptResult(record *model.ReviewRecord, result model.ReviewResult, e
 	return outcome
 }
 
-func (runner *reviewRunner) executeAttempt(ctx context.Context, record model.ReviewRecord, pass passExecution, prompt string) (attemptExecution, error) {
+func (runner *reviewRunner) executeAttempt(ctx context.Context, record model.ReviewRecord, pass passExecution, prompt string) (execution attemptExecution, returnErr error) {
 	checkout, err := subject.PrepareExecution(record.Subject, string(record.ID)+"-1")
 	if err != nil {
 		return failedExecution(model.AttemptUnknownFailure, model.TerminationTransportFailure, model.PhaseHarnessLaunch, err.Error()), nil
 	}
-	defer checkout.Close()
+	defer func() {
+		returnErr = errors.Join(returnErr, checkout.Close())
+	}()
 	if gate := attemptGateFromContext(ctx); gate != nil {
 		select {
 		case gate <- struct{}{}:
 			defer func() { <-gate }()
 		case <-ctx.Done():
-			return contextExecution(ctx.Err()), checkout.Close()
+			return contextExecution(ctx.Err()), nil
 		}
 	}
-	execution := pass.executor.Execute(ctx, attemptSpec{Repository: checkout.Repository, Prompt: prompt, Candidate: pass.profile.reviewer.candidate})
-	return execution, checkout.Close()
+	execution = pass.executor.Execute(ctx, attemptSpec{Repository: checkout.Repository, Prompt: prompt, Candidate: pass.profile.reviewer.candidate})
+	return execution, nil
 }
 
 func (runner *reviewRunner) buildAttempt(id model.ReviewID, prompt string, candidate reviewerCandidate, execution attemptExecution, outcome model.AttemptOutcome, started, completed time.Time) (model.AttemptRecord, error) {

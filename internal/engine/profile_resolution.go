@@ -80,12 +80,6 @@ func (conductor *Conductor) authoredProfileNames(repository string) []string {
 	return conductor.profileNames(repository, func(configuration.Definition[configuration.Profile]) bool { return true })
 }
 
-func (conductor *Conductor) executableProfileNames(repository string) []string {
-	return conductor.profileNames(repository, func(definition configuration.Definition[configuration.Profile]) bool {
-		return definition.Err == nil
-	})
-}
-
 func (conductor *Conductor) profileNames(repository string, include profileInventoryFilter) []string {
 	if conductor.configuration == nil {
 		return nil

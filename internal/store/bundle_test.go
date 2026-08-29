@@ -13,7 +13,7 @@ func TestLedgerRoundTripsReviewBundle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	defer closeTestResource(t, store.Close)
 	created := time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)
 	completed := created.Add(2 * time.Minute)
 	bundle := model.ReviewBundle{
@@ -84,7 +84,7 @@ func TestLedgerPersistsBundleWithoutSelectionFacts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	defer closeTestResource(t, store.Close)
 	now := time.Date(2026, 8, 26, 9, 0, 0, 0, time.UTC)
 	bundle := model.ReviewBundle{
 		ID:               "rb_1724662800000_0123456789abcdef",
@@ -127,7 +127,7 @@ func TestLedgerRejectsSavingUnknownReviewBundle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	defer closeTestResource(t, store.Close)
 	err = store.SaveReviewBundle(model.ReviewBundle{ID: "rb_1724232000099_0123456789abcdef"})
 	if err == nil {
 		t.Fatal("expected error saving a bundle that was never created")

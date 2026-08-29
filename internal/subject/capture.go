@@ -1,3 +1,4 @@
+// Package subject resolves and captures review subjects.
 package subject
 
 import (

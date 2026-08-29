@@ -104,7 +104,7 @@ func readRegularFile(anchor, path, description string, maximumBytes int64) ([]by
 	})
 }
 
-func readRegularFileWith(anchor, path, description string, maximumBytes int64, open func(*os.Root, string) (*os.File, error)) ([]byte, bool, error) {
+func readRegularFileWith(anchor, path, description string, maximumBytes int64, open func(*os.Root, string) (*os.File, error)) (payload []byte, found bool, returnErr error) {
 	relative, err := filepath.Rel(anchor, path)
 	if err != nil {
 		return nil, false, fmt.Errorf("resolve %s path %q: %w", description, path, err)
@@ -113,7 +113,9 @@ func readRegularFileWith(anchor, path, description string, maximumBytes int64, o
 	if err != nil || !found {
 		return nil, found, err
 	}
-	defer root.Close()
+	defer func() {
+		returnErr = errors.Join(returnErr, root.Close())
+	}()
 	return readRootedRegularFileWith(root, fileReadRequest{
 		relative: relative, path: path, description: description, maximumBytes: maximumBytes,
 	}, open)
@@ -138,7 +140,7 @@ type fileReadRequest struct {
 	maximumBytes int64
 }
 
-func readRootedRegularFileWith(root *os.Root, request fileReadRequest, open func(*os.Root, string) (*os.File, error)) ([]byte, bool, error) {
+func readRootedRegularFileWith(root *os.Root, request fileReadRequest, open func(*os.Root, string) (*os.File, error)) (payload []byte, found bool, returnErr error) {
 	info, err := inspectRootedPath(root, rootedPathRequest{
 		relative: request.relative, path: request.path, description: request.description,
 	})
@@ -152,7 +154,9 @@ func readRootedRegularFileWith(root *os.Root, request fileReadRequest, open func
 	if err != nil {
 		return nil, false, fmt.Errorf("open %s at %q: %w", request.description, request.path, err)
 	}
-	defer file.Close()
+	defer func() {
+		returnErr = errors.Join(returnErr, file.Close())
+	}()
 	if err := verifyOpenedRegularFile(root, request, info, file); err != nil {
 		return nil, false, err
 	}

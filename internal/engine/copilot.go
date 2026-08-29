@@ -1,11 +1,7 @@
 package engine
 
 import (
-	"bufio"
-	"bytes"
 	"context"
-	"encoding/json"
-	"fmt"
 	"os/exec"
 	"strings"
 )
@@ -100,22 +96,12 @@ type copilotEvent struct {
 }
 
 func decodeCopilotOutput(output []byte) (decodedCopilotOutput, error) {
-	scanner := bufio.NewScanner(bytes.NewReader(output))
-	scanner.Buffer(make([]byte, 64*1024), 2*1024*1024)
 	var decoded decodedCopilotOutput
 	var chunks strings.Builder
-	for scanner.Scan() {
-		if strings.TrimSpace(scanner.Text()) == "" {
-			continue
-		}
-		var event copilotEvent
-		if err := json.Unmarshal(scanner.Bytes(), &event); err != nil {
-			return decodedCopilotOutput{}, fmt.Errorf("decode copilot event: %w", err)
-		}
+	if err := scanJSONLines[copilotEvent](output, "copilot", func(event copilotEvent) {
 		applyCopilotEvent(&decoded, &chunks, event)
-	}
-	if err := scanner.Err(); err != nil {
-		return decodedCopilotOutput{}, fmt.Errorf("scan copilot output: %w", err)
+	}); err != nil {
+		return decodedCopilotOutput{}, err
 	}
 	decoded.assistantText = chunks.String()
 	return decoded, nil

@@ -1,3 +1,4 @@
+// Package artifact stores review artifacts.
 package artifact
 
 import (
@@ -21,7 +22,7 @@ func NewStore(root string) (*Store, error) {
 	return &Store{root: filepath.Clean(root)}, nil
 }
 
-func (store *Store) Publish(reviewID model.ReviewID, attempt int, kind string, contents []byte, truncated bool) (model.ArtifactReference, error) {
+func (store *Store) Publish(reviewID model.ReviewID, attempt int, kind string, contents []byte, truncated bool) (reference model.ArtifactReference, returnErr error) {
 	if attempt < 1 || !validKind(kind) {
 		return model.ArtifactReference{}, errors.New("invalid artifact identity")
 	}
@@ -38,27 +39,40 @@ func (store *Store) Publish(reviewID model.ReviewID, attempt int, kind string, c
 		return model.ArtifactReference{}, fmt.Errorf("create temporary artifact: %w", err)
 	}
 	temporaryPath := temporary.Name()
-	defer os.Remove(temporaryPath)
-	if err := temporary.Chmod(0o600); err != nil {
-		temporary.Close()
-		return model.ArtifactReference{}, fmt.Errorf("restrict temporary artifact: %w", err)
-	}
-	if _, err := temporary.Write(contents); err != nil {
-		temporary.Close()
-		return model.ArtifactReference{}, fmt.Errorf("write temporary artifact: %w", err)
-	}
-	if err := temporary.Sync(); err != nil {
-		temporary.Close()
-		return model.ArtifactReference{}, fmt.Errorf("sync temporary artifact: %w", err)
-	}
-	if err := temporary.Close(); err != nil {
-		return model.ArtifactReference{}, fmt.Errorf("close temporary artifact: %w", err)
+	defer func() {
+		returnErr = errors.Join(returnErr, removeTemporaryArtifact(temporaryPath))
+	}()
+	if err := writeTemporaryArtifact(temporary, contents); err != nil {
+		return model.ArtifactReference{}, err
 	}
 	if err := os.Rename(temporaryPath, path); err != nil {
 		return model.ArtifactReference{}, fmt.Errorf("publish artifact: %w", err)
 	}
 	digest := sha256.Sum256(contents)
 	return model.ArtifactReference{Kind: kind, Path: relative, Size: int64(len(contents)), Digest: hex.EncodeToString(digest[:]), Truncated: truncated}, nil
+}
+
+func writeTemporaryArtifact(file *os.File, contents []byte) error {
+	if err := file.Chmod(0o600); err != nil {
+		return errors.Join(fmt.Errorf("restrict temporary artifact: %w", err), file.Close())
+	}
+	if _, err := file.Write(contents); err != nil {
+		return errors.Join(fmt.Errorf("write temporary artifact: %w", err), file.Close())
+	}
+	if err := file.Sync(); err != nil {
+		return errors.Join(fmt.Errorf("sync temporary artifact: %w", err), file.Close())
+	}
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("close temporary artifact: %w", err)
+	}
+	return nil
+}
+
+func removeTemporaryArtifact(path string) error {
+	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("remove temporary artifact: %w", err)
+	}
+	return nil
 }
 
 func (store *Store) Read(reference model.ArtifactReference) ([]byte, error) {

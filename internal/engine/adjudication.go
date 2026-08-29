@@ -1,3 +1,4 @@
+// Package engine executes bounded reviews and evaluations.
 package engine
 
 import (

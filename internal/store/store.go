@@ -1,3 +1,4 @@
+// Package store persists review records and evaluation state.
 package store
 
 import (
@@ -295,8 +296,7 @@ func openLedgerRecordStore(directory string, prepare bool) (*LedgerRecordStore, 
 	db.SetMaxOpenConns(4)
 	store := &LedgerRecordStore{db: db, directory: directory, projection: reviewRecordProjection{db: db}}
 	if err := store.initialize(prepare); err != nil {
-		db.Close()
-		return nil, err
+		return nil, errors.Join(err, db.Close())
 	}
 	return store, nil
 }
@@ -372,7 +372,7 @@ var obsoleteLedgerTables = []string{
 	"eval_suite_runs", "reviews", "schema_migrations",
 }
 
-func (s *LedgerRecordStore) migrate() error {
+func (s *LedgerRecordStore) migrate() (returnErr error) {
 	if _, err := s.db.Exec("CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY)"); err != nil {
 		return fmt.Errorf("create migration table: %w", err)
 	}
@@ -380,7 +380,9 @@ func (s *LedgerRecordStore) migrate() error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		returnErr = errors.Join(returnErr, rollbackTransaction(tx))
+	}()
 	version, err := currentMigrationVersion(tx)
 	if err != nil {
 		return err
@@ -510,12 +512,14 @@ func saveEvalSuiteRun(executor statementExecutor, run model.EvalSuiteRun) error 
 	return err
 }
 
-func (s *LedgerRecordStore) CreateEvalSuiteRun(run model.EvalSuiteRun, evalRuns []model.EvalRun) error {
+func (s *LedgerRecordStore) CreateEvalSuiteRun(run model.EvalSuiteRun, evalRuns []model.EvalRun) (returnErr error) {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		returnErr = errors.Join(returnErr, rollbackTransaction(tx))
+	}()
 	if err := saveEvalSuiteRun(tx, run); err != nil {
 		return err
 	}
@@ -527,12 +531,14 @@ func (s *LedgerRecordStore) CreateEvalSuiteRun(run model.EvalSuiteRun, evalRuns 
 	return tx.Commit()
 }
 
-func (s *LedgerRecordStore) CheckpointEvalRun(run model.EvalSuiteRun, evalRun model.EvalRun) error {
+func (s *LedgerRecordStore) CheckpointEvalRun(run model.EvalSuiteRun, evalRun model.EvalRun) (returnErr error) {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		returnErr = errors.Join(returnErr, rollbackTransaction(tx))
+	}()
 	var reviewID any
 	if evalRun.ReviewID != "" {
 		reviewID = evalRun.ReviewID
@@ -759,7 +765,7 @@ func decodeNullableJSONColumn(payload []byte, name string, destination any) erro
 	return json.Unmarshal(payload, destination)
 }
 
-func (s *LedgerRecordStore) PublishAdjudication(revision model.AdjudicationRevision) (model.AdjudicationRevision, error) {
+func (s *LedgerRecordStore) PublishAdjudication(revision model.AdjudicationRevision) (published model.AdjudicationRevision, returnErr error) {
 	document, err := json.Marshal(revision.Document)
 	if err != nil {
 		return model.AdjudicationRevision{}, err
@@ -772,7 +778,9 @@ func (s *LedgerRecordStore) PublishAdjudication(revision model.AdjudicationRevis
 	if err != nil {
 		return model.AdjudicationRevision{}, err
 	}
-	defer tx.Rollback()
+	defer func() {
+		returnErr = errors.Join(returnErr, rollbackTransaction(tx))
+	}()
 	if err := tx.QueryRow(`SELECT COALESCE(MAX(revision_number),0)+1 FROM adjudication_revisions WHERE suite_run_id=?`, revision.SuiteRunID).Scan(&revision.RevisionNumber); err != nil {
 		return model.AdjudicationRevision{}, err
 	}
@@ -800,7 +808,7 @@ func (s *LedgerRecordStore) LoadAdjudication(id model.AdjudicationRevisionID) (m
 	return revision, nil
 }
 
-func (s *LedgerRecordStore) History(query HistoryQuery) (HistoryPage, error) {
+func (s *LedgerRecordStore) History(query HistoryQuery) (page HistoryPage, returnErr error) {
 	statement, arguments, limit, err := buildHistoryQuery(query)
 	if err != nil {
 		return HistoryPage{}, err
@@ -809,8 +817,17 @@ func (s *LedgerRecordStore) History(query HistoryQuery) (HistoryPage, error) {
 	if err != nil {
 		return HistoryPage{}, err
 	}
-	defer rows.Close()
+	defer func() {
+		returnErr = errors.Join(returnErr, rows.Close())
+	}()
 	return scanHistoryPage(rows, limit)
+}
+
+func rollbackTransaction(tx *sql.Tx) error {
+	if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
+		return err
+	}
+	return nil
 }
 
 func buildHistoryQuery(query HistoryQuery) (string, []any, int, error) {

@@ -65,14 +65,6 @@ func New(config Config) (*Conductor, error) {
 	return conductor, nil
 }
 
-func newConductor(store store.RecordStore, executors map[string]attemptExecutor, deadline time.Duration) (*Conductor, error) {
-	return newConductorWithCatalog(store, catalogWithExecutors(executors), deadline)
-}
-
-func newConductorWithCatalog(store store.RecordStore, reviewers reviewerCatalog, deadline time.Duration) (*Conductor, error) {
-	return newConductorWithManager(store, reviewers, newConfigurationManager(""), deadline)
-}
-
 func newConductorWithManager(store store.RecordStore, reviewers reviewerCatalog, manager *configuration.Manager, deadline time.Duration) (*Conductor, error) {
 	if manager == nil {
 		return nil, errConfigurationNotConfigured

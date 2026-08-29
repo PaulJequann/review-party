@@ -39,10 +39,50 @@ func execute(ctx context.Context, arguments []string, streams commandIO) int {
 		if errors.As(err, &exitErr) {
 			return exitErr.code
 		}
-		fmt.Fprintf(streams.errors, "review-party: %v\n", err)
-		return usageExitCode
+		return printCommandError(streams.errors, usageExitCode, err)
 	}
 	return 0
+}
+
+type commandOutput struct {
+	writer io.Writer
+	err    error
+}
+
+func writeCommandOutput(writer io.Writer, render func(*commandOutput)) error {
+	output := &commandOutput{writer: writer}
+	render(output)
+	if output.err != nil {
+		return fmt.Errorf("write command output: %w", output.err)
+	}
+	return nil
+}
+
+func printCommandOutput(stdout, stderr io.Writer, render func(*commandOutput)) int {
+	if err := writeCommandOutput(stdout, render); err != nil {
+		return printFailure(stderr, err)
+	}
+	return 0
+}
+
+func (output *commandOutput) write(format string, args ...any) {
+	if output.err != nil {
+		return
+	}
+	_, output.err = fmt.Fprintf(output.writer, format, args...)
+}
+
+func printCommandError(output io.Writer, code int, err error) int {
+	if writeErr := writeCommandOutput(output, func(output *commandOutput) {
+		output.write("review-party: %v\n", err)
+	}); writeErr != nil {
+		return 1
+	}
+	return code
+}
+
+func printFailure(output io.Writer, err error) int {
+	return printCommandError(output, 1, err)
 }
 
 func newRootCommand(streams commandIO) *cobra.Command {
@@ -139,7 +179,7 @@ func addCommonSelectionFlags(cmd *cobra.Command) {
 	cmd.Flags().String("reviewer", "", "Reviewer adapter: "+strings.Join(engine.SupportedReviewers(), ", "))
 	cmd.Flags().String("model", "", "Explicit model for the selected Reviewer")
 	cmd.Flags().String("effort", "", "Explicit reasoning effort")
-	_ = cmd.RegisterFlagCompletionFunc("reviewer", completeReviewers)
+	cmd.RegisterFlagCompletionFunc("reviewer", completeReviewers) //nolint:errcheck // Cobra completion registration is best-effort
 }
 
 func addRepositoryFlag(cmd *cobra.Command, usage string) {

@@ -174,7 +174,10 @@ func selectionIndex(selection configuration.ReviewSelection, scope configuration
 			return index, nil
 		}
 	}
-	name, _ := item.Name()
+	name, err := item.Name()
+	if err != nil {
+		return 0, err
+	}
 	return 0, fmt.Errorf("review selection does not contain %s %q", scope, name)
 }
 
