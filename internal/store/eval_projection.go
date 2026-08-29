@@ -6,11 +6,19 @@ import (
 	"errors"
 	"fmt"
 	"reviewparty/internal/model"
+	"time"
 )
 
 // evalProjection owns the relational mapping and transactional writes for
 // Eval Suite Run and Eval Run aggregates.
 type evalProjection struct{ db *sql.DB }
+
+func nullableEvalTime(value time.Time) any {
+	if value.IsZero() {
+		return nil
+	}
+	return value.UTC()
+}
 
 func (p evalProjection) loadEvalRun(id model.EvalRunID) (model.EvalRun, error) {
 	var run model.EvalRun
@@ -55,7 +63,7 @@ func saveEvalSuiteRun(executor statementExecutor, run model.EvalSuiteRun) error 
 	if err != nil {
 		return err
 	}
-	_, err = executor.Exec(`INSERT INTO eval_suite_runs(id,suite,suite_revision,suite_digest,experiment,eval_run_ids,lifecycle,termination,completed_clean_count,completed_findings_count,incomplete_count,started_at,completed_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET eval_run_ids=excluded.eval_run_ids,lifecycle=excluded.lifecycle,termination=excluded.termination,completed_clean_count=excluded.completed_clean_count,completed_findings_count=excluded.completed_findings_count,incomplete_count=excluded.incomplete_count,completed_at=excluded.completed_at`, run.ID, run.Suite, run.SuiteRevision, run.SuiteDigest, experiment, runIDs, run.Lifecycle, termination, run.CompletedCleanCount, run.CompletedFindingCount, run.IncompleteCount, run.StartedAt.UTC(), nullableTime(run.CompletedAt))
+	_, err = executor.Exec(`INSERT INTO eval_suite_runs(id,suite,suite_revision,suite_digest,experiment,eval_run_ids,lifecycle,termination,completed_clean_count,completed_findings_count,incomplete_count,started_at,completed_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET eval_run_ids=excluded.eval_run_ids,lifecycle=excluded.lifecycle,termination=excluded.termination,completed_clean_count=excluded.completed_clean_count,completed_findings_count=excluded.completed_findings_count,incomplete_count=excluded.incomplete_count,completed_at=excluded.completed_at`, run.ID, run.Suite, run.SuiteRevision, run.SuiteDigest, experiment, runIDs, run.Lifecycle, termination, run.CompletedCleanCount, run.CompletedFindingCount, run.IncompleteCount, run.StartedAt.UTC(), nullableEvalTime(run.CompletedAt))
 	return err
 }
 
