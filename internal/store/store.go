@@ -4,7 +4,6 @@ package store
 import (
 	"database/sql"
 	"embed"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -90,9 +89,12 @@ type HistoryPage struct {
 }
 
 type LedgerRecordStore struct {
-	db         *sql.DB
-	directory  string
-	projection reviewRecordProjection
+	db                     *sql.DB
+	directory              string
+	projection             reviewRecordProjection
+	evalProjection         evalProjection
+	bundleProjection       bundleProjection
+	adjudicationProjection adjudicationProjection
 }
 
 // DeferredLedgerRecordStore preserves read-only commands: their construction
@@ -294,7 +296,13 @@ func openLedgerRecordStore(directory string, prepare bool) (*LedgerRecordStore, 
 	// they need a second pooled connection. SQLite's busy timeout serializes the
 	// supported concurrent writer pattern.
 	db.SetMaxOpenConns(4)
-	store := &LedgerRecordStore{db: db, directory: directory, projection: reviewRecordProjection{db: db}}
+	store := &LedgerRecordStore{
+		db: db, directory: directory,
+		projection:             reviewRecordProjection{db: db},
+		evalProjection:         evalProjection{db: db},
+		bundleProjection:       bundleProjection{db: db},
+		adjudicationProjection: adjudicationProjection{db: db},
+	}
 	if err := store.initialize(prepare); err != nil {
 		return nil, errors.Join(err, db.Close())
 	}
@@ -466,346 +474,43 @@ func (s *LedgerRecordStore) Load(id model.ReviewID) (model.ReviewRecord, error) 
 }
 
 func (s *LedgerRecordStore) LoadEvalRun(id model.EvalRunID) (model.EvalRun, error) {
-	var run model.EvalRun
-	var casePayload []byte
-	err := s.db.QueryRow(`SELECT id,suite_run_id,case_revision,COALESCE(review_id,''),execution_state,adjudication_state,created_at,updated_at FROM eval_runs WHERE id=?`, id).Scan(&run.ID, &run.SuiteRunID, &casePayload, &run.ReviewID, &run.ExecutionState, &run.AdjudicationState, &run.CreatedAt, &run.UpdatedAt)
-	if err != nil {
-		return model.EvalRun{}, err
-	}
-	if err := json.Unmarshal(casePayload, &run.Case); err != nil {
-		return model.EvalRun{}, err
-	}
-	return run, nil
+	return s.evalProjection.loadEvalRun(id)
 }
 
-type statementExecutor interface {
-	Exec(string, ...any) (sql.Result, error)
+func (s *LedgerRecordStore) CreateEvalSuiteRun(run model.EvalSuiteRun, evalRuns []model.EvalRun) error {
+	return s.evalProjection.createSuiteRun(run, evalRuns)
 }
 
-func insertEvalRun(executor statementExecutor, run model.EvalRun) error {
-	casePayload, err := json.Marshal(run.Case)
-	if err != nil {
-		return err
-	}
-	var reviewID any
-	if run.ReviewID != "" {
-		reviewID = run.ReviewID
-	}
-	_, err = executor.Exec(`INSERT INTO eval_runs(id,suite_run_id,case_id,case_schema_version,case_digest,case_revision,review_id,execution_state,adjudication_state,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, run.ID, run.SuiteRunID, run.Case.ID, run.Case.SchemaVersion, run.Case.Digest, casePayload, reviewID, run.ExecutionState, run.AdjudicationState, run.CreatedAt.UTC(), run.UpdatedAt.UTC())
-	return err
-}
-
-func saveEvalSuiteRun(executor statementExecutor, run model.EvalSuiteRun) error {
-	experiment, err := json.Marshal(run.Experiment)
-	if err != nil {
-		return err
-	}
-	runIDs, err := json.Marshal(run.EvalRunIDs)
-	if err != nil {
-		return err
-	}
-	termination, err := json.Marshal(run.Termination)
-	if err != nil {
-		return err
-	}
-	_, err = executor.Exec(`INSERT INTO eval_suite_runs(id,suite,suite_revision,suite_digest,experiment,eval_run_ids,lifecycle,termination,completed_clean_count,completed_findings_count,incomplete_count,started_at,completed_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET eval_run_ids=excluded.eval_run_ids,lifecycle=excluded.lifecycle,termination=excluded.termination,completed_clean_count=excluded.completed_clean_count,completed_findings_count=excluded.completed_findings_count,incomplete_count=excluded.incomplete_count,completed_at=excluded.completed_at`, run.ID, run.Suite, run.SuiteRevision, run.SuiteDigest, experiment, runIDs, run.Lifecycle, termination, run.CompletedCleanCount, run.CompletedFindingCount, run.IncompleteCount, run.StartedAt.UTC(), nullableTime(run.CompletedAt))
-	return err
-}
-
-func (s *LedgerRecordStore) CreateEvalSuiteRun(run model.EvalSuiteRun, evalRuns []model.EvalRun) (returnErr error) {
-	tx, err := s.db.Begin()
-	if err != nil {
-		return err
-	}
-	defer func() {
-		returnErr = errors.Join(returnErr, rollbackTransaction(tx))
-	}()
-	if err := saveEvalSuiteRun(tx, run); err != nil {
-		return err
-	}
-	for _, evalRun := range evalRuns {
-		if err := insertEvalRun(tx, evalRun); err != nil {
-			return err
-		}
-	}
-	return tx.Commit()
-}
-
-func (s *LedgerRecordStore) CheckpointEvalRun(run model.EvalSuiteRun, evalRun model.EvalRun) (returnErr error) {
-	tx, err := s.db.Begin()
-	if err != nil {
-		return err
-	}
-	defer func() {
-		returnErr = errors.Join(returnErr, rollbackTransaction(tx))
-	}()
-	var reviewID any
-	if evalRun.ReviewID != "" {
-		reviewID = evalRun.ReviewID
-	}
-	result, err := tx.Exec(`UPDATE eval_runs SET review_id=?,execution_state=?,adjudication_state=?,updated_at=? WHERE id=? AND suite_run_id=?`, reviewID, evalRun.ExecutionState, evalRun.AdjudicationState, evalRun.UpdatedAt.UTC(), evalRun.ID, run.ID)
-	if err != nil {
-		return err
-	}
-	updated, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if updated != 1 {
-		return fmt.Errorf("checkpoint Eval Run %q: expected one row, updated %d", evalRun.ID, updated)
-	}
-	if err := saveEvalSuiteRun(tx, run); err != nil {
-		return err
-	}
-	return tx.Commit()
+func (s *LedgerRecordStore) CheckpointEvalRun(run model.EvalSuiteRun, evalRun model.EvalRun) error {
+	return s.evalProjection.checkpoint(run, evalRun)
 }
 
 func (s *LedgerRecordStore) TerminateEvalSuiteRun(run model.EvalSuiteRun) error {
-	if run.Lifecycle != model.LifecycleIncomplete {
-		return fmt.Errorf("terminate Eval Suite Run %q: lifecycle must be incomplete", run.ID)
-	}
-	if run.Termination == nil {
-		return fmt.Errorf("terminate Eval Suite Run %q: termination is required", run.ID)
-	}
-	if run.CompletedAt.IsZero() {
-		return fmt.Errorf("terminate Eval Suite Run %q: completion time is required", run.ID)
-	}
-	return saveEvalSuiteRun(s.db, run)
+	return s.evalProjection.terminateSuiteRun(run)
 }
 
 func (s *LedgerRecordStore) LoadEvalSuiteRun(id model.EvalSuiteRunID) (model.EvalSuiteRun, error) {
-	var run model.EvalSuiteRun
-	var experiment, runIDs, termination []byte
-	var completedAt sql.NullTime
-	err := s.db.QueryRow(`SELECT id,suite,suite_revision,suite_digest,experiment,eval_run_ids,lifecycle,termination,completed_clean_count,completed_findings_count,incomplete_count,started_at,completed_at FROM eval_suite_runs WHERE id=?`, id).Scan(&run.ID, &run.Suite, &run.SuiteRevision, &run.SuiteDigest, &experiment, &runIDs, &run.Lifecycle, &termination, &run.CompletedCleanCount, &run.CompletedFindingCount, &run.IncompleteCount, &run.StartedAt, &completedAt)
-	if err != nil {
-		return model.EvalSuiteRun{}, err
-	}
-	if err := json.Unmarshal(experiment, &run.Experiment); err != nil {
-		return model.EvalSuiteRun{}, err
-	}
-	if err := json.Unmarshal(runIDs, &run.EvalRunIDs); err != nil {
-		return model.EvalSuiteRun{}, err
-	}
-	if len(termination) > 0 && string(termination) != "null" {
-		if err := json.Unmarshal(termination, &run.Termination); err != nil {
-			return model.EvalSuiteRun{}, err
-		}
-	}
-	if completedAt.Valid {
-		run.CompletedAt = completedAt.Time
-	}
-	return run, nil
-}
-
-func nullableTime(value time.Time) any {
-	if value.IsZero() {
-		return nil
-	}
-	return value.UTC()
+	return s.evalProjection.loadSuiteRun(id)
 }
 
 func (s *LedgerRecordStore) CreateReviewBundle(bundle model.ReviewBundle) error {
-	payloads, err := bundlePayloads(bundle)
-	if err != nil {
-		return err
-	}
-	_, err = s.db.Exec(`INSERT INTO review_bundles(id,description,revision,repository,subject_kind,subject_identity,lifecycle,termination,selection,warnings,deduplicated,members,concurrency_limit,created_at,updated_at,completed_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		bundle.ID, bundle.Description, bundle.Revision, bundle.Repository, bundle.SubjectKind, bundle.SubjectIdentity, bundle.Lifecycle, payloads.termination, payloads.selection, payloads.warnings, payloads.deduplicated, payloads.members, bundle.ConcurrencyLimit, bundle.CreatedAt.UTC(), bundle.UpdatedAt.UTC(), nullableTime(bundle.CompletedAt))
-	return err
+	return s.bundleProjection.create(bundle)
 }
 
 func (s *LedgerRecordStore) SaveReviewBundle(bundle model.ReviewBundle) error {
-	mutable, err := renderMutableBundleColumns(bundle)
-	if err != nil {
-		return err
-	}
-	result, err := s.db.Exec(`UPDATE review_bundles SET lifecycle=?,termination=?,members=?,updated_at=?,completed_at=? WHERE id=?`,
-		bundle.Lifecycle, mutable.termination, mutable.members, bundle.UpdatedAt.UTC(), nullableTime(bundle.CompletedAt), bundle.ID)
-	if err != nil {
-		return err
-	}
-	updated, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if updated != 1 {
-		return fmt.Errorf("save Review Bundle %q: expected one row, updated %d", bundle.ID, updated)
-	}
-	return nil
-}
-
-// reviewBundlePayloads renders the immutable creation columns a Review Bundle
-// persists once; SaveReviewBundle deliberately writes only its mutable subset.
-type reviewBundlePayloads struct {
-	members      []byte
-	termination  []byte
-	selection    []byte
-	warnings     []byte
-	deduplicated []byte
-}
-
-// mutableBundleColumns renders only the columns member absorption updates.
-type mutableBundleColumns struct {
-	members     []byte
-	termination []byte
-}
-
-func bundlePayloads(bundle model.ReviewBundle) (reviewBundlePayloads, error) {
-	mutable, err := renderMutableBundleColumns(bundle)
-	if err != nil {
-		return reviewBundlePayloads{}, err
-	}
-	selection, warnings, deduplicated, err := bundleSelectionPayloads(bundle)
-	if err != nil {
-		return reviewBundlePayloads{}, err
-	}
-	return reviewBundlePayloads{
-		members: mutable.members, termination: mutable.termination,
-		selection: selection, warnings: warnings, deduplicated: deduplicated,
-	}, nil
-}
-
-func renderMutableBundleColumns(bundle model.ReviewBundle) (mutableBundleColumns, error) {
-	members, err := json.Marshal(bundle.Members)
-	if err != nil {
-		return mutableBundleColumns{}, err
-	}
-	termination, err := json.Marshal(bundle.Termination)
-	if err != nil {
-		return mutableBundleColumns{}, err
-	}
-	return mutableBundleColumns{members: members, termination: termination}, nil
-}
-
-// bundleSelectionPayloads renders the resolution facts authored once at
-// creation and never rewritten afterwards. Absent facts persist as empty
-// arrays so loading never encounters null collection columns.
-func bundleSelectionPayloads(bundle model.ReviewBundle) ([]byte, []byte, []byte, error) {
-	var (
-		selection    []byte
-		warnings     []byte
-		deduplicated []byte
-		err          error
-	)
-	if bundle.Selection == nil {
-		selection = []byte("null")
-	} else if selection, err = json.Marshal(bundle.Selection); err != nil {
-		return nil, nil, nil, err
-	}
-	presentWarnings := bundle.Warnings
-	if presentWarnings == nil {
-		presentWarnings = []model.BundleWarning{}
-	}
-	if warnings, err = json.Marshal(presentWarnings); err != nil {
-		return nil, nil, nil, err
-	}
-	presentDuplicates := bundle.Deduplicated
-	if presentDuplicates == nil {
-		presentDuplicates = []model.SkippedDuplicate{}
-	}
-	if deduplicated, err = json.Marshal(presentDuplicates); err != nil {
-		return nil, nil, nil, err
-	}
-	return selection, warnings, deduplicated, nil
+	return s.bundleProjection.save(bundle)
 }
 
 func (s *LedgerRecordStore) LoadReviewBundle(id model.ReviewBundleID) (model.ReviewBundle, error) {
-	var bundle model.ReviewBundle
-	var payloads reviewBundlePayloads
-	var completedAt sql.NullTime
-	err := s.db.QueryRow(`SELECT id,description,revision,repository,subject_kind,subject_identity,lifecycle,termination,selection,warnings,deduplicated,members,concurrency_limit,created_at,updated_at,completed_at FROM review_bundles WHERE id=?`, id).Scan(
-		&bundle.ID, &bundle.Description, &bundle.Revision, &bundle.Repository, &bundle.SubjectKind, &bundle.SubjectIdentity, &bundle.Lifecycle, &payloads.termination, &payloads.selection, &payloads.warnings, &payloads.deduplicated, &payloads.members, &bundle.ConcurrencyLimit, &bundle.CreatedAt, &bundle.UpdatedAt, &completedAt)
-	if err != nil {
-		return model.ReviewBundle{}, err
-	}
-	if err := decodeReviewBundlePayloads(&bundle, payloads); err != nil {
-		return model.ReviewBundle{}, err
-	}
-	if completedAt.Valid {
-		bundle.CompletedAt = completedAt.Time
-	}
-	return bundle, nil
-}
-
-// decodeReviewBundlePayloads restores the collection columns and optional
-// termination from their stored JSON representations.
-func decodeReviewBundlePayloads(bundle *model.ReviewBundle, payloads reviewBundlePayloads) error {
-	if err := decodeJSONColumn(payloads.members, "members", &bundle.Members); err != nil {
-		return err
-	}
-	if len(payloads.termination) > 0 && string(payloads.termination) != "null" {
-		if err := json.Unmarshal(payloads.termination, &bundle.Termination); err != nil {
-			return err
-		}
-	}
-	if err := decodeNullableJSONColumn(payloads.selection, "selection", &bundle.Selection); err != nil {
-		return err
-	}
-	if err := decodeJSONColumn(payloads.warnings, "warnings", &bundle.Warnings); err != nil {
-		return err
-	}
-	return decodeJSONColumn(payloads.deduplicated, "deduplicated", &bundle.Deduplicated)
-}
-
-func decodeJSONColumn(payload []byte, name string, destination any) error {
-	if len(payload) == 0 || string(payload) == "null" {
-		return fmt.Errorf("review bundle %s column holds %q", name, payload)
-	}
-	return json.Unmarshal(payload, destination)
-}
-
-func decodeNullableJSONColumn(payload []byte, name string, destination any) error {
-	if string(payload) == "null" {
-		return nil
-	}
-	if len(payload) == 0 {
-		return fmt.Errorf("review bundle %s column is empty", name)
-	}
-	return json.Unmarshal(payload, destination)
+	return s.bundleProjection.load(id)
 }
 
 func (s *LedgerRecordStore) PublishAdjudication(revision model.AdjudicationRevision) (published model.AdjudicationRevision, returnErr error) {
-	document, err := json.Marshal(revision.Document)
-	if err != nil {
-		return model.AdjudicationRevision{}, err
-	}
-	score, err := json.Marshal(revision.Score)
-	if err != nil {
-		return model.AdjudicationRevision{}, err
-	}
-	tx, err := s.db.Begin()
-	if err != nil {
-		return model.AdjudicationRevision{}, err
-	}
-	defer func() {
-		returnErr = errors.Join(returnErr, rollbackTransaction(tx))
-	}()
-	if err := tx.QueryRow(`SELECT COALESCE(MAX(revision_number),0)+1 FROM adjudication_revisions WHERE suite_run_id=?`, revision.SuiteRunID).Scan(&revision.RevisionNumber); err != nil {
-		return model.AdjudicationRevision{}, err
-	}
-	if _, err := tx.Exec(`INSERT INTO adjudication_revisions(id,suite_run_id,revision_number,document,score,created_at) VALUES(?,?,?,?,?,?)`, revision.ID, revision.SuiteRunID, revision.RevisionNumber, document, score, revision.CreatedAt.UTC()); err != nil {
-		return model.AdjudicationRevision{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return model.AdjudicationRevision{}, err
-	}
-	return revision, nil
+	return s.adjudicationProjection.publish(revision)
 }
 
 func (s *LedgerRecordStore) LoadAdjudication(id model.AdjudicationRevisionID) (model.AdjudicationRevision, error) {
-	var revision model.AdjudicationRevision
-	var document, score []byte
-	if err := s.db.QueryRow(`SELECT id,suite_run_id,revision_number,document,score,created_at FROM adjudication_revisions WHERE id=?`, id).Scan(&revision.ID, &revision.SuiteRunID, &revision.RevisionNumber, &document, &score, &revision.CreatedAt); err != nil {
-		return model.AdjudicationRevision{}, err
-	}
-	if err := json.Unmarshal(document, &revision.Document); err != nil {
-		return model.AdjudicationRevision{}, err
-	}
-	if err := json.Unmarshal(score, &revision.Score); err != nil {
-		return model.AdjudicationRevision{}, err
-	}
-	return revision, nil
+	return s.adjudicationProjection.load(id)
 }
 
 func (s *LedgerRecordStore) History(query HistoryQuery) (page HistoryPage, returnErr error) {
