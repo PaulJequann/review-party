@@ -55,6 +55,96 @@ func TestLedgerRoundTripsCompleteAndIncompleteReviews(t *testing.T) {
 	}
 }
 
+func TestLedgerLoadReconstructsOneCommittedReviewVersion(t *testing.T) {
+	directory := t.TempDir()
+	writer, err := NewLedgerRecordStore(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeTestResource(t, writer.Close)
+	reader, err := NewLedgerRecordStore(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeTestResource(t, reader.Close)
+
+	versionA := ledgerFixture(model.LifecycleCompleted)
+	versionB := ledgerFixture(model.LifecycleCompleted)
+	versionB.ID = versionA.ID
+	versionB.Subject.Identity = "version-b"
+	versionB.ProfileRevision.Name = "code-quality"
+	versionB.Result.Summary = "version-b summary"
+	versionB.Result.Raw = "version-b raw"
+	versionB.Passes = append(versionB.Passes, model.PassRecord{
+		Name:     "second-pass",
+		Required: false,
+		Attempts: []model.AttemptRecord{{
+			Number:      2,
+			Outcome:     model.AttemptCompleted,
+			Provenance:  model.ReviewerProvenance{ReviewerID: "version-b"},
+			StartedAt:   versionB.CreatedAt,
+			CompletedAt: versionB.UpdatedAt,
+		}},
+	})
+	versionB.Result.Findings = append(versionB.Result.Findings, model.Finding{Ordinal: 2, Severity: "medium", Category: "version-b", Location: "b.go:2", Failure: "b failure", Evidence: "b evidence", Fix: "b fix", Test: "b test"})
+
+	if err := writer.Save(versionA); err != nil {
+		t.Fatal(err)
+	}
+	encodedA, err := json.Marshal(versionA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encodedB, err := json.Marshal(versionB)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const iterations = 10000
+	start := make(chan struct{})
+	errors := make(chan error, 2)
+	go func() {
+		<-start
+		for index := 0; index < iterations; index++ {
+			if err := writer.Save(versionA); err != nil {
+				errors <- fmt.Errorf("save version A: %w", err)
+				return
+			}
+			if err := writer.Save(versionB); err != nil {
+				errors <- fmt.Errorf("save version B: %w", err)
+				return
+			}
+		}
+		errors <- nil
+	}()
+	go func() {
+		<-start
+		for index := 0; index < iterations*2; index++ {
+			loaded, err := reader.Load(versionA.ID)
+			if err != nil {
+				errors <- fmt.Errorf("load: %w", err)
+				return
+			}
+			encoded, err := json.Marshal(loaded)
+			if err != nil {
+				errors <- fmt.Errorf("encode loaded record: %w", err)
+				return
+			}
+			if !reflect.DeepEqual(encoded, encodedA) && !reflect.DeepEqual(encoded, encodedB) {
+				errors <- fmt.Errorf("loaded torn aggregate: %s", encoded)
+				return
+			}
+		}
+		errors <- nil
+	}()
+	close(start)
+	for range 2 {
+		if err := <-errors; err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func TestLedgerPreparationIsIdempotent(t *testing.T) {
 	directory := t.TempDir()
 	record := ledgerFixture(model.LifecycleCompleted)
