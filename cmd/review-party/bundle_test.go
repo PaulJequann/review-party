@@ -68,7 +68,10 @@ func TestInspectDispatchesBundleIDsToBundleInspection(t *testing.T) {
 	if exit := run(context.Background(), []string{"init", "--repo", repository}, &initOut, &initErr); exit != 0 {
 		t.Fatalf("init exit = %d, stderr = %q", exit, initErr.String())
 	}
-	bundle := model.ReviewBundle{ID: "rb_dispatch", Lifecycle: model.LifecycleCompleted}
+	bundle := model.ReviewBundle{
+		ID: "rb_dispatch", Lifecycle: model.LifecycleCompleted,
+		Members: []model.BundleMember{}, Warnings: []model.BundleWarning{}, Deduplicated: []model.SkippedDuplicate{},
+	}
 	ledger, err := store.NewLedgerRecordStore(filepath.Join(stateHome, "review-party"))
 	if err != nil {
 		t.Fatal(err)
