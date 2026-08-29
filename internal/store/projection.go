@@ -163,22 +163,33 @@ func insertFinding(tx *sql.Tx, id model.ReviewID, finding model.Finding) error {
 	return err
 }
 
-func (p reviewRecordProjection) load(id model.ReviewID) (model.ReviewRecord, error) {
-	values, err := p.loadReviewValues(id)
+func (p reviewRecordProjection) load(id model.ReviewID) (record model.ReviewRecord, returnErr error) {
+	tx, err := p.db.Begin()
 	if err != nil {
-		return model.ReviewRecord{}, err
+		return record, fmt.Errorf("begin review ledger read: %w", err)
 	}
-	record, err := values.record(id)
+	defer func() {
+		returnErr = errors.Join(returnErr, rollbackTransaction(tx))
+	}()
+
+	values, err := loadReviewValues(tx, id)
 	if err != nil {
-		return model.ReviewRecord{}, err
+		return record, err
 	}
-	if err := p.loadPasses(&record); err != nil {
+	record, err = values.record(id)
+	if err != nil {
+		return record, err
+	}
+	if err := loadPasses(tx, &record); err != nil {
 		return record, err
 	}
 	if record.Result != nil {
-		if err := p.loadFindings(record.ID, record.Result); err != nil {
+		if err := loadFindings(tx, record.ID, record.Result); err != nil {
 			return record, err
 		}
+	}
+	if err := tx.Commit(); err != nil {
+		return record, fmt.Errorf("commit review ledger read: %w", err)
 	}
 	return record, nil
 }
@@ -192,8 +203,8 @@ type reviewValues struct {
 	replaysReviewID                                           sql.NullString
 }
 
-func (p reviewRecordProjection) loadReviewValues(id model.ReviewID) (reviewValues, error) {
-	row := p.db.QueryRow("SELECT lifecycle,subject,profile_revision,profile_snapshot,result_status,result_summary,result_raw,result_finding_count,termination,runtime,timings,created_at,updated_at,replays_review_id FROM reviews WHERE id = ?", id)
+func loadReviewValues(tx *sql.Tx, id model.ReviewID) (reviewValues, error) {
+	row := tx.QueryRow("SELECT lifecycle,subject,profile_revision,profile_snapshot,result_status,result_summary,result_raw,result_finding_count,termination,runtime,timings,created_at,updated_at,replays_review_id FROM reviews WHERE id = ?", id)
 	var values reviewValues
 	if err := row.Scan(&values.lifecycle, &values.subject, &values.profile, &values.snapshot, &values.status, &values.summary, &values.raw, &values.findingCount, &values.termination, &values.runtime, &values.timings, &values.createdAt, &values.updatedAt, &values.replaysReviewID); err != nil {
 		return values, fmt.Errorf("read review record %q: %w", id, err)
@@ -238,8 +249,8 @@ func decodeProjectionValue(payload []byte, target any) error {
 	return nil
 }
 
-func (p reviewRecordProjection) loadPasses(record *model.ReviewRecord) (returnErr error) {
-	rows, err := p.db.Query("SELECT ordinal,name,required FROM passes WHERE review_id=? ORDER BY ordinal", record.ID)
+func loadPasses(tx *sql.Tx, record *model.ReviewRecord) (returnErr error) {
+	rows, err := tx.Query("SELECT ordinal,name,required FROM passes WHERE review_id=? ORDER BY ordinal", record.ID)
 	if err != nil {
 		return err
 	}
@@ -252,65 +263,74 @@ func (p reviewRecordProjection) loadPasses(record *model.ReviewRecord) (returnEr
 		if err := rows.Scan(&ordinal, &pass.Name, &pass.Required); err != nil {
 			return err
 		}
-		attempts, err := p.loadAttempts(record.ID, ordinal)
-		if err != nil {
+		pass.Attempts = []model.AttemptRecord{}
+		record.Passes = append(record.Passes, pass)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	return loadAttempts(tx, record)
+}
+
+func loadAttempts(tx *sql.Tx, record *model.ReviewRecord) (returnErr error) {
+	rows, err := tx.Query("SELECT pass_ordinal,ordinal,number,outcome,provenance,diagnostic,raw_output,retry_after_ms,started_at,completed_at FROM attempts WHERE review_id=? ORDER BY pass_ordinal,ordinal", record.ID)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		returnErr = errors.Join(returnErr, rows.Close())
+	}()
+	for rows.Next() {
+		var passOrdinal, ordinal int
+		var attempt model.AttemptRecord
+		var provenance []byte
+		if err := rows.Scan(&passOrdinal, &ordinal, &attempt.Number, &attempt.Outcome, &provenance, &attempt.Diagnostic, &attempt.RawOutput, &attempt.RetryAfterMS, &attempt.StartedAt, &attempt.CompletedAt); err != nil {
 			return err
 		}
-		pass.Attempts = attempts
-		record.Passes = append(record.Passes, pass)
+		if err := decodeProjectionValue(provenance, &attempt.Provenance); err != nil {
+			return err
+		}
+		if passOrdinal < 0 || passOrdinal >= len(record.Passes) {
+			return fmt.Errorf("read review attempt %d: pass ordinal %d is missing", ordinal, passOrdinal)
+		}
+		record.Passes[passOrdinal].Attempts = append(record.Passes[passOrdinal].Attempts, attempt)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	return loadArtifacts(tx, record)
+}
+
+func loadArtifacts(tx *sql.Tx, record *model.ReviewRecord) (returnErr error) {
+	rows, err := tx.Query("SELECT pass_ordinal,attempt_ordinal,kind,path,size,digest,truncated FROM artifacts WHERE review_id=? ORDER BY pass_ordinal,attempt_ordinal,ordinal", record.ID)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		returnErr = errors.Join(returnErr, rows.Close())
+	}()
+	for rows.Next() {
+		var passOrdinal, attemptOrdinal int
+		var artifact model.ArtifactReference
+		if err := rows.Scan(&passOrdinal, &attemptOrdinal, &artifact.Kind, &artifact.Path, &artifact.Size, &artifact.Digest, &artifact.Truncated); err != nil {
+			return err
+		}
+		if passOrdinal < 0 || passOrdinal >= len(record.Passes) || attemptOrdinal < 0 || attemptOrdinal >= len(record.Passes[passOrdinal].Attempts) {
+			return fmt.Errorf("read review artifact: attempt %d in pass %d is missing", attemptOrdinal, passOrdinal)
+		}
+		record.Passes[passOrdinal].Attempts[attemptOrdinal].Artifacts = append(record.Passes[passOrdinal].Attempts[attemptOrdinal].Artifacts, artifact)
 	}
 	return rows.Err()
 }
 
-func (p reviewRecordProjection) loadAttempts(id model.ReviewID, passOrdinal int) (attempts []model.AttemptRecord, returnErr error) {
-	rows, err := p.db.Query("SELECT ordinal,number,outcome,provenance,diagnostic,raw_output,retry_after_ms,started_at,completed_at FROM attempts WHERE review_id=? AND pass_ordinal=? ORDER BY ordinal", id, passOrdinal)
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		returnErr = errors.Join(returnErr, rows.Close())
-	}()
-	attempts = []model.AttemptRecord{}
-	for rows.Next() {
-		var ordinal int
-		var attempt model.AttemptRecord
-		var provenance []byte
-		if err := rows.Scan(&ordinal, &attempt.Number, &attempt.Outcome, &provenance, &attempt.Diagnostic, &attempt.RawOutput, &attempt.RetryAfterMS, &attempt.StartedAt, &attempt.CompletedAt); err != nil {
-			return nil, err
-		}
-		if err := decodeProjectionValue(provenance, &attempt.Provenance); err != nil {
-			return nil, err
-		}
-		artifacts, err := p.loadArtifacts(id, passOrdinal, ordinal)
-		if err != nil {
-			return nil, err
-		}
-		attempt.Artifacts = artifacts
-		attempts = append(attempts, attempt)
-	}
-	return attempts, rows.Err()
-}
-
-func (p reviewRecordProjection) loadArtifacts(id model.ReviewID, passOrdinal, attemptOrdinal int) (artifacts []model.ArtifactReference, returnErr error) {
-	rows, err := p.db.Query("SELECT kind,path,size,digest,truncated FROM artifacts WHERE review_id=? AND pass_ordinal=? AND attempt_ordinal=? ORDER BY ordinal", id, passOrdinal, attemptOrdinal)
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		returnErr = errors.Join(returnErr, rows.Close())
-	}()
-	for rows.Next() {
-		var artifact model.ArtifactReference
-		if err := rows.Scan(&artifact.Kind, &artifact.Path, &artifact.Size, &artifact.Digest, &artifact.Truncated); err != nil {
-			return nil, err
-		}
-		artifacts = append(artifacts, artifact)
-	}
-	return artifacts, rows.Err()
-}
-
-func (p reviewRecordProjection) loadFindings(id model.ReviewID, result *model.ReviewResult) (returnErr error) {
-	rows, err := p.db.Query("SELECT ordinal,severity,category,location,failure,evidence,fix,test FROM findings WHERE review_id=? ORDER BY ordinal", id)
+func loadFindings(tx *sql.Tx, id model.ReviewID, result *model.ReviewResult) (returnErr error) {
+	rows, err := tx.Query("SELECT ordinal,severity,category,location,failure,evidence,fix,test FROM findings WHERE review_id=? ORDER BY ordinal", id)
 	if err != nil {
 		return err
 	}
