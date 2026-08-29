@@ -63,6 +63,12 @@ func (e *editor) runProfileStep() (bool, error) {
 }
 
 func (e *editor) validateAndReviewProfile(flow *configuration.ProfileOnboarding) error {
+	if e.ModelChoiceCheck != nil {
+		draft := flow.Draft()
+		if err := flow.SetModelChoiceCheck(e.ModelChoiceCheck(draft.Reviewer, draft.Model)); err != nil {
+			return err
+		}
+	}
 	plan, err := flow.Validate(e.Repository)
 	if err != nil {
 		return e.reviseProfileAfterError(flow, err)

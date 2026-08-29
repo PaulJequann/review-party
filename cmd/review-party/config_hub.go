@@ -6,26 +6,28 @@ import (
 	"io"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 
 	"github.com/mattn/go-isatty"
 
 	"reviewparty/internal/configuration"
 	"reviewparty/internal/configurationhub" //nolint:depguard // Cobra is the terminal composition root for the dedicated Hub adapter.
+	"reviewparty/internal/discovery"
+	"reviewparty/internal/subject"
 )
 
 type configurationHubOptions struct {
-	repository    string
-	configuration string
-	accessible    bool
+	repository       string
+	configuration    string
+	accessible       bool
+	discoveryService func() *discovery.Service
 }
 
 func executeConfigurationHub(parent context.Context, options configurationHubOptions, streams commandIO) int {
 	if !isTerminalInput(streams.input) || !isTerminalOutput(streams.output) {
 		return printConfigFailure("human", streams.output, streams.errors, fmt.Errorf("the Configuration Hub requires a terminal; use explicit 'review-party config' subcommands for automation"))
 	}
-	repository, err := filepath.Abs(options.repository)
+	repository, err := resolveConfigurationHubRepository(options.repository)
 	if err != nil {
 		return printFailure(streams.errors, fmt.Errorf("resolve repository: %w", err))
 	}
@@ -37,10 +39,22 @@ func executeConfigurationHub(parent context.Context, options configurationHubOpt
 		Repository: configuration.Repository(repository),
 		Input:      configurationHubInput(streams.input), Output: streams.output, Accessible: options.accessible,
 	}
+	if options.discoveryService != nil {
+		hubOptions.ModelChoiceCheck = func(reviewer, model string) configuration.ModelChoiceCheck {
+			return modelChoiceCheck(modelWarningInput{
+				manager: manager, discovery: options.discoveryService, repository: repository,
+				reviewer: reviewer, model: model,
+			})
+		}
+	}
 	if err := configurationhub.Run(manager, hubOptions); err != nil {
 		return printConfigFailure("human", streams.output, streams.errors, fmt.Errorf("run Configuration Hub: %w", err))
 	}
 	return 0
+}
+
+func resolveConfigurationHubRepository(repository string) (string, error) {
+	return subject.ResolveRepositoryRoot(repository)
 }
 
 func configurationHubInput(input io.Reader) io.ReadCloser {

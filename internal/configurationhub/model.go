@@ -295,11 +295,12 @@ func matches(item Item, query string) bool {
 
 // RunOptions contains the terminal boundary required by the Hub.
 type RunOptions struct {
-	Context    context.Context
-	Repository configuration.Repository
-	Input      io.ReadCloser
-	Output     io.Writer
-	Accessible bool
+	Context          context.Context
+	Repository       configuration.Repository
+	Input            io.ReadCloser
+	Output           io.Writer
+	Accessible       bool
+	ModelChoiceCheck func(reviewer, model string) configuration.ModelChoiceCheck
 }
 
 // Run opens the terminal shell over a read-only Manager snapshot.

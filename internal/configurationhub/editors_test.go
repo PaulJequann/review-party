@@ -125,24 +125,7 @@ func TestDeclinedProfileReviewReturnsToEditableDraft(t *testing.T) {
 		GlobalRoot: root, Reviewers: []string{"codex"},
 		ValidateName: func(string) error { return nil },
 	})
-	flow := configuration.NewProfileOnboarding(manager, configuration.ScopeGlobal)
-	if err := flow.ChooseBlank("Review carefully."); err != nil {
-		t.Fatal(err)
-	}
-	for _, field := range []struct {
-		name  configuration.OnboardingField
-		value configuration.OnboardingText
-	}{
-		{name: configuration.OnboardingFieldName, value: "quality"},
-		{name: configuration.OnboardingFieldReviewer, value: "codex"},
-		{name: configuration.OnboardingFieldModel, value: "luna"},
-		{name: configuration.OnboardingFieldEffort, value: "high"},
-		{name: configuration.OnboardingFieldDeadline, value: "8m"},
-	} {
-		if err := flow.Set(field.name, field.value); err != nil {
-			t.Fatal(err)
-		}
-	}
+	flow := completeProfileFlow(t, manager)
 	if _, err := flow.Validate(""); err != nil {
 		t.Fatal(err)
 	}
@@ -152,6 +135,32 @@ func TestDeclinedProfileReviewReturnsToEditableDraft(t *testing.T) {
 	}
 	if flow.Step() != configuration.OnboardingName {
 		t.Fatalf("step after declined review = %q, want %q", flow.Step(), configuration.OnboardingName)
+	}
+}
+
+func TestProfileValidationUsesModelChoiceCheck(t *testing.T) {
+	manager := configuration.NewManager(configuration.Options{
+		GlobalRoot: t.TempDir(), Reviewers: []string{"codex"},
+		ValidateName: func(string) error { return nil },
+	})
+	flow := completeProfileFlow(t, manager)
+	var selected string
+	var output bytes.Buffer
+	editor := editor{manager: manager, RunOptions: RunOptions{
+		Input: io.NopCloser(strings.NewReader("n\n")), Output: &output, Accessible: true,
+		ModelChoiceCheck: func(reviewer, model string) configuration.ModelChoiceCheck {
+			selected = reviewer + "/" + model
+			return configuration.ModelChoiceCheck{Status: configuration.ModelChoicesUnknown}
+		},
+	}}
+	if err := editor.validateAndReviewProfile(flow); err != nil {
+		t.Fatal(err)
+	}
+	if selected != "codex/luna" {
+		t.Fatalf("model choice checked = %q, want codex/luna", selected)
+	}
+	if !strings.Contains(output.String(), `model "luna"`) {
+		t.Fatalf("review output omitted model warning: %q", output.String())
 	}
 }
 
@@ -187,6 +196,29 @@ func newProfileFlowWithTemplate(t *testing.T) *configuration.ProfileOnboarding {
 	t.Helper()
 	manager := configuration.NewManager(configuration.Options{Templates: []configuration.Template{{ID: "bugs", Revision: "v1", Instructions: "template instructions"}}})
 	return configuration.NewProfileOnboarding(manager, configuration.ScopeGlobal)
+}
+
+func completeProfileFlow(t *testing.T, manager *configuration.Manager) *configuration.ProfileOnboarding {
+	t.Helper()
+	flow := configuration.NewProfileOnboarding(manager, configuration.ScopeGlobal)
+	if err := flow.ChooseBlank("Review carefully."); err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []struct {
+		name  configuration.OnboardingField
+		value configuration.OnboardingText
+	}{
+		{name: configuration.OnboardingFieldName, value: "quality"},
+		{name: configuration.OnboardingFieldReviewer, value: "codex"},
+		{name: configuration.OnboardingFieldModel, value: "luna"},
+		{name: configuration.OnboardingFieldEffort, value: "high"},
+		{name: configuration.OnboardingFieldDeadline, value: "8m"},
+	} {
+		if err := flow.Set(field.name, field.value); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return flow
 }
 
 func TestCancelledBlankProfileFormRetainsPartialInstructions(t *testing.T) {
