@@ -152,7 +152,8 @@ func (conductor *Conductor) executeBundleSequential(ctx context.Context, ledger 
 			return conductor.stopBundle(ledger, &bundle, evalFailureCategory(err), err)
 		}
 		record, err := conductor.runPreparedReview(ctx, prepared.members[index], nil, conductor.now().UTC())
-		bundle, hardErr := conductor.absorbBundleMember(ledger, bundle, concurrentMemberResult{index: index, record: record, err: err})
+		var hardErr error
+		bundle, hardErr = conductor.absorbBundleMember(ledger, bundle, concurrentMemberResult{index: index, record: record, err: err})
 		if hardErr != nil {
 			return conductor.stopBundle(ledger, &bundle, evalFailureCategory(hardErr), hardErr)
 		}

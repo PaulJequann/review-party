@@ -309,6 +309,9 @@ func TestRunExplicitProfileReplacesDefaultForOneRun(t *testing.T) {
 	bundle := runRun(t, conductor, selection)
 	requireBundleOutcome(t, bundle, 1, model.LifecycleCompleted)
 	requireScopedMember(t, bundle, 0, "repository:"+localDocs)
+	if bundle.Members[0].ReviewID == "" {
+		t.Fatal("sequential bundle member has no Review ID")
+	}
 	if bundle.Members[0].Origin != "explicit" {
 		t.Fatalf("origin = %q, want explicit", bundle.Members[0].Origin)
 	}
