@@ -16,6 +16,30 @@ import (
 	"time"
 )
 
+func TestEditorProcessGroupForegroundsInteractiveTerminal(t *testing.T) {
+	terminal, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
+	if err != nil {
+		t.Skipf("controlling terminal unavailable: %v", err)
+	}
+	defer func() { _ = terminal.Close() }() //nolint:errcheck // Test terminal cleanup is best-effort.
+
+	command := exec.Command("true")
+	command.Stdin = terminal
+	restore, err := configureEditorProcessGroup(command)
+	if err != nil {
+		t.Fatalf("configure editor process group: %v", err)
+	}
+	if !command.SysProcAttr.Foreground {
+		t.Fatal("interactive editor was not configured for the terminal foreground")
+	}
+	if command.SysProcAttr.Ctty != int(terminal.Fd()) {
+		t.Fatalf("editor controlling terminal = %d, want %d", command.SysProcAttr.Ctty, terminal.Fd())
+	}
+	if err := restore(); err != nil {
+		t.Fatalf("restore terminal foreground process group: %v", err)
+	}
+}
+
 func TestInstructionEditorCancellationTerminatesDescendants(t *testing.T) {
 	if _, err := exec.LookPath("sh"); err != nil {
 		t.Skipf("shell unavailable: %v", err)

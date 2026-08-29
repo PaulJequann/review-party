@@ -125,6 +125,44 @@ func TestProfileOnboardingRevisionKeepsUnchangedLaterFields(t *testing.T) {
 			t.Fatalf("revised draft %s = %q, want %q", field.name, field.got, field.want)
 		}
 	}
+	requireOnboardingStep(t, flow, OnboardingReviewer)
+	requireOnboardingErrorFree(t, flow.Set(OnboardingFieldReviewer, "grok"))
+	requireOnboardingStep(t, flow, OnboardingModel)
+	requireOnboardingErrorFree(t, flow.Set(OnboardingFieldModel, "grok-4.6"))
+	requireOnboardingStep(t, flow, OnboardingEffort)
+	requireOnboardingErrorFree(t, flow.Set(OnboardingFieldEffort, "high"))
+	requireOnboardingStep(t, flow, OnboardingDeadline)
+	requireOnboardingErrorFree(t, flow.Set(OnboardingFieldDeadline, "1m"))
+	requireOnboardingStep(t, flow, OnboardingValidation)
+}
+
+func TestProfileOnboardingRevisionCanEditRetainedLaterField(t *testing.T) {
+	manager := NewManager(Options{
+		GlobalRoot:   t.TempDir(),
+		Reviewers:    []string{"grok"},
+		ValidateName: func(string) error { return nil },
+	})
+	flow := completeOnboarding(t, manager)
+	requireOnboardingErrorFree(t, flow.Set(OnboardingFieldDeadline, "not-a-duration"))
+	plan, err := flow.Validate("")
+	if err == nil && plan.Valid() {
+		t.Fatal("invalid retained deadline passed validation")
+	}
+	requireOnboardingErrorFree(t, flow.Revise())
+	for _, field := range []struct {
+		name  OnboardingField
+		value OnboardingText
+		step  OnboardingStep
+	}{
+		{name: OnboardingFieldName, value: "bugs", step: OnboardingReviewer},
+		{name: OnboardingFieldReviewer, value: "grok", step: OnboardingModel},
+		{name: OnboardingFieldModel, value: "grok-4.6", step: OnboardingEffort},
+		{name: OnboardingFieldEffort, value: "high", step: OnboardingDeadline},
+	} {
+		requireOnboardingErrorFree(t, flow.Set(field.name, field.value))
+		requireOnboardingStep(t, flow, field.step)
+	}
+	requireOnboardingErrorFree(t, flow.Set(OnboardingFieldDeadline, "1m"))
 	requireOnboardingStep(t, flow, OnboardingValidation)
 }
 

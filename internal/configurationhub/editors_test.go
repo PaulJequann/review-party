@@ -261,6 +261,17 @@ func TestEditorCommandLinePreservesQuotedArguments(t *testing.T) {
 	}
 }
 
+func TestWindowsEditorCommandLinePreservesPathSeparators(t *testing.T) {
+	got, err := parseWindowsCommandLine(`"C:\Program Files\Editor\editor.exe" --wait "C:\tmp\instructions.md"`)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	want := []string{`C:\Program Files\Editor\editor.exe`, "--wait", `C:\tmp\instructions.md`}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("arguments = %#v, want %#v", got, want)
+	}
+}
+
 func TestInstructionEditorUsesArgumentVectorAndReturnsEditedBytes(t *testing.T) {
 	if os.Getenv("GO_WANT_EDITOR_HELPER") == "1" {
 		path := os.Args[len(os.Args)-1]

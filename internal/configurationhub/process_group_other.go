@@ -4,7 +4,9 @@ package configurationhub
 
 import "os/exec"
 
-func configureEditorProcessGroup(_ *exec.Cmd) {}
+func configureEditorProcessGroup(_ *exec.Cmd) (func() error, error) {
+	return func() error { return nil }, nil
+}
 
 func terminateEditorProcessGroup(command *exec.Cmd) {
 	killEditorProcessGroup(command)

@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"strings"
 	"time"
 )
 
@@ -39,21 +38,28 @@ func editInstructions(ctx context.Context, instructions string, input io.Reader,
 }
 
 func runEditorCommand(ctx context.Context, command *exec.Cmd) error {
-	configureEditorProcessGroup(command)
-	if err := command.Start(); err != nil {
+	restoreTerminal, err := configureEditorProcessGroup(command)
+	if err != nil {
 		return err
+	}
+	if err := command.Start(); err != nil {
+		return errors.Join(err, restoreTerminal())
 	}
 	finished := make(chan error, 1)
 	go func() { finished <- command.Wait() }()
+	var commandErr error
 	select {
-	case err := <-finished:
-		return err
+	case commandErr = <-finished:
 	case <-ctx.Done():
+		commandErr = ctx.Err()
 		if err := stopEditorProcess(command, finished); err != nil {
-			return errors.Join(ctx.Err(), err)
+			commandErr = errors.Join(commandErr, err)
 		}
-		return ctx.Err()
 	}
+	if err := restoreTerminal(); err != nil {
+		commandErr = errors.Join(commandErr, fmt.Errorf("restore terminal foreground process group: %w", err))
+	}
+	return commandErr
 }
 
 func stopEditorProcess(command *exec.Cmd, finished <-chan error) error {
@@ -80,13 +86,6 @@ func editorProcessStopped(finished <-chan error, timeout time.Duration) bool {
 	}
 }
 
-type commandLineParser struct {
-	arguments []string
-	current   strings.Builder
-	quote     rune
-	escaped   bool
-}
-
 func writeInstructionFile(instructions string) (string, error) {
 	file, err := os.CreateTemp("", "review-party-instructions-*.md")
 	if err != nil {
@@ -109,58 +108,3 @@ func cleanupInstructionFile(path string, cause error) error {
 	}
 	return cause
 }
-
-func parseCommandLine(value string) ([]string, error) {
-	parser := commandLineParser{}
-	for _, char := range value {
-		parser.consume(char)
-	}
-	if parser.escaped || parser.quote != 0 {
-		return nil, errors.New("unterminated escape or quote")
-	}
-	parser.flush()
-	return parser.arguments, nil
-}
-
-func (parser *commandLineParser) consume(char rune) {
-	if parser.escaped {
-		parser.current.WriteRune(char)
-		parser.escaped = false
-		return
-	}
-	if char == '\\' && parser.quote != '\'' {
-		parser.escaped = true
-		return
-	}
-	if parser.quote != 0 {
-		parser.consumeQuoted(char)
-		return
-	}
-	if char == '\'' || char == '"' {
-		parser.quote = char
-		return
-	}
-	if isCommandSpace(char) {
-		parser.flush()
-		return
-	}
-	parser.current.WriteRune(char)
-}
-
-func (parser *commandLineParser) consumeQuoted(char rune) {
-	if char == parser.quote {
-		parser.quote = 0
-		return
-	}
-	parser.current.WriteRune(char)
-}
-
-func (parser *commandLineParser) flush() {
-	if parser.current.Len() == 0 {
-		return
-	}
-	parser.arguments = append(parser.arguments, parser.current.String())
-	parser.current.Reset()
-}
-
-func isCommandSpace(char rune) bool { return char == ' ' || char == '\t' || char == '\n' }

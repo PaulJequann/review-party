@@ -41,6 +41,7 @@ type ProfileOnboarding struct {
 	manager          *Manager
 	draft            ProfileDraft
 	modelChoiceCheck ModelChoiceCheck
+	revising         bool
 	step             OnboardingStep
 	plan             Plan
 }
@@ -72,6 +73,7 @@ func (flow *ProfileOnboarding) ChooseTemplate(id string) error {
 	for _, template := range flow.manager.Templates() {
 		if template.ID == id {
 			flow.clearDependentFields(OnboardingChooseSource)
+			flow.revising = false
 			flow.draft.TemplateID = id
 			flow.draft.TemplateRevision = template.Revision
 			flow.draft.Instructions = ""
@@ -89,6 +91,7 @@ func (flow *ProfileOnboarding) ChooseBlank(instructions OnboardingText) error {
 		return err
 	}
 	flow.clearDependentFields(OnboardingChooseSource)
+	flow.revising = false
 	flow.draft.TemplateID = ""
 	flow.draft.TemplateRevision = ""
 	flow.draft.Instructions = string(instructions)
@@ -108,6 +111,7 @@ func (flow *ProfileOnboarding) SetInstructions(instructions OnboardingText) erro
 	flow.draft.TemplateID = ""
 	flow.draft.TemplateRevision = ""
 	flow.draft.Instructions = string(instructions)
+	flow.revising = false
 	flow.modelChoiceCheck = ModelChoiceCheck{}
 	flow.plan = Plan{}
 	flow.step = flow.nextStep()
@@ -115,7 +119,9 @@ func (flow *ProfileOnboarding) SetInstructions(instructions OnboardingText) erro
 }
 
 // Set updates one executable Profile field and advances to the first missing
-// field. Changing an earlier field clears every dependent field.
+// field. During revision, unchanged fields are traversed in order so retained
+// values remain editable. Changing an earlier field clears every dependent
+// field.
 func (flow *ProfileOnboarding) Set(field OnboardingField, value OnboardingText) error {
 	if err := flow.ensureEditable(); err != nil {
 		return err
@@ -131,9 +137,14 @@ func (flow *ProfileOnboarding) Set(field OnboardingField, value OnboardingText) 
 	spec.write(&flow.draft, string(value))
 	if previous != string(value) {
 		flow.clearDependentFields(spec.step)
+		flow.revising = false
 	}
 	flow.plan = Plan{}
-	flow.step = flow.nextStep()
+	if flow.revising {
+		flow.step = flow.nextRevisionStep(spec.step)
+	} else {
+		flow.step = flow.nextStep()
+	}
 	return nil
 }
 
@@ -191,6 +202,7 @@ func (flow *ProfileOnboarding) Revise() error {
 	}
 	flow.modelChoiceCheck = ModelChoiceCheck{}
 	flow.plan = Plan{}
+	flow.revising = true
 	flow.step = OnboardingName
 	return nil
 }
@@ -239,6 +251,7 @@ func (flow *ProfileOnboarding) Resume() error {
 func (flow *ProfileOnboarding) Discard() {
 	flow.draft = ProfileDraft{Target: flow.draft.Target}
 	flow.modelChoiceCheck = ModelChoiceCheck{}
+	flow.revising = false
 	flow.plan = Plan{}
 	flow.step = OnboardingChooseSource
 }
@@ -283,6 +296,19 @@ func (flow *ProfileOnboarding) nextStep() OnboardingStep {
 		}
 	}
 	return OnboardingValidation
+}
+
+func (flow *ProfileOnboarding) nextRevisionStep(step OnboardingStep) OnboardingStep {
+	for index, spec := range onboardingFields {
+		if spec.step != step {
+			continue
+		}
+		if index+1 == len(onboardingFields) {
+			return OnboardingValidation
+		}
+		return onboardingFields[index+1].step
+	}
+	return flow.nextStep()
 }
 
 func onboardingFieldSpecFor(field OnboardingField) (onboardingFieldSpec, bool) {
