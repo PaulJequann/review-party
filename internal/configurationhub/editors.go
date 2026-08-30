@@ -15,7 +15,7 @@ import (
 type editor struct {
 	RunOptions
 	manager *configuration.Manager
-	drafts  draftSet
+	drafts  *draftSet
 }
 
 type draftSet struct {
@@ -46,11 +46,18 @@ func (drafts draftSet) descriptions() []string {
 	return result
 }
 
-func (e *editor) draftDescriptions() []string { return e.drafts.descriptions() }
+func (e *editor) draftSet() *draftSet {
+	if e.drafts == nil {
+		e.drafts = &draftSet{}
+	}
+	return e.drafts
+}
 
-func (e *editor) draftsEmpty() bool { return e.drafts.empty() }
+func (e *editor) draftDescriptions() []string { return e.draftSet().descriptions() }
 
-func (e *editor) clearDrafts() { e.drafts.clear() }
+func (e *editor) draftsEmpty() bool { return e.draftSet().empty() }
+
+func (e *editor) clearDrafts() { e.draftSet().clear() }
 
 func (e *editor) form(fields ...huh.Field) error {
 	ctx := e.Context
@@ -62,10 +69,10 @@ func (e *editor) form(fields ...huh.Field) error {
 		input = io.NopCloser(strings.NewReader(""))
 	}
 	form := huh.NewForm(huh.NewGroup(fields...)).WithAccessible(e.Accessible).WithInput(input).WithOutput(e.Output)
-	if e.Accessible {
-		return runAccessibleForm(ctx, form, input)
+	if !e.Accessible {
+		return errors.New("interactive forms must be hosted by the Configuration Hub")
 	}
-	return form.RunWithContext(ctx)
+	return runAccessibleForm(ctx, form, input)
 }
 
 func runAccessibleForm(ctx context.Context, form *huh.Form, input io.ReadCloser) error {

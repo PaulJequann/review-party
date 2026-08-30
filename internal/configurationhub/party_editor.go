@@ -15,7 +15,7 @@ type partyFormDraft struct {
 }
 
 func (e *editor) createParty() error {
-	draft := &e.drafts.party
+	draft := &e.draftSet().party
 	if err := e.form(
 		huh.NewSelect[string]().Title("Configuration scope").Options(scopeOptions()...).Value(&draft.scope),
 		huh.NewInput().Title("Party name").Value(&draft.name),
@@ -43,7 +43,7 @@ func (e *editor) createParty() error {
 	}
 	published, err := e.reviewAndPublish(plan, func() error { return e.manager.Publish(plan) })
 	if published {
-		e.drafts.party = partyFormDraft{}
+		e.draftSet().party = partyFormDraft{}
 	}
 	return err
 }

@@ -190,7 +190,7 @@ func TestProfilePlanningErrorOffersDirectDraftRevision(t *testing.T) {
 	draft := completeProfileDraft()
 	draft.Name = "bad"
 	var output bytes.Buffer
-	editor := editor{manager: manager, drafts: draftSet{profile: draft}, RunOptions: RunOptions{
+	editor := editor{manager: manager, drafts: &draftSet{profile: draft}, RunOptions: RunOptions{
 		Input: newLineInput("2\nquality\ny\n"), Output: &output, Accessible: true,
 	}}
 	if err := editor.createProfile(); err != nil {
@@ -214,7 +214,7 @@ func TestDeclinedProfileReviewOffersDraftRevision(t *testing.T) {
 	if err != nil || !plan.Valid() {
 		t.Fatalf("plan = valid %v, err = %v, reason = %s", plan.Valid(), err, plan.Reason())
 	}
-	editor := editor{manager: manager, drafts: draftSet{profile: draft}, RunOptions: RunOptions{
+	editor := editor{manager: manager, drafts: &draftSet{profile: draft}, RunOptions: RunOptions{
 		Input: newLineInput("n\n4\nnew-model\n"), Output: &bytes.Buffer{}, Accessible: true,
 	}}
 	published, err := editor.reviewAndPublish(plan, func() error { return manager.Publish(plan) })
@@ -358,7 +358,7 @@ func completeProfileDraft() configuration.ProfileDraft {
 }
 
 func TestExitCanReturnToRetainedDraft(t *testing.T) {
-	editor := editor{drafts: draftSet{profile: configuration.ProfileDraft{Target: configuration.ScopeGlobal, Instructions: "instructions"}}, RunOptions: RunOptions{Input: io.NopCloser(strings.NewReader("n\n")), Output: &bytes.Buffer{}, Accessible: true}}
+	editor := editor{drafts: &draftSet{profile: configuration.ProfileDraft{Target: configuration.ScopeGlobal, Instructions: "instructions"}}, RunOptions: RunOptions{Input: io.NopCloser(strings.NewReader("n\n")), Output: &bytes.Buffer{}, Accessible: true}}
 	exit, err := editor.confirmExit()
 	if err != nil {
 		t.Fatalf("confirm exit: %v", err)

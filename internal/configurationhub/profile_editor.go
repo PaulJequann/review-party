@@ -13,7 +13,7 @@ func (e *editor) createProfile() error {
 	if err := e.ensureProfileFlow(); err != nil {
 		return err
 	}
-	draft := &e.drafts.profile
+	draft := &e.draftSet().profile
 	if profileNeedsSource(*draft) {
 		if err := e.chooseProfileSource(draft); err != nil {
 			return err
@@ -46,7 +46,7 @@ func (e *editor) completeProfile(draft *configuration.ProfileDraft) error {
 		}
 		published, err := e.reviewAndPublish(plan, func() error { return e.manager.Publish(plan) })
 		if published {
-			e.drafts.profile = configuration.ProfileDraft{}
+			e.draftSet().profile = configuration.ProfileDraft{}
 			return nil
 		}
 		if err != nil {
@@ -59,14 +59,15 @@ func (e *editor) completeProfile(draft *configuration.ProfileDraft) error {
 }
 
 func (e *editor) ensureProfileFlow() error {
-	if e.drafts.profile != (configuration.ProfileDraft{}) {
+	drafts := e.draftSet()
+	if drafts.profile != (configuration.ProfileDraft{}) {
 		return nil
 	}
 	var scope string
 	if err := e.form(huh.NewSelect[string]().Title("Configuration scope").Options(scopeOptions()...).Value(&scope)); err != nil {
 		return err
 	}
-	e.drafts.profile.Target = configuration.Scope(scope)
+	drafts.profile.Target = configuration.Scope(scope)
 	return nil
 }
 

@@ -15,7 +15,7 @@ type reviewFormDraft struct {
 }
 
 func (e *editor) editReviews() error {
-	draft := &e.drafts.reviews
+	draft := &e.draftSet().reviews
 	if err := e.form(huh.NewSelect[string]().Title("Repository Reviews").Options(
 		huh.NewOption("Add Profile or Party", "add"), huh.NewOption("Remove item", "remove"),
 		huh.NewOption("Move item", "move"), huh.NewOption("Set concurrency", "concurrency"),
@@ -45,7 +45,7 @@ func (e *editor) editReviews() error {
 		},
 	)
 	if published {
-		e.drafts.reviews = reviewFormDraft{}
+		e.draftSet().reviews = reviewFormDraft{}
 	}
 	return err
 }
@@ -74,7 +74,7 @@ func (e *editor) reviewIntent(operation string, selection configuration.ReviewSe
 }
 
 func (e *editor) addReview(selection configuration.ReviewSelection) (configuration.SetReviewSelection, error) {
-	draft := &e.drafts.reviews
+	draft := &e.draftSet().reviews
 	err := e.form(huh.NewSelect[string]().Title("Selection group").Options(scopeOptions()...).Value(&draft.scope), huh.NewSelect[string]().Title("Kind").Options(huh.NewOption("Profile", "profile"), huh.NewOption("Party", "party")).Value(&draft.kind), huh.NewInput().Title("Name").Value(&draft.name))
 	item := configuration.SelectionItem{Profile: draft.name}
 	if draft.kind == "party" {
@@ -84,7 +84,7 @@ func (e *editor) addReview(selection configuration.ReviewSelection) (configurati
 }
 
 func (e *editor) removeReview(selection configuration.ReviewSelection) (configuration.SetReviewSelection, error) {
-	draft := &e.drafts.reviews
+	draft := &e.draftSet().reviews
 	if err := e.reviewScope(draft, huh.NewInput().Title("Zero-based index").Value(&draft.index)); err != nil {
 		return configuration.SetReviewSelection{}, err
 	}
@@ -96,7 +96,7 @@ func (e *editor) removeReview(selection configuration.ReviewSelection) (configur
 }
 
 func (e *editor) moveReview(selection configuration.ReviewSelection) (configuration.SetReviewSelection, error) {
-	draft := &e.drafts.reviews
+	draft := &e.draftSet().reviews
 	if err := e.reviewScope(draft, huh.NewInput().Title("From index").Value(&draft.from), huh.NewInput().Title("To index").Value(&draft.to)); err != nil {
 		return configuration.SetReviewSelection{}, err
 	}
@@ -117,7 +117,7 @@ func (e *editor) reviewScope(draft *reviewFormDraft, fields ...huh.Field) error 
 }
 
 func (e *editor) concurrencyReview(selection configuration.ReviewSelection) (configuration.SetReviewSelection, error) {
-	draft := &e.drafts.reviews
+	draft := &e.draftSet().reviews
 	if err := e.form(huh.NewInput().Title("Concurrency limit").Value(&draft.concurrency)); err != nil {
 		return configuration.SetReviewSelection{}, err
 	}

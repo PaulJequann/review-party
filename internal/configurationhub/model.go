@@ -108,64 +108,131 @@ type hubAction struct {
 	exit bool
 }
 
+// viewState identifies the active surface in the long-lived Hub program.
+type viewState uint8
+
+const (
+	viewMenu viewState = iota
+	viewForm
+)
+
 // Model is a Bubble Tea shell. It deliberately owns no filesystem handle and
 // cannot publish configuration while a user merely navigates or searches.
 type Model struct {
-	snapshot  Snapshot
-	area      int
-	query     string
-	searching bool
-	width     int
-	height    int
-	viewport  viewport.Model
-	ready     bool
-	action    hubAction
+	snapshot    Snapshot
+	area        int
+	query       string
+	searching   bool
+	width       int
+	height      int
+	viewport    viewport.Model
+	ready       bool
+	view        viewState
+	drafts      draftSet
+	form        formAdapter
+	formKind    formKind
+	session     *formSession
+	status      string
+	pending     tea.Cmd
+	pendingKind planKind
+	runtime     *hubRuntime
 }
 
 func New(snapshot Snapshot) Model {
 	view := viewport.New(viewport.WithWidth(80), viewport.WithHeight(20))
-	model := Model{snapshot: snapshot, width: 80, height: 20, viewport: view}
+	model := Model{snapshot: snapshot, width: 80, height: 20, viewport: view, view: viewMenu, session: &formSession{}}
 	model.viewport.SetContent(model.viewportContent())
 	return model
 }
 func (Model) Init() tea.Cmd { return nil }
 
 func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
-	switch message := message.(type) {
-	case tea.WindowSizeMsg:
-		model.width = message.Width
-		model.height = message.Height
-		model.viewport.SetWidth(message.Width)
-		// Header ≈ title + global line + blank + 6 menu items + blank + optional search + footer
-		headerHeight := 2 + len(menuAreaSpecs()) + 2
-		if model.query != "" || model.searching {
-			headerHeight++
-		}
-		footerHeight := 1
-		viewportHeight := message.Height - headerHeight - footerHeight - 1
-		if viewportHeight < 5 {
-			viewportHeight = 5
-		}
-		if viewportHeight > message.Height-4 {
-			viewportHeight = message.Height - 4
-		}
-		model.viewport.SetHeight(viewportHeight)
-		model.viewport.SetContent(model.viewportContent())
-		model.ready = true
-		// Also forward to viewport for internal offset handling
-		var cmd tea.Cmd
-		model.viewport, cmd = model.viewport.Update(message)
-		return model, cmd
-	case tea.KeyPressMsg:
-		if model.searching {
-			if message.String() == "ctrl+c" {
-				return model, tea.Quit
-			}
-			return model.updateSearch(message.String()), nil
-		}
-		return model.updateNavigation(message.String())
+	model.ensureSession()
+	if isCtrlC(message) {
+		return model, tea.Quit
+	}
+	if size, ok := message.(tea.WindowSizeMsg); ok {
+		return model.updateWindow(size)
+	}
+	if updated, command, handled := model.updateAsync(message); handled {
+		return updated, command
+	}
+	if key, ok := message.(tea.KeyPressMsg); ok {
+		return model.updateKey(key)
+	}
+	if model.view == viewForm {
+		return model.updateForm(message)
 	}
 	return model, nil
+}
+
+func isCtrlC(message tea.Msg) bool {
+	key, ok := message.(tea.KeyPressMsg)
+	return ok && key.String() == "ctrl+c"
+}
+
+func (model Model) updateWindow(message tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
+	model.width = message.Width
+	model.height = message.Height
+	if model.view == viewForm {
+		return model.updateForm(message)
+	}
+	model.viewport.SetWidth(message.Width)
+	// Header ≈ title + global line + blank + 6 menu items + blank + optional search + footer
+	headerHeight := 2 + len(menuAreaSpecs()) + 2
+	if model.query != "" || model.searching {
+		headerHeight++
+	}
+	footerHeight := 1
+	viewportHeight := message.Height - headerHeight - footerHeight - 1
+	if viewportHeight < 5 {
+		viewportHeight = 5
+	}
+	if viewportHeight > message.Height-4 {
+		viewportHeight = message.Height - 4
+	}
+	model.viewport.SetHeight(viewportHeight)
+	model.viewport.SetContent(model.viewportContent())
+	model.ready = true
+	// Also forward to viewport for internal offset handling
+	var command tea.Cmd
+	model.viewport, command = model.viewport.Update(message)
+	return model, command
+}
+
+func (model Model) updateAsync(message tea.Msg) (tea.Model, tea.Cmd, bool) {
+	switch message := message.(type) {
+	case planReadyMsg:
+		model, command := model.receivePlan(message)
+		return model, command, true
+	case planFailedMsg:
+		model, command := model.receivePlanFailure(message)
+		return model, command, true
+	case publishResultMsg:
+		model, command := model.receivePublishResult(message)
+		return model, command, true
+	case reviewSelectionLoadedMsg:
+		model, command := model.receiveReviewSelection(message)
+		return model, command, true
+	case templateLoadedMsg:
+		model, command := model.receiveTemplate(message)
+		return model, command, true
+	case instructionEditResultMsg:
+		model, command := model.receiveInstructionEdit(message)
+		return model, command, true
+	default:
+		return model, nil, false
+	}
+}
+
+func (model Model) updateKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if model.view == viewForm {
+		return model.updateForm(message)
+	}
+	if model.searching {
+		return model.updateSearch(message.String()), nil
+	}
+	return model.updateNavigation(message.String())
 }
 
 func (model Model) updateSearch(key string) Model {
@@ -191,29 +258,49 @@ func (model Model) updateSearch(key string) Model {
 }
 
 func (model Model) updateNavigation(key string) (tea.Model, tea.Cmd) {
-	areas := menuAreaSpecs()
 	switch key {
 	case "q", "ctrl+c":
 		return model, tea.Quit
-	case "up", "k":
-		model.moveArea(-1)
-	case "down", "j":
-		model.moveArea(1)
+	case "up", "k", "down", "j":
+		model.moveAreaForKey(key)
 	case "enter":
-		model.action = hubAction{area: areas[model.area].area}
-		return model, tea.Quit
+		return model.openSelectedArea()
 	case "/":
-		model.area = 0
-		model.query = ""
-		model.searching = true
-		model.viewport.SetContent(model.viewportContent())
-		model.viewport.GotoTop()
+		model.beginSearch()
 	case "esc":
-		model.query = ""
-		model.viewport.SetContent(model.viewportContent())
-		model.viewport.GotoTop()
+		model.clearSearch()
 	}
 	return model, nil
+}
+
+func (model *Model) moveAreaForKey(key string) {
+	offset := 1
+	if key == "up" || key == "k" {
+		offset = -1
+	}
+	model.moveArea(offset)
+}
+
+func (model *Model) openSelectedArea() (tea.Model, tea.Cmd) {
+	areas := menuAreaSpecs()
+	if model.area < 0 || model.area >= len(areas) {
+		return *model, nil
+	}
+	return model.withForm(model.openArea(areas[model.area].area))
+}
+
+func (model *Model) beginSearch() {
+	model.area = 0
+	model.query = ""
+	model.searching = true
+	model.viewport.SetContent(model.viewportContent())
+	model.viewport.GotoTop()
+}
+
+func (model *Model) clearSearch() {
+	model.query = ""
+	model.viewport.SetContent(model.viewportContent())
+	model.viewport.GotoTop()
 }
 
 func (model *Model) moveArea(offset int) {
@@ -233,7 +320,7 @@ func (model Model) viewportContent() string {
 }
 
 func (model Model) View() tea.View {
-	if !model.ready {
+	if model.view == viewForm || !model.ready {
 		view := tea.NewView(model.Render())
 		view.AltScreen = true
 		return view
@@ -259,6 +346,9 @@ func (model Model) View() tea.View {
 
 // Render returns a deterministic text view and is also used by accessible mode.
 func (model Model) Render() string {
+	if model.view == viewForm {
+		return model.renderForm()
+	}
 	title := lipgloss.NewStyle().Bold(true).Render("Review Party Configuration Hub")
 	var output strings.Builder
 	fmt.Fprintf(&output, "%s\nGlobal Configuration · Repository %s\n\n", title, model.snapshot.Repository)
@@ -376,8 +466,30 @@ func Run(manager *configuration.Manager, options RunOptions) error {
 	if options.Context == nil {
 		options.Context = context.Background()
 	}
-	editor := &editor{RunOptions: options, manager: manager}
-	return editor.runHub()
+	snapshot, err := buildSnapshot(manager, options.Repository)
+	if err != nil {
+		return err
+	}
+	if options.Accessible {
+		model := New(snapshot)
+		editor := &editor{RunOptions: options, manager: manager, drafts: &model.drafts}
+		return editor.runHub()
+	}
+	model := New(snapshot)
+	model.runtime = newHubRuntime(options, manager)
+	result, err := tea.NewProgram(
+		model,
+		tea.WithContext(options.Context),
+		tea.WithInput(options.Input),
+		tea.WithOutput(options.Output),
+	).Run()
+	if err != nil {
+		return err
+	}
+	if _, ok := result.(Model); !ok {
+		return fmt.Errorf("Configuration Hub returned %T", result)
+	}
+	return nil
 }
 
 func (e *editor) runHub() error {
@@ -429,23 +541,15 @@ func (e *editor) abortExits() bool {
 }
 
 func (e *editor) nextAction() (hubAction, error) {
+	if !e.Accessible {
+		return hubAction{}, errors.New("interactive Hub navigation must be hosted by the Configuration Hub")
+	}
 	snapshot, err := buildSnapshot(e.manager, e.Repository)
 	if err != nil {
 		return hubAction{}, err
 	}
-	if e.Accessible {
-		if _, err := io.WriteString(e.Output, New(snapshot).Render()); err != nil {
-			return hubAction{}, err
-		}
-		return e.chooseAction()
-	}
-	result, err := tea.NewProgram(New(snapshot), tea.WithContext(e.Context), tea.WithInput(e.Input), tea.WithOutput(e.Output)).Run()
-	if err != nil {
+	if _, err := io.WriteString(e.Output, New(snapshot).Render()); err != nil {
 		return hubAction{}, err
 	}
-	model, ok := result.(Model)
-	if !ok {
-		return hubAction{}, fmt.Errorf("Configuration Hub returned %T", result)
-	}
-	return model.action, nil
+	return e.chooseAction()
 }
