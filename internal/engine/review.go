@@ -94,6 +94,18 @@ func (runner *reviewRunner) runPreparedReview(ctx context.Context, prepared prep
 	})
 }
 
+// resumePreparedReview continues an already persisted Review for an Eval
+// retry. Eval owns retry policy; the runner owns the availability and attempt
+// lifecycle details needed to resume the same prepared Review.
+func (runner *reviewRunner) resumePreparedReview(ctx context.Context, record model.ReviewRecord, prepared preparedReview, reviewStarted time.Time) (model.ReviewRecord, error) {
+	executor := prepared.profile.reviewer.executor
+	check := executor.Check(ctx, prepared.profile.reviewer.candidate)
+	if !check.Available {
+		return runner.finishIncomplete(record, terminationForAvailability(check.Diagnostic), reviewStarted)
+	}
+	return runner.executePass(ctx, passExecution{record: record, subject: prepared.subject, profile: prepared.profile, executor: executor, reviewStarted: reviewStarted, deadline: prepared.deadline})
+}
+
 func (runner *reviewRunner) finishIncomplete(record model.ReviewRecord, termination model.ReviewTermination, reviewStarted time.Time) (model.ReviewRecord, error) {
 	record.Lifecycle = model.LifecycleIncomplete
 	record.Termination = &termination

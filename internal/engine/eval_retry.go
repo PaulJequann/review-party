@@ -40,23 +40,22 @@ func (conductor *Conductor) prepareEvalReview(ctx context.Context, selection mod
 	}
 	started := conductor.now().UTC()
 	timings := model.ReviewTimings{}
-	repository, err := resolveSubjectRepository(selection.Repository, selection.Subject)
+	preparation, err := conductor.startReviewPreparation(selection.Repository, selection.Subject)
 	if err != nil {
 		return preparedReview{}, time.Time{}, err
 	}
 	profileStarted := conductor.now().UTC()
-	profile, err := conductor.compileExperimentProfile(selection.ProfileSelection(), repository)
+	profile, err := conductor.compileExperimentProfile(selection.ProfileSelection(), preparation.repository)
 	timings.ProfileCompilationMS = elapsedMilliseconds(profileStarted, conductor.now().UTC())
 	if err != nil {
 		return preparedReview{}, time.Time{}, err
 	}
-	_, resolvedSubject, subjectResolutionMS, err := conductor.prepareReviewSubject(repository, selection.Subject)
-	timings.SubjectResolutionMS += subjectResolutionMS
+	preparedSubject, err := conductor.completeReviewPreparation(preparation)
 	if err != nil {
 		return preparedReview{}, time.Time{}, err
 	}
 	profile.revision.AttemptLimit = policy.MaxAttempts
-	return preparedReview{subject: resolvedSubject, profile: profile, timings: timings, deadline: profile.deadline}, started, nil
+	return preparedSubject.review(profile, timings), started, nil
 }
 
 func shouldRetryEval(record model.ReviewRecord, err error, attempts int, policy model.RetryPolicy) bool {
@@ -73,7 +72,7 @@ func (conductor *Conductor) retryEvalReview(execution retryReviewExecution, reco
 	if err := conductor.store.Save(record); err != nil {
 		return record, err
 	}
-	next, err := conductor.resumePreparedReview(execution.context, record, execution.prepared, execution.started)
+	next, err := conductor.getRunner().resumePreparedReview(execution.context, record, execution.prepared, execution.started)
 	return conductor.recordAvailabilityFailure(next, execution.prepared, err)
 }
 
@@ -95,15 +94,6 @@ func isUnrecordedAvailabilityFailure(record model.ReviewRecord, prepared prepare
 		return false
 	}
 	return record.AttemptCount() < prepared.profile.revision.AttemptLimit
-}
-
-func (conductor *Conductor) resumePreparedReview(ctx context.Context, record model.ReviewRecord, prepared preparedReview, reviewStarted time.Time) (model.ReviewRecord, error) {
-	executor := prepared.profile.reviewer.executor
-	check := executor.Check(ctx, prepared.profile.reviewer.candidate)
-	if !check.Available {
-		return conductor.getRunner().finishIncomplete(record, terminationForAvailability(check.Diagnostic), reviewStarted)
-	}
-	return conductor.getRunner().executePass(ctx, passExecution{record: record, subject: prepared.subject, profile: prepared.profile, executor: executor, reviewStarted: reviewStarted, deadline: prepared.deadline})
 }
 
 func retryableTermination(termination *model.ReviewTermination) bool {
