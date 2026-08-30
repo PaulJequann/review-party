@@ -2,7 +2,7 @@
 
 <!-- Stashbox: https://stashbox.local.bysliek.com/0XZZMwVbSdKL -->
 
-Status: Slices 1-8 complete; 5 hardenings landed 2026-08-29…30 via #19, #21, #22, #20, #23; Slice 9 is superseded by the Hub UX rebuild; Hub UX rebuild Slices R1-R2 complete 2026-08-30, see [hub-ux-rebuild-implementation-plan.md](hub-ux-rebuild-implementation-plan.md)
+Status: Slices 1-8 complete; 5 hardenings landed 2026-08-29…30 via #19, #21, #22, #20, #23; Slice 9 is superseded by the Hub UX rebuild; Hub UX rebuild Slices R1-R5 complete 2026-08-30, see [hub-ux-rebuild-implementation-plan.md](hub-ux-rebuild-implementation-plan.md)
 Last reconciled: 2026-08-30
 
 This plan replaces Review Party's current configuration and execution model with

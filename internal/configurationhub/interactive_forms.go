@@ -269,11 +269,13 @@ func (model *Model) openProfileInstructionsForm() tea.Cmd {
 func (model *Model) openPartyForm() tea.Cmd {
 	draft := &model.session.party
 	options := model.profileReferenceOptions()
+	profileSelect := huh.NewMultiSelect[string]().Title("Profiles").Options(options...).Value(&draft.profileRefs).
+		WithHeight(min(max(len(options)+1, 2), 8))
 	return model.openForm(formParty, []huh.Field{
 		huh.NewSelect[string]().Title("Configuration scope").Options(scopeOptions()...).Value(&draft.scope),
 		huh.NewInput().Title("Party name").Value(&draft.name),
 		huh.NewInput().Title("Description").Value(&draft.description),
-		huh.NewMultiSelect[string]().Title("Profiles").Options(options...).Value(&draft.profileRefs),
+		profileSelect,
 		huh.NewInput().Title("Concurrency limit").Value(&draft.limit),
 	})
 }
@@ -337,9 +339,15 @@ func (model Model) repositoryProfileOptions() []huh.Option[string] {
 func (model Model) profileOptions(title string, bothScopes bool) []huh.Option[string] {
 	options := make([]huh.Option[string], 0)
 	for _, scope := range []ItemScope{"global", "repository"} {
+		if !bothScopes && scope != ItemScope("repository") {
+			continue
+		}
 		for _, item := range model.snapshot.Items {
 			if item.Kind == itemProfile && item.Scope == scope {
 				value := string(scope) + ":" + item.Name
+				if !bothScopes {
+					value = item.Name
+				}
 				options = append(options, huh.NewOption("["+string(scope)+"] "+item.Name, value))
 			}
 		}
@@ -588,16 +596,21 @@ func (model *Model) receivePlanFailure(message planFailedMsg) (tea.Model, tea.Cm
 
 func (model *Model) receivePublishResult(message publishResultMsg) (tea.Model, tea.Cmd) {
 	if message.err != nil {
-		model.status = fmt.Sprintf("Publication failed: %v", message.err)
+		model.outcome = fmt.Sprintf("Publish failed: %v (%s)", message.err, model.publishedTarget(message.kind))
+		model.outcomeGood = false
+		model.status = ""
 		model.pending = nil
 		return model.reopenPlan(message.kind)
 	}
+	publishedTarget := model.publishedTarget(message.kind)
 	model.snapshot = message.snapshot
 	model.clearDraft(message.kind)
 	model.pending = nil
-	model.status = "Configuration published."
+	model.outcome = "Published " + publishedTarget
+	model.outcomeGood = true
+	model.status = ""
 	if message.refreshErr != nil {
-		model.status += " Refresh failed: " + message.refreshErr.Error()
+		model.status = "Refresh failed: " + message.refreshErr.Error()
 	}
 	model.toMenu()
 	return *model, nil
@@ -672,39 +685,5 @@ func (model *Model) toMenu() {
 	model.formKind = formNone
 	model.pending = nil
 	model.pendingKind = ""
-	model.viewport.SetContent(model.viewportContent())
-}
-
-func (model Model) renderForm() string {
-	return stripANSI(model.renderFormFrame(renderOptions{styled: true}))
-}
-
-func (model Model) renderFormFrame(options renderOptions) string {
-	sections := []string{model.renderTitleRow(options)}
-	if model.status != "" {
-		sections = append(sections, model.renderStatus(options))
-	}
-
-	content := model.form.View()
-	if content == "" {
-		switch model.formKind {
-		case formPlanning:
-			content = "Planning configuration changes..."
-		case formEditor:
-			content = "Editing instructions..."
-		case formNone, formOverview, formProfileFields, formProfileSource, formProfileTemplate,
-			formProfileTemplateLoading, formProfileInstructions, formParty, formReviewOperation,
-			formReviewLoading, formReviewFields, formCopy, formChanges:
-			// The active form supplies the content.
-		}
-	}
-	sections = append(sections, content, renderFormActionBar(options))
-	return strings.Join(sections, "\n\n")
-}
-
-func renderFormActionBar(options renderOptions) string {
-	return renderActionHints(options, []actionHint{
-		{key: "esc", label: "back"},
-		{key: "ctrl+c", label: "quit"},
-	})
+	model.viewport.GotoTop()
 }

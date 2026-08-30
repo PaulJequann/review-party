@@ -1,6 +1,6 @@
 # Hub UX rebuild implementation plan
 
-Status: **Slices R1-R4 complete** — R4 landed 2026-08-30; R5 pending. Reconciled against
+Status: **Slices R1-R5 complete** — R5 landed 2026-08-30. Reconciled against
 [configuration-hub-implementation-plan.md](configuration-hub-implementation-plan.md)
 (Slices 1-8 complete); see "Relationship to the existing plan" below.
 
@@ -451,6 +451,8 @@ single column with no truncation. The whole Hub shares one height budget.
 | Row actions match typed intents | Row-driven remove produces a different selection than the CLI | Review selection plans | Plans compare equal to the typed-index forms' output |
 | Party membership stays declarative | MultiSelect order or scope labels diverge from authored references | Party plan expansion | Published party references equal the CLI path's output for the same choices |
 | Inline validation prevents stale submits | Invalid concurrency reaches plan time as before | Form field Validate | Invalid values are rejected inside the form; plan receives only valid drafts |
+| Responsive panes fit the terminal | A pane clips or wraps differently after resize | Layout rendering | Golden frames at 80x24, 100x30, and 160x50 keep every line within the terminal and keep the cursor visible |
+| One height budget owns the frame | Independent clamps hide the action bar or viewport content | Frame sizing | Viewport height equals terminal height minus the measured header, action bar, and footer at rows 20 through 60 |
 
 ## Execution protocol
 

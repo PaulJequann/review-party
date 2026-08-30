@@ -138,13 +138,21 @@ func TestConcurrencyValidationRequiresPositiveInteger(t *testing.T) {
 
 func TestHubUsesOneAltScreenForMenuAndForms(t *testing.T) {
 	model := New(Snapshot{})
-	if !model.View().AltScreen {
+	view := model.View()
+	if !view.AltScreen {
 		t.Fatal("menu view did not request the alt screen")
+	}
+	if view.WindowTitle != "Review Party Configuration Hub" {
+		t.Fatalf("menu window title = %q", view.WindowTitle)
 	}
 	updated, _ := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	model = requireHubModel(t, updated)
-	if !model.View().AltScreen || model.view != viewBrowser {
+	view = model.View()
+	if !view.AltScreen || model.view != viewBrowser {
 		t.Fatal("browser view did not request the alt screen")
+	}
+	if view.WindowTitle != "Review Party Configuration Hub" {
+		t.Fatalf("browser window title = %q", view.WindowTitle)
 	}
 }
 
@@ -263,66 +271,73 @@ func TestHubPlansBeforeItPublishesAndPreviewsInProgram(t *testing.T) {
 	}
 }
 
-func TestHubPlanPreviewTransitions(t *testing.T) {
-	t.Run("cancel retains draft", func(t *testing.T) {
-		var planned bool
-		var published bool
-		model := newPlanTestModel(&planned, &published)
-		model.drafts.copyName = "quality"
-		model = enterHubForm(t, model)
-		model.session.copyName = "quality"
-		model, command := completeHubForm(t, model)
-		model, _ = runHubCommand(t, model, command)
-		updated, publishCommand := model.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
-		model = requireHubModel(t, updated)
-		if publishCommand != nil || published || model.drafts.copyName != "quality" {
-			t.Fatalf("cancel transition scheduled publication or changed draft: %#v", model.drafts)
-		}
-	})
+func TestHubPlanPreviewCancelRetainsDraft(t *testing.T) {
+	var planned bool
+	var published bool
+	model := newPlanTestModel(&planned, &published)
+	model.drafts.copyName = "quality"
+	model = enterHubForm(t, model)
+	model.session.copyName = "quality"
+	model, command := completeHubForm(t, model)
+	model, _ = runHubCommand(t, model, command)
+	updated, publishCommand := model.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	model = requireHubModel(t, updated)
+	if publishCommand != nil {
+		t.Fatal("cancel transition scheduled publication")
+	}
+	if published {
+		t.Fatal("cancel transition published the draft")
+	}
+	if model.drafts.copyName != "quality" {
+		t.Fatalf("cancel transition changed draft: %#v", model.drafts)
+	}
+}
 
-	t.Run("failure retains draft", func(t *testing.T) {
-		model := New(Snapshot{Repository: "/repo"})
-		model.pendingKind = planProfile
-		model.drafts.profile = completeProfileDraft()
-		model.planSummary = "profile"
-		model.planWarnings = nil
-		model.pending = func() tea.Msg { return publishResultMsg{kind: planProfile, err: errors.New("disk full")} }
-		model.view = viewPlanPreview
+func TestHubPlanPreviewFailureRetainsDraft(t *testing.T) {
+	model := New(Snapshot{Repository: "/repo"})
+	model.pendingKind = planProfile
+	model.drafts.profile = completeProfileDraft()
+	model.planSummary = "profile"
+	model.planWarnings = nil
+	model.pending = func() tea.Msg { return publishResultMsg{kind: planProfile, err: errors.New("disk full")} }
+	model.view = viewPlanPreview
 
-		updated, command := model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
-		model = requireHubModel(t, updated)
-		updated, _ = model.Update(command())
-		model = requireHubModel(t, updated)
-		if model.view != viewForm || model.drafts.profile == (configuration.ProfileDraft{}) {
-			t.Fatalf("failed publication transition = view %v, draft %#v", model.view, model.drafts.profile)
-		}
-		if !strings.Contains(model.status, "disk full") {
-			t.Fatalf("failure status = %q", model.status)
-		}
-	})
+	updated, command := model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
+	model = requireHubModel(t, updated)
+	updated, _ = model.Update(command())
+	model = requireHubModel(t, updated)
+	if model.view != viewForm {
+		t.Fatalf("failed publication view = %v, want form", model.view)
+	}
+	if model.drafts.profile == (configuration.ProfileDraft{}) {
+		t.Fatal("failed publication cleared the draft")
+	}
+	if !strings.Contains(model.outcome, "Publish failed: disk full") {
+		t.Fatalf("failure outcome = %q", model.outcome)
+	}
+}
 
-	t.Run("success clears only published draft", func(t *testing.T) {
-		model := New(Snapshot{Repository: "/repo"})
-		model.pendingKind = planProfile
-		model.drafts.profile = completeProfileDraft()
-		model.drafts.party = partyFormDraft{scope: "global", name: "keep"}
-		model.pending = func() tea.Msg { return publishResultMsg{kind: planProfile, snapshot: model.snapshot} }
-		model.view = viewPlanPreview
+func TestHubPlanPreviewSuccessClearsOnlyPublishedDraft(t *testing.T) {
+	model := New(Snapshot{Repository: "/repo"})
+	model.pendingKind = planProfile
+	model.drafts.profile = completeProfileDraft()
+	model.drafts.party = partyFormDraft{scope: "global", name: "keep"}
+	model.pending = func() tea.Msg { return publishResultMsg{kind: planProfile, snapshot: model.snapshot} }
+	model.view = viewPlanPreview
 
-		updated, command := model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
-		model = requireHubModel(t, updated)
-		updated, _ = model.Update(command())
-		model = requireHubModel(t, updated)
-		if model.drafts.profile != (configuration.ProfileDraft{}) {
-			t.Fatalf("published profile draft retained: %#v", model.drafts.profile)
-		}
-		if model.drafts.party.name != "keep" {
-			t.Fatalf("unpublished party draft changed: %#v", model.drafts.party)
-		}
-		if !strings.Contains(model.Render(), "Configuration published.") {
-			t.Fatalf("success banner missing from view:\n%s", model.Render())
-		}
-	})
+	updated, command := model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
+	model = requireHubModel(t, updated)
+	updated, _ = model.Update(command())
+	model = requireHubModel(t, updated)
+	if model.drafts.profile != (configuration.ProfileDraft{}) {
+		t.Fatalf("published profile draft retained: %#v", model.drafts.profile)
+	}
+	if model.drafts.party.name != "keep" {
+		t.Fatalf("unpublished party draft changed: %#v", model.drafts.party)
+	}
+	if !strings.Contains(model.Render(), "✓ Published profile \"quality\"") {
+		t.Fatalf("success banner missing from view:\n%s", model.Render())
+	}
 }
 
 func requireDependentProfileFieldsEmpty(t *testing.T, state *profileFormState) {
