@@ -2,6 +2,7 @@ package configurationhub
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -134,6 +135,38 @@ func (model *Model) openArea(area Area) tea.Cmd {
 	}
 }
 
+func (model *Model) openReviewOperation(operation string) tea.Cmd {
+	model.session.reviews.operation = operation
+	return model.openForm(formReviewOperation, []huh.Field{
+		huh.NewNote().Title("Repository Reviews").Description("Choose the next selection change."),
+	})
+}
+
+func (model Model) startRowReview(operation string) (tea.Model, tea.Cmd) {
+	items := model.visibleItems(itemReview)
+	if len(items) == 0 {
+		model.status = "No Repository Review row is selected."
+		return model, nil
+	}
+	item := items[min(model.cursor, len(items)-1)]
+	index := model.currentReviewIndex()
+	model.session.reviews = reviewFormDraft{operation: operation, scope: string(item.Scope), index: strconv.Itoa(index)}
+	if operation == "move" {
+		model.session.reviews.from = strconv.Itoa(model.moveFrom)
+		model.session.reviews.to = strconv.Itoa(index)
+	}
+	model.rowReview = true
+	model.drafts.reviews = model.session.reviews
+	model.formKind = formReviewLoading
+	model.view = viewForm
+	model.form = formAdapter{}
+	if model.runtime == nil || model.runtime.commands.loadReviewSelection == nil {
+		model.session.reviewSelection = configuration.DefaultReviewSelection()
+		return model.startPlan(planRequest{kind: planReviews, review: reviewPlanRequest{selection: model.session.reviewSelection, draft: model.drafts.reviews}})
+	}
+	return model, model.runtime.commands.loadReviewSelection()
+}
+
 func (model *Model) openForm(kind formKind, fields []huh.Field) tea.Cmd {
 	model.view = viewForm
 	model.formKind = kind
@@ -238,11 +271,12 @@ func (model *Model) openProfileInstructionsForm() tea.Cmd {
 
 func (model *Model) openPartyForm() tea.Cmd {
 	draft := &model.session.party
+	options := model.profileReferenceOptions()
 	return model.openForm(formParty, []huh.Field{
 		huh.NewSelect[string]().Title("Configuration scope").Options(scopeOptions()...).Value(&draft.scope),
 		huh.NewInput().Title("Party name").Value(&draft.name),
 		huh.NewInput().Title("Description").Value(&draft.description),
-		huh.NewText().Title("Profiles, one scoped reference per line").Value(&draft.profiles),
+		huh.NewMultiSelect[string]().Title("Profiles").Options(options...).Value(&draft.profileRefs),
 		huh.NewInput().Title("Concurrency limit").Value(&draft.limit),
 	})
 }
@@ -280,7 +314,7 @@ func (model *Model) openReviewFieldsForm() tea.Cmd {
 			huh.NewInput().Title("To index").Value(&draft.to),
 		}
 	case "concurrency":
-		fields = []huh.Field{huh.NewInput().Title("Concurrency limit").Value(&draft.concurrency)}
+		fields = []huh.Field{huh.NewInput().Title("Concurrency limit").Validate(validatePositiveInteger).Value(&draft.concurrency)}
 	default:
 		model.status = fmt.Sprintf("unknown Repository Reviews operation %q", draft.operation)
 		return model.openReviewOperationForm()
@@ -289,9 +323,39 @@ func (model *Model) openReviewFieldsForm() tea.Cmd {
 }
 
 func (model *Model) openCopyForm() tea.Cmd {
+	options := model.repositoryProfileOptions()
 	return model.openForm(formCopy, []huh.Field{
-		huh.NewInput().Title("Repository Profile to copy to Global Configuration").Value(&model.session.copyName),
+		huh.NewSelect[string]().Title("Repository Profile to copy to Global Configuration").Options(options...).Value(&model.session.copyName),
 	})
+}
+
+func (model Model) profileReferenceOptions() []huh.Option[string] {
+	return model.profileOptions("Profiles", true)
+}
+
+func (model Model) repositoryProfileOptions() []huh.Option[string] {
+	return model.profileOptions("Repository Profiles", false)
+}
+
+func (model Model) profileOptions(title string, bothScopes bool) []huh.Option[string] {
+	options := make([]huh.Option[string], 0)
+	for _, scope := range []ItemScope{"global", "repository"} {
+		for _, item := range model.snapshot.Items {
+			if item.Kind == itemProfile && item.Scope == scope {
+				value := string(scope) + ":" + item.Name
+				options = append(options, huh.NewOption("["+string(scope)+"] "+item.Name, value))
+			}
+		}
+	}
+	return options
+}
+
+func validatePositiveInteger(value string) error {
+	limit, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil || limit <= 0 {
+		return fmt.Errorf("must be an integer greater than 0")
+	}
+	return nil
 }
 
 func (model *Model) openChangesForm() tea.Cmd {
@@ -567,6 +631,10 @@ func (model *Model) receiveReviewSelection(message reviewSelectionLoadedMsg) (te
 		return model.withForm(model.openReviewOperationForm())
 	}
 	model.session.reviewSelection = message.selection
+	if model.rowReview {
+		model.rowReview = false
+		return model.startPlan(planRequest{kind: planReviews, review: reviewPlanRequest{selection: message.selection, draft: model.drafts.reviews}})
+	}
 	return model.withForm(model.openReviewFieldsForm())
 }
 

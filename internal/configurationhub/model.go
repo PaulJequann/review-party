@@ -77,10 +77,10 @@ type areaSpec struct {
 
 func newAreaSpecs() []areaSpec {
 	return []areaSpec{
-		{area: AreaOverview, menu: true, render: renderOverviewArea},
-		{area: AreaProfiles, kind: itemProfile, menu: true, action: (*editor).createProfile, render: renderInventoryArea},
-		{area: AreaParties, kind: itemParty, menu: true, action: (*editor).createParty, render: renderInventoryArea},
-		{area: AreaReviews, kind: itemReview, menu: true, action: (*editor).editReviews, render: renderInventoryArea},
+		{area: AreaOverview, description: "See configuration counts, resolved reviews, and warnings.", menu: true, render: renderOverviewArea},
+		{area: AreaProfiles, kind: itemProfile, description: "Browse Profiles and create or copy one.", menu: true, action: (*editor).createProfile, render: renderInventoryArea},
+		{area: AreaParties, kind: itemParty, description: "Browse flat Parties and create one.", menu: true, action: (*editor).createParty, render: renderInventoryArea},
+		{area: AreaReviews, kind: itemReview, description: "Assemble the ordered Repository Review selection.", menu: true, action: (*editor).editReviews, render: renderInventoryArea},
 		{area: AreaAdvanced, description: "Copy a Repository Profile to Global Configuration.", menu: true, action: (*editor).copyProfile, render: renderActionArea},
 		{area: AreaChanges, description: "Review or discard unfinished drafts.", menu: true, action: (*editor).reviewDrafts, render: renderActionArea},
 		{area: areaSearch, action: (*editor).search, render: renderSearchArea},
@@ -118,6 +118,7 @@ type viewState uint8
 const (
 	viewMenu viewState = iota
 	viewForm
+	viewBrowser
 )
 
 const menuGutterWidth = 2
@@ -127,6 +128,11 @@ const menuGutterWidth = 2
 type Model struct {
 	snapshot    Snapshot
 	area        int
+	browserArea Area
+	cursor      int
+	moveReview  bool
+	moveFrom    int
+	rowReview   bool
 	query       string
 	searching   bool
 	width       int
@@ -232,7 +238,95 @@ func (model Model) updateKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if model.searching {
 		return model.updateSearch(message.String()), nil
 	}
+	if model.view == viewBrowser {
+		return model.updateBrowser(message.String())
+	}
 	return model.updateNavigation(message.String())
+}
+
+func (model Model) updateBrowser(key string) (tea.Model, tea.Cmd) {
+	switch key {
+	case "q", "ctrl+c":
+		return model, tea.Quit
+	case "up", "k", "down", "j":
+		model.moveBrowserCursor(key)
+	case "esc":
+		model.toMenu()
+	case "/":
+		model.beginSearch()
+	case "enter":
+		if model.moveReview {
+			model.moveReview = false
+			return model.startRowReview("move")
+		}
+	default:
+		return model.browserAction(key)
+	}
+	model.viewport.SetContent(model.browserContent(renderOptions{styled: true}))
+	return model, nil
+}
+
+func (model Model) browserAction(key string) (tea.Model, tea.Cmd) {
+	switch key {
+	case "n":
+		return model.browserNew()
+	case "p":
+		return model.browserCopy()
+	case "a":
+		return model.browserReviewForm("add")
+	default:
+		return model.browserReviewAction(key)
+	}
+}
+
+func (model Model) browserReviewAction(key string) (tea.Model, tea.Cmd) {
+	if model.browserArea != AreaReviews {
+		return model, nil
+	}
+	switch key {
+	case "r":
+		return model.startRowReview("remove")
+	case "m":
+		model.moveFrom = model.currentReviewIndex()
+		model.moveReview = true
+		model.status = "Choose a destination, then press enter."
+	case "c":
+		return model.browserReviewForm("concurrency")
+	}
+	return model, nil
+}
+
+func (model *Model) moveBrowserCursor(key string) {
+	items := model.visibleItems(model.browserKind())
+	if len(items) == 0 {
+		return
+	}
+	delta := 1
+	if key == "up" || key == "k" {
+		delta = -1
+	}
+	model.cursor = max(0, min(len(items)-1, model.cursor+delta))
+}
+
+func (model Model) browserNew() (tea.Model, tea.Cmd) {
+	if model.browserArea != AreaProfiles && model.browserArea != AreaParties {
+		return model, nil
+	}
+	return model.withForm(model.openArea(model.browserArea))
+}
+
+func (model Model) browserCopy() (tea.Model, tea.Cmd) {
+	if model.browserArea != AreaProfiles && model.browserArea != AreaAdvanced {
+		return model, nil
+	}
+	return model.withForm(model.openCopyForm())
+}
+
+func (model Model) browserReviewForm(operation string) (tea.Model, tea.Cmd) {
+	if model.browserArea != AreaReviews {
+		return model, nil
+	}
+	return model.withForm(model.openReviewOperation(operation))
 }
 
 func (model Model) updateSearch(key string) Model {
@@ -286,7 +380,13 @@ func (model *Model) openSelectedArea() (tea.Model, tea.Cmd) {
 	if model.area < 0 || model.area >= len(areas) {
 		return *model, nil
 	}
-	return model.withForm(model.openArea(areas[model.area].area))
+	model.browserArea = areas[model.area].area
+	model.cursor = 0
+	model.view = viewBrowser
+	model.searching = false
+	model.query = ""
+	model.viewport.SetContent(model.browserContent(renderOptions{styled: true}))
+	return *model, nil
 }
 
 func (model *Model) beginSearch() {
@@ -322,6 +422,8 @@ func (model Model) View() tea.View {
 	switch {
 	case model.view == viewForm:
 		content = model.renderFormFrame(renderOptions{styled: true})
+	case model.view == viewBrowser:
+		content = model.renderBrowserFrame(renderOptions{styled: true})
 	case !model.ready:
 		content = model.renderMenuFrame(renderOptions{styled: true})
 	default:
@@ -344,6 +446,9 @@ func (model Model) Render() string {
 	if model.view == viewForm {
 		return model.renderForm()
 	}
+	if model.view == viewBrowser {
+		return stripANSI(model.renderBrowserFrame(renderOptions{}))
+	}
 	return stripANSI(model.renderMenuFrame(renderOptions{}))
 }
 
@@ -362,8 +467,6 @@ func (model Model) renderHeader(options renderOptions) string {
 	if model.status != "" {
 		lines = append(lines, model.renderStatus(options))
 	}
-	lines = append(lines, "")
-	lines = append(lines, model.renderMenuRows(options))
 	if model.query != "" || model.searching {
 		lines = append(lines, "", model.renderSearchLine(options))
 	}
@@ -380,16 +483,6 @@ func (model Model) renderTitleRow(options renderOptions) string {
 		repository = metaStyle.Render(repository)
 	}
 	return title + "  " + badge + " " + repository
-}
-
-func (model Model) renderMenuRows(options renderOptions) string {
-	areas := menuAreaSpecs()
-	rowWidth := max(model.width, minBoxWidth)
-	rows := make([]string, 0, len(areas))
-	for index, spec := range areas {
-		rows = append(rows, model.renderMenuRow(index, spec, rowWidth, options))
-	}
-	return strings.Join(rows, "\n")
 }
 
 func (model Model) renderMenuRow(index int, spec areaSpec, rowWidth int, options renderOptions) string {
@@ -485,6 +578,24 @@ func (model Model) renderSearchLine(options renderOptions) string {
 }
 
 func (model Model) renderActionBar(options renderOptions) string {
+	if model.view == viewBrowser {
+		hints := []actionHint{{key: "↑/↓", label: "navigate"}}
+		switch model.browserArea {
+		case AreaProfiles:
+			hints = append(hints, actionHint{key: "n", label: "new"}, actionHint{key: "p", label: "copy"})
+		case AreaParties:
+			hints = append(hints, actionHint{key: "n", label: "new"})
+		case AreaReviews:
+			hints = append(hints, actionHint{key: "a", label: "add"}, actionHint{key: "r", label: "remove"}, actionHint{key: "m", label: "move"}, actionHint{key: "c", label: "concurrency"})
+		case AreaOverview, AreaAdvanced, AreaChanges, areaSearch:
+		}
+		hints = append(hints, actionHint{key: "/", label: "filter"}, actionHint{key: "esc", label: "back"}, actionHint{key: "q", label: "quit"})
+		bar := renderActionHints(options, hints)
+		if !model.drafts.empty() {
+			bar += "  " + warningStyle.Render("⏸ drafts")
+		}
+		return bar
+	}
 	return renderActionHints(options, []actionHint{
 		{key: "↑/↓", label: "navigate"},
 		{key: "⏎", label: "open"},
@@ -512,6 +623,12 @@ func renderActionHints(options renderOptions, hints []actionHint) string {
 }
 
 func (model Model) renderSelectedArea(options renderOptions) string {
+	if model.view == viewMenu {
+		if model.query != "" {
+			return model.renderMenuSearch(options)
+		}
+		return model.renderMenu(options)
+	}
 	areas := menuAreaSpecs()
 	if model.area < 0 || model.area >= len(areas) {
 		return ""
@@ -527,6 +644,125 @@ func (model Model) renderSelectedArea(options renderOptions) string {
 		title = sectionTitleStyle.Render(title)
 	}
 	return renderBox(title, content.String(), max(model.width, minBoxWidth), "")
+}
+
+func (model Model) renderMenuSearch(options renderOptions) string {
+	var content strings.Builder
+	model.renderSearchResults(&content, options)
+	title := "Search"
+	if options.styled {
+		title = sectionTitleStyle.Render(title)
+	}
+	return renderBox(title, content.String(), max(model.width, minBoxWidth), "")
+}
+
+func (model Model) renderMenu(options renderOptions) string {
+	var content strings.Builder
+	for index, spec := range menuAreaSpecs() {
+		fmt.Fprintf(&content, "%s\n   %s\n", model.renderMenuRow(index, spec, max(model.width, minBoxWidth), options), spec.description)
+	}
+	if model.area == 0 {
+		model.renderOverview(&content, options)
+	}
+	title := "Areas"
+	if options.styled {
+		title = sectionTitleStyle.Render(title)
+	}
+	return renderBox(title, content.String(), max(model.width, minBoxWidth), "")
+}
+
+func (model Model) renderBrowserFrame(options renderOptions) string {
+	return strings.Join([]string{model.renderHeader(options), model.browserContent(options), model.renderActionBar(options)}, "\n\n")
+}
+
+func (model Model) browserKind() ItemKind {
+	spec, _ := areaSpecFor(model.browserArea)
+	return spec.kind
+}
+
+func (model Model) currentReviewIndex() int {
+	items := model.visibleItems(itemReview)
+	if len(items) == 0 || model.cursor >= len(items) {
+		return -1
+	}
+	index := 0
+	for _, item := range items[:model.cursor] {
+		if item.Scope == items[model.cursor].Scope {
+			index++
+		}
+	}
+	return index
+}
+
+func (model Model) browserContent(options renderOptions) string {
+	spec, ok := areaSpecFor(model.browserArea)
+	if !ok {
+		return ""
+	}
+	var content strings.Builder
+	if spec.kind != "" {
+		renderInventoryBrowser(model, spec, &content, options)
+	} else if spec.render != nil {
+		spec.render(model, spec, &content, options)
+	}
+	title := string(model.browserArea)
+	if options.styled {
+		title = sectionTitleStyle.Render(title)
+	}
+	return renderBox(title, content.String(), max(model.width, minBoxWidth), "")
+}
+
+func renderInventoryBrowser(model Model, spec areaSpec, output *strings.Builder, options renderOptions) {
+	items := model.visibleItems(spec.kind)
+	if len(items) == 0 {
+		output.WriteString("No matching items.\n")
+		return
+	}
+	if model.browserArea == AreaReviews {
+		renderReviewRows(model, items, output, options)
+	} else {
+		renderRows(model, items, output, options)
+	}
+	renderItemDetail(model, items[min(model.cursor, len(items)-1)], output, options)
+}
+
+func renderRows(model Model, items []Item, output *strings.Builder, options renderOptions) {
+	for index, item := range items {
+		fmt.Fprint(output, renderRow(model, item, index, options))
+	}
+}
+
+func renderReviewRows(model Model, items []Item, output *strings.Builder, options renderOptions) {
+	for _, scope := range []ItemScope{"global", "repository"} {
+		label := "Global"
+		if scope == ItemScope("repository") {
+			label = "Repository"
+		}
+		fmt.Fprintf(output, "%s selection\n", label)
+		for index, item := range items {
+			if item.Scope == scope {
+				fmt.Fprint(output, renderRow(model, item, index, options))
+			}
+		}
+	}
+}
+
+func renderRow(model Model, item Item, index int, options renderOptions) string {
+	cursor := "  "
+	if index == model.cursor {
+		cursor = "› "
+	}
+	return fmt.Sprintf("%s%s\n", cursor, renderInventoryItem(item, options))
+}
+
+func renderItemDetail(model Model, item Item, output *strings.Builder, options renderOptions) {
+	output.WriteString("\nDetail\n")
+	fmt.Fprintf(output, "%s\n", renderInventoryItem(item, options))
+	if item.Kind == itemProfile || item.Kind == itemParty {
+		for _, line := range model.snapshot.Overview {
+			fmt.Fprintf(output, "%s\n", line)
+		}
+	}
 }
 
 func renderOverviewArea(model Model, _ areaSpec, output *strings.Builder, options renderOptions) {
@@ -675,7 +911,7 @@ func Run(manager *configuration.Manager, options RunOptions) error {
 	}
 	if options.Accessible {
 		model := New(snapshot)
-		editor := &editor{RunOptions: options, manager: manager, drafts: &model.drafts}
+		editor := &editor{RunOptions: options, manager: manager, drafts: &model.drafts, snapshot: snapshot}
 		return editor.runHub()
 	}
 	model := New(snapshot)

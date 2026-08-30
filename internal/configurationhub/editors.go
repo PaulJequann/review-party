@@ -14,8 +14,9 @@ import (
 
 type editor struct {
 	RunOptions
-	manager *configuration.Manager
-	drafts  *draftSet
+	manager  *configuration.Manager
+	drafts   *draftSet
+	snapshot Snapshot
 }
 
 type draftSet struct {
@@ -27,14 +28,14 @@ type draftSet struct {
 
 func (drafts *draftSet) clear() { *drafts = draftSet{} }
 func (drafts draftSet) empty() bool {
-	return drafts.profile == (configuration.ProfileDraft{}) && drafts.party == (partyFormDraft{}) && drafts.copyName == "" && drafts.reviews == (reviewFormDraft{})
+	return drafts.profile == (configuration.ProfileDraft{}) && partyDraftEmpty(drafts.party) && drafts.copyName == "" && drafts.reviews == (reviewFormDraft{})
 }
 func (drafts draftSet) descriptions() []string {
 	var result []string
 	if drafts.profile != (configuration.ProfileDraft{}) {
 		result = append(result, fmt.Sprintf("Profile %q (%s)", drafts.profile.Name, drafts.profile.Target))
 	}
-	if drafts.party != (partyFormDraft{}) {
+	if !partyDraftEmpty(drafts.party) {
 		result = append(result, fmt.Sprintf("Party %q (%s)", drafts.party.name, drafts.party.scope))
 	}
 	if drafts.copyName != "" {
@@ -46,11 +47,23 @@ func (drafts draftSet) descriptions() []string {
 	return result
 }
 
+func partyDraftEmpty(draft partyFormDraft) bool {
+	return draft.scope == "" && draft.name == "" && draft.description == "" && draft.profiles == "" && draft.limit == "" && len(draft.profileRefs) == 0
+}
+
 func (e *editor) draftSet() *draftSet {
 	if e.drafts == nil {
 		e.drafts = &draftSet{}
 	}
 	return e.drafts
+}
+
+func (e *editor) repositoryProfileOptions() []huh.Option[string] {
+	return Model{snapshot: e.snapshot}.repositoryProfileOptions()
+}
+
+func (e *editor) profileReferenceOptions() []huh.Option[string] {
+	return Model{snapshot: e.snapshot}.profileReferenceOptions()
 }
 
 func (e *editor) draftDescriptions() []string { return e.draftSet().descriptions() }

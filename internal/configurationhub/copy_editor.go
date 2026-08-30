@@ -8,7 +8,7 @@ import (
 
 func (e *editor) copyProfile() error {
 	drafts := e.draftSet()
-	if err := e.form(huh.NewInput().Title("Repository Profile to copy to Global Configuration").Value(&drafts.copyName)); err != nil {
+	if err := e.form(huh.NewSelect[string]().Title("Repository Profile to copy to Global Configuration").Options(e.repositoryProfileOptions()...).Value(&drafts.copyName)); err != nil {
 		return err
 	}
 	plan, err := e.manager.PlanProfileCopy(e.Repository, configuration.ScopeRepository, configuration.ScopeGlobal, drafts.copyName)

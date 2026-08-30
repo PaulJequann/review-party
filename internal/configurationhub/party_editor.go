@@ -12,6 +12,7 @@ import (
 
 type partyFormDraft struct {
 	scope, name, description, profiles, limit string
+	profileRefs                               []string
 }
 
 func (e *editor) createParty() error {
@@ -20,7 +21,7 @@ func (e *editor) createParty() error {
 		huh.NewSelect[string]().Title("Configuration scope").Options(scopeOptions()...).Value(&draft.scope),
 		huh.NewInput().Title("Party name").Value(&draft.name),
 		huh.NewInput().Title("Description").Value(&draft.description),
-		huh.NewText().Title("Profiles, one scoped reference per line").Value(&draft.profiles),
+		huh.NewMultiSelect[string]().Title("Profiles").Options(e.profileReferenceOptions()...).Value(&draft.profileRefs),
 		huh.NewInput().Title("Concurrency limit").Value(&draft.limit),
 	); err != nil {
 		return err

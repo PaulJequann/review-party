@@ -18,6 +18,8 @@ func TestHubLabelsEverySearchResultWithItsScope(t *testing.T) {
 		{Scope: "repository", Kind: "Profile", Name: "quality", Detail: "grok / fast"},
 	}})
 	model.area = 1
+	updated, _ := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	model = requireHubModel(t, updated)
 	view := model.Render()
 	for _, want := range []string{"[global] quality", "[repository] quality"} {
 		if !strings.Contains(view, want) {
@@ -45,25 +47,91 @@ func TestHubNavigationAndCancellationDoNotMutateSnapshot(t *testing.T) {
 	}
 }
 
-func TestHubEnterOpensProfileFormWithoutQuitting(t *testing.T) {
-	model := New(Snapshot{Repository: "/repo"})
+func TestHubEnterOpensProfileBrowserAndNewOpensForm(t *testing.T) {
+	model := New(Snapshot{Repository: "/repo", Items: []Item{
+		{Scope: "global", Kind: itemProfile, Name: "quality", Detail: "codex / large"},
+	}})
 	model.area = 1
 
 	updated, command := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if command != nil {
-		if _, quit := command().(tea.QuitMsg); quit {
-			t.Fatal("opening Profiles unexpectedly scheduled tea.Quit")
-		}
+		t.Fatal("opening Profiles unexpectedly scheduled a command")
 	}
 	updatedModel, ok := updated.(Model)
 	if !ok {
 		t.Fatalf("updated model has type %T", updated)
 	}
-	if !strings.Contains(updatedModel.Render(), "Profile name") {
-		t.Fatalf("profile form did not open:\n%s", updatedModel.Render())
+	if updatedModel.view != viewBrowser {
+		t.Fatalf("view = %v, want browser view", updatedModel.view)
 	}
+	if !strings.Contains(updatedModel.Render(), "quality") {
+		t.Fatalf("profile browser did not open:\n%s", updatedModel.Render())
+	}
+	updated, _ = updatedModel.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
+	updatedModel = requireHubModel(t, updated)
 	if updatedModel.view != viewForm {
-		t.Fatalf("view = %v, want form view", updatedModel.view)
+		t.Fatalf("new Profile view = %v, want form view", updatedModel.view)
+	}
+}
+
+func TestHubReviewBrowserUsesHighlightedRowForRemoval(t *testing.T) {
+	model := New(Snapshot{Repository: "/repo", Items: []Item{
+		{Scope: "global", Kind: itemReview, Name: "one", Detail: "Profile"},
+		{Scope: "global", Kind: itemReview, Name: "two", Detail: "Profile"},
+	}})
+	model.area = 3
+	updated, _ := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	model = requireHubModel(t, updated)
+	updated, _ = model.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	model = requireHubModel(t, updated)
+	updated, _ = model.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
+	model = requireHubModel(t, updated)
+	if model.drafts.reviews.index != "1" || model.drafts.reviews.scope != "global" {
+		t.Fatalf("row-driven removal draft = %#v", model.drafts.reviews)
+	}
+	if model.formKind != formReviewFields {
+		t.Fatalf("form kind = %v, want review fields", model.formKind)
+	}
+}
+
+func TestHubActionBarShowsDraftIndicatorInBrowser(t *testing.T) {
+	model := New(Snapshot{Repository: "/repo", Items: []Item{{Kind: itemProfile, Scope: "global", Name: "quality"}}})
+	model.area = 1
+	model.drafts.profile = completeProfileDraft()
+	updated, _ := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	model = requireHubModel(t, updated)
+	if !strings.Contains(model.Render(), "draft") && !strings.Contains(model.Render(), "⏸") {
+		t.Fatalf("browser action bar has no draft indicator:\n%s", model.Render())
+	}
+}
+
+func TestPartyMultiSelectPreservesScopedExpansionOrder(t *testing.T) {
+	draft, err := partyDraftFromForm(partyFormDraft{
+		scope: "repository", name: "all", limit: "2",
+		profileRefs: []string{"global:quality", "repository:fast"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(draft.Profiles) != 2 {
+		t.Fatalf("profiles = %#v, want two references", draft.Profiles)
+	}
+	if draft.Profiles[0].Scope != configuration.ScopeGlobal || draft.Profiles[0].Profile != "quality" {
+		t.Fatalf("first profile = %#v", draft.Profiles[0])
+	}
+	if draft.Profiles[1].Scope != configuration.ScopeRepository || draft.Profiles[1].Profile != "fast" {
+		t.Fatalf("second profile = %#v", draft.Profiles[1])
+	}
+}
+
+func TestConcurrencyValidationRequiresPositiveInteger(t *testing.T) {
+	for _, value := range []string{"", "0", "-1", "two"} {
+		if err := validatePositiveInteger(value); err == nil {
+			t.Fatalf("validatePositiveInteger(%q) succeeded", value)
+		}
+	}
+	if err := validatePositiveInteger("3"); err != nil {
+		t.Fatalf("positive integer rejected: %v", err)
 	}
 }
 
@@ -74,8 +142,8 @@ func TestHubUsesOneAltScreenForMenuAndForms(t *testing.T) {
 	}
 	updated, _ := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	model = requireHubModel(t, updated)
-	if !model.View().AltScreen {
-		t.Fatal("form view did not request the alt screen")
+	if !model.View().AltScreen || model.view != viewBrowser {
+		t.Fatal("browser view did not request the alt screen")
 	}
 }
 
@@ -87,6 +155,7 @@ func TestHubFormEscapeReturnsToMenuWithDrafts(t *testing.T) {
 	}
 
 	updated, _ := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	updated, _ = requireHubModel(t, updated).Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
 	model = requireHubModel(t, updated)
 	updated, command := model.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if command != nil {
@@ -105,6 +174,7 @@ func TestHubFormQDoesNotQuit(t *testing.T) {
 	model := New(Snapshot{})
 	model.area = 1
 	updated, _ := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	updated, _ = requireHubModel(t, updated).Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
 	model = requireHubModel(t, updated)
 	updated, command := model.Update(tea.KeyPressMsg{Code: 'q', Text: "q"})
 	if command != nil {
@@ -122,6 +192,7 @@ func TestHubFormResizeUpdatesAdapterSize(t *testing.T) {
 	model := New(Snapshot{})
 	model.area = 1
 	updated, _ := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	updated, _ = requireHubModel(t, updated).Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
 	model = requireHubModel(t, updated)
 	updated, _ = model.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	model = requireHubModel(t, updated)
@@ -251,6 +322,8 @@ func newPlanTestModel(planned, published *bool) Model {
 func enterHubForm(t *testing.T, model Model) Model {
 	t.Helper()
 	updated, _ := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	model = requireHubModel(t, updated)
+	updated, _ = model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
 	return requireHubModel(t, updated)
 }
 
@@ -304,7 +377,8 @@ func TestProfilePlanCommandUsesRepositoryForRepositoryProfile(t *testing.T) {
 func TestHubRendersConfiguredParties(t *testing.T) {
 	model := New(Snapshot{Repository: "/repo", Items: []Item{{Scope: "global", Kind: "Party", Name: "baseline", Detail: "2 Profiles"}}})
 	model.area = 2
-	view := model.Render()
+	updated, _ := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	view := requireHubModel(t, updated).Render()
 	if !strings.Contains(view, "[global] baseline") {
 		t.Fatalf("party missing from view:\n%s", view)
 	}

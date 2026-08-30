@@ -64,6 +64,8 @@ func TestHubRenderIsPlainText(t *testing.T) {
 		Warnings: []string{"repository selection is not authored"},
 	})
 	model.area = 1
+	updated, _ := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	model = requireHubModel(t, updated)
 	got := model.Render()
 	if strings.ContainsRune(got, '\x1b') {
 		t.Fatalf("Render returned ANSI escapes: %q", got)
@@ -73,22 +75,20 @@ func TestHubRenderIsPlainText(t *testing.T) {
 		"[repository] /repo",
 		"[global] quality",
 		"[repository] quality",
-		"⏎ open",
+		"n new",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("Render missing %q:\n%s", want, got)
 		}
 	}
-	model.area = 0
+	model = New(Snapshot{Overview: []string{"overview restored"}, Warnings: []string{"repository selection is not authored"}})
 	if got := model.Render(); !strings.Contains(got, "▲ repository selection is not authored") {
 		t.Fatalf("Render missing warning:\n%s", got)
 	}
 
-	model.area = 1
-	updated, _ := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	model = requireHubModel(t, updated)
+	model = New(Snapshot{})
 	if got := model.Render(); strings.ContainsRune(got, '\x1b') {
-		t.Fatalf("form Render returned ANSI escapes: %q", got)
+		t.Fatalf("menu Render returned ANSI escapes: %q", got)
 	}
 }
 

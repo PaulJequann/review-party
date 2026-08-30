@@ -226,7 +226,11 @@ func partyDraftFromForm(draft partyFormDraft) (configuration.PartyDraft, error) 
 		return configuration.PartyDraft{}, fmt.Errorf("invalid concurrency limit: %w", err)
 	}
 	profiles := make([]configuration.ProfileReference, 0)
-	for _, raw := range strings.Fields(draft.profiles) {
+	rawProfiles := draft.profileRefs
+	if len(rawProfiles) == 0 {
+		rawProfiles = strings.Fields(draft.profiles)
+	}
+	for _, raw := range rawProfiles {
 		scope, name := configuration.ParseScopedReference(raw)
 		if scope == "" {
 			scope = configuration.Scope(draft.scope)
