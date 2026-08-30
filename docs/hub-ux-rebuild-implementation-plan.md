@@ -1,6 +1,6 @@
 # Hub UX rebuild implementation plan
 
-Status: **Slice R1 complete** — landed 2026-08-29; R2-R5 pending. Reconciled against
+Status: **Slices R1-R2 complete** — R2 landed 2026-08-30; R3-R5 pending. Reconciled against
 [configuration-hub-implementation-plan.md](configuration-hub-implementation-plan.md)
 (Slices 1-8 complete); see "Relationship to the existing plan" below.
 

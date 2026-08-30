@@ -3,7 +3,6 @@ package configurationhub
 import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/huh/v2"
-	"charm.land/lipgloss/v2"
 )
 
 // formAdapter makes a Huh v2 form usable as one view inside the Hub's
@@ -57,14 +56,7 @@ func (adapter formAdapter) View() string {
 	if adapter.form == nil {
 		return ""
 	}
-	width := max(adapter.width-4, 1)
-	height := max(adapter.height-4, 1)
-	box := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		Padding(1, 1).
-		Width(width).
-		Height(height)
-	return box.Render(adapter.form.View())
+	return renderBox(sectionTitleStyle.Render("Configuration"), adapter.form.View(), max(adapter.width, minBoxWidth), "")
 }
 
 func (adapter formAdapter) State() huh.FormState {

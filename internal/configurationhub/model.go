@@ -60,7 +60,11 @@ type Snapshot struct {
 	Warnings   []string
 }
 
-type areaRenderer func(Model, areaSpec, *strings.Builder)
+type areaRenderer func(Model, areaSpec, *strings.Builder, renderOptions)
+
+type renderOptions struct {
+	styled bool
+}
 
 type areaSpec struct {
 	area        Area
@@ -115,6 +119,8 @@ const (
 	viewMenu viewState = iota
 	viewForm
 )
+
+const menuGutterWidth = 2
 
 // Model is a Bubble Tea shell. It deliberately owns no filesystem handle and
 // cannot publish configuration while a user merely navigates or searches.
@@ -178,19 +184,13 @@ func (model Model) updateWindow(message tea.WindowSizeMsg) (tea.Model, tea.Cmd) 
 		return model.updateForm(message)
 	}
 	model.viewport.SetWidth(message.Width)
-	// Header ≈ title + global line + blank + 6 menu items + blank + optional search + footer
-	headerHeight := 2 + len(menuAreaSpecs()) + 2
-	if model.query != "" || model.searching {
-		headerHeight++
-	}
-	footerHeight := 1
+	// Keep the menu header outside the viewport. Measure the rendered sections
+	// so scrolling cannot duplicate the header or consume an accidental line.
+	options := renderOptions{styled: true}
+	headerHeight := lipgloss.Height(model.renderHeader(options)) + 1
+	footerHeight := lipgloss.Height(model.renderActionBar(options))
 	viewportHeight := message.Height - headerHeight - footerHeight - 1
-	if viewportHeight < 5 {
-		viewportHeight = 5
-	}
-	if viewportHeight > message.Height-4 {
-		viewportHeight = message.Height - 4
-	}
+	viewportHeight = max(viewportHeight, 1)
 	model.viewport.SetHeight(viewportHeight)
 	model.viewport.SetContent(model.viewportContent())
 	model.ready = true
@@ -314,32 +314,27 @@ func (model *Model) moveArea(offset int) {
 }
 
 func (model Model) viewportContent() string {
-	var builder strings.Builder
-	model.renderArea(&builder)
-	return builder.String()
+	return model.renderSelectedArea(renderOptions{styled: true})
 }
 
 func (model Model) View() tea.View {
-	if model.view == viewForm || !model.ready {
-		view := tea.NewView(model.Render())
-		view.AltScreen = true
-		return view
+	var content string
+	switch {
+	case model.view == viewForm:
+		content = model.renderFormFrame(renderOptions{styled: true})
+	case !model.ready:
+		content = model.renderMenuFrame(renderOptions{styled: true})
+	default:
+		content = lipgloss.JoinVertical(
+			lipgloss.Left,
+			model.renderHeader(renderOptions{styled: true}),
+			"",
+			model.viewport.View(),
+			"",
+			model.renderActionBar(renderOptions{styled: true}),
+		)
 	}
-	title := lipgloss.NewStyle().Bold(true).Render("Review Party Configuration Hub")
-	var header strings.Builder
-	fmt.Fprintf(&header, "%s\nGlobal Configuration · Repository %s\n\n", title, model.snapshot.Repository)
-	for index, spec := range menuAreaSpecs() {
-		marker := "  "
-		if index == model.area {
-			marker = "› "
-		}
-		fmt.Fprintf(&header, "%s%s\n", marker, spec.area)
-	}
-	header.WriteString("\n")
-	if model.query != "" || model.searching {
-		fmt.Fprintf(&header, "Search: %s\n", model.query)
-	}
-	view := tea.NewView(lipgloss.JoinVertical(lipgloss.Left, header.String(), model.viewport.View(), "↑/↓ navigate  enter open  / search  esc clear  q quit"))
+	view := tea.NewView(content)
 	view.AltScreen = true
 	return view
 }
@@ -349,87 +344,295 @@ func (model Model) Render() string {
 	if model.view == viewForm {
 		return model.renderForm()
 	}
-	title := lipgloss.NewStyle().Bold(true).Render("Review Party Configuration Hub")
-	var output strings.Builder
-	fmt.Fprintf(&output, "%s\nGlobal Configuration · Repository %s\n\n", title, model.snapshot.Repository)
-	for index, spec := range menuAreaSpecs() {
-		marker := "  "
-		if index == model.area {
-			marker = "› "
-		}
-		fmt.Fprintf(&output, "%s%s\n", marker, spec.area)
-	}
-	output.WriteString("\n")
-	if model.query != "" || model.searching {
-		fmt.Fprintf(&output, "Search: %s\n", model.query)
-	}
-	model.renderArea(&output)
-	output.WriteString("\n↑/↓ navigate  enter open  / search  esc clear  q quit\n")
-	return output.String()
+	return stripANSI(model.renderMenuFrame(renderOptions{}))
 }
 
-func (model Model) renderArea(output *strings.Builder) {
+func (model Model) renderMenuFrame(options renderOptions) string {
+	header := model.renderHeader(options)
+	body := model.renderSelectedArea(options)
+	actionBar := model.renderActionBar(options)
+	if options.styled {
+		return lipgloss.JoinVertical(lipgloss.Left, header, "", body, "", actionBar)
+	}
+	return strings.Join([]string{header, body, actionBar}, "\n\n")
+}
+
+func (model Model) renderHeader(options renderOptions) string {
+	lines := []string{model.renderTitleRow(options)}
+	if model.status != "" {
+		lines = append(lines, model.renderStatus(options))
+	}
+	lines = append(lines, "")
+	lines = append(lines, model.renderMenuRows(options))
+	if model.query != "" || model.searching {
+		lines = append(lines, "", model.renderSearchLine(options))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (model Model) renderTitleRow(options renderOptions) string {
+	title := "Review Party Configuration Hub"
+	badge := "[repository]"
+	repository := model.snapshot.Repository
+	if options.styled {
+		title = sectionTitleStyle.Render(title)
+		badge = repositoryScopeStyle().Render(badge)
+		repository = metaStyle.Render(repository)
+	}
+	return title + "  " + badge + " " + repository
+}
+
+func (model Model) renderMenuRows(options renderOptions) string {
+	areas := menuAreaSpecs()
+	rowWidth := max(model.width, minBoxWidth)
+	rows := make([]string, 0, len(areas))
+	for index, spec := range areas {
+		rows = append(rows, model.renderMenuRow(index, spec, rowWidth, options))
+	}
+	return strings.Join(rows, "\n")
+}
+
+func (model Model) renderMenuRow(index int, spec areaSpec, rowWidth int, options renderOptions) string {
+	label := string(spec.area)
+	indicator := model.menuDraftIndicator(spec, options)
+	count := fmt.Sprintf("%d", model.menuAreaCount(spec))
+	gap := max(rowWidth-menuGutterWidth-lipgloss.Width(label+indicator)-lipgloss.Width(count), 2)
+	return model.menuCursor(index, options) + model.menuLabel(index, label, options) + indicator +
+		strings.Repeat(" ", gap) + model.menuCountLabel(count, options)
+}
+
+func (model Model) menuDraftIndicator(spec areaSpec, options renderOptions) string {
+	if spec.area != AreaChanges || model.drafts.empty() {
+		return ""
+	}
+	if options.styled {
+		return " " + warningStyle.Render("⏸")
+	}
+	return " ⏸"
+}
+
+func (model Model) menuCursor(index int, options renderOptions) string {
+	if index != model.area {
+		return "  "
+	}
+	if options.styled {
+		return focusStyle.Render("› ")
+	}
+	return "› "
+}
+
+func (model Model) menuLabel(index int, label string, options renderOptions) string {
+	if options.styled && index == model.area {
+		return focusStyle.Render(label)
+	}
+	return label
+}
+
+func (model Model) menuCountLabel(count string, options renderOptions) string {
+	if options.styled {
+		return metaStyle.Render(count)
+	}
+	return count
+}
+
+func (model Model) menuAreaCount(spec areaSpec) int {
+	switch spec.area {
+	case AreaOverview:
+		return len(model.snapshot.Items)
+	case AreaProfiles:
+		return model.countItems(itemProfile)
+	case AreaParties:
+		return model.countItems(itemParty)
+	case AreaReviews:
+		return model.countItems(itemReview)
+	case AreaAdvanced:
+		return model.countScopedItems(itemProfile, ItemScope("repository"))
+	case AreaChanges:
+		return len(model.drafts.descriptions())
+	case areaSearch:
+		return 0
+	default:
+		return 0
+	}
+}
+
+func (model Model) countItems(kind ItemKind) int {
+	count := 0
+	for _, item := range model.snapshot.Items {
+		if item.Kind == kind {
+			count++
+		}
+	}
+	return count
+}
+
+func (model Model) countScopedItems(kind ItemKind, scope ItemScope) int {
+	count := 0
+	for _, item := range model.snapshot.Items {
+		if item.Kind == kind && item.Scope == scope {
+			count++
+		}
+	}
+	return count
+}
+
+func (model Model) renderSearchLine(options renderOptions) string {
+	line := "Search: " + model.query
+	if options.styled {
+		return metaStyle.Render("Search: ") + focusStyle.Render(model.query)
+	}
+	return line
+}
+
+func (model Model) renderActionBar(options renderOptions) string {
+	return renderActionHints(options, []actionHint{
+		{key: "↑/↓", label: "navigate"},
+		{key: "⏎", label: "open"},
+		{key: "/", label: "search"},
+		{key: "esc", label: "clear"},
+		{key: "q", label: "quit"},
+	})
+}
+
+type actionHint struct {
+	key   string
+	label string
+}
+
+func renderActionHints(options renderOptions, hints []actionHint) string {
+	parts := make([]string, 0, len(hints))
+	for _, hint := range hints {
+		key := hint.key
+		if options.styled {
+			key = renderActionKey(key)
+		}
+		parts = append(parts, key+" "+hint.label)
+	}
+	return strings.Join(parts, "  ")
+}
+
+func (model Model) renderSelectedArea(options renderOptions) string {
 	areas := menuAreaSpecs()
 	if model.area < 0 || model.area >= len(areas) {
-		return
+		return ""
 	}
 	spec := areas[model.area]
-	if spec.render != nil {
-		spec.render(model, spec, output)
+	if spec.render == nil {
+		return ""
 	}
+	var content strings.Builder
+	spec.render(model, spec, &content, options)
+	title := string(spec.area)
+	if options.styled {
+		title = sectionTitleStyle.Render(title)
+	}
+	return renderBox(title, content.String(), max(model.width, minBoxWidth), "")
 }
 
-func renderOverviewArea(model Model, _ areaSpec, output *strings.Builder) {
+func renderOverviewArea(model Model, _ areaSpec, output *strings.Builder, options renderOptions) {
 	if model.query != "" {
-		model.renderSearchResults(output)
+		model.renderSearchResults(output, options)
 		return
 	}
-	model.renderOverview(output)
+	model.renderOverview(output, options)
 }
 
-func renderInventoryArea(model Model, spec areaSpec, output *strings.Builder) {
+func renderInventoryArea(model Model, spec areaSpec, output *strings.Builder, options renderOptions) {
 	items := model.visibleItems(spec.kind)
 	for _, item := range items {
-		fmt.Fprintf(output, "[%s] %s", item.Scope, item.Name)
-		if item.Detail != "" {
-			fmt.Fprintf(output, " — %s", item.Detail)
-		}
-		output.WriteString("\n")
+		fmt.Fprintf(output, "  %s\n", renderInventoryItem(item, options))
 	}
 	if len(items) == 0 {
 		output.WriteString("No matching items.\n")
 	}
 }
 
-func renderActionArea(_ Model, spec areaSpec, output *strings.Builder) {
+func renderInventoryItem(item Item, options renderOptions) string {
+	badge := "[" + string(item.Scope) + "]"
+	if options.styled {
+		badge = renderScopeBadge(item.Scope)
+	}
+	line := badge + " " + item.Name
+	if item.Detail == "" {
+		return line
+	}
+	if strings.HasPrefix(strings.ToLower(item.Detail), "invalid:") {
+		detail := "✗ " + item.Detail
+		if options.styled {
+			detail = dangerStyle.Render(detail)
+		}
+		return line + " " + detail
+	}
+	detail := " — " + item.Detail
+	if options.styled {
+		detail = metaStyle.Render(detail)
+	}
+	return line + detail
+}
+
+func renderScopeBadge(scope ItemScope) string {
+	badge := "[" + string(scope) + "]"
+	switch scope {
+	case ItemScope("global"):
+		return globalScopeStyle().Render(badge)
+	case ItemScope("repository"):
+		return repositoryScopeStyle().Render(badge)
+	default:
+		return metaStyle.Render(badge)
+	}
+}
+
+func renderActionArea(_ Model, spec areaSpec, output *strings.Builder, _ renderOptions) {
 	fmt.Fprintf(output, "%s\n", spec.description)
 }
 
-func renderSearchArea(model Model, _ areaSpec, output *strings.Builder) {
-	model.renderSearchResults(output)
+func renderSearchArea(model Model, _ areaSpec, output *strings.Builder, options renderOptions) {
+	model.renderSearchResults(output, options)
 }
 
-func (model Model) renderSearchResults(output *strings.Builder) {
+func (model Model) renderSearchResults(output *strings.Builder, options renderOptions) {
 	matched := 0
 	for _, item := range model.snapshot.Items {
 		if !matches(item, model.query) {
 			continue
 		}
 		matched++
-		fmt.Fprintf(output, "[%s] %s — %s\n", item.Scope, item.Name, item.Detail)
+		fmt.Fprintf(output, "  %s\n", renderInventoryItem(item, options))
 	}
 	if matched == 0 {
 		output.WriteString("No matching items.\n")
 	}
 }
 
-func (model Model) renderOverview(output *strings.Builder) {
+func (model Model) renderOverview(output *strings.Builder, options renderOptions) {
 	for _, line := range model.snapshot.Overview {
 		fmt.Fprintf(output, "%s\n", line)
 	}
 	for _, warning := range model.snapshot.Warnings {
-		fmt.Fprintf(output, "warning: %s\n", warning)
+		warningLine := "▲ " + warning
+		if options.styled {
+			warningLine = warningStyle.Render(warningLine)
+		}
+		fmt.Fprintf(output, "%s\n", warningLine)
 	}
+}
+
+func (model Model) renderStatus(options renderOptions) string {
+	status := model.status
+	line := "✗ configuration error: " + status
+	style := dangerStyle
+	if strings.HasPrefix(status, "Configuration published.") {
+		line = "✓ " + status
+		style = successStyle
+	}
+	if strings.HasPrefix(status, "No packaged") {
+		line = "▲ " + status
+		style = warningStyle
+	}
+	if options.styled {
+		return style.Render(line)
+	}
+	return line
 }
 
 func (model Model) visibleItems(kind ItemKind) []Item {
@@ -548,7 +751,11 @@ func (e *editor) nextAction() (hubAction, error) {
 	if err != nil {
 		return hubAction{}, err
 	}
-	if _, err := io.WriteString(e.Output, New(snapshot).Render()); err != nil {
+	model := New(snapshot)
+	if e.drafts != nil {
+		model.drafts = *e.drafts
+	}
+	if _, err := io.WriteString(e.Output, model.Render()); err != nil {
 		return hubAction{}, err
 	}
 	return e.chooseAction()

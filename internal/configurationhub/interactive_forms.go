@@ -6,7 +6,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/huh/v2"
-	"charm.land/lipgloss/v2"
 
 	"reviewparty/internal/configuration"
 )
@@ -170,7 +169,7 @@ func (model *Model) openOverviewForm() tea.Cmd {
 func (model Model) overviewDescription() string {
 	lines := append([]string(nil), model.snapshot.Overview...)
 	for _, warning := range model.snapshot.Warnings {
-		lines = append(lines, "warning: "+warning)
+		lines = append(lines, warningStyle.Render("▲ "+warning))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -628,28 +627,37 @@ func (model *Model) toMenu() {
 }
 
 func (model Model) renderForm() string {
-	title := lipgloss.NewStyle().Bold(true).Render("Review Party Configuration Hub")
-	var output strings.Builder
-	fmt.Fprintf(&output, "%s\nGlobal Configuration · Repository %s\n\n", title, model.snapshot.Repository)
+	return stripANSI(model.renderFormFrame(renderOptions{styled: true}))
+}
+
+func (model Model) renderFormFrame(options renderOptions) string {
+	sections := []string{model.renderTitleRow(options)}
 	if model.status != "" {
-		fmt.Fprintf(&output, "configuration error: %s\n\n", model.status)
+		sections = append(sections, model.renderStatus(options))
 	}
-	if content := model.form.View(); content != "" {
-		output.WriteString(content)
-	} else {
+
+	content := model.form.View()
+	if content == "" {
 		switch model.formKind {
 		case formPlanning:
-			output.WriteString("Planning configuration changes...\n")
+			content = "Planning configuration changes..."
 		case formEditor:
-			output.WriteString("Editing instructions...\n")
+			content = "Editing instructions..."
 		case formPublishing:
-			output.WriteString("Publishing configuration changes...\n")
+			content = "Publishing configuration changes..."
 		case formNone, formOverview, formProfileFields, formProfileSource, formProfileTemplate,
 			formProfileTemplateLoading, formProfileInstructions, formParty, formReviewOperation,
 			formReviewLoading, formReviewFields, formCopy, formChanges, formConfirm:
 			// The active form supplies the content.
 		}
 	}
-	output.WriteString("\nEsc back  Ctrl-C quit\n")
-	return output.String()
+	sections = append(sections, content, renderFormActionBar(options))
+	return strings.Join(sections, "\n\n")
+}
+
+func renderFormActionBar(options renderOptions) string {
+	return renderActionHints(options, []actionHint{
+		{key: "esc", label: "back"},
+		{key: "ctrl+c", label: "quit"},
+	})
 }

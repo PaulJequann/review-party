@@ -98,6 +98,9 @@ func (e *editor) search() error {
 		return err
 	}
 	model := New(snapshot)
+	if e.drafts != nil {
+		model.drafts = *e.drafts
+	}
 	model.query = query
 	_, err = io.WriteString(e.Output, model.Render())
 	return err
