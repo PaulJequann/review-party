@@ -2,8 +2,8 @@
 
 <!-- Stashbox: https://stashbox.local.bysliek.com/0XZZMwVbSdKL -->
 
-Status: Slices 1-8 complete; Slice 9 is next
-Last reconciled: 2026-08-27
+Status: Slices 1-8 complete; 5 hardenings landed 2026-08-29…30 via #19, #21, #22, #20, #23; Slice 9 is next
+Last reconciled: 2026-08-30
 
 This plan replaces Review Party's current configuration and execution model with
 the accepted Global and Repository Configuration model in [`../CONTEXT.md`](../CONTEXT.md).
@@ -240,6 +240,8 @@ plans, and rollback. The Hub and commands must not duplicate those rules.
 Model Discovery remains a separate Module behind Reviewer-specific adapters. A
 failure for one Reviewer cannot prevent configuration of another Reviewer or
 opening the Hub.
+
+Post-Slice 8 hardening keeps `LedgerRecordStore` as the deep `store` owner with private `reviewRecordProjection` + new `eval`/`bundle`/`adjudication` projections and narrow `RecordStore`/`EvalRunStore`/`AdjudicationStore`/`BundleStore` seams; `Bundle` lifecycle lives in `internal/engine/bundle.go` + CLI `cmd/review-party/bundle.go` (keeps `Conductor.Run`/`InspectBundle`); `Profile` compilation is engine-local over frozen `RuntimeSnapshot`; `Subject` owns synthetic `PrepareExecution` leases (captured copy vs committed worktree) while `eval_corpus.go` retains corpus authority.
 
 ## Dependency order
 
@@ -593,6 +595,18 @@ mechanics.
 - Cancellation, resizing, and save failure leave the terminal and authored
   configuration intact.
 
+## Post-Slice 8 Architectural Hardening (2026-08-29…30)
+
+Landed after Slice 8 (`48db3b7`) and the `e3665bb` dogfood/verification skills, before Slice 9. All preserve locked decisions (`No executable packaged Profiles`, `No Party nesting`, `No migration`).
+
+* **#19 Bundle mechanics** (`6db5d5b`, `DEV-83`): `internal/engine/party.go` bundle lifecycle split into `internal/engine/bundle.go` (construction, execution, absorption, finalization, hard-stop, inspection) and CLI `cmd/review-party/bundle.go` (shared human/JSON presentation); `party.go` placeholder removed (`21232d7`, path-specific approval). Keeps `Conductor.Run`/`InspectBundle`/`BundleStore`.
+* **#21 Torn `Load` Tx** (`ac3878a`, `DEV-62`): `internal/store/projection.go:166` now hydrates parent + passes/attempts/artifacts/findings in one read `Tx`, draining cursors before dependent queries (Tx bound to one connection); preserves `WAL`/`busy_timeout 5000`/`MaxOpenConns 4`, honest errors, ordering; no retries.
+* **#22 Ledger projections** (`d6078f6`, `DEV-64`): extracted private `internal/store/eval_projection.go`, `bundle_projection.go`, `adjudication_projection.go` analogous to `reviewRecordProjection`; keeps narrow `RecordStore`/`EvalRunStore`/`AdjudicationStore`/`BundleStore` + explicit `init` preparation; defers wide aggregate interface.
+* **#20 Profile compiler** (`824b4e4`, `DEV-84`): engine-local unexported `profileCompileRequest`/`compiledProfile` over frozen `configuration.RuntimeSnapshot`; `compileProfile` is single compiler, `resolveProfile`/`compileResolvedProfile`/`compileExperimentProfile` thin adapters; `Run`/`Explain`/summaries/`Eval`/`replay` share result, `Effective` applied once.
+* **#23 Subject materialization** (`0fd8db2`, `DEV-63`): `Subject` owns synthetic identity + executable source-view lease (`subject/git.go`/`execution.go` captured copy vs committed worktree with `prepare isolated repo + idempotent cleanup`); `eval_corpus.go` retains corpus authority/expected Findings/revision digests/suite staging; `model/types.go:ExecutionRepository` removed from durable `ReviewSubject`.
+
+Dogfooding for parallel `paseo` worktrees now uses worktree-local `$PWD/scratch/dogfood-bin` (`dogfood-review-party` skill: `dogfood_binary="$PWD/scratch/dogfood-bin/review-party"`) to avoid global `~/.local/bin` race.
+
 ## Slice 9: Template updates, recovery, and release polish
 
 Status: **Pending**
@@ -676,3 +690,5 @@ The accepted replacement is expected to make tracked source and documentation
 obsolete. Before deleting any tracked path, list the exact path and request the
 approval required by `AGENTS.md`. Do not preserve dead readers, aliases, or
 commands to avoid requesting deletion approval.
+
+Post-Slice 8 example: `internal/engine/party.go` bundle-half removed `21232d7` (now `internal/engine/bundle.go` + `cmd/review-party/bundle.go`; Party definitions remain in `party_library.go`) — path-specific approval granted for `DEV-83`.
