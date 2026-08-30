@@ -40,7 +40,7 @@ func (conductor *Conductor) prepareRun(selection model.RunSelection) (preparedBu
 	}
 	members := make([]preparedReview, 0, len(planned.members))
 	for _, slot := range planned.members {
-		members = append(members, preparedReview{subject: planned.subject, profile: slot.profile, timings: slot.timings, deadline: slot.profile.deadline})
+		members = append(members, planned.preparedSubject.review(slot.profile, slot.timings))
 	}
 	return preparedBundle{bundle: bundle, members: members}, ledger, nil
 }
@@ -56,7 +56,7 @@ func newPendingBundle(created time.Time, plan plannedSelection) (model.ReviewBun
 	bundle := model.ReviewBundle{
 		ID: model.ReviewBundleID(id), Description: bundleDescription(plan),
 		Revision: selectionRevisionIdentity(plan.resolved, plan.members), Repository: plan.repository,
-		SubjectKind: plan.subject.Kind, SubjectIdentity: plan.subject.Identity,
+		SubjectKind: plan.preparedSubject.value.Kind, SubjectIdentity: plan.preparedSubject.value.Identity,
 		Lifecycle: model.LifecyclePending, Selection: bundleSelection(plan.resolved),
 		Warnings: bundleWarnings(plan.resolved.Warnings), Deduplicated: bundleSkippedDuplicates(plan.resolved.Deduplicated),
 		Members: make([]model.BundleMember, 0, len(plan.members)), ConcurrencyLimit: plan.resolved.ConcurrencyLimit,

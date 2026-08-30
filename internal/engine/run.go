@@ -8,7 +8,6 @@ import (
 
 	"reviewparty/internal/configuration"
 	"reviewparty/internal/model"
-	"reviewparty/internal/subject"
 )
 
 // This file resolves one run request into the Effective Review Selection and
@@ -55,15 +54,15 @@ func (conductor *Conductor) ReviewExplicitProfile(ctx context.Context, selection
 		return model.ReviewRecord{}, errors.New("explicit Profile must resolve to exactly one Profile")
 	}
 	member := planned.members[0]
-	prepared := preparedReview{subject: planned.subject, profile: member.profile, timings: member.timings, deadline: member.profile.deadline}
+	prepared := planned.preparedSubject.review(member.profile, member.timings)
 	return conductor.runPreparedReview(ctx, prepared, nil, reviewStarted)
 }
 
 type plannedSelection struct {
-	resolved   configuration.ResolvedReviews
-	repository string
-	subject    subject.Subject
-	members    []compiledSlot
+	resolved        configuration.ResolvedReviews
+	repository      string
+	preparedSubject preparedSubject
+	members         []compiledSlot
 }
 
 type compiledSlot struct {
@@ -76,11 +75,11 @@ type compiledSlot struct {
 // launches. It fails closed on a missing selection, missing reference,
 // incomplete Profile, unavailable saved Reviewer, or rejected model.
 func (conductor *Conductor) planSelection(selection model.RunSelection) (plannedSelection, error) {
-	repository, err := resolveSubjectRepository(selection.Repository, selection.Subject)
+	preparation, err := conductor.startReviewPreparation(selection.Repository, selection.Subject)
 	if err != nil {
 		return plannedSelection{}, err
 	}
-	resolved, err := conductor.resolveEffectiveReviews(repository, selection)
+	resolved, err := conductor.resolveEffectiveReviews(preparation.repository, selection)
 	if err != nil {
 		return plannedSelection{}, err
 	}
@@ -88,38 +87,16 @@ func (conductor *Conductor) planSelection(selection model.RunSelection) (planned
 	if err != nil {
 		return plannedSelection{}, err
 	}
-	resolvedRepository, subject, subjectResolutionMS, err := conductor.prepareReviewSubject(selection.Repository, selection.Subject)
-	if err == nil && resolvedRepository != repository {
-		repository = resolvedRepository
-	}
+	preparedSubject, err := conductor.completeReviewPreparation(preparation)
 	if err != nil {
 		return plannedSelection{}, err
 	}
-	for index := range members {
-		members[index].timings.SubjectResolutionMS = subjectResolutionMS
-	}
-	return plannedSelection{resolved: resolved.snapshot.Selection(), repository: repository, subject: subject, members: members}, nil
-}
-
-// resolveSharedSubject freezes the one Review Subject every member will review,
-// after preflight compiles every Profile Revision and before any launch.
-func (conductor *Conductor) prepareReviewSubject(repository string, reference model.SubjectReference) (string, subject.Subject, int64, error) {
-	started := conductor.now().UTC()
-	resolvedRepository, err := resolveSubjectRepository(repository, reference)
-	if err != nil {
-		return "", subject.Subject{}, elapsedMilliseconds(started, conductor.now().UTC()), err
-	}
-	resolved, err := subject.ResolveSubject(resolvedRepository, reference)
-	return resolvedRepository, resolved, elapsedMilliseconds(started, conductor.now().UTC()), err
-}
-
-// resolveSubjectRepository is the single repository rule shared by ordinary
-// and Eval preparation, including captured Subjects that already carry paths.
-func resolveSubjectRepository(repository string, reference model.SubjectReference) (string, error) {
-	if reference.Kind == model.SubjectCapturedChange {
-		return repository, nil
-	}
-	return subject.ResolveRepositoryRoot(repository)
+	return plannedSelection{
+		resolved:        resolved.snapshot.Selection(),
+		repository:      preparation.repository,
+		preparedSubject: preparedSubject,
+		members:         members,
+	}, nil
 }
 
 // resolvedRunSelection carries the one configuration snapshot for a run.
