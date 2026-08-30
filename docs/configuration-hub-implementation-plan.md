@@ -2,7 +2,7 @@
 
 <!-- Stashbox: https://stashbox.local.bysliek.com/0XZZMwVbSdKL -->
 
-Status: Slices 1-8 complete; 5 hardenings landed 2026-08-29…30 via #19, #21, #22, #20, #23; Slice 9 is next
+Status: Slices 1-8 complete; 5 hardenings landed 2026-08-29…30 via #19, #21, #22, #20, #23; Slice 9 is superseded by the Hub UX rebuild, see [hub-ux-rebuild-implementation-plan.md](hub-ux-rebuild-implementation-plan.md)
 Last reconciled: 2026-08-30
 
 This plan replaces Review Party's current configuration and execution model with
@@ -254,7 +254,7 @@ Slice 5  Resolution and review-party run                         Complete (PR #1
 Slice 6  Agent-facing configuration commands                Complete
 Slice 7  Discovery and onboarding                            Complete
 Slice 8  Hub shell and core editors
-Slice 9  Template updates, recovery, and release polish
+Slice 9  Template updates, recovery, and release polish   Superseded by the Hub UX rebuild (docs/hub-ux-rebuild-implementation-plan.md)
 ```
 
 Do not build Hub views against the superseded Profile or Party model. Slice 4
@@ -609,7 +609,13 @@ Dogfooding for parallel `paseo` worktrees now uses worktree-local `$PWD/scratch/
 
 ## Slice 9: Template updates, recovery, and release polish
 
-Status: **Pending**
+Status: **Pending — Hub-facing work superseded by the [Hub UX rebuild](hub-ux-rebuild-implementation-plan.md) (2026-08-29)**
+
+The Hub UX rebuild absorbs this slice's Hub presentation work (Template drift
+visibility in the Hub) and keeps Profile and Party deletion deferred exactly as
+specified below. Ledger backup, fresh-initialization confirmation, `doctor`
+JSON, README documentation, and dogfooding remain owned by this slice and are
+out of scope for the rebuild.
 
 ### Goal
 
