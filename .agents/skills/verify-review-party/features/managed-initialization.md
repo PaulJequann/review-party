@@ -7,6 +7,16 @@ Review Party initializes managed state for a Git repository, permits the same in
 - `STATE-INIT-IDEMPOTENT`
 - `STATE-HISTORY-EMPTY`
 
+## Source evidence
+
+- `cmd/review-party/standard_commands.go:170-180` exposes `init` with explicit
+  repository, state, and configuration paths.
+- `cmd/review-party/standard_commands.go:50-67` exposes `history` with the
+  explicit repository and configuration inputs used by this recipe.
+
+Drift: none. The live recipe below verifies the missing-repository rejection,
+idempotent initialization, and empty history view.
+
 ## How to get to it (user POV)
 
 - Run `review-party init --repo PATH --state-dir PATH --config PATH`.
