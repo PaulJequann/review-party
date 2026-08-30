@@ -153,7 +153,7 @@ func (conductor *Conductor) requirePreparedState(repository string) error {
 }
 
 type preparedReview struct {
-	subject  model.ReviewSubject
+	subject  subject.Subject
 	profile  compiledProfile
 	timings  model.ReviewTimings
 	deadline time.Duration

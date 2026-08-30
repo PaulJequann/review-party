@@ -1,12 +1,15 @@
 package subject
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+
+	"reviewparty/internal/model"
 )
 
 func TestWorkingChangesRecordsTrackedAndUntrackedSubjectFacts(t *testing.T) {
@@ -24,6 +27,65 @@ func TestWorkingChangesRecordsTrackedAndUntrackedSubjectFacts(t *testing.T) {
 	want := SubjectFacts{ChangedFiles: 3, Additions: 4, Deletions: 1, BinaryFiles: 1}
 	if !reflect.DeepEqual(subject.Facts, &want) {
 		t.Fatalf("facts = %#v, want %#v", subject.Facts, want)
+	}
+}
+
+func TestCapturedSubjectKeepsMaterializationOpaqueAndPathIndependent(t *testing.T) {
+	base := t.TempDir()
+	head := t.TempDir()
+	writeTestFile(t, filepath.Join(base, "review.go"), "package demo\n\nconst state = \"base\"\n")
+	writeTestFile(t, filepath.Join(head, "review.go"), "package demo\n\nconst state = \"head\"\n")
+
+	resolved, err := ResolveSubject("", model.CapturedChange(base, head))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(resolved.Patch, base) || strings.Contains(resolved.Patch, head) {
+		t.Fatalf("patch leaked source path: %s", resolved.Patch)
+	}
+	serialized, err := json.Marshal(resolved.ReviewSubject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(serialized), head) {
+		t.Fatalf("durable Subject leaked source path: %s", serialized)
+	}
+	otherBase := t.TempDir()
+	otherHead := t.TempDir()
+	writeTestFile(t, filepath.Join(otherBase, "review.go"), "package demo\n\nconst state = \"base\"\n")
+	writeTestFile(t, filepath.Join(otherHead, "review.go"), "package demo\n\nconst state = \"head\"\n")
+	other, err := ResolveSubject("", model.CapturedChange(otherBase, otherHead))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.Identity != other.Identity {
+		t.Fatalf("identity depends on source paths: %s != %s", resolved.Identity, other.Identity)
+	}
+
+}
+
+func TestCapturedSubjectExecutionCleansItsCheckout(t *testing.T) {
+	base := t.TempDir()
+	head := t.TempDir()
+	writeTestFile(t, filepath.Join(base, "review.go"), "package demo\n\nconst state = \"base\"\n")
+	writeTestFile(t, filepath.Join(head, "review.go"), "package demo\n\nconst state = \"head\"\n")
+	resolved, err := ResolveSubject("", model.CapturedChange(base, head))
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkout, err := resolved.PrepareExecution("captured-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := checkout.Repository
+	if _, err := os.Stat(filepath.Join(path, "review.go")); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkout.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("captured checkout remains: %v", err)
 	}
 }
 

@@ -49,12 +49,12 @@ type ownerLabel string
 type repositoryPath string
 type checkoutPath string
 
-func PrepareExecution(subject model.ReviewSubject, owner string) (*ExecutionCheckout, error) {
+func (subject Subject) PrepareExecution(owner string) (*ExecutionCheckout, error) {
 	switch subject.Kind {
 	case model.SubjectCapturedChange:
-		return prepareCapturedExecution(subject, owner)
+		return subject.prepareCapturedExecution(owner)
 	case model.SubjectCommittedRange:
-		return prepareCommittedExecution(subject, owner)
+		return prepareCommittedExecution(subject.ReviewSubject, owner)
 	case model.SubjectWorkingChanges:
 		return &ExecutionCheckout{Repository: subject.Repository}, nil
 	default:
@@ -89,8 +89,8 @@ func prepareCommittedExecution(subject model.ReviewSubject, owner string) (*Exec
 	return &ExecutionCheckout{Repository: path, close: func() error { return removeOwnedCheckout(checkout) }}, nil
 }
 
-func prepareCapturedExecution(subject model.ReviewSubject, owner string) (*ExecutionCheckout, error) {
-	if subject.ExecutionRepository == "" {
+func (subject Subject) prepareCapturedExecution(owner string) (*ExecutionCheckout, error) {
+	if subject.capturedHead == "" {
 		return nil, errors.New("captured Subject execution source is unavailable")
 	}
 	root := filepath.Join(os.TempDir(), executionRootName)
@@ -101,7 +101,7 @@ func prepareCapturedExecution(subject model.ReviewSubject, owner string) (*Execu
 	if err != nil {
 		return nil, err
 	}
-	if err := copyCapturedTree(subject.ExecutionRepository, destination); err != nil {
+	if err := copyCapturedTree(subject.capturedHead, destination); err != nil {
 		return nil, errors.Join(err, os.RemoveAll(destination))
 	}
 	return &ExecutionCheckout{Repository: destination, close: func() error { return os.RemoveAll(destination) }}, nil

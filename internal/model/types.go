@@ -397,15 +397,14 @@ func (selection ReviewSelection) ProfileSelection() ProfileSelection {
 }
 
 type ReviewSubject struct {
-	Kind                SubjectKind   `json:"kind"`
-	Repository          string        `json:"repository"`
-	Identity            string        `json:"identity"`
-	BaseObject          string        `json:"base_object,omitempty"`
-	HeadObject          string        `json:"head_object,omitempty"`
-	ChangedPaths        []string      `json:"changed_paths"`
-	Patch               string        `json:"patch"`
-	Facts               *SubjectFacts `json:"facts,omitempty"`
-	ExecutionRepository string        `json:"-"`
+	Kind         SubjectKind   `json:"kind"`
+	Repository   string        `json:"repository"`
+	Identity     string        `json:"identity"`
+	BaseObject   string        `json:"base_object,omitempty"`
+	HeadObject   string        `json:"head_object,omitempty"`
+	ChangedPaths []string      `json:"changed_paths"`
+	Patch        string        `json:"patch"`
+	Facts        *SubjectFacts `json:"facts,omitempty"`
 }
 
 type SubjectFacts struct {

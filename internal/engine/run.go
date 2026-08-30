@@ -62,7 +62,7 @@ func (conductor *Conductor) ReviewExplicitProfile(ctx context.Context, selection
 type plannedSelection struct {
 	resolved   configuration.ResolvedReviews
 	repository string
-	subject    model.ReviewSubject
+	subject    subject.Subject
 	members    []compiledSlot
 }
 
@@ -103,11 +103,11 @@ func (conductor *Conductor) planSelection(selection model.RunSelection) (planned
 
 // resolveSharedSubject freezes the one Review Subject every member will review,
 // after preflight compiles every Profile Revision and before any launch.
-func (conductor *Conductor) prepareReviewSubject(repository string, reference model.SubjectReference) (string, model.ReviewSubject, int64, error) {
+func (conductor *Conductor) prepareReviewSubject(repository string, reference model.SubjectReference) (string, subject.Subject, int64, error) {
 	started := conductor.now().UTC()
 	resolvedRepository, err := resolveSubjectRepository(repository, reference)
 	if err != nil {
-		return "", model.ReviewSubject{}, elapsedMilliseconds(started, conductor.now().UTC()), err
+		return "", subject.Subject{}, elapsedMilliseconds(started, conductor.now().UTC()), err
 	}
 	resolved, err := subject.ResolveSubject(resolvedRepository, reference)
 	return resolvedRepository, resolved, elapsedMilliseconds(started, conductor.now().UTC()), err
