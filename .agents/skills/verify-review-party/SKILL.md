@@ -1,11 +1,11 @@
 ---
 name: verify-review-party
-description: Drive Review Party through its public CLI to verify binary identity, isolated initialization and history, or explicit Profile configuration without launching a Reviewer.
+description: Drive Review Party through its public CLI to verify binary identity, isolated initialization and history, explicit Profile configuration, or terminal-backed Configuration Hub flows without launching a Reviewer.
 ---
 
 # Verify Review Party
 
-Run every command from the repository root. This skill verifies local CLI behavior through an installed binary. It does not prove live Reviewer authentication, model availability, or review execution.
+Run every command from the repository root. This skill verifies local CLI behavior through an installed binary, including the terminal-backed Configuration Hub. It does not prove live Reviewer authentication, model availability, or review execution.
 
 Read [features/README.md](features/README.md) before choosing a recipe. Read the linked feature file for the behavior under test.
 
@@ -42,9 +42,16 @@ Use the literal commands in the selected feature file. Run CLI commands through 
 
 The wrapper resolves `review-party` to the run-owned binary. It does not replace or bypass a product interface.
 
+For a terminal-backed entry point, use the PTY procedure in
+[features/README.md](features/README.md). `capture` deliberately does not
+allocate a terminal, so it is the right driver for the negative non-TTY
+control and for read-only follow-up commands, not for the Hub itself. Start
+one fresh PTY session per terminal recipe, capture the screen after each
+stable state, send one action at a time, and stop the session before cleanup.
+
 ## Evidence
 
-Evidence lives at `$run_dir/evidence/` and remains after cleanup. Each capture records the argument vector, stdout, stderr, and exit code. Retain the negative control beside the positive transcript. For durable changes, capture a second read-only CLI view as required by the feature recipe.
+Evidence lives at `$run_dir/evidence/` and remains after cleanup. Each capture records the argument vector, stdout, stderr, and exit code. Terminal recipes retain screen captures beside CLI transcripts. Retain the negative control beside the positive transcript. For durable changes, capture a second read-only CLI view as required by the feature recipe. Run expected nonzero controls with exit-on-error disabled, record their status, and run doctor before continuing.
 
 An exit code alone proves only process completion. Inspect structured output for the claimed fields. A live Reviewer substitution is not allowed. If a recipe later needs a Reviewer, record the unavailable saved Reviewer, model, or authentication as unproved.
 
@@ -56,8 +63,8 @@ Clean up after successful and failed drives:
 .agents/skills/verify-review-party/scripts/verify.sh cleanup "$run_dir"
 ```
 
-Cleanup removes only the run's recorded `runtime` directory and is safe to repeat. It preserves the manifest and evidence. A successful cleanup prints `cleanup: complete`; doctor must then fail because the owned runtime is gone.
+Stop every PTY session before cleanup. Cleanup removes only the run's recorded `runtime` directory and is safe to repeat. It preserves the manifest and evidence. A successful cleanup prints `cleanup: complete`; doctor must then fail because the owned runtime is gone.
 
 ## Helper
 
-`scripts/verify.sh` requires a POSIX shell, Git, Go, and either `sha256sum` or `shasum`. Its commands are `launch`, `doctor RUN_DIR`, `capture RUN_DIR EVIDENCE -- COMMAND [ARGS...]`, and `cleanup RUN_DIR`. The helper must remain executable.
+`scripts/verify.sh` requires a POSIX shell, Git, Go, and either `sha256sum` or `shasum`. Its commands are `launch`, `doctor RUN_DIR`, `capture RUN_DIR EVIDENCE -- COMMAND [ARGS...]`, and `cleanup RUN_DIR`. Terminal recipes additionally require `tmux` or an equivalent PTY driver, plus the driver's screen-capture and key-input operations. The helper must remain executable.

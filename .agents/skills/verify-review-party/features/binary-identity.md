@@ -7,6 +7,17 @@ Review Party exposes build provenance through its `version` command, while docto
 - `BIN-IDENTITY`
 - `BIN-REVISION-GUARD`
 
+## Source evidence
+
+- `cmd/review-party/version.go:16-38` exposes human and JSON provenance through
+  `review-party version`.
+- `.agents/skills/verify-review-party/scripts/verify.sh:85-116` binds doctor to
+  the recorded source revision, binary digest, binary identity, and run-owned
+  resources.
+
+Drift: none. The live recipe below exercises both version formats and the
+revision guard.
+
 ## How to get to it (user POV)
 
 - Run `review-party version` for human output.
