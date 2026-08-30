@@ -10,6 +10,7 @@ import (
 	"io"
 	"strings"
 
+	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/huh/v2"
 	"charm.land/lipgloss/v2"
@@ -115,16 +116,46 @@ type Model struct {
 	query     string
 	searching bool
 	width     int
+	height    int
+	viewport  viewport.Model
+	ready     bool
 	action    hubAction
 }
 
-func New(snapshot Snapshot) Model { return Model{snapshot: snapshot, width: 80} }
-func (Model) Init() tea.Cmd       { return nil }
+func New(snapshot Snapshot) Model {
+	view := viewport.New(viewport.WithWidth(80), viewport.WithHeight(20))
+	model := Model{snapshot: snapshot, width: 80, height: 20, viewport: view}
+	model.viewport.SetContent(model.viewportContent())
+	return model
+}
+func (Model) Init() tea.Cmd { return nil }
 
 func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	switch message := message.(type) {
 	case tea.WindowSizeMsg:
 		model.width = message.Width
+		model.height = message.Height
+		model.viewport.SetWidth(message.Width)
+		// Header ≈ title + global line + blank + 6 menu items + blank + optional search + footer
+		headerHeight := 2 + len(menuAreaSpecs()) + 2
+		if model.query != "" || model.searching {
+			headerHeight++
+		}
+		footerHeight := 1
+		viewportHeight := message.Height - headerHeight - footerHeight - 1
+		if viewportHeight < 5 {
+			viewportHeight = 5
+		}
+		if viewportHeight > message.Height-4 {
+			viewportHeight = message.Height - 4
+		}
+		model.viewport.SetHeight(viewportHeight)
+		model.viewport.SetContent(model.viewportContent())
+		model.ready = true
+		// Also forward to viewport for internal offset handling
+		var cmd tea.Cmd
+		model.viewport, cmd = model.viewport.Update(message)
+		return model, cmd
 	case tea.KeyPressMsg:
 		if model.searching {
 			if message.String() == "ctrl+c" {
@@ -154,6 +185,8 @@ func (model Model) updateSearch(key string) Model {
 			model.query += key
 		}
 	}
+	model.viewport.SetContent(model.viewportContent())
+	model.viewport.GotoTop()
 	return model
 }
 
@@ -173,8 +206,12 @@ func (model Model) updateNavigation(key string) (tea.Model, tea.Cmd) {
 		model.area = 0
 		model.query = ""
 		model.searching = true
+		model.viewport.SetContent(model.viewportContent())
+		model.viewport.GotoTop()
 	case "esc":
 		model.query = ""
+		model.viewport.SetContent(model.viewportContent())
+		model.viewport.GotoTop()
 	}
 	return model, nil
 }
@@ -184,10 +221,41 @@ func (model *Model) moveArea(offset int) {
 	next := model.area + offset
 	if next >= 0 && next < len(areas) {
 		model.area = next
+		model.viewport.SetContent(model.viewportContent())
+		model.viewport.GotoTop()
 	}
 }
 
-func (model Model) View() tea.View { return tea.NewView(model.Render()) }
+func (model Model) viewportContent() string {
+	var builder strings.Builder
+	model.renderArea(&builder)
+	return builder.String()
+}
+
+func (model Model) View() tea.View {
+	if !model.ready {
+		view := tea.NewView(model.Render())
+		view.AltScreen = true
+		return view
+	}
+	title := lipgloss.NewStyle().Bold(true).Render("Review Party Configuration Hub")
+	var header strings.Builder
+	fmt.Fprintf(&header, "%s\nGlobal Configuration · Repository %s\n\n", title, model.snapshot.Repository)
+	for index, spec := range menuAreaSpecs() {
+		marker := "  "
+		if index == model.area {
+			marker = "› "
+		}
+		fmt.Fprintf(&header, "%s%s\n", marker, spec.area)
+	}
+	header.WriteString("\n")
+	if model.query != "" || model.searching {
+		fmt.Fprintf(&header, "Search: %s\n", model.query)
+	}
+	view := tea.NewView(lipgloss.JoinVertical(lipgloss.Left, header.String(), model.viewport.View(), "↑/↓ navigate  enter open  / search  esc clear  q quit"))
+	view.AltScreen = true
+	return view
+}
 
 // Render returns a deterministic text view and is also used by accessible mode.
 func (model Model) Render() string {
