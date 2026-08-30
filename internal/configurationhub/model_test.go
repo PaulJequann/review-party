@@ -2,6 +2,7 @@ package configurationhub
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -234,7 +235,7 @@ func TestGroupedProfileFieldsRefreshDependentInputs(t *testing.T) {
 	requireModelChangeReset(t, state)
 }
 
-func TestHubPlansBeforeItPublishesAndConfirmsInProgram(t *testing.T) {
+func TestHubPlansBeforeItPublishesAndPreviewsInProgram(t *testing.T) {
 	var planned, published bool
 	model := newPlanTestModel(&planned, &published)
 	model = enterHubForm(t, model)
@@ -244,22 +245,84 @@ func TestHubPlansBeforeItPublishesAndConfirmsInProgram(t *testing.T) {
 		t.Fatal("copy form did not start planning")
 	}
 	model, _ = runHubCommand(t, model, planCommand)
-	if model.formKind != formConfirm {
-		t.Fatalf("form kind = %v, want confirmation", model.formKind)
+	if model.view != viewPlanPreview {
+		t.Fatalf("view = %v, want plan preview", model.view)
 	}
 	if published {
 		t.Fatal("plan command published before confirmation")
 	}
 
-	model.session.confirm = true
-	model, publishCommand := completeHubForm(t, model)
+	updated, publishCommand := model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
+	model = requireHubModel(t, updated)
 	if published {
-		t.Fatal("publish command ran while handling confirmation")
+		t.Fatal("publish command ran while handling preview key")
 	}
 	model, _ = runHubCommand(t, model, publishCommand)
 	if !published || model.view != viewMenu {
 		t.Fatalf("publish transition = published %v, view %v", published, model.view)
 	}
+}
+
+func TestHubPlanPreviewTransitions(t *testing.T) {
+	t.Run("cancel retains draft", func(t *testing.T) {
+		var planned bool
+		var published bool
+		model := newPlanTestModel(&planned, &published)
+		model.drafts.copyName = "quality"
+		model = enterHubForm(t, model)
+		model.session.copyName = "quality"
+		model, command := completeHubForm(t, model)
+		model, _ = runHubCommand(t, model, command)
+		updated, publishCommand := model.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+		model = requireHubModel(t, updated)
+		if publishCommand != nil || published || model.drafts.copyName != "quality" {
+			t.Fatalf("cancel transition scheduled publication or changed draft: %#v", model.drafts)
+		}
+	})
+
+	t.Run("failure retains draft", func(t *testing.T) {
+		model := New(Snapshot{Repository: "/repo"})
+		model.pendingKind = planProfile
+		model.drafts.profile = completeProfileDraft()
+		model.planSummary = "profile"
+		model.planWarnings = nil
+		model.pending = func() tea.Msg { return publishResultMsg{kind: planProfile, err: errors.New("disk full")} }
+		model.view = viewPlanPreview
+
+		updated, command := model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
+		model = requireHubModel(t, updated)
+		updated, _ = model.Update(command())
+		model = requireHubModel(t, updated)
+		if model.view != viewForm || model.drafts.profile == (configuration.ProfileDraft{}) {
+			t.Fatalf("failed publication transition = view %v, draft %#v", model.view, model.drafts.profile)
+		}
+		if !strings.Contains(model.status, "disk full") {
+			t.Fatalf("failure status = %q", model.status)
+		}
+	})
+
+	t.Run("success clears only published draft", func(t *testing.T) {
+		model := New(Snapshot{Repository: "/repo"})
+		model.pendingKind = planProfile
+		model.drafts.profile = completeProfileDraft()
+		model.drafts.party = partyFormDraft{scope: "global", name: "keep"}
+		model.pending = func() tea.Msg { return publishResultMsg{kind: planProfile, snapshot: model.snapshot} }
+		model.view = viewPlanPreview
+
+		updated, command := model.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
+		model = requireHubModel(t, updated)
+		updated, _ = model.Update(command())
+		model = requireHubModel(t, updated)
+		if model.drafts.profile != (configuration.ProfileDraft{}) {
+			t.Fatalf("published profile draft retained: %#v", model.drafts.profile)
+		}
+		if model.drafts.party.name != "keep" {
+			t.Fatalf("unpublished party draft changed: %#v", model.drafts.party)
+		}
+		if !strings.Contains(model.Render(), "Configuration published.") {
+			t.Fatalf("success banner missing from view:\n%s", model.Render())
+		}
+	})
 }
 
 func requireDependentProfileFieldsEmpty(t *testing.T, state *profileFormState) {

@@ -119,6 +119,7 @@ const (
 	viewMenu viewState = iota
 	viewForm
 	viewBrowser
+	viewPlanPreview
 )
 
 const menuGutterWidth = 2
@@ -126,28 +127,30 @@ const menuGutterWidth = 2
 // Model is a Bubble Tea shell. It deliberately owns no filesystem handle and
 // cannot publish configuration while a user merely navigates or searches.
 type Model struct {
-	snapshot    Snapshot
-	area        int
-	browserArea Area
-	cursor      int
-	moveReview  bool
-	moveFrom    int
-	rowReview   bool
-	query       string
-	searching   bool
-	width       int
-	height      int
-	viewport    viewport.Model
-	ready       bool
-	view        viewState
-	drafts      draftSet
-	form        formAdapter
-	formKind    formKind
-	session     *formSession
-	status      string
-	pending     tea.Cmd
-	pendingKind planKind
-	runtime     *hubRuntime
+	snapshot     Snapshot
+	area         int
+	browserArea  Area
+	cursor       int
+	moveReview   bool
+	moveFrom     int
+	rowReview    bool
+	query        string
+	searching    bool
+	width        int
+	height       int
+	viewport     viewport.Model
+	ready        bool
+	view         viewState
+	drafts       draftSet
+	form         formAdapter
+	formKind     formKind
+	session      *formSession
+	status       string
+	planSummary  string
+	planWarnings []string
+	pending      tea.Cmd
+	pendingKind  planKind
+	runtime      *hubRuntime
 }
 
 func New(snapshot Snapshot) Model {
@@ -232,6 +235,12 @@ func (model Model) updateAsync(message tea.Msg) (tea.Model, tea.Cmd, bool) {
 }
 
 func (model Model) updateKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if strings.HasPrefix(model.status, "Configuration published.") {
+		model.status = ""
+	}
+	if model.view == viewPlanPreview {
+		return model.updatePlanPreviewKey(message.String())
+	}
 	if model.view == viewForm {
 		return model.updateForm(message)
 	}
@@ -242,6 +251,25 @@ func (model Model) updateKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return model.updateBrowser(message.String())
 	}
 	return model.updateNavigation(message.String())
+}
+
+func (model Model) updatePlanPreviewKey(key string) (tea.Model, tea.Cmd) {
+	switch key {
+	case "p":
+		if model.pending == nil {
+			model.status = "No publish command is available."
+			return model, nil
+		}
+		command := model.pending
+		model.pending = nil
+		return model, command
+	case "e":
+		return model.reopenPlan(model.pendingKind)
+	case "esc":
+		model.toMenu()
+		return model, nil
+	}
+	return model, nil
 }
 
 func (model Model) updateBrowser(key string) (tea.Model, tea.Cmd) {
@@ -424,6 +452,8 @@ func (model Model) View() tea.View {
 		content = model.renderFormFrame(renderOptions{styled: true})
 	case model.view == viewBrowser:
 		content = model.renderBrowserFrame(renderOptions{styled: true})
+	case model.view == viewPlanPreview:
+		content = model.renderPlanPreviewFrame(renderOptions{styled: true})
 	case !model.ready:
 		content = model.renderMenuFrame(renderOptions{styled: true})
 	default:
@@ -449,7 +479,49 @@ func (model Model) Render() string {
 	if model.view == viewBrowser {
 		return stripANSI(model.renderBrowserFrame(renderOptions{}))
 	}
+	if model.view == viewPlanPreview {
+		return stripANSI(model.renderPlanPreviewFrame(renderOptions{styled: true}))
+	}
 	return stripANSI(model.renderMenuFrame(renderOptions{}))
+}
+
+func (model Model) renderPlanPreviewFrame(options renderOptions) string {
+	sections := []string{model.renderTitleRow(options)}
+	var warnings strings.Builder
+	for _, warning := range model.planWarnings {
+		line := "▲ " + warning
+		if options.styled {
+			line = warningStyle.Render(line)
+		}
+		warnings.WriteString(line + "\n")
+	}
+	content := model.planSummary
+	title := "Plan preview"
+	if options.styled {
+		title = sectionTitleStyle.Render(title)
+	}
+	if warnings.Len() > 0 {
+		sections = append(sections, strings.TrimSuffix(warnings.String(), "\n"))
+	}
+	sections = append(sections, renderBox(title, content, max(model.width, minBoxWidth), ""), model.renderPlanActionBar(options))
+	return strings.Join(sections, "\n\n")
+}
+
+func (model Model) renderPlanActionBar(options renderOptions) string {
+	bar := renderActionHints(options, []actionHint{{key: "p", label: "publish"}, {key: "e", label: "revise"}, {key: "esc", label: "cancel"}})
+	if model.status != "" {
+		line := model.status
+		if strings.HasPrefix(model.status, "Configuration published.") {
+			line = "✓ " + line
+			if options.styled {
+				line = successStyle.Render(line)
+			}
+		} else if options.styled {
+			line = dangerStyle.Render("✗ " + line)
+		}
+		bar = line + "  " + bar
+	}
+	return bar
 }
 
 func (model Model) renderMenuFrame(options renderOptions) string {

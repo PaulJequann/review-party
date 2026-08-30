@@ -57,9 +57,10 @@ type publishRequest struct {
 }
 
 type planReadyMsg struct {
-	kind    planKind
-	summary string
-	publish tea.Cmd
+	kind     planKind
+	summary  string
+	warnings []string
+	publish  tea.Cmd
 }
 
 type planFailedMsg struct {
@@ -125,12 +126,8 @@ func planRequestCommand(ctx context.Context, manager *configuration.Manager, rep
 		if err := configuration.RenderPlanHuman(&summary, plan); err != nil {
 			return planFailedMsg{kind: request.kind, err: err}
 		}
-		if err := configuration.RenderPlanWarningsHuman(&summary, plan.Warnings()); err != nil {
-			return planFailedMsg{kind: request.kind, err: err}
-		}
 		return planReadyMsg{
-			kind:    request.kind,
-			summary: summary.String(),
+			kind: request.kind, summary: summary.String(), warnings: plan.Warnings(),
 			publish: publishPlanCommand(publishRequest{
 				context: ctx, manager: manager, repository: repository, kind: request.kind, plan: plan,
 			}),

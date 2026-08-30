@@ -29,8 +29,6 @@ const (
 	formCopy                   formKind = "copy"
 	formChanges                formKind = "changes"
 	formPlanning               formKind = "planning"
-	formConfirm                formKind = "confirm"
-	formPublishing             formKind = "publishing"
 )
 
 type formSession struct {
@@ -45,7 +43,6 @@ type formSession struct {
 	instructions         string
 	useEditor            bool
 	confirm              bool
-	planSummary          string
 }
 
 type profileFormState struct {
@@ -387,7 +384,7 @@ func (model *Model) syncFormDraft() {
 		model.drafts.reviews = model.session.reviews
 	case formCopy:
 		model.drafts.copyName = model.session.copyName
-	case formNone, formOverview, formChanges, formPlanning, formConfirm, formPublishing:
+	case formNone, formOverview, formChanges, formPlanning:
 		// These views do not edit a draft directly.
 	}
 }
@@ -418,9 +415,7 @@ func (model *Model) completeForm() (tea.Model, tea.Cmd) {
 		return model.completePlanForm()
 	case formReviewOperation:
 		return model.completeReviewOperationForm()
-	case formConfirm:
-		return model.completeConfirmationForm()
-	case formNone, formProfileTemplateLoading, formEditor, formReviewLoading, formPlanning, formPublishing:
+	case formNone, formProfileTemplateLoading, formEditor, formReviewLoading, formPlanning:
 		// These states do not accept a completed form.
 	}
 	return *model, nil
@@ -438,7 +433,7 @@ func (model *Model) completeProfileForm() (tea.Model, tea.Cmd) {
 		return model.completeProfileInstructionsForm()
 	case formNone, formOverview, formProfileTemplateLoading, formEditor, formParty,
 		formReviewOperation, formReviewLoading, formReviewFields, formCopy, formChanges,
-		formPlanning, formConfirm, formPublishing:
+		formPlanning:
 		// Only profile forms reach this dispatcher.
 	}
 	return *model, nil
@@ -457,7 +452,7 @@ func (model *Model) completePlanForm() (tea.Model, tea.Cmd) {
 		return model.startPlan(planRequest{kind: planCopy, copy: model.drafts.copyName})
 	case formNone, formOverview, formProfileFields, formProfileSource, formProfileTemplate,
 		formProfileTemplateLoading, formProfileInstructions, formEditor, formReviewOperation,
-		formReviewLoading, formChanges, formPlanning, formConfirm, formPublishing:
+		formReviewLoading, formChanges, formPlanning:
 		// Only plan-producing forms reach this dispatcher.
 	}
 	return *model, nil
@@ -526,20 +521,6 @@ func (model *Model) completeReviewOperationForm() (tea.Model, tea.Cmd) {
 	return model.withForm(model.runtime.commands.loadReviewSelection())
 }
 
-func (model *Model) completeConfirmationForm() (tea.Model, tea.Cmd) {
-	if !model.session.confirm {
-		model.toMenu()
-		return *model, nil
-	}
-	model.formKind = formPublishing
-	model.form = formAdapter{}
-	if model.pending == nil {
-		model.status = "No publish command is available."
-		return model.reopenPlan(model.pendingKind)
-	}
-	return model.withForm(model.pending)
-}
-
 func (model *Model) startPlan(request planRequest) (tea.Model, tea.Cmd) {
 	model.pendingKind = request.kind
 	model.formKind = formPlanning
@@ -591,13 +572,13 @@ func (model *Model) reopenPlan(kind planKind) (Model, tea.Cmd) {
 func (model *Model) receivePlan(message planReadyMsg) (tea.Model, tea.Cmd) {
 	model.pendingKind = message.kind
 	model.pending = message.publish
-	model.session.planSummary = message.summary
-	model.session.confirm = false
+	model.planSummary = message.summary
+	model.planWarnings = message.warnings
 	model.status = ""
-	return model.withForm(model.openForm(formConfirm, []huh.Field{
-		huh.NewNote().Title("Proposed configuration plan").Description(message.summary),
-		huh.NewConfirm().Title("Publish this complete plan?").Value(&model.session.confirm),
-	}))
+	model.view = viewPlanPreview
+	model.form = formAdapter{}
+	model.formKind = formNone
+	return *model, nil
 }
 
 func (model *Model) receivePlanFailure(message planFailedMsg) (tea.Model, tea.Cmd) {
@@ -711,11 +692,9 @@ func (model Model) renderFormFrame(options renderOptions) string {
 			content = "Planning configuration changes..."
 		case formEditor:
 			content = "Editing instructions..."
-		case formPublishing:
-			content = "Publishing configuration changes..."
 		case formNone, formOverview, formProfileFields, formProfileSource, formProfileTemplate,
 			formProfileTemplateLoading, formProfileInstructions, formParty, formReviewOperation,
-			formReviewLoading, formReviewFields, formCopy, formChanges, formConfirm:
+			formReviewLoading, formReviewFields, formCopy, formChanges:
 			// The active form supplies the content.
 		}
 	}
