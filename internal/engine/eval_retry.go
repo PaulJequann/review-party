@@ -103,7 +103,7 @@ func (conductor *Conductor) resumePreparedReview(ctx context.Context, record mod
 	if !check.Available {
 		return conductor.getRunner().finishIncomplete(record, terminationForAvailability(check.Diagnostic), reviewStarted)
 	}
-	return conductor.getRunner().executePass(ctx, passExecution{record: record, profile: prepared.profile, executor: executor, reviewStarted: reviewStarted, deadline: prepared.deadline})
+	return conductor.getRunner().executePass(ctx, passExecution{record: record, subject: prepared.subject, profile: prepared.profile, executor: executor, reviewStarted: reviewStarted, deadline: prepared.deadline})
 }
 
 func retryableTermination(termination *model.ReviewTermination) bool {

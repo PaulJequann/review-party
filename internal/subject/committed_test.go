@@ -49,7 +49,7 @@ func TestCommittedRangeRecordsRenamesAndBinaryChanges(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertBinaryRenameFacts(t, subject)
+	assertBinaryRenameFacts(t, subject.ReviewSubject)
 	if !strings.Contains(subject.Patch, "GIT binary patch") {
 		t.Fatalf("binary patch missing:\n%s", subject.Patch)
 	}
@@ -83,7 +83,7 @@ func TestCommittedExecutionCheckoutOmitsCallerStateAndCleansExactWorktree(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	checkout, err := PrepareExecution(subject, "test-owner")
+	checkout, err := subject.PrepareExecution("test-owner")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +141,7 @@ func TestCommittedExecutionReconcilesOnlyInactiveOwnedCheckout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	stale, err := PrepareExecution(subject, "stale-owner")
+	stale, err := subject.PrepareExecution("stale-owner")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,7 +153,7 @@ func TestCommittedExecutionReconcilesOnlyInactiveOwnedCheckout(t *testing.T) {
 	unrelated := filepath.Join(t.TempDir(), "user-worktree")
 	runTestCommand(t, repository, "git", "worktree", "add", "--detach", unrelated, subject.HeadObject)
 	defer runTestCommand(t, repository, "git", "worktree", "remove", "--force", unrelated)
-	fresh, err := PrepareExecution(subject, "fresh-owner")
+	fresh, err := subject.PrepareExecution("fresh-owner")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -280,9 +280,6 @@ func assertSyntheticSubject(t *testing.T, suite string, index int, subject model
 	if subject.Repository != "eval://"+subject.Identity {
 		t.Fatalf("case %d repository = %s", index, subject.Repository)
 	}
-	if subject.ExecutionRepository != "" {
-		t.Fatalf("case %d leaked execution source", index)
-	}
 	if strings.Contains(subject.Patch, filepath.Dir(suite)) {
 		t.Fatalf("case %d patch leaked suite path: %s", index, subject.Patch)
 	}

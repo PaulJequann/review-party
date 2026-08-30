@@ -32,18 +32,18 @@ func (conductor *Conductor) prepareReplay(source model.ReviewRecord, selection m
 	return preparedReview{subject: subject, profile: profile, timings: timings, deadline: deadline}, nil
 }
 
-func replaySubject(recorded model.ReviewSubject) (model.ReviewSubject, error) {
+func replaySubject(recorded model.ReviewSubject) (subject.Subject, error) {
 	if recorded.Kind != model.SubjectCommittedRange {
-		return model.ReviewSubject{}, ErrWorkingChangesReplayUnsupported
+		return subject.Subject{}, ErrWorkingChangesReplayUnsupported
 	}
 	resolved, err := subject.ResolveSubject(recorded.Repository, model.CommittedRange(recorded.BaseObject, recorded.HeadObject))
 	if err != nil {
-		return model.ReviewSubject{}, fmt.Errorf("reconstruct replay Subject: %w", err)
+		return subject.Subject{}, fmt.Errorf("reconstruct replay Subject: %w", err)
 	}
 	if resolved.Identity != recorded.Identity {
-		return model.ReviewSubject{}, errors.New("reconstructed replay Subject does not match the recorded identity")
+		return subject.Subject{}, errors.New("reconstructed replay Subject does not match the recorded identity")
 	}
-	return recorded, nil
+	return subject.Subject{ReviewSubject: recorded}, nil
 }
 
 func (conductor *Conductor) replayProfile(source model.ReviewRecord, selection model.ReplaySelection) (compiledProfile, error) {

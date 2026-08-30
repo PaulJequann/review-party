@@ -16,51 +16,60 @@ import (
 
 const emptyGitTree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
-func ResolveSubject(repository string, reference model.SubjectReference) (model.ReviewSubject, error) {
+// Subject owns the correspondence between a durable ReviewSubject and the
+// private material needed to prepare one Reviewer execution view.
+type Subject struct {
+	model.ReviewSubject
+	capturedHead string
+}
+
+func ResolveSubject(repository string, reference model.SubjectReference) (Subject, error) {
 	root := repositoryRoot(repository)
 	switch reference.Kind {
 	case model.SubjectWorkingChanges:
-		return resolveWorkingChangesAtRoot(root)
+		resolved, err := resolveWorkingChangesAtRoot(root)
+		return Subject{ReviewSubject: resolved}, err
 	case model.SubjectCommittedRange:
-		return resolveCommittedRange(root, reference)
+		resolved, err := resolveCommittedRange(root, reference)
+		return Subject{ReviewSubject: resolved}, err
 	case model.SubjectCapturedChange:
 		return resolveCapturedChange(reference)
 	default:
-		return model.ReviewSubject{}, fmt.Errorf("unsupported review subject %q", reference.Kind)
+		return Subject{}, fmt.Errorf("unsupported review subject %q", reference.Kind)
 	}
 }
 
-func resolveCapturedChange(reference model.SubjectReference) (model.ReviewSubject, error) {
+func resolveCapturedChange(reference model.SubjectReference) (Subject, error) {
 	baseValue, err := filepath.Abs(reference.CapturedBase)
 	if err != nil {
-		return model.ReviewSubject{}, err
+		return Subject{}, err
 	}
 	headValue, err := filepath.Abs(reference.CapturedHead)
 	if err != nil {
-		return model.ReviewSubject{}, err
+		return Subject{}, err
 	}
 	base := capturedDirectory(baseValue)
 	head := capturedDirectory(headValue)
 	if err := validateCapturedDirectory(base); err != nil {
-		return model.ReviewSubject{}, fmt.Errorf("validate captured base: %w", err)
+		return Subject{}, fmt.Errorf("validate captured base: %w", err)
 	}
 	if err := validateCapturedDirectory(head); err != nil {
-		return model.ReviewSubject{}, fmt.Errorf("validate captured head: %w", err)
+		return Subject{}, fmt.Errorf("validate captured head: %w", err)
 	}
 	patch, err := capturedDirectoryPatch(base, head)
 	if err != nil {
-		return model.ReviewSubject{}, err
+		return Subject{}, err
 	}
 	if len(patch) == 0 {
-		return model.ReviewSubject{}, errors.New("captured change is empty")
+		return Subject{}, errors.New("captured change is empty")
 	}
 	paths, err := changedCapturedPaths(base, head)
 	if err != nil {
-		return model.ReviewSubject{}, err
+		return Subject{}, err
 	}
 	identity := sha256.Sum256(append([]byte(strings.Join(paths, "\x00")+"\x00"), patch...))
 	facts := model.SubjectFacts{ChangedFiles: len(paths)}
-	return model.ReviewSubject{Kind: model.SubjectCapturedChange, Repository: "eval://" + hex.EncodeToString(identity[:]), Identity: hex.EncodeToString(identity[:]), ChangedPaths: paths, Patch: string(patch), Facts: &facts, ExecutionRepository: string(head)}, nil
+	return Subject{ReviewSubject: model.ReviewSubject{Kind: model.SubjectCapturedChange, Repository: "eval://" + hex.EncodeToString(identity[:]), Identity: hex.EncodeToString(identity[:]), ChangedPaths: paths, Patch: string(patch), Facts: &facts}, capturedHead: string(head)}, nil
 }
 
 type capturedDirectory string

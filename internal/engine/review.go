@@ -62,7 +62,7 @@ func (runner *reviewRunner) pendingRecord(subject model.ReviewSubject, profile c
 }
 
 func (runner *reviewRunner) runPreparedReview(ctx context.Context, prepared preparedReview, replaysReviewID *model.ReviewID, reviewStarted time.Time) (model.ReviewRecord, error) {
-	record, err := runner.pendingRecord(prepared.subject, prepared.profile, prepared.timings, replaysReviewID)
+	record, err := runner.pendingRecord(prepared.subject.ReviewSubject, prepared.profile, prepared.timings, replaysReviewID)
 	if err != nil {
 		return model.ReviewRecord{}, err
 	}
@@ -86,6 +86,7 @@ func (runner *reviewRunner) runPreparedReview(ctx context.Context, prepared prep
 	}
 	return runner.executePass(ctx, passExecution{
 		record:        record,
+		subject:       prepared.subject,
 		profile:       prepared.profile,
 		executor:      executor,
 		reviewStarted: reviewStarted,
@@ -111,6 +112,7 @@ func (runner *reviewRunner) finalizeOperationalRecord(record *model.ReviewRecord
 
 type passExecution struct {
 	record        model.ReviewRecord
+	subject       subject.Subject
 	profile       compiledProfile
 	executor      attemptExecutor
 	reviewStarted time.Time
@@ -176,7 +178,7 @@ func applyAttemptResult(record *model.ReviewRecord, result model.ReviewResult, e
 }
 
 func (runner *reviewRunner) executeAttempt(ctx context.Context, record model.ReviewRecord, pass passExecution, prompt string) (execution attemptExecution, returnErr error) {
-	checkout, err := subject.PrepareExecution(record.Subject, string(record.ID)+"-1")
+	checkout, err := pass.subject.PrepareExecution(string(record.ID) + "-1")
 	if err != nil {
 		return failedExecution(model.AttemptUnknownFailure, model.TerminationTransportFailure, model.PhaseHarnessLaunch, err.Error()), nil
 	}
