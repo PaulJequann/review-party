@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -115,6 +116,8 @@ type Service struct {
 	cacheLocks   map[string]*sync.Mutex
 	cacheLocksMu sync.Mutex
 	cacheWrites  cacheWriteTracker
+	forgetGens   map[string]*atomic.Uint64
+	forgetMu     sync.Mutex
 	deadline     time.Duration
 	now          func() time.Time
 }
@@ -145,7 +148,7 @@ func NewService(options Options) *Service {
 		}
 		adapters[adapter.Reviewer()] = adapter
 	}
-	return &Service{adapters: adapters, cache: options.Cache, cacheLocks: make(map[string]*sync.Mutex), deadline: deadline, now: now}
+	return &Service{adapters: adapters, cache: options.Cache, cacheLocks: make(map[string]*sync.Mutex), forgetGens: make(map[string]*atomic.Uint64), deadline: deadline, now: now}
 }
 
 // NewDefaultService wires the four Reviewers currently supported by Review
@@ -205,12 +208,16 @@ func (service *Service) discover(ctx context.Context, reviewer string) Result {
 func (service *Service) saveCachedResult(reviewer string, result Result) {
 	cached := cacheableResult(result)
 	cached.Models = cloneModels(result.Models)
+	generation := service.forgetGeneration(reviewer).Load()
 	service.cacheWrites.start()
 	go func() {
 		defer service.cacheWrites.finish()
 		cacheLock := service.cacheLock(reviewer)
 		cacheLock.Lock()
 		defer cacheLock.Unlock()
+		if service.forgetGeneration(reviewer).Load() != generation {
+			return
+		}
 		current, found, err := service.cache.Load(reviewer)
 		if newerCacheExists(current, found, err, cached.ObservedAt) {
 			return
@@ -219,6 +226,21 @@ func (service *Service) saveCachedResult(reviewer string, result Result) {
 			return
 		}
 	}()
+}
+
+// forgetGeneration returns the number of ForgetCached operations recorded for
+// the Reviewer. Cache writers capture it when queued and re-check it under the
+// per-Reviewer cache lock, so a forget that races a still-queued write wins:
+// the outdated write skips its save instead of resurrecting the removed entry.
+func (service *Service) forgetGeneration(reviewer string) *atomic.Uint64 {
+	service.forgetMu.Lock()
+	defer service.forgetMu.Unlock()
+	generation, found := service.forgetGens[reviewer]
+	if !found {
+		generation = &atomic.Uint64{}
+		service.forgetGens[reviewer] = generation
+	}
+	return generation
 }
 
 func (service *Service) shouldCache(result Result, ctx context.Context) bool {
@@ -382,11 +404,17 @@ func validCachedResult(result Result, found bool, err error) bool {
 
 // ForgetCached removes the reviewer's cached result so the next live
 // observation rebuilds it. It reports whether cache material was discarded;
-// a missing or disabled cache is not an error.
+// a missing or disabled cache is not an error. A write still queued from an
+// earlier discovery is invalidated, so it cannot resurrect the removed entry.
 func (service *Service) ForgetCached(reviewer string) (bool, error) {
 	if service.cache == nil {
 		return false, nil
 	}
+	// The generation is bumped before taking the per-Reviewer lock: a write
+	// that is queued but has not acquired the lock yet must observe the bump
+	// no matter which of the two wins the lock. Bumping only alongside the
+	// removal would let such a write pass its staleness check and save.
+	service.forgetGeneration(reviewer).Add(1)
 	cacheLock := service.cacheLock(reviewer)
 	cacheLock.Lock()
 	defer cacheLock.Unlock()
