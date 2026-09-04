@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	mathrand "math/rand/v2"
 	"time"
 
@@ -67,13 +68,30 @@ func (conductor *Conductor) retryEvalReview(execution retryReviewExecution, reco
 	if err := conductor.wait(execution.context, conductor.retryDelay(execution.policy, execution.attempt, providerDelay)); err != nil {
 		return record, err
 	}
-	record.Lifecycle, record.Termination, record.Result = model.LifecycleRunning, nil, nil
+	// Salvaged partial evidence survives retries: a later attempt may still
+	// produce a complete replacement, but if none does, the retained partial
+	// is what the Review and its exported adjudication report. Only the failed
+	// attempt's termination state is reset while the retry runs.
+	retained := record.Result
+	if retained != nil && retained.Status != model.ResultFindingsPartial {
+		retained = nil
+	}
+	record.Lifecycle, record.Termination = model.LifecycleRunning, nil
+	record.Result = nil
 	record.UpdatedAt = conductor.now().UTC()
 	if err := conductor.store.Save(record); err != nil {
 		return record, err
 	}
 	next, err := conductor.getRunner().resumePreparedReview(execution.context, record, execution.prepared, execution.started)
-	return conductor.recordAvailabilityFailure(next, execution.prepared, err)
+	next, resumeErr := conductor.recordAvailabilityFailure(next, execution.prepared, err)
+	if next.Lifecycle != model.LifecycleCompleted && next.Result == nil && retained != nil {
+		next.Result = retained
+		next.UpdatedAt = conductor.now().UTC()
+		if saveErr := conductor.store.Save(next); saveErr != nil {
+			return next, errors.Join(resumeErr, saveErr)
+		}
+	}
+	return next, resumeErr
 }
 
 func (conductor *Conductor) recordAvailabilityFailure(record model.ReviewRecord, prepared preparedReview, err error) (model.ReviewRecord, error) {
