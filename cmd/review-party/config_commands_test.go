@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -255,7 +256,7 @@ func TestConfigDiscoveryReportsStructuredObservationWithoutLogin(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	service := discovery.NewService(discovery.Options{Adapters: []discovery.Adapter{discoveryTestAdapter{}}})
 	streams := productionCommandIO(bytes.NewBuffer(nil), &stdout, &stderr)
-	if exit := executeConfigurationDiscovery(context.Background(), "grok", "json", streams, func() *discovery.Service { return service }); exit != 0 {
+	if exit := executeConfigurationDiscovery(context.Background(), "grok", "json", false, streams, func() *discovery.Service { return service }); exit != 0 {
 		t.Fatalf("exit = %d, stderr = %q", exit, stderr.String())
 	}
 	var result discovery.Result
@@ -274,7 +275,7 @@ func TestConfigDiscoveryWrapsOneResultWhenReviewerIsOmitted(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	service := discovery.NewService(discovery.Options{Adapters: []discovery.Adapter{discoveryTestAdapter{}}})
 	streams := productionCommandIO(bytes.NewBuffer(nil), &stdout, &stderr)
-	if exit := executeConfigurationDiscovery(context.Background(), "", "json", streams, func() *discovery.Service { return service }); exit != 0 {
+	if exit := executeConfigurationDiscovery(context.Background(), "", "json", false, streams, func() *discovery.Service { return service }); exit != 0 {
 		t.Fatalf("exit = %d, stderr = %q", exit, stderr.String())
 	}
 	var report discoveryReport
@@ -283,6 +284,40 @@ func TestConfigDiscoveryWrapsOneResultWhenReviewerIsOmitted(t *testing.T) {
 	}
 	if len(report.Results) != 1 || report.Results[0].Reviewer != "grok" {
 		t.Fatalf("report = %#v", report)
+	}
+}
+
+func TestConfigDiscoveryRefreshForgetsCachedResults(t *testing.T) {
+	root := t.TempDir()
+	cache := discovery.NewFileCache(filepath.Join(root, "model-discovery"))
+	if err := cache.Save("grok", discovery.Result{Reviewer: "grok", Status: discovery.StatusSupported, Models: []discovery.Model{{ID: "grok-4.5"}}, ObservedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	service := discovery.NewService(discovery.Options{
+		Adapters: []discovery.Adapter{discoveryTestAdapter{}},
+		Cache:    cache,
+	})
+	var stdout, stderr bytes.Buffer
+	streams := productionCommandIO(bytes.NewBuffer(nil), &stdout, &stderr)
+	if exit := executeConfigurationDiscovery(context.Background(), "grok", "json", true, streams, func() *discovery.Service { return service }); exit != 0 {
+		t.Fatalf("exit = %d, stderr = %q", exit, stderr.String())
+	}
+	if _, found, err := cache.Load("grok"); err != nil {
+		t.Fatal(err)
+	} else if !found {
+		t.Fatal("refresh did not repopulate the cache from the live observation")
+	}
+}
+
+func TestConfigDiscoveryRefreshRejectsUnknownReviewer(t *testing.T) {
+	service := discovery.NewService(discovery.Options{Adapters: []discovery.Adapter{discoveryTestAdapter{}}})
+	var stdout, stderr bytes.Buffer
+	streams := productionCommandIO(bytes.NewBuffer(nil), &stdout, &stderr)
+	if exit := executeConfigurationDiscovery(context.Background(), "unknown", "json", true, streams, func() *discovery.Service { return service }); exit != 1 {
+		t.Fatalf("exit = %d, stderr = %q", exit, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "unknown Reviewer") {
+		t.Fatalf("stdout = %q", stdout.String())
 	}
 }
 

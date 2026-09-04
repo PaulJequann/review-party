@@ -41,6 +41,8 @@ type fakeCache struct {
 
 func (cache *fakeCache) Load(string) (Result, bool, error) { return cache.result, cache.found, nil }
 
+func (cache *fakeCache) Forget(string) error { return nil }
+
 func (cache *fakeCache) Save(_ string, result Result) error {
 	cache.mu.Lock()
 	defer cache.mu.Unlock()
@@ -222,12 +224,16 @@ type trackingCache struct {
 	savedDone chan struct{}
 }
 
+func (cache *trackingCache) Forget(string) error { return nil }
+
 type blockingCache struct {
 	started chan struct{}
 	release chan struct{}
 }
 
 func (cache *blockingCache) Load(string) (Result, bool, error) { return Result{}, false, nil }
+
+func (cache *blockingCache) Forget(string) error { return nil }
 
 func (cache *blockingCache) Save(string, Result) error {
 	close(cache.started)
@@ -435,4 +441,53 @@ func TestCacheWriteSkipsOlderObservation(t *testing.T) {
 	if len(cache.saved) != 0 {
 		t.Fatalf("older observation was cached: %#v", cache.saved)
 	}
+}
+
+func TestForgetCachedInvalidatesAStillQueuedCacheWrite(t *testing.T) {
+	cache := &fakeCache{}
+	service := NewService(Options{Cache: cache})
+	// Hold the per-Reviewer cache lock so the queued write below waits before
+	// its staleness re-check while the forget records its invalidation.
+	lock := service.cacheLock("grok")
+	lock.Lock()
+	service.saveCachedResult("grok", Result{Reviewer: "grok", Status: StatusSupported, Models: []Model{{ID: "grok-4.6"}}, ObservedAt: time.Unix(10, 0)})
+	forgetDone := make(chan error, 1)
+	go func() {
+		_, err := service.ForgetCached("grok")
+		forgetDone <- err
+	}()
+	waitForForgetGeneration(t, service, "grok", 1)
+	lock.Unlock()
+	select {
+	case err := <-forgetDone:
+		if err != nil {
+			t.Fatalf("forget error = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("forget did not finish")
+	}
+	if err := service.Flush(context.Background()); err != nil {
+		t.Fatalf("flush error = %v", err)
+	}
+	if len(cache.saved) != 0 {
+		t.Fatalf("queued write resurrected the forgotten entry: %#v", cache.saved)
+	}
+	if _, found := service.Cached("grok"); found {
+		t.Fatal("forgotten entry is still served")
+	}
+}
+
+func waitForForgetGeneration(t *testing.T, service *Service, reviewer string, want uint64) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		service.forgetMu.Lock()
+		generation, found := service.forgetGens[reviewer]
+		service.forgetMu.Unlock()
+		if found && generation.Load() == want {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("forget did not record its cache invalidation")
 }

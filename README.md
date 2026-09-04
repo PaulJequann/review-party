@@ -491,7 +491,13 @@ Review Party-owned configuration or store credentials. The external harness may
 read its configured credentials and write its own state under its normal
 HOME/XDG/CODEX_HOME locations. Successful results may be cached under the user
 cache root for responsive selection; the cache is advisory and does not prove
-current access. Discovery never logs in implicitly.
+current access. Cached choices expire after 24 hours, and entries without a
+usable observation timestamp are never served. Discovery never logs in
+implicitly.
+Pass `--refresh` to discard the cached result for the observed Reviewer (or
+every known Reviewer when none is named) before the observation runs. A cache
+write still in flight from an earlier observation is invalidated as well, so a
+refreshed observation that fails never resurrects the discarded entry.
 Where a harness requires it, discovery may use already configured, allowlisted
 credentials for its read-only provider query; it never starts authentication or
 stores credentials.

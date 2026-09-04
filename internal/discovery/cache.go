@@ -7,12 +7,20 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 const cacheSchemaVersion = 1
 
+// defaultCacheMaxAge bounds how long a cached discovery result is served.
+// Cached material is advisory, so entries expire rather than surviving
+// forever.
+const defaultCacheMaxAge = 24 * time.Hour
+
 type fileCache struct {
-	root cacheRoot
+	root   cacheRoot
+	now    func() time.Time
+	maxAge time.Duration
 }
 
 type cacheDocument struct {
@@ -30,8 +38,21 @@ type cacheEntry struct {
 }
 
 // NewFileCache returns a disposable cache rooted at root. The cache does not
-// create its directory until a successful discovery is saved.
-func NewFileCache(root string) Cache { return fileCache{root: cacheRoot(root)} }
+// create its directory until a successful discovery is saved, and entries
+// expire after defaultCacheMaxAge.
+func NewFileCache(root string) Cache { return newFileCache(root, nil, 0) }
+
+// newFileCache lets tests pin the clock and age limit; non-positive values
+// fall back to the defaults.
+func newFileCache(root string, now func() time.Time, maxAge time.Duration) fileCache {
+	if now == nil {
+		now = time.Now
+	}
+	if maxAge <= 0 {
+		maxAge = defaultCacheMaxAge
+	}
+	return fileCache{root: cacheRoot(root), now: now, maxAge: maxAge}
+}
 
 // DefaultCache returns the user cache location, or a disabled cache when the
 // platform does not expose one.
@@ -52,7 +73,20 @@ func (cache fileCache) Load(reviewer string) (Result, bool, error) {
 	if err != nil || !found {
 		return Result{}, found, err
 	}
-	return decodeCachePayload(payload, entry)
+	return decodeCachePayload(payload, entry, cache.now(), cache.maxAge)
+}
+
+// Forget removes the reviewer's cache entry. A missing entry is not an error;
+// the operation is best effort and never blocks discovery on failure.
+func (cache fileCache) Forget(reviewer string) error {
+	entry, err := cache.entry(reviewerID(reviewer))
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(entry.path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("forget discovery cache: %w", err)
+	}
+	return nil
 }
 
 func readCachePayload(entry cacheEntry) ([]byte, bool, error) {
@@ -76,7 +110,7 @@ func readCachePayload(entry cacheEntry) ([]byte, bool, error) {
 	return payload, true, nil
 }
 
-func decodeCachePayload(payload []byte, entry cacheEntry) (Result, bool, error) {
+func decodeCachePayload(payload []byte, entry cacheEntry, now time.Time, maxAge time.Duration) (Result, bool, error) {
 	var document cacheDocument
 	if err := json.Unmarshal(payload, &document); err != nil {
 		return Result{}, false, fmt.Errorf("decode discovery cache: %w", err)
@@ -84,7 +118,20 @@ func decodeCachePayload(payload []byte, entry cacheEntry) (Result, bool, error) 
 	if !validCacheDocument(document, entry) {
 		return Result{}, false, errors.New("discovery cache is not a supported result")
 	}
+	if !cacheEntryIsFresh(document.Result.ObservedAt, now, maxAge) {
+		return Result{}, false, nil
+	}
 	return document.Result, true, nil
+}
+
+// cacheEntryIsFresh reports whether an entry observed at observedAt is still
+// servable. Entries without a usable timestamp or with a future timestamp are
+// never fresh, so a broken clock never promotes stale material.
+func cacheEntryIsFresh(observedAt time.Time, now time.Time, maxAge time.Duration) bool {
+	if observedAt.IsZero() || observedAt.After(now) {
+		return false
+	}
+	return now.Sub(observedAt) <= maxAge
 }
 
 func validCacheDocument(document cacheDocument, entry cacheEntry) bool {

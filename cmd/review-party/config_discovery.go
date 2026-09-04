@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"sort"
@@ -23,13 +24,14 @@ func newConfigDiscoveryCommand(streams commandIO, dependencies configurationDepe
 		if len(args) == 1 {
 			reviewer = args[0]
 		}
-		return commandResult(executeConfigurationDiscovery(cmd.Context(), reviewer, stringFlag(cmd, "format"), streams, dependencies.discoveryService))
+		return commandResult(executeConfigurationDiscovery(cmd.Context(), reviewer, stringFlag(cmd, "format"), boolFlag(cmd, "refresh"), streams, dependencies.discoveryService))
 	})
 	addFormatFlag(cmd)
+	cmd.Flags().Bool("refresh", false, "Discard any cached result for the observed Reviewer before discovery")
 	return cmd
 }
 
-func executeConfigurationDiscovery(ctx context.Context, reviewer, format string, streams commandIO, discoveryService func() *discovery.Service) int {
+func executeConfigurationDiscovery(ctx context.Context, reviewer, format string, refresh bool, streams commandIO, discoveryService func() *discovery.Service) int {
 	if err := validateConfigurationFormat(format); err != nil {
 		return printConfigFailure(format, streams.output, streams.errors, err)
 	}
@@ -39,6 +41,11 @@ func executeConfigurationDiscovery(ctx context.Context, reviewer, format string,
 	service := discoveryService()
 	if service == nil {
 		return printConfigFailure(format, streams.output, streams.errors, fmt.Errorf("discovery service is unavailable"))
+	}
+	if refresh {
+		if err := forgetDiscoveryCache(service, reviewer); err != nil {
+			return printConfigFailure(format, streams.output, streams.errors, err)
+		}
 	}
 	if reviewer != "" {
 		if !containsString(service.Reviewers(), reviewer) {
@@ -51,6 +58,26 @@ func executeConfigurationDiscovery(ctx context.Context, reviewer, format string,
 	results := service.DiscoverMany(ctx, nil)
 	flushDiscoveryCache(ctx, service)
 	return printDiscoveryResults(discoveryOutput{format: format, stdout: streams.output, stderr: streams.errors}, results)
+}
+
+// forgetDiscoveryCache discards cached results before a refresh. Without a
+// Reviewer every known Reviewer entry is discarded; failures are joined so
+// one unreadable entry does not hide the others.
+func forgetDiscoveryCache(service *discovery.Service, reviewer string) error {
+	reviewers := service.Reviewers()
+	if reviewer != "" {
+		if !containsString(reviewers, reviewer) {
+			return fmt.Errorf("unknown Reviewer %q; expected %v", reviewer, reviewers)
+		}
+		reviewers = []string{reviewer}
+	}
+	var failures []error
+	for _, known := range reviewers {
+		if _, err := service.ForgetCached(known); err != nil {
+			failures = append(failures, err)
+		}
+	}
+	return errors.Join(failures...)
 }
 
 func flushDiscoveryCache(ctx context.Context, service *discovery.Service) {
