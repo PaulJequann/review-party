@@ -8,6 +8,8 @@ import (
 	"os"
 	"os/exec"
 	"reviewparty/internal/model"
+	"runtime"
+	"sync"
 )
 
 type workingChangesCapture struct {
@@ -48,13 +50,60 @@ func workingChangesBase(repositoryRoot string) string {
 	return "HEAD"
 }
 
+// untrackedPatchResult carries one file's diff back to the stitching loop.
+type untrackedPatchResult struct {
+	index int
+	patch []byte
+	err   error
+}
+
+// combineWorkingChangePatches diffs every untracked file against the empty
+// tree and appends the patches after the tracked patch. The diffs run in
+// parallel because each one spawns a git subprocess, which dominates capture
+// time for repositories with many untracked files; results are stitched back
+// in listing order so the patch stays deterministic. A file that vanishes or
+// becomes unreadable between listing and diffing yields an empty patch: git
+// reports an inaccessible file through exit code 1, the same code it uses for
+// a real diff with no content.
 func combineWorkingChangePatches(repositoryRoot string, trackedPatch []byte, untrackedPaths []string) ([]byte, error) {
-	patch := bytes.NewBuffer(trackedPatch)
-	for _, path := range untrackedPaths {
-		untrackedPatch, err := gitDiffNoIndex(repositoryRoot, []string{"--binary"}, os.DevNull, path)
-		if err != nil {
-			return nil, fmt.Errorf("capture untracked file %q: %w", path, err)
+	patches := make([][]byte, len(untrackedPaths))
+	results := make(chan untrackedPatchResult, len(untrackedPaths))
+	next := make(chan int)
+	lanes := min(runtime.NumCPU(), len(untrackedPaths))
+	var group sync.WaitGroup
+	for range lanes {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			for index := range next {
+				untrackedPatch, err := gitDiffNoIndex(repositoryRoot, []string{"--binary"}, os.DevNull, untrackedPaths[index])
+				results <- untrackedPatchResult{index: index, patch: untrackedPatch, err: err}
+			}
+		}()
+	}
+	for index := range untrackedPaths {
+		next <- index
+	}
+	close(next)
+	group.Wait()
+	close(results)
+
+	var failure error
+	for result := range results {
+		if result.err != nil {
+			if failure == nil {
+				failure = fmt.Errorf("capture untracked file %q: %w", untrackedPaths[result.index], result.err)
+			}
+			continue
 		}
+		patches[result.index] = result.patch
+	}
+	if failure != nil {
+		return nil, failure
+	}
+
+	patch := bytes.NewBuffer(trackedPatch)
+	for _, untrackedPatch := range patches {
 		patch.Write(untrackedPatch)
 	}
 	if patch.Len() == 0 {
