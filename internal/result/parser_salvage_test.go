@@ -144,3 +144,83 @@ func TestPartialResultRoundTripsThroughJSON(t *testing.T) {
 		t.Fatalf("status = %q, want %q", loaded.Status, model.ResultFindingsPartial)
 	}
 }
+
+func TestSalvageSurvivesMalformedHeaderBetweenValidFindings(t *testing.T) {
+	// The second section has an unsupported severity in its header. The
+	// lenient anchor still delimits it, so the strict header failure only
+	// drops section 2 and both neighbouring findings survive.
+	review := `BEGIN_REVIEW
+status: findings
+
+1. HIGH | correctness | first.go:3
+Failure: First failure.
+Evidence: First evidence.
+Fix: First correction.
+Test: First regression.
+
+2. LOW | maintainability | second.go:8
+Failure: Second failure.
+Evidence: Second evidence.
+Fix: Second correction.
+Test: Second regression.
+
+3. HIGH | correctness | third.go:12
+Failure: Third failure.
+Evidence: Third evidence.
+Fix: Third correction.
+Test: Third regression.
+END_REVIEW`
+	result, err := parseReviewResult(review)
+	if err == nil {
+		t.Fatal("partial review was accepted without an incompleteness error")
+	}
+	if !strings.Contains(err.Error(), "section 2") {
+		t.Fatalf("error = %v, want section 2 to be the dropped one", err)
+	}
+	if result.Status != ResultFindingsPartial {
+		t.Fatalf("status = %q, want %q", result.Status, ResultFindingsPartial)
+	}
+	if len(result.Findings) != 2 {
+		t.Fatalf("findings = %#v, want the two well-formed neighbours", result.Findings)
+	}
+	if result.Findings[0].Location != "first.go:3" || result.Findings[1].Location != "third.go:12" {
+		t.Fatalf("findings = %#v, want sections 1 and 3 salvaged", result.Findings)
+	}
+	if result.Findings[0].Ordinal != 1 || result.Findings[1].Ordinal != 2 {
+		t.Fatalf("ordinals = %d, %d; want renumbered 1, 2", result.Findings[0].Ordinal, result.Findings[1].Ordinal)
+	}
+}
+
+func TestSalvageSurvivesMalformedFirstHeader(t *testing.T) {
+	// The first section's header is missing its severity entirely, so the
+	// old boundary detection failed the ordinal check outright; now only
+	// section 1 is dropped and the well-formed second finding survives.
+	review := `BEGIN_REVIEW
+status: findings
+
+1. correctness | broken.go:1
+Failure: Broken failure.
+Evidence: Broken evidence.
+Fix: Broken correction.
+Test: Broken regression.
+
+2. HIGH | correctness | healthy.go:3
+Failure: Healthy failure.
+Evidence: Healthy evidence.
+Fix: Healthy correction.
+Test: Healthy regression.
+END_REVIEW`
+	result, err := parseReviewResult(review)
+	if err == nil {
+		t.Fatal("partial review was accepted without an incompleteness error")
+	}
+	if !strings.Contains(err.Error(), "section 1") {
+		t.Fatalf("error = %v, want section 1 to be the dropped one", err)
+	}
+	if len(result.Findings) != 1 || result.Findings[0].Location != "healthy.go:3" {
+		t.Fatalf("findings = %#v, want the surviving second finding", result.Findings)
+	}
+	if result.Findings[0].Ordinal != 1 {
+		t.Fatalf("ordinal = %d, want renumbered to 1", result.Findings[0].Ordinal)
+	}
+}

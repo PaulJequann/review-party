@@ -19,23 +19,25 @@ type findingField struct {
 // parseFindingSections parses every finding section. A malformed section is
 // recorded as a salvage reason instead of failing the whole review, but the
 // slice of salvage reasons is non-empty whenever any section was dropped, so
-// the caller cannot mistake partial output for a fully valid parse.
-func parseFindingSections(review string, locations [][]int) ([]model.Finding, []salvageReason, error) {
+// the caller cannot mistake partial output for a fully valid parse. Sections
+// are delimited by lenient anchors (a numbered line) rather than by strict
+// headers, so a malformed header only drops its own section.
+func parseFindingSections(review string, locations []sectionLocation) ([]model.Finding, []salvageReason, error) {
 	findings := make([]model.Finding, 0, len(locations))
 	salvage := []salvageReason{}
 	parsed := make([]model.Finding, 0, len(locations))
 	ordinals := make([]int, 0, len(locations))
 	for index, location := range locations {
-		end := len(review)
-		if index+1 < len(locations) {
-			end = locations[index+1][0]
-		}
-		ordinal, headerErr := sectionOrdinal(findingSection(review[location[0]:end]))
+		section := review[location.start:location.end]
+		ordinal, headerErr := sectionOrdinal(findingSection(section))
 		if headerErr != nil {
+			// The lenient anchor guarantees an ordinal prefix, but a
+			// non-numeric or missing one is a structural failure the whole
+			// review cannot recover from.
 			return nil, nil, headerErr
 		}
 		ordinals = append(ordinals, ordinal)
-		finding, err := parseFinding(findingSection(review[location[0]:end]))
+		finding, err := parseFinding(findingSection(section))
 		if err != nil {
 			salvage = append(salvage, salvageReason{sectionIndex: index, cause: err})
 			continue
@@ -59,10 +61,12 @@ func parseFindingSections(review string, locations [][]int) ([]model.Finding, []
 
 // sectionOrdinal reads the header ordinal of one finding section, including
 // sections that later fail strict field parsing, so the whole-review ordinal
-// sequence can be validated across every declared section.
+// sequence can be validated across every declared section. The ordinal comes
+// from the same lenient anchor that delimited the section; whether the rest
+// of the header is well-formed is decided per-section by the salvage tier.
 func sectionOrdinal(section findingSection) (int, error) {
-	match := findingHeader.FindStringSubmatch(strings.Split(string(section), "\n")[0])
-	if len(match) != 5 {
+	match := findingAnchor.FindStringSubmatch(strings.Split(string(section), "\n")[0])
+	if len(match) != 2 {
 		return 0, errors.New("finding header is malformed")
 	}
 	ordinal := 0

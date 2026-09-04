@@ -23,6 +23,35 @@ type salvageReason struct {
 
 var findingHeader = regexp.MustCompile(`(?m)^(\d+)\. (MEDIUM|HIGH|CRITICAL) \| ([^|]+) \| (.+)$`)
 
+// findingAnchor leniently spots the start of a numbered section: a line
+// beginning with an ordinal and a dot. Strict header validation happens
+// per-section afterwards, so a malformed header no longer hides its section
+// boundary and merges it into the previous finding.
+var findingAnchor = regexp.MustCompile(`(?m)^(\d+)\. `)
+
+// sectionLocation delimits one finding section in the review text.
+type sectionLocation struct {
+	start int
+	end   int
+}
+
+// findingSectionLocations delimits every numbered finding section: each
+// anchor runs to the next anchor or the end of the review. Sections that
+// fail strict validation are salvaged individually without dropping their
+// well-formed neighbours.
+func findingSectionLocations(review string) []sectionLocation {
+	anchors := findingAnchor.FindAllStringIndex(review, -1)
+	locations := make([]sectionLocation, 0, len(anchors))
+	for index, anchor := range anchors {
+		end := len(review)
+		if index+1 < len(anchors) {
+			end = anchors[index+1][0]
+		}
+		locations = append(locations, sectionLocation{start: anchor[0], end: end})
+	}
+	return locations
+}
+
 func parseReviewResult(assistantText string) (model.ReviewResult, error) {
 	review, err := extractLastReview(assistantText)
 	if err != nil {
@@ -85,11 +114,11 @@ func parseFindings(review string, body []string) (model.ReviewResult, error) {
 	if countExact(body, "status: findings") != 1 || countExact(body, "status: clean") != 0 {
 		return model.ReviewResult{}, errors.New("findings review has contradictory status")
 	}
-	headerLocations := findingHeader.FindAllStringSubmatchIndex(review, -1)
-	if err := validateFindingCount(headerLocations); err != nil {
+	sectionLocations := findingSectionLocations(review)
+	if err := validateFindingCount(sectionLocations); err != nil {
 		return model.ReviewResult{}, err
 	}
-	findings, salvage, err := parseFindingSections(review, headerLocations)
+	findings, salvage, err := parseFindingSections(review, sectionLocations)
 	if err != nil {
 		return model.ReviewResult{}, err
 	}
@@ -126,7 +155,7 @@ func partialFindings(review string, findings []model.Finding, salvage []salvageR
 	return result, fmt.Errorf("review result is incomplete: dropped %d malformed finding section(s): %s", len(salvage), strings.Join(details, "; "))
 }
 
-func validateFindingCount(locations [][]int) error {
+func validateFindingCount(locations []sectionLocation) error {
 	if len(locations) == 0 {
 		return errors.New("findings review must contain one to eight findings")
 	}
