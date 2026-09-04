@@ -164,6 +164,56 @@ func TestReviewExplicitProfileEmitsProgressEvents(t *testing.T) {
 	}
 }
 
+// TestRunProgressStartedWaitsForConcurrencyGate pins the gate contract: with
+// three members at concurrency limit two, no third running line may appear
+// while two members execute, and every start pairs with a finish — so a
+// running line never includes launch-queue time.
+func TestRunProgressStartedWaitsForConcurrencyGate(t *testing.T) {
+	repository := changedTestRepository(t)
+	recorder := &runProgressRecorder{}
+	const limit = 2
+	executor := &scriptedExecutor{
+		availability: availability{Available: true},
+		execute: func(ctx context.Context, spec attemptSpec) attemptExecution {
+			select {
+			case <-ctx.Done():
+				return contextExecution(ctx.Err())
+			case <-time.After(20 * time.Millisecond):
+				return attemptExecution{AssistantText: cleanReview, Outcome: model.AttemptCompleted}
+			}
+		},
+	}
+	conductor := testPartyConductor(t, map[string]attemptExecutor{defaultReviewer: executor})
+	writeRepositorySelection(t, repository, configuration.ReviewSelection{
+		ConcurrencyLimit: limit,
+		Global:           []configuration.SelectionItem{{Profile: "bugs"}, {Profile: "code-quality"}, {Profile: "documentation"}},
+		Repository:       []configuration.SelectionItem{},
+	})
+	conductor.progress = recorder.record
+
+	bundle := runRun(t, conductor, model.RunSelection{Repository: repository, Subject: model.WorkingChanges()})
+
+	events := recorder.collected()
+	if len(events) != len(bundle.Members)*2 {
+		t.Fatalf("events = %d, want %d (start+finish per member)", len(events), len(bundle.Members)*2)
+	}
+	running := 0
+	for index, event := range events {
+		switch event.Kind {
+		case model.RunProgressStarted:
+			running++
+			if running > limit {
+				t.Fatalf("event %d reports %d running members with concurrency limit %d: %#v", index, running, limit, event)
+			}
+		case model.RunProgressFinished:
+			running--
+		}
+	}
+	if running != 0 {
+		t.Fatalf("events leave %d members running without a finish", running)
+	}
+}
+
 func progressEventsForMember(events []model.RunProgressEvent, member model.BundleMember) (*model.RunProgressEvent, *model.RunProgressEvent) {
 	var started, finished *model.RunProgressEvent
 	for index := range events {

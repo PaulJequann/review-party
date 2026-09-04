@@ -165,6 +165,9 @@ func (conductor *Conductor) executeBundleConcurrent(ctx context.Context, ledger 
 	runContext, cancel := context.WithCancel(ctx)
 	defer cancel()
 	runContext = context.WithValue(runContext, attemptGateContextKey{}, make(chan struct{}, prepared.bundle.ConcurrencyLimit))
+	// Progress admission mirrors the attempt limit so a queued member reports
+	// running only when the limit actually starts its execution.
+	runContext = context.WithValue(runContext, progressGateContextKey{}, make(chan struct{}, prepared.bundle.ConcurrencyLimit))
 	bundle := prepared.bundle
 	bundle.Lifecycle = model.LifecycleRunning
 	bundle.UpdatedAt = conductor.now().UTC()
