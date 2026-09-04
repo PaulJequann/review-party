@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	resultContractRevision = "canonical-v2"
+	resultContractRevision = "canonical-v3"
 	cleanReviewExample     = `BEGIN_REVIEW
 status: clean
 summary: No actionable findings.

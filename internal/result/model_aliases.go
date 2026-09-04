@@ -9,6 +9,7 @@ type ReviewSubject = model.ReviewSubject
 
 const ResultClean = model.ResultClean
 const ResultFindings = model.ResultFindings
+const ResultFindingsPartial = model.ResultFindingsPartial
 
 // AttemptInvalidResult keeps the model constant available to result-package tests.
 const AttemptInvalidResult = model.AttemptInvalidResult

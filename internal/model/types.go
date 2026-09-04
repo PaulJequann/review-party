@@ -570,6 +570,11 @@ type ResultStatus string
 const (
 	ResultClean    ResultStatus = "clean"
 	ResultFindings ResultStatus = "findings"
+	// ResultFindingsPartial marks a salvaged review result: its well-formed
+	// findings were preserved, but at least one malformed finding section was
+	// dropped, so the review stays incomplete and can never claim a clean or
+	// fully complete conclusion.
+	ResultFindingsPartial ResultStatus = "findings_partial"
 )
 
 type ReviewResult struct {
