@@ -14,7 +14,43 @@ const (
 	MaxResultSize = 24_576
 )
 
+// salvageReason explains why one finding section was dropped when an
+// otherwise-usable findings review was salvaged.
+type salvageReason struct {
+	sectionIndex int
+	cause        error
+}
+
 var findingHeader = regexp.MustCompile(`(?m)^(\d+)\. (MEDIUM|HIGH|CRITICAL) \| ([^|]+) \| (.+)$`)
+
+// findingAnchor leniently spots the start of a numbered section: a line
+// beginning with an ordinal and a dot. Strict header validation happens
+// per-section afterwards, so a malformed header no longer hides its section
+// boundary and merges it into the previous finding.
+var findingAnchor = regexp.MustCompile(`(?m)^(\d+)\. `)
+
+// sectionLocation delimits one finding section in the review text.
+type sectionLocation struct {
+	start int
+	end   int
+}
+
+// findingSectionLocations delimits every numbered finding section: each
+// anchor runs to the next anchor or the end of the review. Sections that
+// fail strict validation are salvaged individually without dropping their
+// well-formed neighbours.
+func findingSectionLocations(review string) []sectionLocation {
+	anchors := findingAnchor.FindAllStringIndex(review, -1)
+	locations := make([]sectionLocation, 0, len(anchors))
+	for index, anchor := range anchors {
+		end := len(review)
+		if index+1 < len(anchors) {
+			end = anchors[index+1][0]
+		}
+		locations = append(locations, sectionLocation{start: anchor[0], end: end})
+	}
+	return locations
+}
 
 func parseReviewResult(assistantText string) (model.ReviewResult, error) {
 	review, err := extractLastReview(assistantText)
@@ -54,7 +90,7 @@ func reviewBody(review string) ([]string, error) {
 	}
 	body := nonemptyLines(lines[1 : len(lines)-1])
 	if len(body) == 0 {
-		return nil, errors.New("review result has no status")
+		return nil, errors.New("review result has no status line")
 	}
 	return body, nil
 }
@@ -69,27 +105,57 @@ func parseCleanReview(review string, body []string) (model.ReviewResult, error) 
 	return model.ReviewResult{Status: model.ResultClean, Summary: "No actionable findings.", Findings: []model.Finding{}, Raw: review}, nil
 }
 
+// parseFindings validates a findings review strictly first. When strict
+// parsing fails only on malformed finding sections and at least one
+// well-formed finding survives, it returns the salvaged partial result
+// together with an incompleteness error; the caller decides whether that
+// partial evidence is acceptable. Everything else stays a hard error.
 func parseFindings(review string, body []string) (model.ReviewResult, error) {
 	if countExact(body, "status: findings") != 1 || countExact(body, "status: clean") != 0 {
 		return model.ReviewResult{}, errors.New("findings review has contradictory status")
 	}
-	headerLocations := findingHeader.FindAllStringSubmatchIndex(review, -1)
-	if err := validateFindingCount(headerLocations); err != nil {
+	sectionLocations := findingSectionLocations(review)
+	if err := validateFindingCount(sectionLocations); err != nil {
 		return model.ReviewResult{}, err
 	}
-	findings, err := parseFindingSections(review, headerLocations)
+	findings, salvage, err := parseFindingSections(review, sectionLocations)
 	if err != nil {
 		return model.ReviewResult{}, err
 	}
-	return model.ReviewResult{
-		Status:   model.ResultFindings,
-		Summary:  fmt.Sprintf("%d actionable finding(s).", len(findings)),
-		Findings: findings,
-		Raw:      review,
-	}, nil
+	if len(salvage) == 0 {
+		return model.ReviewResult{
+			Status:   model.ResultFindings,
+			Summary:  fmt.Sprintf("%d actionable finding(s).", len(findings)),
+			Findings: findings,
+			Raw:      review,
+		}, nil
+	}
+	if len(findings) == 0 {
+		// Nothing usable survived, so there is no partial evidence to
+		// preserve; the strict failure stands.
+		return model.ReviewResult{}, errors.New("findings review must contain one to eight findings")
+	}
+	return partialFindings(review, findings, salvage)
 }
 
-func validateFindingCount(locations [][]int) error {
+// partialFindings builds the explicitly-partial result and the paired
+// incompleteness error. The error names every dropped section so no caller
+// can mistake the salvage for a fully clean parse.
+func partialFindings(review string, findings []model.Finding, salvage []salvageReason) (model.ReviewResult, error) {
+	details := make([]string, 0, len(salvage))
+	for _, reason := range salvage {
+		details = append(details, fmt.Sprintf("section %d: %s", reason.sectionIndex+1, reason.cause.Error()))
+	}
+	result := model.ReviewResult{
+		Status:   model.ResultFindingsPartial,
+		Summary:  fmt.Sprintf("%d actionable finding(s); at least one finding section was malformed and dropped.", len(findings)),
+		Findings: findings,
+		Raw:      review,
+	}
+	return result, fmt.Errorf("review result is incomplete: dropped %d malformed finding section(s): %s", len(salvage), strings.Join(details, "; "))
+}
+
+func validateFindingCount(locations []sectionLocation) error {
 	if len(locations) == 0 {
 		return errors.New("findings review must contain one to eight findings")
 	}

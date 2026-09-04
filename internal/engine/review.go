@@ -169,6 +169,20 @@ func applyAttemptResult(record *model.ReviewRecord, result model.ReviewResult, e
 		record.Lifecycle = model.LifecycleCompleted
 		return outcome
 	}
+	// A completed attempt can still contribute salvaged, explicitly-partial
+	// evidence. The review stays incomplete — partial evidence never reports
+	// a fully clean or fully complete lifecycle — and the paired error names
+	// every dropped section.
+	if outcome == model.AttemptCompleted && result.Status == model.ResultFindingsPartial {
+		record.Result = &result
+		record.Lifecycle = model.LifecycleIncomplete
+		record.Termination = &model.ReviewTermination{
+			Category: model.TerminationResultValidationFailure,
+			Phase:    model.PhaseResultValidation,
+			Message:  attemptTerminationMessage(model.AttemptInvalidResult, execution.Diagnostic, parseErr),
+		}
+		return outcome
+	}
 	if outcome == model.AttemptCompleted {
 		outcome = model.AttemptInvalidResult
 		record.Lifecycle = model.LifecycleIncomplete
