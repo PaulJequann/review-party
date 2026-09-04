@@ -45,6 +45,9 @@ the saved selection for this one run and never changes configuration.`,
 				repository: stringFlag(cmd, "repo"), subject: subjectReference,
 				format: stringFlag(cmd, "format"), configuration: stringFlag(cmd, "config"),
 			}
+			renderer, sink := newRunProgressSink(options.format, streams.errors)
+			defer renderer.stop()
+			options.progress = sink
 			return commandResult(executeRun(cmd.Context(), options, streams.output, streams.errors))
 		},
 	}
@@ -64,10 +67,11 @@ type runOptions struct {
 	subject       model.SubjectReference
 	format        string
 	configuration string
+	progress      func(model.RunProgressEvent)
 }
 
 func executeRun(ctx context.Context, options runOptions, stdout, stderr io.Writer) int {
-	conductor, err := engine.New(engine.Config{UserConfigurationPath: options.configuration})
+	conductor, err := engine.New(engine.Config{UserConfigurationPath: options.configuration, Progress: options.progress})
 	if err != nil {
 		return printFailure(stderr, err)
 	}

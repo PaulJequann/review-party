@@ -55,7 +55,7 @@ func (conductor *Conductor) ReviewExplicitProfile(ctx context.Context, selection
 	}
 	member := planned.members[0]
 	prepared := planned.preparedSubject.review(member.profile, member.timings)
-	return conductor.runPreparedReview(ctx, prepared, nil, reviewStarted)
+	return conductor.runReviewWithProgress(ctx, prepared, "explicit", 0, 1, reviewStarted)
 }
 
 type plannedSelection struct {
