@@ -41,6 +41,8 @@ type fakeCache struct {
 
 func (cache *fakeCache) Load(string) (Result, bool, error) { return cache.result, cache.found, nil }
 
+func (cache *fakeCache) Forget(string) error { return nil }
+
 func (cache *fakeCache) Save(_ string, result Result) error {
 	cache.mu.Lock()
 	defer cache.mu.Unlock()
@@ -222,12 +224,16 @@ type trackingCache struct {
 	savedDone chan struct{}
 }
 
+func (cache *trackingCache) Forget(string) error { return nil }
+
 type blockingCache struct {
 	started chan struct{}
 	release chan struct{}
 }
 
 func (cache *blockingCache) Load(string) (Result, bool, error) { return Result{}, false, nil }
+
+func (cache *blockingCache) Forget(string) error { return nil }
 
 func (cache *blockingCache) Save(string, Result) error {
 	close(cache.started)

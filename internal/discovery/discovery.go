@@ -100,9 +100,11 @@ type Adapter interface {
 
 // Cache stores only disposable successful discovery material. Implementations
 // must not treat cache bytes as configuration or as proof of current access.
+// Entries expire, and Forget must remove one reviewer's entry.
 type Cache interface {
 	Load(reviewer string) (Result, bool, error)
 	Save(reviewer string, result Result) error
+	Forget(reviewer string) error
 }
 
 // Service runs bounded observations and provides immediate choices to Hub
@@ -376,6 +378,22 @@ func (service *Service) cacheLock(reviewer string) *sync.Mutex {
 
 func validCachedResult(result Result, found bool, err error) bool {
 	return err == nil && found && result.Status == StatusSupported && len(result.Models) > 0
+}
+
+// ForgetCached removes the reviewer's cached result so the next live
+// observation rebuilds it. It reports whether cache material was discarded;
+// a missing or disabled cache is not an error.
+func (service *Service) ForgetCached(reviewer string) (bool, error) {
+	if service.cache == nil {
+		return false, nil
+	}
+	cacheLock := service.cacheLock(reviewer)
+	cacheLock.Lock()
+	defer cacheLock.Unlock()
+	if err := service.cache.Forget(reviewer); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func cacheableResult(result Result) Result {

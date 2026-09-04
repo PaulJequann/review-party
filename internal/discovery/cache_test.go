@@ -10,7 +10,7 @@ import (
 
 func TestFileCacheRoundTripIsPrivateAndStripsTransientFacts(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "model-discovery")
-	cache := NewFileCache(root)
+	cache := newFileCache(root, func() time.Time { return time.Unix(10, 0).UTC() }, 0)
 	want := Result{
 		Reviewer:       "grok",
 		Status:         StatusSupported,
@@ -40,9 +40,9 @@ func TestFileCacheRoundTripIsPrivateAndStripsTransientFacts(t *testing.T) {
 
 func TestFileCacheSaveReplacesExistingEntry(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "model-discovery")
-	cache := NewFileCache(root)
-	first := Result{Reviewer: "grok", Status: StatusSupported, Models: []Model{{ID: "grok-4.5"}}}
-	second := Result{Reviewer: "grok", Status: StatusSupported, Models: []Model{{ID: "grok-4.6"}}}
+	cache := newFileCache(root, func() time.Time { return time.Unix(20, 0).UTC() }, 0)
+	first := Result{Reviewer: "grok", Status: StatusSupported, Models: []Model{{ID: "grok-4.5"}}, ObservedAt: time.Unix(10, 0).UTC()}
+	second := Result{Reviewer: "grok", Status: StatusSupported, Models: []Model{{ID: "grok-4.6"}}, ObservedAt: time.Unix(20, 0).UTC()}
 	if err := cache.Save(first.Reviewer, first); err != nil {
 		t.Fatal(err)
 	}
@@ -67,6 +67,59 @@ func TestFileCacheRejectsSymlinkedEntries(t *testing.T) {
 	}
 	if _, found, err := cache.Load("grok"); err == nil || found {
 		t.Fatalf("symlink load = found %v, error %v", found, err)
+	}
+}
+
+func TestFileCacheLoadExpiresStaleEntry(t *testing.T) {
+	now := time.Unix(10_000, 0)
+	cache := newFileCache(filepath.Join(t.TempDir(), "model-discovery"), func() time.Time { return now }, time.Hour)
+	fresh := Result{Reviewer: "grok", Status: StatusSupported, Models: []Model{{ID: "grok-4.6"}}, ObservedAt: now.Add(-30 * time.Minute)}
+	stale := Result{Reviewer: "grok", Status: StatusSupported, Models: []Model{{ID: "grok-4.5"}}, ObservedAt: now.Add(-2 * time.Hour)}
+	if err := cache.Save(fresh.Reviewer, fresh); err != nil {
+		t.Fatal(err)
+	}
+	if got, found, err := cache.Load("grok"); err != nil || !found || got.Models[0].ID != "grok-4.6" {
+		t.Fatalf("fresh load = %#v, found %v, error %v", got, found, err)
+	}
+	if err := cache.Save(stale.Reviewer, stale); err != nil {
+		t.Fatal(err)
+	}
+	got, found, err := cache.Load("grok")
+	if err != nil || found {
+		t.Fatalf("stale load = %#v, found %v, error %v", got, found, err)
+	}
+}
+
+func TestFileCacheLoadRejectsZeroAndFutureObservedAt(t *testing.T) {
+	now := time.Unix(10_000, 0)
+	for name, observedAt := range map[string]time.Time{"zero": {}, "future": now.Add(time.Hour)} {
+		t.Run(name, func(t *testing.T) {
+			cache := newFileCache(filepath.Join(t.TempDir(), "model-discovery"), func() time.Time { return now }, time.Hour)
+			if err := cache.Save("grok", Result{Reviewer: "grok", Status: StatusSupported, Models: []Model{{ID: "grok-4.6"}}, ObservedAt: observedAt}); err != nil {
+				t.Fatal(err)
+			}
+			if got, found, err := cache.Load("grok"); err != nil || found {
+				t.Fatalf("load = %#v, found %v, error %v", got, found, err)
+			}
+		})
+	}
+}
+
+func TestFileCacheForgetRemovesEntry(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "model-discovery")
+	cache := NewFileCache(root)
+	result := Result{Reviewer: "grok", Status: StatusSupported, Models: []Model{{ID: "grok-4.6"}}, ObservedAt: time.Unix(10, 0).UTC()}
+	if err := cache.Save(result.Reviewer, result); err != nil {
+		t.Fatal(err)
+	}
+	if err := cache.Forget("grok"); err != nil {
+		t.Fatal(err)
+	}
+	if _, found, err := cache.Load("grok"); err != nil || found {
+		t.Fatalf("load after forget = found %v, error %v", found, err)
+	}
+	if err := cache.Forget("grok"); err != nil {
+		t.Fatalf("forget of missing entry = %v", err)
 	}
 }
 
