@@ -69,7 +69,11 @@ func combineWorkingChangePatches(repositoryRoot string, trackedPatch []byte, unt
 	patches := make([][]byte, len(untrackedPaths))
 	results := make(chan untrackedPatchResult, len(untrackedPaths))
 	next := make(chan int)
-	lanes := min(runtime.NumCPU(), len(untrackedPaths))
+	// GOMAXPROCS(0) instead of runtime.NumCPU(): containers may cap CPU via
+	// cgroup quota or an explicit GOMAXPROCS below the affinity mask, and
+	// oversubscribing that limit makes parallel capture slower than
+	// sequential capture.
+	lanes := min(runtime.GOMAXPROCS(0), len(untrackedPaths))
 	var group sync.WaitGroup
 	for range lanes {
 		group.Add(1)
