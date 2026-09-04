@@ -151,7 +151,7 @@ func (conductor *Conductor) executeBundleSequential(ctx context.Context, ledger 
 		if err := ctx.Err(); err != nil {
 			return conductor.stopBundle(ledger, &bundle, evalFailureCategory(err), err)
 		}
-		record, err := conductor.runPreparedReview(ctx, prepared.members[index], nil, conductor.now().UTC())
+		record, err := conductor.runReviewWithProgress(ctx, prepared.members[index], bundleMemberScope(bundle, index), index, len(prepared.members), conductor.now().UTC())
 		var hardErr error
 		bundle, hardErr = conductor.absorbBundleMember(ledger, bundle, concurrentMemberResult{index: index, record: record, err: err})
 		if hardErr != nil {
@@ -205,11 +205,25 @@ func (conductor *Conductor) launchBundleMembers(ctx context.Context, prepared pr
 		}
 		started++
 		go func(index int, member preparedReview) {
-			record, err := conductor.runPreparedReview(ctx, member, nil, conductor.now().UTC())
+			record, err := conductor.runReviewWithProgress(ctx, member, bundleMemberScope(prepared.bundle, index), index, len(prepared.members), conductor.now().UTC())
 			results <- concurrentMemberResult{index: index, record: record, err: err}
 		}(index, prepared.members[index])
 	}
 	return started, nil
+}
+
+// bundleMemberScope names the selection scope at index. An explicit Profile or
+// Party run reports the "explicit" origin; saved selections report the member's
+// authored scope. The renderer combines it with the Profile name.
+func bundleMemberScope(bundle model.ReviewBundle, index int) string {
+	if index < 0 || index >= len(bundle.Members) {
+		return ""
+	}
+	member := bundle.Members[index]
+	if member.Origin == "explicit" {
+		return member.Origin
+	}
+	return member.Scope
 }
 
 func (conductor *Conductor) absorbPendingBundleResults(ledger store.BundleStore, bundle model.ReviewBundle, results chan concurrentMemberResult, pending int) (model.ReviewBundle, error) {

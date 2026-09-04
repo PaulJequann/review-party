@@ -21,6 +21,9 @@ type Config struct {
 	// UserConfigurationPath optionally overrides the canonical Global
 	// Configuration file location for tests and explicit --config flags.
 	UserConfigurationPath string
+	// Progress optionally receives live per-reviewer events while a run
+	// executes. A nil sink keeps execution fully silent.
+	Progress func(model.RunProgressEvent)
 }
 
 type Conductor struct {
@@ -34,6 +37,7 @@ type Conductor struct {
 	retryDelay          func(model.RetryPolicy, int, time.Duration) time.Duration
 	wait                func(context.Context, time.Duration) error
 	runner              *reviewRunner
+	progress            func(model.RunProgressEvent)
 }
 
 func New(config Config) (*Conductor, error) {
@@ -53,7 +57,7 @@ func New(config Config) (*Conductor, error) {
 	// Repository-scoped profile compilation applies the complete Global and
 	// Repository reviewer policy before validating a selection.
 	reviewers := defaultReviewerCatalog()
-	conductor, err := newConductorWithManager(store, reviewers, manager, config.AttemptDeadline)
+	conductor, err := newConductorWithManagerAndProgress(store, reviewers, manager, config.AttemptDeadline, config.Progress)
 	if err != nil {
 		return nil, err
 	}
@@ -66,6 +70,12 @@ func New(config Config) (*Conductor, error) {
 }
 
 func newConductorWithManager(store store.RecordStore, reviewers reviewerCatalog, manager *configuration.Manager, deadline time.Duration) (*Conductor, error) {
+	return newConductorWithManagerAndProgress(store, reviewers, manager, deadline, nil)
+}
+
+// newConductorWithManagerAndProgress shares newConductorWithManager's
+// construction; the progress sink is nil for silent paths.
+func newConductorWithManagerAndProgress(store store.RecordStore, reviewers reviewerCatalog, manager *configuration.Manager, deadline time.Duration, progress func(model.RunProgressEvent)) (*Conductor, error) {
 	if manager == nil {
 		return nil, errConfigurationNotConfigured
 	}
@@ -78,6 +88,7 @@ func newConductorWithManager(store store.RecordStore, reviewers reviewerCatalog,
 		buildProvenance:     provenance.CurrentRuntimeProvenance,
 		retryDelay:          retryDelay,
 		wait:                waitForRetry,
+		progress:            progress,
 	}
 	conductor.runner = newReviewRunner(store, func() time.Time { return conductor.now() }, func() model.RuntimeProvenance { return conductor.buildProvenance() }, newArtifactPublisher(nil))
 	return conductor, nil

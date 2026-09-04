@@ -234,6 +234,33 @@ type BundleTermination struct {
 	Message  string              `json:"message"`
 }
 
+// RunProgressKind distinguishes the live progress facts emitted during a run.
+type RunProgressKind string
+
+const (
+	RunProgressStarted  RunProgressKind = "started"
+	RunProgressFinished RunProgressKind = "finished"
+)
+
+// RunProgressEvent is one live per-reviewer progress fact emitted while a run
+// executes. Kind distinguishes member start from completion.
+type RunProgressEvent struct {
+	Kind         RunProgressKind `json:"kind"`
+	Index        int             `json:"index"`
+	Total        int             `json:"total"`
+	Scope        string          `json:"scope"`
+	Profile      string          `json:"profile"`
+	Reviewer     string          `json:"reviewer"`
+	Model        string          `json:"model"`
+	ReviewID     ReviewID        `json:"review_id,omitempty"`
+	Lifecycle    Lifecycle       `json:"lifecycle,omitempty"`
+	Status       string          `json:"status,omitempty"`
+	FindingCount int             `json:"finding_count,omitempty"`
+	ElapsedMS    int64           `json:"elapsed_ms,omitempty"`
+	Message      string          `json:"message,omitempty"`
+}
+
+// ReviewBundle records the executed selection behind one run.
 type ReviewBundle struct {
 	ID               ReviewBundleID     `json:"id"`
 	Revision         string             `json:"revision"`
