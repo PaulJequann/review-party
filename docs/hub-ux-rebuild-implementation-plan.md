@@ -4,6 +4,15 @@ Status: **Slices R1-R5 complete** — R5 landed 2026-08-30. Reconciled against
 [configuration-hub-implementation-plan.md](configuration-hub-implementation-plan.md)
 (Slices 1-8 complete); see "Relationship to the existing plan" below.
 
+Post-R5 menu simplification (2026-09-07): the menu pane is one line per
+destination, area descriptions render only in the focused context pane, the
+redundant Advanced menu row was removed (Profile copy lives in the Profiles
+browser via `p`, and accessible mode gained an explicit copy option), and
+counts render only when meaningful. Dogfooding also exposed and fixed an
+accessible-mode defect: the editor loop reused the program-start snapshot, so
+Profiles published mid-session were invisible to the copy and reference
+forms until restart.
+
 ## Problem
 
 `review-party config` feels broken and boring because of how it is

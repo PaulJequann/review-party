@@ -23,13 +23,13 @@ import (
 type Area string
 
 const (
-	AreaOverview Area = "Overview"
-	AreaProfiles Area = "Profiles"
-	AreaParties  Area = "Parties"
-	AreaReviews  Area = "Repository Reviews"
-	AreaAdvanced Area = "Advanced"
-	AreaChanges  Area = "Review Changes"
-	areaSearch   Area = "Search"
+	AreaOverview    Area = "Overview"
+	AreaProfiles    Area = "Profiles"
+	AreaParties     Area = "Parties"
+	AreaReviews     Area = "Repository Reviews"
+	AreaChanges     Area = "Review Changes"
+	areaCopyProfile Area = "Copy Profile"
+	areaSearch      Area = "Search"
 )
 
 // ItemKind identifies one Hub inventory category.
@@ -82,8 +82,9 @@ func newAreaSpecs() []areaSpec {
 		{area: AreaProfiles, kind: itemProfile, description: "Browse Profiles and create or copy one.", menu: true, action: (*editor).createProfile, render: renderInventoryArea},
 		{area: AreaParties, kind: itemParty, description: "Browse flat Parties and create one.", menu: true, action: (*editor).createParty, render: renderInventoryArea},
 		{area: AreaReviews, kind: itemReview, description: "Assemble the ordered Repository Review selection.", menu: true, action: (*editor).editReviews, render: renderInventoryArea},
-		{area: AreaAdvanced, description: "Copy a Repository Profile to Global Configuration.", menu: true, action: (*editor).copyProfile, render: renderActionArea},
 		{area: AreaChanges, description: "Review or discard unfinished drafts.", menu: true, action: (*editor).reviewDrafts, render: renderActionArea},
+		// Unlisted: reachable from the accessible-mode action select, not the menu.
+		{area: areaCopyProfile, description: "Copy a Repository Profile to Global Configuration.", action: (*editor).copyProfile, render: renderActionArea},
 		{area: areaSearch, action: (*editor).search, render: renderSearchArea},
 	}
 }
@@ -351,7 +352,7 @@ func (model Model) browserNew() (tea.Model, tea.Cmd) {
 }
 
 func (model Model) browserCopy() (tea.Model, tea.Cmd) {
-	if model.browserArea != AreaProfiles && model.browserArea != AreaAdvanced {
+	if model.browserArea != AreaProfiles {
 		return model, nil
 	}
 	return model.withForm(model.openCopyForm())
@@ -490,10 +491,13 @@ func (model Model) renderTitleRow(options renderOptions) string {
 func (model Model) renderMenuRow(index int, spec areaSpec, rowWidth int, options renderOptions) string {
 	label := string(spec.area)
 	indicator := model.menuDraftIndicator(spec, options)
-	count := fmt.Sprintf("%d", model.menuAreaCount(spec))
-	gap := max(rowWidth-menuGutterWidth-lipgloss.Width(label+indicator)-lipgloss.Width(count), 2)
-	return model.menuCursor(index, options) + model.menuLabel(index, label, options) + indicator +
-		strings.Repeat(" ", gap) + model.menuCountLabel(count, options)
+	row := model.menuCursor(index, options) + model.menuLabel(index, label, options) + indicator
+	if count := model.menuAreaCount(spec); count > 0 {
+		text := fmt.Sprintf("%d", count)
+		gap := max(rowWidth-menuGutterWidth-lipgloss.Width(label+indicator)-lipgloss.Width(text), 2)
+		row += strings.Repeat(" ", gap) + model.menuCountLabel(text, options)
+	}
+	return row
 }
 
 func (model Model) menuDraftIndicator(spec areaSpec, options renderOptions) string {
@@ -533,15 +537,15 @@ func (model Model) menuCountLabel(count string, options renderOptions) string {
 func (model Model) menuAreaCount(spec areaSpec) int {
 	switch spec.area {
 	case AreaOverview:
-		return len(model.snapshot.Items)
+		return 0 // the overview pane is contextual, not a count
+	case areaCopyProfile:
+		return 0 // unlisted from the menu; never counted
 	case AreaProfiles:
 		return model.countItems(itemProfile)
 	case AreaParties:
 		return model.countItems(itemParty)
 	case AreaReviews:
 		return model.countItems(itemReview)
-	case AreaAdvanced:
-		return model.countScopedItems(itemProfile, ItemScope("repository"))
 	case AreaChanges:
 		return len(model.drafts.descriptions())
 	case areaSearch:
@@ -555,16 +559,6 @@ func (model Model) countItems(kind ItemKind) int {
 	count := 0
 	for _, item := range model.snapshot.Items {
 		if item.Kind == kind {
-			count++
-		}
-	}
-	return count
-}
-
-func (model Model) countScopedItems(kind ItemKind, scope ItemScope) int {
-	count := 0
-	for _, item := range model.snapshot.Items {
-		if item.Kind == kind && item.Scope == scope {
 			count++
 		}
 	}
@@ -613,11 +607,9 @@ func (model Model) renderMenuPane(width int, options renderOptions, footer strin
 	rowWidth := max(width-4, 1)
 	for index, spec := range menuAreaSpecs() {
 		content.WriteString(model.renderMenuRow(index, spec, rowWidth, options))
-		content.WriteString("\n   ")
-		content.WriteString(spec.description)
 		content.WriteString("\n")
 	}
-	title := "Areas"
+	title := "Menu"
 	if options.styled {
 		title = sectionTitleStyle.Render(title)
 	}
@@ -747,7 +739,6 @@ func (model Model) menuCursorLine() int {
 			return line
 		}
 		line += wrappedLineCount(model.renderMenuRow(index, spec, innerWidth, renderOptions{styled: true}), innerWidth)
-		line += wrappedLineCount("   "+spec.description, innerWidth)
 	}
 	return line
 }
@@ -1083,6 +1074,7 @@ func (e *editor) nextAction() (hubAction, error) {
 	if err != nil {
 		return hubAction{}, err
 	}
+	e.snapshot = snapshot
 	model := New(snapshot)
 	if e.drafts != nil {
 		model.drafts = *e.drafts

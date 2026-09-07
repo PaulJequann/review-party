@@ -160,11 +160,15 @@ func (e *editor) confirmExit() (bool, error) {
 func (e *editor) chooseAction() (hubAction, error) {
 	var action string
 	areas := menuAreaSpecs()
-	options := make([]huh.Option[string], 0, len(areas)+1)
+	options := make([]huh.Option[string], 0, len(areas)+3)
 	for _, spec := range areas {
 		options = append(options, huh.NewOption(string(spec.area), string(spec.area)))
 	}
-	options = append(options, huh.NewOption("Search scoped configuration", string(areaSearch)), huh.NewOption("Exit", "exit"))
+	options = append(options,
+		huh.NewOption("Copy a Repository Profile to Global Configuration", string(areaCopyProfile)),
+		huh.NewOption("Search scoped configuration", string(areaSearch)),
+		huh.NewOption("Exit", "exit"),
+	)
 	err := e.form(huh.NewSelect[string]().Title("Configuration Hub").Options(options...).Value(&action))
 	if action == "exit" {
 		return hubAction{exit: true}, err

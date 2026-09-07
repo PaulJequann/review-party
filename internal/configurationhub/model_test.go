@@ -377,7 +377,7 @@ func requireProfileInputsEmpty(t *testing.T, state *profileFormState) {
 
 func newPlanTestModel(planned, published *bool) Model {
 	model := New(Snapshot{Repository: "/repo"})
-	model.area = 4
+	model.area = 1
 	snapshot := model.snapshot
 	model.runtime = &hubRuntime{commands: hubCommands{
 		plan: func(request planRequest) tea.Cmd {
@@ -468,8 +468,7 @@ func TestHubRendersActionAreasAsActions(t *testing.T) {
 		area int
 		want string
 	}{
-		{name: "advanced", area: 4, want: "Copy a Repository Profile"},
-		{name: "changes", area: 5, want: "unfinished drafts"},
+		{name: "changes", area: 4, want: "unfinished drafts"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			model := New(Snapshot{})

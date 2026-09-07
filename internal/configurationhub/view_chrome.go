@@ -104,7 +104,7 @@ func formArea(kind formKind) Area {
 	case formReviewOperation, formReviewLoading, formReviewFields:
 		return AreaReviews
 	case formCopy:
-		return AreaAdvanced
+		return AreaProfiles
 	case formOverview:
 		return AreaOverview
 	case formChanges:
@@ -161,7 +161,7 @@ func (model Model) actionHints() []actionHint {
 		hints = append(hints, actionHint{key: "n", label: "new"})
 	case AreaReviews:
 		hints = append(hints, actionHint{key: "a", label: "add"}, actionHint{key: "r", label: "remove"}, actionHint{key: "m", label: "move"}, actionHint{key: "c", label: "concurrency"})
-	case AreaOverview, AreaAdvanced, AreaChanges, areaSearch:
+	case AreaOverview, AreaChanges, areaSearch, areaCopyProfile:
 	}
 	return append(hints,
 		actionHint{key: "/", label: "filter"},

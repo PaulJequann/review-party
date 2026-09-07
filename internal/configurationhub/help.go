@@ -102,7 +102,7 @@ func (model Model) browserHelpBindings() []bubbleskey.Binding {
 			helpBinding("m", "move review", "m"),
 			helpBinding("c", "set concurrency", "c"),
 		)
-	case AreaOverview, AreaAdvanced, AreaChanges, areaSearch:
+	case AreaOverview, AreaChanges, areaSearch, areaCopyProfile:
 	}
 	return bindings
 }

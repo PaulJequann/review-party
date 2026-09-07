@@ -2,6 +2,7 @@ package configurationhub
 
 import (
 	"fmt"
+	"strings"
 
 	"reviewparty/internal/configuration"
 )
@@ -28,8 +29,8 @@ func buildSnapshot(manager *configuration.Manager, repository configuration.Repo
 		return snapshot, err
 	}
 	snapshot.Overview = append(snapshot.Overview,
-		fmt.Sprintf("Global: %d Profiles, %d Parties", countHubProfiles(profiles, configuration.ScopeGlobal), countHubParties(parties, configuration.ScopeGlobal)),
-		fmt.Sprintf("Repository: %d Profiles, %d Parties", countHubProfiles(profiles, configuration.ScopeRepository), countHubParties(parties, configuration.ScopeRepository)),
+		fmt.Sprintf("Global: %s, %s", pluralizedCount("Profile", countHubProfiles(profiles, configuration.ScopeGlobal)), pluralizedCount("Party", countHubParties(parties, configuration.ScopeGlobal))),
+		fmt.Sprintf("Repository: %s, %s", pluralizedCount("Profile", countHubProfiles(profiles, configuration.ScopeRepository)), pluralizedCount("Party", countHubParties(parties, configuration.ScopeRepository))),
 	)
 	if !source.Authored {
 		snapshot.Overview = append(snapshot.Overview, "Repository Reviews: not configured")
@@ -66,7 +67,7 @@ func appendHubProfiles(snapshot *Snapshot, profiles []configuration.Definition[c
 
 func appendHubParties(snapshot *Snapshot, parties []configuration.Definition[configuration.Party]) {
 	for _, party := range parties {
-		detail := fmt.Sprintf("%d Profiles · concurrency %d", len(party.Value.Profiles), party.Value.ConcurrencyLimit)
+		detail := fmt.Sprintf("%s · concurrency %d", pluralizedCount("Profile", len(party.Value.Profiles)), party.Value.ConcurrencyLimit)
 		if party.Err != nil {
 			detail = "invalid: " + party.Err.Error()
 		}
@@ -107,4 +108,25 @@ func countHubParties(values []configuration.Definition[configuration.Party], sco
 		}
 	}
 	return count
+}
+
+// pluralizedCount renders one count with its noun, using the singular only
+// for exactly one so counts like "1 Parties" never appear. Nouns ending in a
+// consonant + y pluralize as -ies (Party becomes Parties).
+func pluralizedCount(noun string, count int) string {
+	if count == 1 {
+		return fmt.Sprintf("1 %s", noun)
+	}
+	if endsInConsonantY(noun) {
+		return fmt.Sprintf("%d %sies", count, noun[:len(noun)-1])
+	}
+	return fmt.Sprintf("%d %ss", count, noun)
+}
+
+func endsInConsonantY(noun string) bool {
+	if len(noun) < 2 || noun[len(noun)-1] != 'y' {
+		return false
+	}
+	previous := rune(noun[len(noun)-2])
+	return !strings.ContainsRune("aeiouAEIOU", previous)
 }

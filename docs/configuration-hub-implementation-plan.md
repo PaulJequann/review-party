@@ -562,8 +562,8 @@ mechanics.
 
 - Open the Bubble Tea Hub in a TTY; print guidance without writes outside a TTY.
 - Show Global and current Repository scope explicitly.
-- Provide Overview, Profiles, Parties, Repository Reviews, Advanced, and Review
-  Changes areas.
+- Provide Overview, Profiles, Parties, Repository Reviews, and Review Changes
+  areas.
 - Search Templates, Global Profiles and Parties, and Repository Profiles and
   Parties with visible source labels.
 - Create Profiles from Template or blank instructions; use `$EDITOR` for

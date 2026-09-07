@@ -119,10 +119,10 @@ func (model *Model) openArea(area Area) tea.Cmd {
 		return model.openPartyForm()
 	case AreaReviews:
 		return model.openReviewOperationForm()
-	case AreaAdvanced:
-		return model.openCopyForm()
 	case AreaChanges:
 		return model.openChangesForm()
+	case areaCopyProfile:
+		return model.openCopyForm()
 	case areaSearch:
 		model.status = "Search is available from the menu."
 		return model.openOverviewForm()

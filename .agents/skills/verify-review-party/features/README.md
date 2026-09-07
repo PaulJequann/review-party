@@ -27,7 +27,7 @@ config_file=$(awk -F '\t' '$1 == "config_file" {print $2}' "$run_dir/ownership.t
 target_repository=$(awk -F '\t' '$1 == "target_repository" {print $2}' "$run_dir/ownership.tsv")
 session=verify-review-party-hub
 tmux new-session -d -x 120 -y 30 -s "$session" -- \
-  env TERM=xterm-256color XDG_CONFIG_HOME="$config_root" XDG_STATE_HOME="$state_root" \
+  env TERM=xterm-256color EDITOR=true XDG_CONFIG_HOME="$config_root" XDG_STATE_HOME="$state_root" \
   "$binary" config --repo "$target_repository" --config "$config_file"
 ```
 

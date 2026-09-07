@@ -17,6 +17,84 @@ import (
 	"reviewparty/internal/configuration"
 )
 
+func TestAccessibleNextActionRefreshesSnapshotForEditors(t *testing.T) {
+	root := t.TempDir()
+	repository := configuration.Repository(t.TempDir())
+	manager := configuration.NewManager(configuration.Options{
+		GlobalRoot: root, Reviewers: []string{"codex"},
+		ValidateName: func(string) error { return nil },
+	})
+	publishRepositoryProfile(t, manager, repository, "late")
+	editor := &editor{
+		manager: manager,
+		RunOptions: RunOptions{
+			Repository: repository, Accessible: true,
+			Input: newLineInput("8\n"), Output: &bytes.Buffer{},
+		},
+	}
+	// The editor started before the profile existed; the next menu render must
+	// refresh the snapshot the editors consume, or the copy form offers nothing.
+	action, err := editor.nextAction()
+	if err != nil {
+		t.Fatalf("nextAction: %v", err)
+	}
+	if !action.exit {
+		t.Fatalf("action = %#v, want exit", action)
+	}
+	if !hubSnapshotHasProfile(editor.snapshot, "late", "repository") {
+		t.Fatalf("snapshot was not refreshed: %#v", editor.snapshot.Items)
+	}
+}
+
+// publishRepositoryProfile publishes one minimal complete Repository Profile.
+func publishRepositoryProfile(t *testing.T, manager *configuration.Manager, repository configuration.Repository, name string) {
+	t.Helper()
+	plan, err := manager.PlanProfileCreation(repository, configuration.ProfileDraft{
+		Target: configuration.ScopeRepository, Name: name, Reviewer: "codex",
+		Model: "luna", ReasoningEffort: "high", AttemptDeadline: "8m", Instructions: "Review.",
+	})
+	if err != nil {
+		t.Fatalf("plan profile %q: %v", name, err)
+	}
+	if err := manager.Publish(plan); err != nil {
+		t.Fatalf("publish profile %q: %v", name, err)
+	}
+}
+
+// hubSnapshotHasProfile reports whether the snapshot inventory lists one Profile
+// by name and scope.
+func hubSnapshotHasProfile(snapshot Snapshot, name, scope string) bool {
+	for _, item := range snapshot.Items {
+		if item.Kind != itemProfile {
+			continue
+		}
+		if item.Name == name && item.Scope == ItemScope(scope) {
+			return true
+		}
+	}
+	return false
+}
+
+func TestAccessibleChooseActionRoutesCopyOption(t *testing.T) {
+	manager := configuration.NewManager(configuration.Options{
+		GlobalRoot: t.TempDir(), Reviewers: []string{"codex"},
+		ValidateName: func(string) error { return nil },
+	})
+	var output bytes.Buffer
+	// Five area options precede the copy option; huh accessible selects take
+	// a one-based option number.
+	editor := editor{manager: manager, RunOptions: RunOptions{
+		Input: newLineInput("6\n"), Output: &output, Accessible: true,
+	}}
+	action, err := editor.chooseAction()
+	if err != nil {
+		t.Fatalf("chooseAction: %v", err)
+	}
+	if action.exit || action.area != areaCopyProfile {
+		t.Fatalf("copy option routed to %#v, want area %q", action, areaCopyProfile)
+	}
+}
+
 func TestAccessibleFormCompletesWithoutBackgroundReader(t *testing.T) {
 	var value string
 	editor := editor{RunOptions: RunOptions{Context: context.Background(), Input: io.NopCloser(strings.NewReader("value\n")), Output: &bytes.Buffer{}, Accessible: true}}
