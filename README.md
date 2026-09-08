@@ -51,9 +51,9 @@ dogfood Reviews.
 
 ## Current CLI
 
-> Configuration and execution slices 5 through 7 resolve the repository's saved review selection
-> and expose it through `review-party run` and explicit `review-party config ...`
-> commands. Slice 8 adds the recurring Hub: `review-party config` opens its
+> Review Party resolves the repository's saved review selection and exposes it
+> through `review-party run` and explicit `review-party config ...` commands.
+> The recurring Hub, `review-party config`, opens its
 > scoped, searchable overview and focused Profile creation, Party creation,
 > Repository Reviews, and Repository-to-Global Profile-copy flows in a
 > terminal, and refuses without writes outside a terminal. The explicit
@@ -82,9 +82,21 @@ Advanced callers may select a state location during initialization with
 `--state-dir PATH`; Review Party remembers that choice in the selected user
 configuration. Pass `--config PATH` consistently to init, Review, inspect, and
 history when using a non-default configuration. Initialization is idempotent
-for current state. Review, inspect, and history refuse to create state. Review Party is pre-release and does not upgrade retired
-ledger schemas; select a fresh `XDG_STATE_HOME` or `--state-dir` and run
-`review-party init` when an old ledger is incompatible.
+for current state. Review, inspect, and history refuse to create state. Review
+Party is pre-release and does not upgrade retired ledger schemas. Back up an
+incompatible ledger and its SQLite sidecars first, then authorize fresh state
+in a separate command:
+
+```sh
+review-party init --repo . --backup-incompatible --yes
+review-party init --repo . --fresh --yes
+```
+
+The first command moves the old bytes under the state root's `backups/`
+directory and records that fresh initialization is pending. It does not claim
+a migration or create a new ledger. Repeat the
+same `--state-dir` and `--config` options on both commands when using either
+advanced selector.
 
 List and explain saved executable Review Profiles without creating a Review
 Record. `config discover` is the explicit bounded observational command in
@@ -96,7 +108,8 @@ review-party explain bugs
 review-party config path
 review-party config show --repo . --format json
 review-party config file show --scope global --format json
-review-party config validate --repo . --format json
+review-party config validate --repo .
+review-party doctor --repo .
 review-party config discover --format json
 ```
 
@@ -129,8 +142,16 @@ match `--scope`: use `global:NAME` with `--scope global` and
 `repository:NAME` with `--scope repository`. Unqualified references use the
 selected scope.
 
-For example, create a complete Profile from a packaged Template, add it to the
-repository's saved selection, and set the selection limit:
+For the shortest human path to a working repository selection, open the Hub,
+create a complete Profile from a Template, then add it under Repository Reviews
+and publish the reviewed changes:
+
+```sh
+review-party config --repo .
+review-party run --repo .
+```
+
+Automation can perform the same setup with explicit commands:
 
 ```sh
 review-party config profile create code-quality \
@@ -139,10 +160,10 @@ review-party config profile create code-quality \
   --model meta/muse-spark-1.2-contributor \
   --effort high \
   --deadline 3m \
-  --yes --format json
+  --yes
 review-party config reviews add --scope global --profile code-quality \
-  --repo . --yes --format json
-review-party config reviews set-concurrency 2 --repo . --yes --format json
+  --repo . --yes
+review-party config reviews set-concurrency 2 --repo . --yes
 ```
 
 Run one exact saved Profile, one Party, or the repository's saved selection:
@@ -179,6 +200,18 @@ as non-executable Templates. Global and Repository Configuration may still
 enable or disable known Reviewers and constrain accepted models. Review Party
 checks the saved Profile against that policy before launch and never substitutes
 a different Reviewer or model.
+
+The Hub and `review-party doctor --format json` report when a Profile's saved
+Template revision differs from the packaged revision. Drift never blocks a
+compatible Review. Apply an update explicitly:
+
+```sh
+review-party config profile update-template code-quality --scope global --yes
+```
+
+The update replaces `instructions.md` and records a new Profile Revision. It
+keeps the saved Reviewer, model, effort, and deadline. The reviewed Plan warns
+when the current instructions differ from the packaged replacement.
 
 Query the local Review history using facts recorded at execution time:
 

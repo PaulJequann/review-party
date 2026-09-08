@@ -44,7 +44,25 @@ func validateConfigurationPath(path string) error {
 	return rejectSpecialConfigurationPath(path)
 }
 
-func prepareInitializationState(manager *configuration.Manager, selection initializationStateSelection) (bool, error) {
+func prepareInitializationState(manager *configuration.Manager, selection initializationStateSelection, fresh bool) (bool, error) {
+	pending, err := store.ReviewRecordStateRecoveryPending(string(selection.directory))
+	if err != nil {
+		return false, err
+	}
+	if pending && !fresh {
+		return false, errors.New("incompatible state was backed up; run init --fresh with a separate confirmation")
+	}
+	if fresh {
+		if err := store.PrepareFreshReviewRecordState(string(selection.directory)); err != nil {
+			return false, err
+		}
+		if selection.remember {
+			if err := rememberStateDirectory(manager, string(selection.directory)); err != nil {
+				return false, err
+			}
+		}
+		return false, nil
+	}
 	alreadyReady, err := store.ReviewRecordStatePrepared(string(selection.directory))
 	if err != nil && !errors.Is(err, store.ErrReviewRecordStateRequiresPreparation) {
 		return false, err

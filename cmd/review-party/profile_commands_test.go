@@ -6,8 +6,18 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+func TestFreshInitializationCommandKeepsAdvancedSelectors(t *testing.T) {
+	command := freshInitializationCommand("/repo $(touch bad)", initOptions{stateDirectory: "/state path", configuration: "/config path"})
+	for _, wanted := range []string{"--repo '/repo $(touch bad)'", "--state-dir '/state path'", "--config '/config path'"} {
+		if !strings.Contains(command, wanted) {
+			t.Fatalf("command %q does not contain %q", command, wanted)
+		}
+	}
+}
 
 func TestInitPreparesStateWithoutCreatingProfiles(t *testing.T) {
 	isolateProfileCommandEnvironment(t)

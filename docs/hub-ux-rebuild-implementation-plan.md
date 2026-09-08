@@ -2,7 +2,7 @@
 
 Status: **Slices R1-R5 complete** — R5 landed 2026-08-30. Reconciled against
 [configuration-hub-implementation-plan.md](configuration-hub-implementation-plan.md)
-(Slices 1-8 complete); see "Relationship to the existing plan" below.
+(Slices 1-9 complete); see "Relationship to the existing plan" below.
 
 Post-R5 menu simplification (2026-09-07): the menu pane is one line per
 destination, area descriptions render only in the focused context pane, the
@@ -439,13 +439,13 @@ single column with no truncation. The whole Hub shares one height budget.
 
 ## Relationship to the existing plan
 
-- `docs/configuration-hub-implementation-plan.md` Slices 1-8 remain
+- `docs/configuration-hub-implementation-plan.md` Slices 1-9 remain
   complete and authoritative for the domain, commands, and publication
   contract. This rebuild consumes those seams unchanged.
-- That plan's Slice 9 is partially absorbed: its Hub presentation work
-  (Template drift visibility) will be delivered on top of R2/R3 views, and
-  its deletion work remains deferred exactly as written. Its non-Hub work
-  (ledger backup, `doctor`, README, dogfooding) stays owned by Slice 9.
+- That plan's Slice 9 is complete. Its Hub presentation work reports Template
+  drift on the R2/R3 views. The non-Hub work supplies ledger backup, separate
+  fresh-init confirmation, `doctor`, README guidance, and dogfood evidence.
+  Profile and Party deletion remains deferred.
 - The existing plan's locked decisions, explicit non-goals, and test-intent
   ledger carry forward. New ledger rows added by this plan:
 

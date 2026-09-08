@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 )
 
 // ProfileDraft contains all choices required to create an executable Profile.
@@ -27,6 +28,93 @@ func (manager *Manager) Templates() []Template {
 	result := append([]Template(nil), manager.templates...)
 	sort.Slice(result, func(left, right int) bool { return result[left].ID < result[right].ID })
 	return result
+}
+
+// TemplateDrift reports revision drift without participating in Profile
+// validation or run compatibility.
+func (manager *Manager) TemplateDrift(repository Repository) ([]TemplateDrift, error) {
+	profiles, err := manager.ProfileInventory(repository)
+	if err != nil {
+		return nil, err
+	}
+	return manager.TemplateDriftForProfiles(profiles), nil
+}
+
+// TemplateDriftForProfiles computes drift from an already-read inventory.
+func (manager *Manager) TemplateDriftForProfiles(profiles []Definition[Profile]) []TemplateDrift {
+	var result []TemplateDrift
+	for _, definition := range profiles {
+		profile := definition.Value
+		if definition.Err != nil || profile.TemplateID == "" {
+			continue
+		}
+		template, found := manager.Template(profile.TemplateID)
+		if !found || template.Revision == profile.TemplateRevision {
+			continue
+		}
+		result = append(result, TemplateDrift{
+			Scope: definition.Scope, Profile: profile.Name, TemplateID: profile.TemplateID,
+			TemplateRevision: profile.TemplateRevision, AvailableRevision: template.Revision,
+			Customized: profile.Instructions != template.Instructions,
+		})
+	}
+	return result
+}
+
+// PlanProfileTemplateUpdate explicitly replaces only instructions.md and the
+// Template revision recorded in metadata. Execution settings are retained.
+func (manager *Manager) PlanProfileTemplateUpdate(repository Repository, scope Scope, name string) (Plan, error) {
+	profile, found, err := manager.LoadProfile(scope, repository, name)
+	if err != nil {
+		return Plan{}, err
+	}
+	if !found {
+		return Plan{}, fmt.Errorf("Profile %q does not exist in %s Configuration", name, scope)
+	}
+	if profile.TemplateID == "" {
+		return Plan{}, fmt.Errorf("Profile %q was not created from a Template", name)
+	}
+	template, found := manager.Template(profile.TemplateID)
+	if !found {
+		return Plan{}, fmt.Errorf("Template %q is unavailable", profile.TemplateID)
+	}
+	plan := Plan{state: &planState{owner: manager}}
+	if template.Revision == profile.TemplateRevision {
+		plan.state.reason = fmt.Sprintf("Profile %q already uses Template %s@%s", name, template.ID, template.Revision)
+		return plan, nil
+	}
+	entry, anchor, err := manager.profileEntry(scope, repository, name)
+	if err != nil {
+		return Plan{}, err
+	}
+	updated := profile
+	updated.TemplateRevision = template.Revision
+	metadata, err := renderProfile(updated)
+	if err != nil {
+		return Plan{}, err
+	}
+	metadataPath := filepath.Join(filepath.Dir(entry.Path), "profile.json")
+	oldMetadata, _, err := readRegularFile(anchor, metadataPath, "Profile metadata", MaximumDocumentBytes)
+	if err != nil {
+		return Plan{}, err
+	}
+	writes := []pendingWrite{
+		{scope: scope, anchor: anchor, path: metadataPath, payload: metadata, backup: oldMetadata, existed: true},
+		{scope: scope, anchor: anchor, path: entry.Path, payload: []byte(template.Instructions), backup: []byte(profile.Instructions), existed: true},
+	}
+	change := Change{Field: "profiles." + name + ".template_revision", Scope: scope, Path: filepath.Dir(entry.Path), Before: profile.TemplateRevision, After: template.Revision, HadBefore: true, HadAfter: true}
+	plan = newFilePlan(manager, scope, change, writes)
+	plan = plan.WithWarnings(renderInstructionReplacement(profile.Instructions, template.Instructions))
+	if profile.Instructions != template.Instructions {
+		plan = plan.WithWarnings("replaces customized instructions.md; execution settings are kept")
+	}
+	return plan, nil
+}
+
+func renderInstructionReplacement(before, after string) string {
+	removed := strings.ReplaceAll(strings.TrimSuffix(before, "\n"), "\n", "\n-")
+	added := strings.ReplaceAll(strings.TrimSuffix(after, "\n"), "\n", "\n+")
+	return "instructions.md replacement diff:\n--- current\n+++ Template\n-" + removed + "\n+" + added
 }
 
 // PlanProfileCreation validates and stages one complete two-file Profile.
