@@ -1,11 +1,15 @@
 # Hub UX rebuild implementation plan
 
-Status: **Slices R1-R5 complete** — R5 landed 2026-08-30. Reconciled against
+Status: **Slices R1-R5, Profile setup follow-up, and Slice 9 complete**
+(2026-09-08). Reconciled against
 [configuration-hub-implementation-plan.md](configuration-hub-implementation-plan.md)
 (Slices 1-9 complete); see "Relationship to the existing plan" below.
 
-The [Profile setup follow-up](#profile-setup-follow-up-before-slice-9) scopes
-unimplemented discovery-backed selection before the remaining Slice 9 work.
+The [Profile setup follow-up](#profile-setup-follow-up-before-slice-9) landed
+discovery-backed Reviewer, model, and effort selection for Hub Profile
+creation, plus the remaining Slice 9 recovery work (Template drift reporting,
+instruction replacement, ledger backup, fresh-init confirmation, `doctor`
+JSON, README).
 R5 form repairs now budget header, actions, footer, and box padding on creation
 and resize. The action bar exposes Tab, Shift+Tab, and Enter; form-layout tests
 cover wrapped headers and focused inputs at narrow and wide sizes.
@@ -445,9 +449,8 @@ single column with no truncation. The whole Hub shares one height budget.
 
 ## Profile setup follow-up before Slice 9
 
-Status: scoped, not implemented. Discovery-backed selection is separate from
-R5 form sizing and navigation repairs. Linear remains the issue tracker; this
-section defines the implementation scope, not a second backlog.
+Status: complete (2026-09-08). Discovery-backed selection landed for Hub
+Profile creation; Linear remains the issue tracker.
 
 ### Goal
 

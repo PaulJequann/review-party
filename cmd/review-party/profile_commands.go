@@ -17,7 +17,7 @@ type initOptions struct {
 }
 
 func executeInit(options initOptions, stdout, stderr io.Writer) int {
-	if (options.backup || options.fresh) && !options.yes {
+	if !initRecoveryConfirmed(options) {
 		return printFailure(stderr, errors.New("state recovery requires --yes for this confirmation step"))
 	}
 	result, err := engine.InitializeReviewParty(engine.ReviewPartyInitialization{
@@ -34,6 +34,13 @@ func executeInit(options initOptions, stdout, stderr io.Writer) int {
 		return printFailure(stderr, err)
 	}
 	return 0
+}
+
+func initRecoveryConfirmed(options initOptions) bool {
+	if !options.backup && !options.fresh {
+		return true
+	}
+	return options.yes
 }
 
 func printInitialization(output io.Writer, result engine.ReviewPartyInitializationResult, options initOptions) error {

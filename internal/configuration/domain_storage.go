@@ -64,26 +64,47 @@ func (manager *Manager) TemplateDriftForProfiles(profiles []Definition[Profile])
 // PlanProfileTemplateUpdate explicitly replaces only instructions.md and the
 // Template revision recorded in metadata. Execution settings are retained.
 func (manager *Manager) PlanProfileTemplateUpdate(repository Repository, scope Scope, name string) (Plan, error) {
-	profile, found, err := manager.LoadProfile(scope, repository, name)
+	profile, template, err := manager.loadTemplateUpdateSource(repository, scope, name)
 	if err != nil {
 		return Plan{}, err
 	}
+	return manager.stageTemplateUpdate(templateUpdateRequest{repository: repository, scope: scope, name: name, profile: profile, template: template})
+}
+
+func (manager *Manager) loadTemplateUpdateSource(repository Repository, scope Scope, name string) (Profile, Template, error) {
+	profile, found, err := manager.LoadProfile(scope, repository, name)
+	if err != nil {
+		return Profile{}, Template{}, err
+	}
 	if !found {
-		return Plan{}, fmt.Errorf("Profile %q does not exist in %s Configuration", name, scope)
+		return Profile{}, Template{}, fmt.Errorf("Profile %q does not exist in %s Configuration", name, scope)
 	}
 	if profile.TemplateID == "" {
-		return Plan{}, fmt.Errorf("Profile %q was not created from a Template", name)
+		return Profile{}, Template{}, fmt.Errorf("Profile %q was not created from a Template", name)
 	}
 	template, found := manager.Template(profile.TemplateID)
 	if !found {
-		return Plan{}, fmt.Errorf("Template %q is unavailable", profile.TemplateID)
+		return Profile{}, Template{}, fmt.Errorf("Template %q is unavailable", profile.TemplateID)
 	}
+	return profile, template, nil
+}
+
+type templateUpdateRequest struct {
+	repository Repository
+	scope      Scope
+	name       string
+	profile    Profile
+	template   Template
+}
+
+func (manager *Manager) stageTemplateUpdate(request templateUpdateRequest) (Plan, error) {
+	profile, template := request.profile, request.template
 	plan := Plan{state: &planState{owner: manager}}
 	if template.Revision == profile.TemplateRevision {
-		plan.state.reason = fmt.Sprintf("Profile %q already uses Template %s@%s", name, template.ID, template.Revision)
+		plan.state.reason = fmt.Sprintf("Profile %q already uses Template %s@%s", request.name, template.ID, template.Revision)
 		return plan, nil
 	}
-	entry, anchor, err := manager.profileEntry(scope, repository, name)
+	entry, anchor, err := manager.profileEntry(request.scope, request.repository, request.name)
 	if err != nil {
 		return Plan{}, err
 	}
@@ -99,19 +120,20 @@ func (manager *Manager) PlanProfileTemplateUpdate(repository Repository, scope S
 		return Plan{}, err
 	}
 	writes := []pendingWrite{
-		{scope: scope, anchor: anchor, path: metadataPath, payload: metadata, backup: oldMetadata, existed: true},
-		{scope: scope, anchor: anchor, path: entry.Path, payload: []byte(template.Instructions), backup: []byte(profile.Instructions), existed: true},
+		{scope: request.scope, anchor: anchor, path: metadataPath, payload: metadata, backup: oldMetadata, existed: true},
+		{scope: request.scope, anchor: anchor, path: entry.Path, payload: []byte(template.Instructions), backup: []byte(profile.Instructions), existed: true},
 	}
-	change := Change{Field: "profiles." + name + ".template_revision", Scope: scope, Path: filepath.Dir(entry.Path), Before: profile.TemplateRevision, After: template.Revision, HadBefore: true, HadAfter: true}
-	plan = newFilePlan(manager, scope, change, writes)
-	plan = plan.WithWarnings(renderInstructionReplacement(profile.Instructions, template.Instructions))
+	change := Change{Field: "profiles." + request.name + ".template_revision", Scope: request.scope, Path: filepath.Dir(entry.Path), Before: profile.TemplateRevision, After: template.Revision, HadBefore: true, HadAfter: true}
+	plan = newFilePlan(manager, request.scope, change, writes)
+	plan = plan.WithWarnings(request.instructionReplacementWarning())
 	if profile.Instructions != template.Instructions {
 		plan = plan.WithWarnings("replaces customized instructions.md; execution settings are kept")
 	}
 	return plan, nil
 }
 
-func renderInstructionReplacement(before, after string) string {
+func (request templateUpdateRequest) instructionReplacementWarning() string {
+	before, after := request.profile.Instructions, request.template.Instructions
 	removed := strings.ReplaceAll(strings.TrimSuffix(before, "\n"), "\n", "\n-")
 	added := strings.ReplaceAll(strings.TrimSuffix(after, "\n"), "\n", "\n+")
 	return "instructions.md replacement diff:\n--- current\n+++ Template\n-" + removed + "\n+" + added
