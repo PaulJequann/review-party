@@ -7,10 +7,12 @@ import (
 	"io"
 	"strconv"
 	"strings"
+	"sync"
 
 	tea "charm.land/bubbletea/v2"
 
 	"reviewparty/internal/configuration"
+	"reviewparty/internal/discovery"
 )
 
 type hubCommands struct {
@@ -24,6 +26,29 @@ type hubRuntime struct {
 	input    io.Reader
 	output   io.Writer
 	commands hubCommands
+	choices  profileChoiceRuntime
+}
+
+type profileChoiceRuntime struct {
+	mu      sync.Mutex
+	next    uint64
+	cancel  context.CancelFunc
+	service *discovery.Service
+	manager *configuration.Manager
+	repo    configuration.Repository
+}
+
+type profileChoicesOpenedMsg struct {
+	generation uint64
+	reviewer   string
+	choices    []discovery.ModelChoice
+	refresh    tea.Cmd
+}
+
+type profileChoicesRefreshedMsg struct {
+	generation uint64
+	reviewer   string
+	result     discovery.Result
 }
 
 type planRequest struct {
@@ -92,7 +117,7 @@ type instructionEditResultMsg struct {
 }
 
 func newHubRuntime(options RunOptions, manager *configuration.Manager) *hubRuntime {
-	return &hubRuntime{
+	runtime := &hubRuntime{
 		context: options.Context,
 		input:   options.Input,
 		output:  options.Output,
@@ -108,6 +133,61 @@ func newHubRuntime(options RunOptions, manager *configuration.Manager) *hubRunti
 			},
 		},
 	}
+	runtime.choices = profileChoiceRuntime{service: options.Discovery, manager: manager, repo: options.Repository}
+	return runtime
+}
+
+func (runtime *hubRuntime) openProfileChoices(reviewer string) tea.Cmd {
+	if runtime == nil || runtime.choices.service == nil {
+		return func() tea.Msg { return profileChoicesOpenedMsg{reviewer: reviewer} }
+	}
+	runtime.choices.mu.Lock()
+	if runtime.choices.cancel != nil {
+		runtime.choices.cancel()
+	}
+	runtime.choices.next++
+	generation := runtime.choices.next
+	ctx, cancel := context.WithCancel(runtime.context)
+	runtime.choices.cancel = cancel
+	runtime.choices.mu.Unlock()
+	return func() tea.Msg {
+		sources, sourceErr := runtime.choices.manager.ProfileModelChoices(runtime.choices.repo, reviewer)
+		if sourceErr != nil {
+			sources = configuration.ProfileModelChoiceSources{}
+		}
+		session := runtime.choices.service.Open(ctx, discovery.ChoiceRequest{Reviewer: reviewer, Configured: sources.Configured, Packaged: sources.Packaged})
+		refresh := func() tea.Msg {
+			result, ok := <-session.Refresh
+			session.Close()
+			if !ok {
+				result = discovery.Result{Reviewer: reviewer, Status: discovery.StatusUnavailable, Diagnostic: "model discovery ended without a result"}
+			}
+			return profileChoicesRefreshedMsg{generation: generation, reviewer: reviewer, result: result}
+		}
+		return profileChoicesOpenedMsg{generation: generation, reviewer: reviewer, choices: session.Choices, refresh: refresh}
+	}
+}
+
+func (runtime *hubRuntime) closeProfileChoices() {
+	if runtime == nil {
+		return
+	}
+	runtime.choices.mu.Lock()
+	runtime.choices.next++
+	if runtime.choices.cancel != nil {
+		runtime.choices.cancel()
+		runtime.choices.cancel = nil
+	}
+	runtime.choices.mu.Unlock()
+}
+
+func (runtime *hubRuntime) currentProfileChoiceGeneration(generation uint64) bool {
+	if runtime == nil {
+		return false
+	}
+	runtime.choices.mu.Lock()
+	defer runtime.choices.mu.Unlock()
+	return runtime.choices.next == generation
 }
 
 func planRequestCommand(ctx context.Context, manager *configuration.Manager, repository configuration.Repository, modelChoiceCheck func(string, string) configuration.ModelChoiceCheck, request planRequest) tea.Cmd {
