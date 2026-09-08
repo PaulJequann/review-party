@@ -132,6 +132,14 @@ func (model Model) publishedTarget(kind planKind) string {
 }
 
 func (model Model) renderActionBar(options renderOptions) string {
+	switch model.view {
+	case viewForm:
+		return model.renderFormActionBar(options)
+	case viewPlanPreview:
+		return model.renderPlanActionBar(options)
+	case viewMenu, viewBrowser:
+		// Menu and browser actions are determined by the focused area.
+	}
 	bar := renderActionHints(options, model.actionHints())
 	if model.view == viewBrowser && !model.drafts.empty() {
 		drafts := "⏸ drafts"
@@ -241,6 +249,9 @@ func (model Model) renderFormFrame(options renderOptions) string {
 
 func (model Model) renderFormActionBar(options renderOptions) string {
 	bar := renderActionHints(options, []actionHint{
+		{key: "tab", label: "next"},
+		{key: "shift+tab", label: "previous"},
+		{key: "enter", label: "continue"},
 		{key: "esc", label: "back"},
 		{key: "ctrl+c", label: "quit"},
 	})

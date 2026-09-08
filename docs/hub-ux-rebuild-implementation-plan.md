@@ -4,6 +4,12 @@ Status: **Slices R1-R5 complete** — R5 landed 2026-08-30. Reconciled against
 [configuration-hub-implementation-plan.md](configuration-hub-implementation-plan.md)
 (Slices 1-8 complete); see "Relationship to the existing plan" below.
 
+The [Profile setup follow-up](#profile-setup-follow-up-before-slice-9) scopes
+unimplemented discovery-backed selection before the remaining Slice 9 work.
+R5 form repairs now budget header, actions, footer, and box padding on creation
+and resize. The action bar exposes Tab, Shift+Tab, and Enter; form-layout tests
+cover wrapped headers and focused inputs at narrow and wide sizes.
+
 Post-R5 menu simplification (2026-09-07): the menu pane is one line per
 destination, area descriptions render only in the focused context pane, the
 redundant Advanced menu row was removed (Profile copy lives in the Profiles
@@ -436,6 +442,63 @@ single column with no truncation. The whole Hub shares one height budget.
   selection, copy profile, abort mid-form, resize mid-form, publish, quit.
   Terminal state clean after exit (`git diff --check`-equivalent: no
   residual alt-screen artifacts).
+
+## Profile setup follow-up before Slice 9
+
+Status: scoped, not implemented. Discovery-backed selection is separate from
+R5 form sizing and navigation repairs. Linear remains the issue tracker; this
+section defines the implementation scope, not a second backlog.
+
+### Goal
+
+Create a Profile by choosing a Reviewer, model, and supported reasoning effort
+without having to know their identifiers in advance. Keep exact manual model
+entry available when discovery is incomplete.
+
+### Existing implementation
+
+- `internal/discovery/choices.go` exposes immediate cached, configured, and
+  packaged choices through `ChoiceSnapshot`. `Service.Open` adds a bounded
+  asynchronous refresh, and `ChoiceSession.Close` cancels it.
+- `ModelChoice` carries source provenance and model reasoning-effort metadata.
+- `cmd/review-party/config_hub.go` currently passes only `ModelChoiceCheck` to
+  the Hub. The profile fields in `interactive_forms.go` remain text inputs.
+
+### Bounded work
+
+- Offer known Reviewer identifiers as choices. Show availability and
+  authentication diagnostics without starting login or substituting an agent.
+- Offer searchable model choices for the selected Reviewer, with provenance
+  and an explicit manual-entry option. Render immediate choices before refresh
+  completes; retain the current selection when results arrive.
+- Offer the selected model's reported reasoning efforts. When metadata is
+  unavailable, label that limitation and allow explicit manual entry rather
+  than guessing supported values or choosing a default silently.
+- Keep Profile name, scope, deadline, and instruction selection in the existing
+  creation flow. Changes to Reviewer or model invalidate dependent selections
+  using the existing draft rules.
+- Own discovery lifecycle outside rendering. Cancel abandoned requests and
+  ignore late results for a previous Reviewer or closed editor.
+- Give the accessible editor the same choices, manual-entry route, warnings,
+  and reviewed publication contract.
+
+### Acceptance
+
+- A terminal drive creates and reads back a Profile by selecting a Reviewer,
+  model, and reported effort without typing their identifiers.
+- Empty, expired, failed, and slow discovery leave manual entry usable. Cached
+  choices never imply verified current access.
+- Switching Reviewers during refresh cannot populate the new selection with
+  the old Reviewer's results. Refresh never overwrites typed input.
+- Unknown model publication requires the existing warning and confirmation.
+  No authentication or executable review starts during configuration.
+- Normal and accessible flows preserve exact selected values through publish
+  and `explain`. Cancellation leaves configuration unchanged.
+- Choice lists and manual fields fit at 80x24 and 120x30, keep focus visible
+  through resize, and retain visible navigation guidance.
+
+Out of scope: editing saved Profile execution settings, new Reviewer adapters,
+credential management, model benchmarking, and Slice 9 recovery work.
 
 ## Relationship to the existing plan
 

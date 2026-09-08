@@ -183,10 +183,7 @@ func (model Model) formWidth() int {
 }
 
 func (model Model) formHeight() int {
-	if model.height > 0 {
-		return model.height
-	}
-	return 20
+	return model.frameBudget(renderOptions{styled: true}).viewport
 }
 
 func (model *Model) openOverviewForm() tea.Cmd {
@@ -398,6 +395,9 @@ func (model *Model) syncFormDraft() {
 }
 
 func (model *Model) updateForm(message tea.Msg) (tea.Model, tea.Cmd) {
+	if _, resized := message.(tea.WindowSizeMsg); resized {
+		message = tea.WindowSizeMsg{Width: model.formWidth(), Height: model.formHeight()}
+	}
 	var command tea.Cmd
 	model.form, command = model.form.Update(message)
 	model.syncFormDraft()
