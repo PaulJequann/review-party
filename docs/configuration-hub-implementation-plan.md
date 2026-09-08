@@ -2,8 +2,8 @@
 
 <!-- Stashbox: https://stashbox.local.bysliek.com/0XZZMwVbSdKL -->
 
-Status: Slices 1-8 complete; 5 hardenings landed 2026-08-29…30 via #19, #21, #22, #20, #23; Slice 9 is superseded by the Hub UX rebuild; Hub UX rebuild Slices R1-R5 complete 2026-08-30, see [hub-ux-rebuild-implementation-plan.md](hub-ux-rebuild-implementation-plan.md)
-Last reconciled: 2026-08-30
+Status: **Slices 1-9 complete**; Hub UX rebuild Slices R1-R5 complete 2026-08-30, see [hub-ux-rebuild-implementation-plan.md](hub-ux-rebuild-implementation-plan.md)
+Last reconciled: 2026-09-07
 
 This plan replaces Review Party's current configuration and execution model with
 the accepted Global and Repository Configuration model in [`../CONTEXT.md`](../CONTEXT.md).
@@ -254,7 +254,7 @@ Slice 5  Resolution and review-party run                         Complete (PR #1
 Slice 6  Agent-facing configuration commands                Complete
 Slice 7  Discovery and onboarding                            Complete
 Slice 8  Hub shell and core editors
-Slice 9  Template updates, recovery, and release polish   Superseded by the Hub UX rebuild (docs/hub-ux-rebuild-implementation-plan.md)
+Slice 9  Template updates, recovery, and release polish   Complete
 ```
 
 Do not build Hub views against the superseded Profile or Party model. Slice 4
@@ -609,7 +609,7 @@ Dogfooding for parallel `paseo` worktrees now uses worktree-local `$PWD/scratch/
 
 ## Slice 9: Template updates, recovery, and release polish
 
-Status: **Pending — Hub-facing work superseded by the [Hub UX rebuild](hub-ux-rebuild-implementation-plan.md) (2026-08-29)**
+Status: **Complete — Hub drift presentation landed on the completed R2/R3 views; deletion remains deferred (2026-09-07)**
 
 The Hub UX rebuild absorbs this slice's Hub presentation work (Template drift
 visibility in the Hub) and keeps Profile and Party deletion deferred exactly as
@@ -632,8 +632,8 @@ configuration operations.
 - Back up incompatible ledgers and SQLite sidecars under a dedicated backup
   directory.
 - Require separate confirmation before fresh initialization.
-- Add Profile and Party deletion only after export/backup recovery exists; use
-  typed-name confirmation and reviewed Plans.
+- Keep Profile and Party deletion deferred. This slice adds backup recovery but
+  does not add deletion intents or commands.
 - Replace README current-CLI documentation only as each behavior ships.
 - Dogfood `bugs`, `code-quality`, and `documentation` purposes against one
   unchanged Subject through configured executable Profiles.
@@ -665,7 +665,8 @@ are written.
 | Effective inspection is not authored inspection | An agent mistakes one file for what will run | Config CLI | `config show` reports expansion and provenance; `config file show` reports one document |
 | Manual model entry remains possible | Incomplete discovery blocks a valid model | Profile editor and command | Warning can be confirmed and exact model ID is saved |
 | Template updates are explicit | A product update overwrites customized judgment | Hub and Configuration Manager | No Profile changes before reviewed confirmation |
-| Recovery preserves retired state | Fresh initialization destroys an incompatible ledger | Real filesystem recovery | Ledger and sidecars exist in backup before new state preparation |
+| Recovery preserves retired state | Fresh initialization destroys an incompatible ledger | Real filesystem recovery | Ledger, WAL, SHM, and rollback journal bytes exist in backup before separately confirmed new state preparation |
+| Doctor reports machine-readable health | Automation treats Template drift as invalid configuration or misses an invalid definition | `doctor --format json` | Additive JSON reports validation state and Template drift independently |
 | Hub cancellation is clean | Leaving a focused editor, closing the Hub, or a failed publication leaks one or more staged writes | Hub draft state plus real Configuration Manager filesystem publication | Cancel each editor and exit from Review Changes; assert configuration paths remain byte-for-byte absent or unchanged until the single reviewed publication succeeds |
 | Machine mutation never blocks on prompts | An agent waits forever without a terminal | Config command | Mutation refuses unless `--yes` supplies authorization |
 | Slice 5: an explicit choice replaces the saved default | `--profile code-quality` silently appends to the repository roll-up | Public run command | Exactly the named Profile or Party executes; conflicting flags are refused |

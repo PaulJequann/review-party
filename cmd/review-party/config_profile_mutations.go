@@ -87,6 +87,20 @@ func executeConfigProfileCopy(value, targetValue string, options configurationMu
 	})
 }
 
+func executeConfigProfileTemplateUpdate(name, scopeValue string, options configurationMutationOptions, streams commandIO) int {
+	return runConfigurationCommand(options.format, options.configuration, streams, func(manager *configuration.Manager) (int, error) {
+		scope, err := parseConfigurationScope(scopeValue)
+		if err != nil {
+			return 0, err
+		}
+		plan, err := manager.PlanProfileTemplateUpdate(configuration.Repository(options.repository), scope, name)
+		if err != nil {
+			return 0, err
+		}
+		return publishConfigurationPlan(manager, plan, options, streams), nil
+	})
+}
+
 func executeConfigPartyCreate(name string, cmd *cobra.Command, options configurationMutationOptions, streams commandIO) int {
 	return runConfigurationCommand(options.format, options.configuration, streams, func(manager *configuration.Manager) (int, error) {
 		scope, err := parseConfigurationScope(stringFlag(cmd, "scope"))

@@ -57,6 +57,17 @@ type Template struct {
 	Instructions string `json:"instructions"`
 }
 
+// TemplateDrift describes a Profile whose recorded Template revision differs
+// from the immutable Template packaged with this binary.
+type TemplateDrift struct {
+	Scope             Scope  `json:"scope"`
+	Profile           string `json:"profile"`
+	TemplateID        string `json:"template_id"`
+	TemplateRevision  string `json:"template_revision"`
+	AvailableRevision string `json:"available_revision"`
+	Customized        bool   `json:"customized"`
+}
+
 // Party is an ordered, flat group of scoped Profile references.
 type Party struct {
 	SchemaVersion    int                `json:"schema_version"`

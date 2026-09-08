@@ -3,6 +3,7 @@ package engine
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -15,5 +16,12 @@ func TestInitializationDoesNotCreateProfileMaterial(t *testing.T) {
 	path := filepath.Join(repository, ".reviewparty", "profiles")
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("initialization created Profile material: %v", err)
+	}
+}
+
+func TestInitializationRejectsCombinedRecoveryActions(t *testing.T) {
+	_, err := InitializeReviewParty(ReviewPartyInitialization{BackupIncompatible: true, Fresh: true})
+	if err == nil || !strings.Contains(err.Error(), "separate requests") {
+		t.Fatalf("combined recovery error = %v", err)
 	}
 }
