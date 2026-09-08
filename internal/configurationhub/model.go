@@ -1070,12 +1070,10 @@ func (e *editor) nextAction() (hubAction, error) {
 	if !e.Accessible {
 		return hubAction{}, errors.New("interactive Hub navigation must be hosted by the Configuration Hub")
 	}
-	snapshot, err := buildSnapshot(e.manager, e.Repository)
-	if err != nil {
+	if err := e.refresh(); err != nil {
 		return hubAction{}, err
 	}
-	e.snapshot = snapshot
-	model := New(snapshot)
+	model := New(e.snapshot)
 	if e.drafts != nil {
 		model.drafts = *e.drafts
 	}

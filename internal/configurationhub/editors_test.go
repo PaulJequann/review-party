@@ -241,7 +241,7 @@ func TestCreateProfilePublishesDirectDraft(t *testing.T) {
 		GlobalRoot: root, Reviewers: []string{"codex"},
 		ValidateName: func(string) error { return nil },
 	})
-	input := "1\n2\nReview bugs.\nn\nbugs\ncodex\nluna\nhigh\n8m\ny\n"
+	input := "1\nbugs\ncodex\nluna\nhigh\n8m\n2\nReview bugs.\nn\ny\n"
 	editor := editor{manager: manager, RunOptions: RunOptions{Input: newLineInput(input), Output: &bytes.Buffer{}, Accessible: true}}
 	if err := editor.createProfile(); err != nil {
 		t.Fatal(err)

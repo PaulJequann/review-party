@@ -72,6 +72,18 @@ func (e *editor) draftsEmpty() bool { return e.draftSet().empty() }
 
 func (e *editor) clearDrafts() { e.draftSet().clear() }
 
+// refresh rebuilds the editor's read model from the Manager. Every editor flow
+// must go through this seam instead of calling buildSnapshot directly, so the
+// snapshot the editors consume stays consistent with what the menu renders.
+func (e *editor) refresh() error {
+	snapshot, err := buildSnapshot(e.manager, e.Repository)
+	if err != nil {
+		return err
+	}
+	e.snapshot = snapshot
+	return nil
+}
+
 func (e *editor) form(fields ...huh.Field) error {
 	ctx := e.Context
 	if ctx == nil {
@@ -106,16 +118,15 @@ func (e *editor) search() error {
 	if err := e.form(huh.NewInput().Title("Search Templates, Profiles, Parties, and Reviews").Value(&query)); err != nil {
 		return err
 	}
-	snapshot, err := buildSnapshot(e.manager, e.Repository)
-	if err != nil {
+	if err := e.refresh(); err != nil {
 		return err
 	}
-	model := New(snapshot)
+	model := New(e.snapshot)
 	if e.drafts != nil {
 		model.drafts = *e.drafts
 	}
 	model.query = query
-	_, err = io.WriteString(e.Output, model.Render())
+	_, err := io.WriteString(e.Output, model.Render())
 	return err
 }
 

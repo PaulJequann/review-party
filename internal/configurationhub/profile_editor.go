@@ -14,13 +14,15 @@ func (e *editor) createProfile() error {
 		return err
 	}
 	draft := &e.draftSet().profile
+	// Field order matches the interactive forms: execution fields first, then
+	// the instruction source once the rest of the draft is known.
+	if err := e.editProfileFields(draft); err != nil {
+		return err
+	}
 	if profileNeedsSource(*draft) {
 		if err := e.chooseProfileSource(draft); err != nil {
 			return err
 		}
-	}
-	if err := e.editProfileFields(draft); err != nil {
-		return err
 	}
 	return e.completeProfile(draft)
 }
@@ -34,6 +36,8 @@ func profileNeedsSource(draft configuration.ProfileDraft) bool {
 
 func (e *editor) completeProfile(draft *configuration.ProfileDraft) error {
 	for {
+		// Re-ask only the fields still empty, matching the interactive forms'
+		// reopen-with-prefilled-values behavior on revision.
 		if err := e.editProfileFields(draft); err != nil {
 			return err
 		}
