@@ -9,6 +9,7 @@ import (
 	"charm.land/huh/v2"
 
 	"reviewparty/internal/configuration"
+	"reviewparty/internal/discovery"
 )
 
 type formKind string
@@ -17,6 +18,12 @@ const (
 	formNone                   formKind = ""
 	formOverview               formKind = "overview"
 	formProfileFields          formKind = "profile-fields"
+	formProfileChoicesLoading  formKind = "profile-choices-loading"
+	formProfileModel           formKind = "profile-model"
+	formProfileModelManual     formKind = "profile-model-manual"
+	formProfileEffort          formKind = "profile-effort"
+	formProfileEffortManual    formKind = "profile-effort-manual"
+	formProfileDeadline        formKind = "profile-deadline"
 	formProfileSource          formKind = "profile-source"
 	formProfileTemplate        formKind = "profile-template"
 	formProfileTemplateLoading formKind = "profile-template-loading"
@@ -46,10 +53,17 @@ type formSession struct {
 }
 
 type profileFormState struct {
-	draft     configuration.ProfileDraft
-	target    string
-	accessors map[string]*profileFieldAccessor
+	draft      configuration.ProfileDraft
+	target     string
+	accessors  map[string]*profileFieldAccessor
+	choices    []discovery.ModelChoice
+	selected   string
+	effort     string
+	generation uint64
+	diagnostic string
 }
+
+const manualProfileChoice = "__manual__"
 
 func newFormSession(drafts draftSet) *formSession {
 	return &formSession{
@@ -199,22 +213,6 @@ func (model Model) overviewDescription() string {
 		lines = append(lines, warningStyle.Render("▲ "+warning))
 	}
 	return strings.Join(lines, "\n")
-}
-
-func (model *Model) openProfileFieldsForm() tea.Cmd {
-	state := &model.session.profile
-	fields := []huh.Field{
-		huh.NewSelect[string]().Title("Configuration scope").Options(scopeOptions()...).Value(&state.target),
-		huh.NewNote().Title("Profile details").Description("Create a Review Profile. Reviewer changes reset its execution fields."),
-	}
-	state.accessors = make(map[string]*profileFieldAccessor, len(profileFieldSpecs))
-	for _, spec := range profileFieldSpecs {
-		accessor := &profileFieldAccessor{draft: &state.draft, spec: spec, state: state}
-		accessor.input = huh.NewInput().Title(spec.title).Accessor(accessor)
-		state.accessors[spec.name] = accessor
-		fields = append(fields, accessor.input)
-	}
-	return model.openForm(formProfileFields, fields)
 }
 
 func (model *Model) openProfileSourceForm() tea.Cmd {
@@ -376,7 +374,9 @@ func (model *Model) syncFormDraft() {
 		return
 	}
 	switch model.formKind {
-	case formProfileFields, formProfileSource, formProfileTemplate, formProfileTemplateLoading, formProfileInstructions, formEditor:
+	case formProfileFields, formProfileChoicesLoading, formProfileModel, formProfileModelManual, formProfileEffort,
+		formProfileEffortManual, formProfileDeadline, formProfileSource, formProfileTemplate,
+		formProfileTemplateLoading, formProfileInstructions, formEditor:
 		state := model.session.profile
 		state.draft.Target = configuration.Scope(state.target)
 		if state.draft.TemplateID == "" {
@@ -417,13 +417,14 @@ func (model *Model) completeForm() (tea.Model, tea.Cmd) {
 	switch model.formKind {
 	case formOverview, formChanges:
 		return model.completeExitForm()
-	case formProfileFields, formProfileSource, formProfileTemplate, formProfileInstructions:
+	case formProfileFields, formProfileModel, formProfileModelManual, formProfileEffort,
+		formProfileEffortManual, formProfileDeadline, formProfileSource, formProfileTemplate, formProfileInstructions:
 		return model.completeProfileForm()
 	case formParty, formReviewFields, formCopy:
 		return model.completePlanForm()
 	case formReviewOperation:
 		return model.completeReviewOperationForm()
-	case formNone, formProfileTemplateLoading, formEditor, formReviewLoading, formPlanning:
+	case formNone, formProfileChoicesLoading, formProfileTemplateLoading, formEditor, formReviewLoading, formPlanning:
 		// These states do not accept a completed form.
 	}
 	return *model, nil
@@ -433,16 +434,39 @@ func (model *Model) completeProfileForm() (tea.Model, tea.Cmd) {
 	switch model.formKind {
 	case formProfileFields:
 		return model.completeProfileFieldsForm()
+	case formProfileModel, formProfileModelManual, formProfileEffort, formProfileEffortManual, formProfileDeadline:
+		return model.completeProfileChoiceForm()
 	case formProfileSource:
 		return model.completeProfileSourceForm()
 	case formProfileTemplate:
 		return model.completeProfileTemplateForm()
 	case formProfileInstructions:
 		return model.completeProfileInstructionsForm()
-	case formNone, formOverview, formProfileTemplateLoading, formEditor, formParty,
+	case formNone, formOverview, formProfileChoicesLoading, formProfileTemplateLoading, formEditor, formParty,
 		formReviewOperation, formReviewLoading, formReviewFields, formCopy, formChanges,
 		formPlanning:
 		// Only profile forms reach this dispatcher.
+	}
+	return *model, nil
+}
+
+func (model *Model) completeProfileChoiceForm() (tea.Model, tea.Cmd) {
+	switch model.formKind {
+	case formProfileModel:
+		return model.completeProfileModelForm()
+	case formProfileModelManual:
+		return model.withForm(model.openProfileEffortForm())
+	case formProfileEffort:
+		return model.completeProfileEffortForm()
+	case formProfileEffortManual:
+		return model.withForm(model.openProfileDeadlineForm())
+	case formProfileDeadline:
+		return model.completeProfileExecutionForm()
+	case formNone, formOverview, formProfileFields, formProfileChoicesLoading, formProfileSource,
+		formProfileTemplate, formProfileTemplateLoading, formProfileInstructions, formEditor,
+		formParty, formReviewOperation, formReviewLoading, formReviewFields, formCopy, formChanges,
+		formPlanning:
+		return *model, nil
 	}
 	return *model, nil
 }
@@ -459,7 +483,8 @@ func (model *Model) completePlanForm() (tea.Model, tea.Cmd) {
 	case formCopy:
 		return model.startPlan(planRequest{kind: planCopy, copy: model.drafts.copyName})
 	case formNone, formOverview, formProfileFields, formProfileSource, formProfileTemplate,
-		formProfileTemplateLoading, formProfileInstructions, formEditor, formReviewOperation,
+		formProfileChoicesLoading, formProfileModel, formProfileModelManual, formProfileEffort,
+		formProfileEffortManual, formProfileDeadline, formProfileTemplateLoading, formProfileInstructions, formEditor, formReviewOperation,
 		formReviewLoading, formChanges, formPlanning:
 		// Only plan-producing forms reach this dispatcher.
 	}
@@ -472,14 +497,6 @@ func (model *Model) completeExitForm() (tea.Model, tea.Cmd) {
 	}
 	model.toMenu()
 	return *model, nil
-}
-
-func (model *Model) completeProfileFieldsForm() (tea.Model, tea.Cmd) {
-	if profileNeedsSource(model.drafts.profile) {
-		model.session.source = ""
-		return model.withForm(model.openProfileSourceForm())
-	}
-	return model.startPlan(planRequest{kind: planProfile, profile: model.drafts.profile})
 }
 
 func (model *Model) completeProfileSourceForm() (tea.Model, tea.Cmd) {
@@ -680,6 +697,9 @@ func (model *Model) clearDraft(kind planKind) {
 }
 
 func (model *Model) toMenu() {
+	if model.runtime != nil {
+		model.runtime.closeProfileChoices()
+	}
 	model.view = viewMenu
 	model.form = formAdapter{}
 	model.formKind = formNone

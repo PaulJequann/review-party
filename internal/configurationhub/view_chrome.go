@@ -97,7 +97,9 @@ func planArea(kind planKind) Area {
 
 func formArea(kind formKind) Area {
 	switch kind {
-	case formProfileFields, formProfileSource, formProfileTemplate, formProfileTemplateLoading, formProfileInstructions, formEditor:
+	case formProfileFields, formProfileChoicesLoading, formProfileModel, formProfileModelManual,
+		formProfileEffort, formProfileEffortManual, formProfileDeadline, formProfileSource,
+		formProfileTemplate, formProfileTemplateLoading, formProfileInstructions, formEditor:
 		return AreaProfiles
 	case formParty:
 		return AreaParties
@@ -236,7 +238,8 @@ func (model Model) renderFormFrame(options renderOptions) string {
 		case formEditor:
 			content = "Editing instructions..."
 		case formNone, formOverview, formProfileFields, formProfileSource, formProfileTemplate,
-			formProfileTemplateLoading, formProfileInstructions, formParty, formReviewOperation,
+			formProfileChoicesLoading, formProfileModel, formProfileModelManual, formProfileEffort,
+			formProfileEffortManual, formProfileDeadline, formProfileTemplateLoading, formProfileInstructions, formParty, formReviewOperation,
 			formReviewLoading, formReviewFields, formCopy, formChanges:
 			// The active form supplies the content.
 		}
