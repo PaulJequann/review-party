@@ -100,9 +100,21 @@ func profileChoiceDiagnostic(state *profileFormState) string {
 }
 
 func (model *Model) openProfileManualModelForm() tea.Cmd {
+	state := &model.session.profile
+	state.manualModel = state.draft.Model
 	return model.openForm(formProfileModelManual, []huh.Field{
-		huh.NewInput().Title("Model ID").Description("Enter the exact identifier. Unknown models require confirmation before publish.").Value(&model.session.profile.draft.Model),
+		huh.NewInput().Title("Model ID").Description("Enter the exact identifier. Unknown models require confirmation before publish.").Value(&state.manualModel),
 	})
+}
+
+func (model *Model) completeProfileModelManualForm() (tea.Model, tea.Cmd) {
+	state := &model.session.profile
+	// Route through the model spec setter so a changed model clears the
+	// dependent effort and deadline, mirroring choice selection. The setter
+	// is a no-op when the value is unchanged.
+	spec, _ := profileFieldSpecFor("model")
+	spec.set(&state.draft, state.manualModel)
+	return model.withForm(model.openProfileEffortForm())
 }
 
 func (model *Model) openProfileEffortForm() tea.Cmd {
@@ -322,7 +334,13 @@ func (e *editor) editAccessibleModel(draft *configuration.ProfileDraft, choices 
 		return err
 	}
 	if selected == manualProfileChoice {
-		return e.form(huh.NewInput().Title("Model ID").Value(&draft.Model))
+		entered := draft.Model
+		if err := e.form(huh.NewInput().Title("Model ID").Value(&entered)); err != nil {
+			return err
+		}
+		model, _ := profileFieldSpecFor("model")
+		model.set(draft, entered)
+		return nil
 	}
 	model, _ := profileFieldSpecFor("model")
 	model.set(draft, selected)

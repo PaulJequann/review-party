@@ -140,13 +140,17 @@ func (manager *Manager) stageTemplateUpdate(request templateUpdateRequest) (Plan
 		return Plan{}, err
 	}
 	writes := []pendingWrite{
-		{scope: request.scope, anchor: anchor, path: metadataPath, payload: metadata, backup: oldMetadata, existed: true},
 		{scope: request.scope, anchor: anchor, path: entry.Path, payload: []byte(template.Instructions), backup: []byte(profile.Instructions), existed: true},
+		{scope: request.scope, anchor: anchor, path: metadataPath, payload: metadata, backup: oldMetadata, existed: true},
 	}
+	// Instructions commit first: a crash between the two writes leaves the
+	// old metadata beside new instructions, which drift still reports, so a
+	// re-run converges. Metadata first would leave new metadata beside old
+	// instructions, invisible to drift.
 	change := Change{Field: "profiles." + request.name + ".template_revision", Scope: request.scope, Path: filepath.Dir(entry.Path), Before: profile.TemplateRevision, After: template.Revision, HadBefore: true, HadAfter: true}
 	plan = newFilePlan(manager, request.scope, change, writes)
 	plan = plan.WithWarnings(request.instructionReplacementWarning())
-	if profile.Instructions != template.Instructions {
+	if templateInstructionsCustomized(profile, template) {
 		plan = plan.WithWarnings("replaces customized instructions.md; execution settings are kept")
 	}
 	return plan, nil

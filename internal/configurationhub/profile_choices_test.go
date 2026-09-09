@@ -65,6 +65,35 @@ func TestAccessibleProfileSelectsCachedModelAndReportedEffort(t *testing.T) {
 	}
 }
 
+func TestManualModelCompletionClearsStaleExecutionFields(t *testing.T) {
+	model := hubModelAtSize(t, 120, 30)
+	state := &model.session.profile
+	state.draft = configuration.ProfileDraft{Name: "bugs", Reviewer: "codex", Model: "old", ReasoningEffort: "high", AttemptDeadline: "8m"}
+	_ = model.openProfileManualModelForm()
+	state.manualModel = "new"
+	_, _ = model.completeProfileModelManualForm()
+	if state.draft.Model != "new" {
+		t.Fatalf("model = %q", state.draft.Model)
+	}
+	if state.draft.ReasoningEffort != "" || state.draft.AttemptDeadline != "" {
+		t.Fatalf("stale execution fields = %q %q", state.draft.ReasoningEffort, state.draft.AttemptDeadline)
+	}
+	_ = model.openProfileManualModelForm()
+	state.manualModel = "new"
+	_, _ = model.completeProfileModelManualForm()
+	if state.draft.Model != "new" {
+		t.Fatalf("model = %q", state.draft.Model)
+	}
+	// An unchanged model preserves the dependent fields.
+	state.draft.ReasoningEffort = "low"
+	state.draft.AttemptDeadline = "5m"
+	_ = model.openProfileManualModelForm()
+	_, _ = model.completeProfileModelManualForm()
+	if state.draft.ReasoningEffort != "low" || state.draft.AttemptDeadline != "5m" {
+		t.Fatalf("preserved execution fields = %q %q", state.draft.ReasoningEffort, state.draft.AttemptDeadline)
+	}
+}
+
 func TestProfileChoiceRefreshFromAbandonedGenerationIsIgnored(t *testing.T) {
 	service := discovery.NewService(discovery.Options{Adapters: []discovery.Adapter{
 		profileChoiceAdapter{reviewer: "codex"}, profileChoiceAdapter{reviewer: "grok"},

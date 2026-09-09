@@ -53,14 +53,15 @@ type formSession struct {
 }
 
 type profileFormState struct {
-	draft      configuration.ProfileDraft
-	target     string
-	accessors  map[string]*profileFieldAccessor
-	choices    []discovery.ModelChoice
-	selected   string
-	effort     string
-	generation uint64
-	diagnostic string
+	draft       configuration.ProfileDraft
+	target      string
+	accessors   map[string]*profileFieldAccessor
+	choices     []discovery.ModelChoice
+	selected    string
+	effort      string
+	manualModel string
+	generation  uint64
+	diagnostic  string
 }
 
 const manualProfileChoice = "__manual__"
@@ -455,7 +456,7 @@ func (model *Model) completeProfileChoiceForm() (tea.Model, tea.Cmd) {
 	case formProfileModel:
 		return model.completeProfileModelForm()
 	case formProfileModelManual:
-		return model.withForm(model.openProfileEffortForm())
+		return model.completeProfileModelManualForm()
 	case formProfileEffort:
 		return model.completeProfileEffortForm()
 	case formProfileEffortManual:
