@@ -1,6 +1,8 @@
 package configuration
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -55,10 +57,27 @@ func (manager *Manager) TemplateDriftForProfiles(profiles []Definition[Profile])
 		result = append(result, TemplateDrift{
 			Scope: definition.Scope, Profile: profile.Name, TemplateID: profile.TemplateID,
 			TemplateRevision: profile.TemplateRevision, AvailableRevision: template.Revision,
-			Customized: profile.Instructions != template.Instructions,
+			Customized: templateInstructionsCustomized(profile, template),
 		})
 	}
 	return result
+}
+
+// templateInstructionsDigest hashes instructions for the drift baseline.
+func templateInstructionsDigest(instructions string) string {
+	digest := sha256.Sum256([]byte(instructions))
+	return hex.EncodeToString(digest[:])
+}
+
+// templateInstructionsCustomized reports whether the saved instructions
+// diverge from the last template-sourced write. Profiles written before the
+// baseline existed fall back to byte comparison against the available
+// Template, which can over-report customization for untouched Profiles.
+func templateInstructionsCustomized(profile Profile, template Template) bool {
+	if profile.TemplateInstructionsSHA256 != "" {
+		return templateInstructionsDigest(profile.Instructions) != profile.TemplateInstructionsSHA256
+	}
+	return profile.Instructions != template.Instructions
 }
 
 // PlanProfileTemplateUpdate explicitly replaces only instructions.md and the
@@ -110,6 +129,7 @@ func (manager *Manager) stageTemplateUpdate(request templateUpdateRequest) (Plan
 	}
 	updated := profile
 	updated.TemplateRevision = template.Revision
+	updated.TemplateInstructionsSHA256 = templateInstructionsDigest(template.Instructions)
 	metadata, err := renderProfile(updated)
 	if err != nil {
 		return Plan{}, err
@@ -227,6 +247,10 @@ func (manager *Manager) profileFromDraft(draft ProfileDraft) (Profile, string, e
 		return Profile{}, "", fmt.Errorf("Template %q revision %q is unavailable", draft.TemplateID, draft.TemplateRevision)
 	}
 	profile.TemplateRevision = template.Revision
+	// Baseline customization detection against the source Template text,
+	// not the authored instructions: creation-time $EDITOR edits must still
+	// read as customized later.
+	profile.TemplateInstructionsSHA256 = templateInstructionsDigest(template.Instructions)
 	if draft.Instructions != "" {
 		return profile, draft.Instructions, nil
 	}

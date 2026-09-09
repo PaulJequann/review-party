@@ -292,6 +292,16 @@ func (e *editor) accessibleProfileChoices(reviewer string) ([]discovery.ModelCho
 	}
 	session := e.Discovery.Open(e.Context, discovery.ChoiceRequest{Reviewer: reviewer, Configured: sources.Configured, Packaged: sources.Packaged})
 	choices := session.Choices
+	if len(choices) == 0 {
+		// No immediate choices: wait for the bounded refresh instead of
+		// offering manual entry alone while discovery is still running.
+		// The session always delivers one result, so this terminates.
+		if result, ok := <-session.Refresh; ok {
+			choices = discovery.MergeChoices(choices, result.Models, discovery.ChoiceSourceDiscovered)
+			_, writeErr := fmt.Fprintln(e.Output, profileDiscoveryDiagnostic(result))
+			return choices, session.Close, writeErr
+		}
+	}
 	message := "Reviewer availability is still being checked; manual entry remains available."
 	select {
 	case result := <-session.Refresh:

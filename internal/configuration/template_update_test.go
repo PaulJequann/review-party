@@ -6,10 +6,10 @@ import (
 	"testing"
 )
 
-func seedCustomizedBugsProfile(t *testing.T, root, revision string) {
+func seedBugsProfile(t *testing.T, root, templateInstructions, profileInstructions string) {
 	t.Helper()
-	manager := NewManager(Options{GlobalRoot: root, Reviewers: []string{"codex"}, Templates: []Template{{ID: "bugs", Revision: revision, Instructions: "customized\n"}}})
-	plan, err := manager.PlanProfileCreation("", ProfileDraft{Target: ScopeGlobal, Name: "bugs", Reviewer: "codex", Model: "luna", ReasoningEffort: "high", AttemptDeadline: "8m", TemplateID: "bugs", Instructions: "customized\n"})
+	manager := NewManager(Options{GlobalRoot: root, Reviewers: []string{"codex"}, Templates: []Template{{ID: "bugs", Revision: "old", Instructions: templateInstructions}}})
+	plan, err := manager.PlanProfileCreation("", ProfileDraft{Target: ScopeGlobal, Name: "bugs", Reviewer: "codex", Model: "luna", ReasoningEffort: "high", AttemptDeadline: "8m", TemplateID: "bugs", Instructions: profileInstructions})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -21,18 +21,12 @@ func seedCustomizedBugsProfile(t *testing.T, root, revision string) {
 	}
 }
 
-func newBugsManager(root, revision string) *Manager {
-	instructions := "packaged new\n"
-	if revision == "old" {
-		instructions = "customized\n"
-	}
+func newBugsManager(root, revision, instructions string) *Manager {
 	return NewManager(Options{GlobalRoot: root, Reviewers: []string{"codex"}, Templates: []Template{{ID: "bugs", Revision: revision, Instructions: instructions}}})
 }
 
-func TestTemplateDriftFlagsCustomizedInstructions(t *testing.T) {
-	root := t.TempDir()
-	seedCustomizedBugsProfile(t, root, "old")
-	manager := newBugsManager(root, "new")
+func driftForBugs(t *testing.T, manager *Manager) TemplateDrift {
+	t.Helper()
 	drift, err := manager.TemplateDrift("")
 	if err != nil {
 		t.Fatal(err)
@@ -40,18 +34,34 @@ func TestTemplateDriftFlagsCustomizedInstructions(t *testing.T) {
 	if len(drift) != 1 {
 		t.Fatalf("drift = %#v", drift)
 	}
-	if !drift[0].Customized {
-		t.Fatalf("drift customized = %#v", drift[0])
+	return drift[0]
+}
+
+func TestTemplateDriftFlagsCustomizedInstructions(t *testing.T) {
+	root := t.TempDir()
+	seedBugsProfile(t, root, "packaged old\n", "my tweaks\n")
+	entry := driftForBugs(t, newBugsManager(root, "new", "packaged new\n"))
+	if !entry.Customized {
+		t.Fatalf("drift customized = %#v", entry)
 	}
-	if drift[0].TemplateRevision != "old" {
-		t.Fatalf("saved Template revision = %q", drift[0].TemplateRevision)
+	if entry.TemplateRevision != "old" {
+		t.Fatalf("saved Template revision = %q", entry.TemplateRevision)
+	}
+}
+
+func TestTemplateDriftLeavesUntouchedProfileUnflagged(t *testing.T) {
+	root := t.TempDir()
+	seedBugsProfile(t, root, "packaged old\n", "")
+	entry := driftForBugs(t, newBugsManager(root, "new", "packaged new\n"))
+	if entry.Customized {
+		t.Fatalf("untouched drift customized = %#v", entry)
 	}
 }
 
 func TestTemplateUpdateKeepsExecutionSettingsAndCreatesRevision(t *testing.T) {
 	root := t.TempDir()
-	seedCustomizedBugsProfile(t, root, "old")
-	manager := newBugsManager(root, "new")
+	seedBugsProfile(t, root, "packaged old\n", "my tweaks\n")
+	manager := newBugsManager(root, "new", "packaged new\n")
 	plan, err := manager.PlanProfileTemplateUpdate("", ScopeGlobal, "bugs")
 	if err != nil {
 		t.Fatal(err)
@@ -64,6 +74,9 @@ func TestTemplateUpdateKeepsExecutionSettingsAndCreatesRevision(t *testing.T) {
 	}
 	assertTemplateUpdateExecution(t, manager)
 	assertTemplateUpdateInstructions(t, manager, root)
+	if drift, err := manager.TemplateDrift(""); err != nil || len(drift) != 0 {
+		t.Fatalf("drift after update = %#v, err %v", drift, err)
+	}
 }
 
 func assertTemplateUpdateExecution(t *testing.T, manager *Manager) {

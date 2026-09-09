@@ -145,7 +145,24 @@ func PrepareFreshReviewRecordState(directory string) error {
 	for _, suffix := range []string{"", "-wal", "-shm", "-journal"} {
 		path := filepath.Join(directory, ledgerFilename+suffix)
 		if _, err := os.Lstat(path); err == nil {
-			return fmt.Errorf("fresh initialization refused while review state file %q remains outside backup", path)
+			// A prepared state beside a pending marker is an interrupted
+			// completion (prepared usable state, then exited before the
+			// marker was dropped, including a failed marker removal). It
+			// cannot be the backed-up original, which was unusable by
+			// definition, so dropping the marker completes the retry.
+			// Anything else could be unrestored originals: refuse and
+			// direct the operator to --backup first.
+			ready, prepErr := ReviewRecordStatePrepared(directory)
+			if prepErr != nil {
+				return fmt.Errorf("fresh initialization refused while review state file %q remains outside backup", path)
+			}
+			if !ready {
+				return fmt.Errorf("fresh initialization refused while review state file %q remains outside backup", path)
+			}
+			if err := os.Remove(filepath.Join(directory, recoveryMarker)); err != nil {
+				return fmt.Errorf("complete fresh initialization: %w", err)
+			}
+			return nil
 		} else if !errors.Is(err, os.ErrNotExist) {
 			return err
 		}

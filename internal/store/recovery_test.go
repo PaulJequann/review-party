@@ -67,3 +67,35 @@ func TestFreshPreparationRequiresPriorBackup(t *testing.T) {
 		t.Fatal("fresh initialization succeeded without backup")
 	}
 }
+
+func TestFreshPreparationCompletesInterruptedState(t *testing.T) {
+	directory := t.TempDir()
+	original := map[string][]byte{
+		ledgerFilename:          []byte("retired-ledger-bytes"),
+		ledgerFilename + "-wal": []byte("retired-wal-bytes"),
+	}
+	for name, payload := range original {
+		if err := os.WriteFile(filepath.Join(directory, name), payload, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := BackupIncompatibleReviewRecordState(directory); err != nil {
+		t.Fatal(err)
+	}
+	// Simulate a crash after the fresh ledger was prepared but before the
+	// recovery marker was removed.
+	if err := PrepareReviewRecordState(directory); err != nil {
+		t.Fatal(err)
+	}
+	if err := PrepareFreshReviewRecordState(directory); err != nil {
+		t.Fatalf("retry after interrupted fresh initialization: %v", err)
+	}
+	pending, err := ReviewRecordStateRecoveryPending(directory)
+	if err != nil || pending {
+		t.Fatalf("recovery pending after completed fresh init = %t, %v", pending, err)
+	}
+	ready, err := ReviewRecordStatePrepared(directory)
+	if err != nil || !ready {
+		t.Fatalf("state prepared after completed fresh init = %t, %v", ready, err)
+	}
+}
