@@ -18,8 +18,8 @@ func newFormAdapter(fields []huh.Field, width, height int, theme huh.Theme) form
 	width = max(width, 1)
 	height = max(height, 1)
 	form := huh.NewForm(huh.NewGroup(fields...)).
-		WithWidth(width).
-		WithHeight(height).
+		WithWidth(max(width-4, 1)).
+		WithHeight(max(height-2, 1)).
 		WithTheme(theme).
 		WithShowHelp(false)
 	return formAdapter{form: form, width: width, height: height}
@@ -39,7 +39,8 @@ func (adapter formAdapter) Update(message tea.Msg) (formAdapter, tea.Cmd) {
 	if size, ok := message.(tea.WindowSizeMsg); ok {
 		adapter.width = max(size.Width, 1)
 		adapter.height = max(size.Height, 1)
-		adapter.form.WithWidth(adapter.width).WithHeight(adapter.height)
+		// The adapter owns the box; Huh owns scrolling inside its padding.
+		adapter.form.WithWidth(max(adapter.width-4, 1)).WithHeight(max(adapter.height-2, 1))
 	}
 
 	updated, command := adapter.form.Update(message)

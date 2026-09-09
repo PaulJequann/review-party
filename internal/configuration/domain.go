@@ -43,10 +43,17 @@ type Profile struct {
 	AttemptDeadline  string `json:"attempt_deadline"`
 	TemplateID       string `json:"template_id,omitempty"`
 	TemplateRevision string `json:"template_revision,omitempty"`
-	Instructions     string `json:"-"`
-	Scope            Scope  `json:"-"`
-	Source           string `json:"-"`
-	SourceDigest     string `json:"-"`
+	// TemplateInstructionsSHA256 records the source Template's instructions
+	// hash at the last template-sourced write (creation or template update).
+	// Drift compares current instructions against this baseline so untouched
+	// Profiles are not reported as customized, while creation-time and later
+	// edits still are. Empty for Profiles written before the baseline
+	// existed; those fall back to byte comparison.
+	TemplateInstructionsSHA256 string `json:"template_instructions_sha256,omitempty"`
+	Instructions               string `json:"-"`
+	Scope                      Scope  `json:"-"`
+	Source                     string `json:"-"`
+	SourceDigest               string `json:"-"`
 }
 
 // Template is immutable packaged judgment content. It has no execution fields
@@ -55,6 +62,17 @@ type Template struct {
 	ID           string `json:"id"`
 	Revision     string `json:"revision"`
 	Instructions string `json:"instructions"`
+}
+
+// TemplateDrift describes a Profile whose recorded Template revision differs
+// from the immutable Template packaged with this binary.
+type TemplateDrift struct {
+	Scope             Scope  `json:"scope"`
+	Profile           string `json:"profile"`
+	TemplateID        string `json:"template_id"`
+	TemplateRevision  string `json:"template_revision"`
+	AvailableRevision string `json:"available_revision"`
+	Customized        bool   `json:"customized"`
 }
 
 // Party is an ordered, flat group of scoped Profile references.

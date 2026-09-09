@@ -19,6 +19,8 @@ func buildSnapshot(manager *configuration.Manager, repository configuration.Repo
 		return snapshot, err
 	}
 	appendHubProfiles(&snapshot, profiles)
+	drift := manager.TemplateDriftForProfiles(profiles)
+	appendTemplateDrift(&snapshot, drift)
 	parties, err := manager.PartyInventory(repository)
 	if err != nil {
 		return snapshot, err
@@ -41,6 +43,37 @@ func buildSnapshot(manager *configuration.Manager, repository configuration.Repo
 	appendHubReviews(&snapshot, "repository", selection.Repository)
 	appendResolvedPreview(manager, repository, &snapshot)
 	return snapshot, nil
+}
+
+func appendTemplateDrift(snapshot *Snapshot, drift []configuration.TemplateDrift) {
+	for _, item := range drift {
+		snapshot.Warnings = append(snapshot.Warnings, templateDriftMessage(item))
+		markDriftedProfile(snapshot, item)
+	}
+}
+
+func templateDriftMessage(item configuration.TemplateDrift) string {
+	message := fmt.Sprintf("%s Profile %q: Template %s drift (%s → %s)", item.Scope, item.Profile, item.TemplateID, item.TemplateRevision, item.AvailableRevision)
+	if item.Customized {
+		message += "; updating replaces customized instructions"
+	}
+	return message
+}
+
+func markDriftedProfile(snapshot *Snapshot, item configuration.TemplateDrift) {
+	for index := range snapshot.Items {
+		candidate := &snapshot.Items[index]
+		if candidate.Kind != itemProfile {
+			continue
+		}
+		if candidate.Scope != ItemScope(item.Scope) {
+			continue
+		}
+		if candidate.Name != item.Profile {
+			continue
+		}
+		candidate.Detail += " · Template update available"
+	}
 }
 
 func appendResolvedPreview(manager *configuration.Manager, repository configuration.Repository, snapshot *Snapshot) {

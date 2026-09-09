@@ -197,19 +197,6 @@ func TestHubFormQDoesNotQuit(t *testing.T) {
 	}
 }
 
-func TestHubFormResizeUpdatesAdapterSize(t *testing.T) {
-	model := New(Snapshot{})
-	model.area = 1
-	updated, _ := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	updated, _ = requireHubModel(t, updated).Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
-	model = requireHubModel(t, updated)
-	updated, _ = model.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
-	model = requireHubModel(t, updated)
-	if model.form.width != 100 || model.form.height != 30 {
-		t.Fatalf("form size = %dx%d, want 100x30", model.form.width, model.form.height)
-	}
-}
-
 func TestFormAdapterMapsHuhAbortState(t *testing.T) {
 	adapter := newFormAdapter(
 		[]huh.Field{huh.NewInput().Title("Name")},

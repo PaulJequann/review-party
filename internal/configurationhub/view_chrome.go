@@ -97,7 +97,9 @@ func planArea(kind planKind) Area {
 
 func formArea(kind formKind) Area {
 	switch kind {
-	case formProfileFields, formProfileSource, formProfileTemplate, formProfileTemplateLoading, formProfileInstructions, formEditor:
+	case formProfileFields, formProfileChoicesLoading, formProfileModel, formProfileModelManual,
+		formProfileEffort, formProfileEffortManual, formProfileDeadline, formProfileSource,
+		formProfileTemplate, formProfileTemplateLoading, formProfileInstructions, formEditor:
 		return AreaProfiles
 	case formParty:
 		return AreaParties
@@ -132,6 +134,14 @@ func (model Model) publishedTarget(kind planKind) string {
 }
 
 func (model Model) renderActionBar(options renderOptions) string {
+	switch model.view {
+	case viewForm:
+		return model.renderFormActionBar(options)
+	case viewPlanPreview:
+		return model.renderPlanActionBar(options)
+	case viewMenu, viewBrowser:
+		// Menu and browser actions are determined by the focused area.
+	}
 	bar := renderActionHints(options, model.actionHints())
 	if model.view == viewBrowser && !model.drafts.empty() {
 		drafts := "⏸ drafts"
@@ -228,7 +238,8 @@ func (model Model) renderFormFrame(options renderOptions) string {
 		case formEditor:
 			content = "Editing instructions..."
 		case formNone, formOverview, formProfileFields, formProfileSource, formProfileTemplate,
-			formProfileTemplateLoading, formProfileInstructions, formParty, formReviewOperation,
+			formProfileChoicesLoading, formProfileModel, formProfileModelManual, formProfileEffort,
+			formProfileEffortManual, formProfileDeadline, formProfileTemplateLoading, formProfileInstructions, formParty, formReviewOperation,
 			formReviewLoading, formReviewFields, formCopy, formChanges:
 			// The active form supplies the content.
 		}
@@ -241,6 +252,9 @@ func (model Model) renderFormFrame(options renderOptions) string {
 
 func (model Model) renderFormActionBar(options renderOptions) string {
 	bar := renderActionHints(options, []actionHint{
+		{key: "tab", label: "next"},
+		{key: "shift+tab", label: "previous"},
+		{key: "enter", label: "continue"},
 		{key: "esc", label: "back"},
 		{key: "ctrl+c", label: "quit"},
 	})

@@ -76,6 +76,9 @@ func (e *editor) ensureProfileFlow() error {
 }
 
 func (e *editor) editProfileFields(draft *configuration.ProfileDraft) error {
+	if e.Discovery != nil {
+		return e.editProfileFieldsWithChoices(draft)
+	}
 	for _, spec := range profileFieldSpecs {
 		if strings.TrimSpace(spec.value(*draft)) != "" {
 			continue

@@ -17,6 +17,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"reviewparty/internal/configuration"
+	"reviewparty/internal/discovery"
 )
 
 // Area is a stable Hub destination.
@@ -215,6 +216,9 @@ func (model Model) updateWindow(message tea.WindowSizeMsg) (tea.Model, tea.Cmd) 
 }
 
 func (model Model) updateAsync(message tea.Msg) (tea.Model, tea.Cmd, bool) {
+	if updated, command, handled := model.updateProfileChoiceMessage(message); handled {
+		return updated, command, true
+	}
 	switch message := message.(type) {
 	case planReadyMsg:
 		model, command := model.receivePlan(message)
@@ -985,6 +989,7 @@ type RunOptions struct {
 	Output           io.Writer
 	Accessible       bool
 	ModelChoiceCheck func(reviewer, model string) configuration.ModelChoiceCheck
+	Discovery        *discovery.Service
 }
 
 // Run opens the terminal shell over a read-only Manager snapshot.

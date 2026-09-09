@@ -171,12 +171,16 @@ func newInitCommand(streams commandIO) *cobra.Command {
 	cmd := &cobra.Command{
 		Use: "init", Short: "Prepare managed state for a repository", Example: "  review-party init --repo .", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			options := initOptions{repository: stringFlag(cmd, "repo"), stateDirectory: stringFlag(cmd, "state-dir"), configuration: stringFlag(cmd, "config")}
+			options := initOptions{repository: stringFlag(cmd, "repo"), stateDirectory: stringFlag(cmd, "state-dir"), configuration: stringFlag(cmd, "config"), backup: boolFlag(cmd, "backup-incompatible"), fresh: boolFlag(cmd, "fresh"), yes: boolFlag(cmd, "yes")}
 			return commandResult(executeInit(options, streams.output, streams.errors))
 		},
 	}
 	addRepositoryFlag(cmd, "Git repository to initialize")
 	cmd.Flags().String("state-dir", "", "Advanced per-user state location")
+	cmd.Flags().Bool("backup-incompatible", false, "Back up an incompatible ledger and SQLite sidecars without initializing")
+	cmd.Flags().Bool("fresh", false, "Initialize fresh state after a separately confirmed backup")
+	cmd.Flags().Bool("yes", false, "Confirm this recovery step")
+	cmd.MarkFlagsMutuallyExclusive("backup-incompatible", "fresh")
 	addConfigurationFlag(cmd)
 	return cmd
 }

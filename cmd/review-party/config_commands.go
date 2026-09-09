@@ -76,7 +76,16 @@ func newConfigValidateCommand(streams commandIO) *cobra.Command {
 
 func newConfigProfileCommand(streams commandIO, dependencies configurationDependencies) *cobra.Command {
 	cmd := &cobra.Command{Use: "profile", Short: "Create or copy Review Profiles", Args: cobra.NoArgs, RunE: showCommandHelp}
-	cmd.AddCommand(newConfigProfileCreateCommand(streams, dependencies), newConfigProfileCopyCommand(streams))
+	cmd.AddCommand(newConfigProfileCreateCommand(streams, dependencies), newConfigProfileCopyCommand(streams), newConfigProfileTemplateUpdateCommand(streams))
+	return cmd
+}
+
+func newConfigProfileTemplateUpdateCommand(streams commandIO) *cobra.Command {
+	cmd := newConfigLeafCommand("update-template NAME", "Replace Profile instructions from its newer Template", cobra.ExactArgs(1), func(cmd *cobra.Command, args []string) error {
+		options := configurationMutationOptions{repository: stringFlag(cmd, "repo"), format: stringFlag(cmd, "format"), configuration: stringFlag(cmd, "config"), yes: boolFlag(cmd, "yes")}
+		return commandResult(executeConfigProfileTemplateUpdate(args[0], stringFlag(cmd, "scope"), options, streams))
+	})
+	addConfigMutationFlags(cmd, true, false, string(configuration.ScopeGlobal))
 	return cmd
 }
 

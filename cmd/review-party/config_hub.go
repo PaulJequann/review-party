@@ -40,6 +40,7 @@ func executeConfigurationHub(parent context.Context, options configurationHubOpt
 		Input:      configurationHubInput(streams.input), Output: streams.output, Accessible: options.accessible,
 	}
 	if options.discoveryService != nil {
+		hubOptions.Discovery = options.discoveryService()
 		hubOptions.ModelChoiceCheck = func(reviewer, model string) configuration.ModelChoiceCheck {
 			return modelChoiceCheck(modelWarningInput{
 				manager: manager, discovery: options.discoveryService, repository: repository,

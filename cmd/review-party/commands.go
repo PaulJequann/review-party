@@ -122,7 +122,7 @@ func newRootCommand(streams commandIO) *cobra.Command {
 		newPartiesCommand(streams),
 		newEvalCommand(streams),
 		newConfigCommand(streams),
-		newInitCommand(streams),
+		newInitCommand(streams), newDoctorCommand(streams),
 		newVersionCommand(streams),
 	)
 	return root

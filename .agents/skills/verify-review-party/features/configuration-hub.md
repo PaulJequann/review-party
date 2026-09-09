@@ -67,9 +67,16 @@ procedure in `features/README.md`. Wait for `Menu`, then perform this
 sequence, capturing each named state:
 
 1. Send `Down`, then `Enter` to open Profiles, and send `n` for a new Profile.
-2. Wait for `Configuration scope`. Send `Down` to choose Repository scope,
-   then Tab through the fields entering, in order: `ui-bugs`, `codex`,
-   `gpt-5.6-luna`, `high`, and `8m`.
+2. Wait for `Configuration scope`. Capture the full 120x30 frame, including
+   the bottom border, `tab next`, `shift+tab previous`, `enter continue`, and
+   `? help`. Resize to 80x24 and require those controls to remain visible.
+   Send `Down` to choose Repository scope, then Tab through the fields entering,
+   in order: `ui-bugs`, `codex`, `gpt-5.6-luna`, `high`, and `8m`. Require each
+   focused input to remain inside the box. On the deadline field, send
+   Shift+Tab and confirm focus returns to Reasoning effort without changing
+   `high`. Send Tab to return to the deadline, resize to 120x30, and confirm
+   the focused deadline and navigation controls remain visible. Send Enter
+   to continue to the instruction source; Tab alone does not submit the form.
 3. Accept the default Template instruction source, accept the first packaged
    template, and accept the default `Edit instructions with $EDITOR?` answer.
 4. Capture `configuration-hub/menu.txt`, `profiles-browser.txt`, and

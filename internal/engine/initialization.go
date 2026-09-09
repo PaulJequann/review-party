@@ -44,7 +44,35 @@ func validateConfigurationPath(path string) error {
 	return rejectSpecialConfigurationPath(path)
 }
 
-func prepareInitializationState(manager *configuration.Manager, selection initializationStateSelection) (bool, error) {
+func prepareInitializationState(manager *configuration.Manager, selection initializationStateSelection, fresh bool) (bool, error) {
+	if err := refuseUnconfirmedRecovery(selection.directory, fresh); err != nil {
+		return false, err
+	}
+	if fresh {
+		return false, prepareFreshInitializationState(manager, selection)
+	}
+	return prepareExistingInitializationState(manager, selection)
+}
+
+func refuseUnconfirmedRecovery(directory statePath, fresh bool) error {
+	pending, err := store.ReviewRecordStateRecoveryPending(string(directory))
+	if err != nil {
+		return err
+	}
+	if pending && !fresh {
+		return errors.New("incompatible state was backed up; run init --fresh with a separate confirmation")
+	}
+	return nil
+}
+
+func prepareFreshInitializationState(manager *configuration.Manager, selection initializationStateSelection) error {
+	if err := store.PrepareFreshReviewRecordState(string(selection.directory)); err != nil {
+		return err
+	}
+	return rememberInitializedState(manager, selection)
+}
+
+func prepareExistingInitializationState(manager *configuration.Manager, selection initializationStateSelection) (bool, error) {
 	alreadyReady, err := store.ReviewRecordStatePrepared(string(selection.directory))
 	if err != nil && !errors.Is(err, store.ErrReviewRecordStateRequiresPreparation) {
 		return false, err
@@ -55,12 +83,17 @@ func prepareInitializationState(manager *configuration.Manager, selection initia
 	if err := store.PrepareReviewRecordState(string(selection.directory)); err != nil {
 		return false, err
 	}
-	if selection.remember {
-		if err := rememberStateDirectory(manager, string(selection.directory)); err != nil {
-			return false, err
-		}
+	if err := rememberInitializedState(manager, selection); err != nil {
+		return false, err
 	}
 	return alreadyReady, nil
+}
+
+func rememberInitializedState(manager *configuration.Manager, selection initializationStateSelection) error {
+	if !selection.remember {
+		return nil
+	}
+	return rememberStateDirectory(manager, string(selection.directory))
 }
 
 type initializationStateSelection struct {

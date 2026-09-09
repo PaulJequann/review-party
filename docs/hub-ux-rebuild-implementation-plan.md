@@ -1,8 +1,18 @@
 # Hub UX rebuild implementation plan
 
-Status: **Slices R1-R5 complete** — R5 landed 2026-08-30. Reconciled against
+Status: **Slices R1-R5, Profile setup follow-up, and Slice 9 complete**
+(2026-09-08). Reconciled against
 [configuration-hub-implementation-plan.md](configuration-hub-implementation-plan.md)
-(Slices 1-8 complete); see "Relationship to the existing plan" below.
+(Slices 1-9 complete); see "Relationship to the existing plan" below.
+
+The [Profile setup follow-up](#profile-setup-follow-up-before-slice-9) landed
+discovery-backed Reviewer, model, and effort selection for Hub Profile
+creation, plus the remaining Slice 9 recovery work (Template drift reporting,
+instruction replacement, ledger backup, fresh-init confirmation, `doctor`
+JSON, README).
+R5 form repairs now budget header, actions, footer, and box padding on creation
+and resize. The action bar exposes Tab, Shift+Tab, and Enter; form-layout tests
+cover wrapped headers and focused inputs at narrow and wide sizes.
 
 Post-R5 menu simplification (2026-09-07): the menu pane is one line per
 destination, area descriptions render only in the focused context pane, the
@@ -437,15 +447,71 @@ single column with no truncation. The whole Hub shares one height budget.
   Terminal state clean after exit (`git diff --check`-equivalent: no
   residual alt-screen artifacts).
 
+## Profile setup follow-up before Slice 9
+
+Status: complete (2026-09-08). Discovery-backed selection landed for Hub
+Profile creation; Linear remains the issue tracker.
+
+### Goal
+
+Create a Profile by choosing a Reviewer, model, and supported reasoning effort
+without having to know their identifiers in advance. Keep exact manual model
+entry available when discovery is incomplete.
+
+### Existing implementation
+
+- `internal/discovery/choices.go` exposes immediate cached, configured, and
+  packaged choices through `ChoiceSnapshot`. `Service.Open` adds a bounded
+  asynchronous refresh, and `ChoiceSession.Close` cancels it.
+- `ModelChoice` carries source provenance and model reasoning-effort metadata.
+- `cmd/review-party/config_hub.go` currently passes only `ModelChoiceCheck` to
+  the Hub. The profile fields in `interactive_forms.go` remain text inputs.
+
+### Bounded work
+
+- Offer known Reviewer identifiers as choices. Show availability and
+  authentication diagnostics without starting login or substituting an agent.
+- Offer searchable model choices for the selected Reviewer, with provenance
+  and an explicit manual-entry option. Render immediate choices before refresh
+  completes; retain the current selection when results arrive.
+- Offer the selected model's reported reasoning efforts. When metadata is
+  unavailable, label that limitation and allow explicit manual entry rather
+  than guessing supported values or choosing a default silently.
+- Keep Profile name, scope, deadline, and instruction selection in the existing
+  creation flow. Changes to Reviewer or model invalidate dependent selections
+  using the existing draft rules.
+- Own discovery lifecycle outside rendering. Cancel abandoned requests and
+  ignore late results for a previous Reviewer or closed editor.
+- Give the accessible editor the same choices, manual-entry route, warnings,
+  and reviewed publication contract.
+
+### Acceptance
+
+- A terminal drive creates and reads back a Profile by selecting a Reviewer,
+  model, and reported effort without typing their identifiers.
+- Empty, expired, failed, and slow discovery leave manual entry usable. Cached
+  choices never imply verified current access.
+- Switching Reviewers during refresh cannot populate the new selection with
+  the old Reviewer's results. Refresh never overwrites typed input.
+- Unknown model publication requires the existing warning and confirmation.
+  No authentication or executable review starts during configuration.
+- Normal and accessible flows preserve exact selected values through publish
+  and `explain`. Cancellation leaves configuration unchanged.
+- Choice lists and manual fields fit at 80x24 and 120x30, keep focus visible
+  through resize, and retain visible navigation guidance.
+
+Out of scope: editing saved Profile execution settings, new Reviewer adapters,
+credential management, model benchmarking, and Slice 9 recovery work.
+
 ## Relationship to the existing plan
 
-- `docs/configuration-hub-implementation-plan.md` Slices 1-8 remain
+- `docs/configuration-hub-implementation-plan.md` Slices 1-9 remain
   complete and authoritative for the domain, commands, and publication
   contract. This rebuild consumes those seams unchanged.
-- That plan's Slice 9 is partially absorbed: its Hub presentation work
-  (Template drift visibility) will be delivered on top of R2/R3 views, and
-  its deletion work remains deferred exactly as written. Its non-Hub work
-  (ledger backup, `doctor`, README, dogfooding) stays owned by Slice 9.
+- That plan's Slice 9 is complete. Its Hub presentation work reports Template
+  drift on the R2/R3 views. The non-Hub work supplies ledger backup, separate
+  fresh-init confirmation, `doctor`, README guidance, and dogfood evidence.
+  Profile and Party deletion remains deferred.
 - The existing plan's locked decisions, explicit non-goals, and test-intent
   ledger carry forward. New ledger rows added by this plan:
 
