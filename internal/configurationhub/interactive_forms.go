@@ -36,12 +36,15 @@ const (
 	formCopy                   formKind = "copy"
 	formChanges                formKind = "changes"
 	formPlanning               formKind = "planning"
+	formProfileEdit            formKind = "profile-edit"
+	formProfileEditLoading     formKind = "profile-edit-loading"
 )
 
 type formSession struct {
 	profile              profileFormState
 	party                partyFormDraft
 	copyName             string
+	editProfile          string
 	reviews              reviewFormDraft
 	reviewSelection      configuration.ReviewSelection
 	source               string
@@ -55,6 +58,7 @@ type formSession struct {
 type profileFormState struct {
 	draft       configuration.ProfileDraft
 	target      string
+	editing     bool
 	accessors   map[string]*profileFieldAccessor
 	choices     []discovery.ModelChoice
 	selected    string
@@ -390,7 +394,7 @@ func (model *Model) syncFormDraft() {
 		model.drafts.reviews = model.session.reviews
 	case formCopy:
 		model.drafts.copyName = model.session.copyName
-	case formNone, formOverview, formChanges, formPlanning:
+	case formNone, formOverview, formChanges, formPlanning, formProfileEdit, formProfileEditLoading:
 		// These views do not edit a draft directly.
 	}
 }
@@ -418,6 +422,8 @@ func (model *Model) completeForm() (tea.Model, tea.Cmd) {
 	switch model.formKind {
 	case formOverview, formChanges:
 		return model.completeExitForm()
+	case formProfileEdit:
+		return model.completeProfileEditSelectForm()
 	case formProfileFields, formProfileModel, formProfileModelManual, formProfileEffort,
 		formProfileEffortManual, formProfileDeadline, formProfileSource, formProfileTemplate, formProfileInstructions:
 		return model.completeProfileForm()
@@ -425,7 +431,8 @@ func (model *Model) completeForm() (tea.Model, tea.Cmd) {
 		return model.completePlanForm()
 	case formReviewOperation:
 		return model.completeReviewOperationForm()
-	case formNone, formProfileChoicesLoading, formProfileTemplateLoading, formEditor, formReviewLoading, formPlanning:
+	case formNone, formProfileChoicesLoading, formProfileTemplateLoading, formEditor, formReviewLoading, formPlanning,
+		formProfileEditLoading:
 		// These states do not accept a completed form.
 	}
 	return *model, nil
@@ -445,7 +452,7 @@ func (model *Model) completeProfileForm() (tea.Model, tea.Cmd) {
 		return model.completeProfileInstructionsForm()
 	case formNone, formOverview, formProfileChoicesLoading, formProfileTemplateLoading, formEditor, formParty,
 		formReviewOperation, formReviewLoading, formReviewFields, formCopy, formChanges,
-		formPlanning:
+		formPlanning, formProfileEdit, formProfileEditLoading:
 		// Only profile forms reach this dispatcher.
 	}
 	return *model, nil
@@ -466,7 +473,7 @@ func (model *Model) completeProfileChoiceForm() (tea.Model, tea.Cmd) {
 	case formNone, formOverview, formProfileFields, formProfileChoicesLoading, formProfileSource,
 		formProfileTemplate, formProfileTemplateLoading, formProfileInstructions, formEditor,
 		formParty, formReviewOperation, formReviewLoading, formReviewFields, formCopy, formChanges,
-		formPlanning:
+		formPlanning, formProfileEdit, formProfileEditLoading:
 		return *model, nil
 	}
 	return *model, nil
@@ -486,7 +493,7 @@ func (model *Model) completePlanForm() (tea.Model, tea.Cmd) {
 	case formNone, formOverview, formProfileFields, formProfileSource, formProfileTemplate,
 		formProfileChoicesLoading, formProfileModel, formProfileModelManual, formProfileEffort,
 		formProfileEffortManual, formProfileDeadline, formProfileTemplateLoading, formProfileInstructions, formEditor, formReviewOperation,
-		formReviewLoading, formChanges, formPlanning:
+		formReviewLoading, formChanges, formPlanning, formProfileEdit, formProfileEditLoading:
 		// Only plan-producing forms reach this dispatcher.
 	}
 	return *model, nil
@@ -556,6 +563,9 @@ func (model *Model) startPlan(request planRequest) (tea.Model, tea.Cmd) {
 		model.status = "No plan command is available."
 		return model.reopenPlan(request.kind)
 	}
+	if request.receipts == nil {
+		request.receipts = model.runtime.receipts
+	}
 	return model.withForm(model.runtime.commands.plan(request))
 }
 
@@ -583,6 +593,11 @@ func (model *Model) reopenPlan(kind planKind) (Model, tea.Cmd) {
 	switch kind {
 	case planProfile:
 		return model.withForm(model.openProfileFieldsForm())
+	case planProfileEdit:
+		if model.isProfileEdit() {
+			return model.withForm(model.openProfileEditFieldsForm())
+		}
+		return model.withForm(model.openProfileEditSelectForm())
 	case planParty:
 		return model.withForm(model.openPartyForm())
 	case planReviews:
@@ -686,7 +701,7 @@ func (model *Model) receiveInstructionEdit(message instructionEditResultMsg) (te
 
 func (model *Model) clearDraft(kind planKind) {
 	switch kind {
-	case planProfile:
+	case planProfile, planProfileEdit:
 		model.drafts.profile = configuration.ProfileDraft{}
 	case planParty:
 		model.drafts.party = partyFormDraft{}

@@ -80,7 +80,7 @@ type areaSpec struct {
 func newAreaSpecs() []areaSpec {
 	return []areaSpec{
 		{area: AreaOverview, description: "See configuration counts, resolved reviews, and warnings.", menu: true, render: renderOverviewArea},
-		{area: AreaProfiles, kind: itemProfile, description: "Browse Profiles and create or copy one.", menu: true, action: (*editor).createProfile, render: renderInventoryArea},
+		{area: AreaProfiles, kind: itemProfile, description: "Browse Profiles and create or edit one.", menu: true, action: (*editor).manageProfiles, render: renderInventoryArea},
 		{area: AreaParties, kind: itemParty, description: "Browse flat Parties and create one.", menu: true, action: (*editor).createParty, render: renderInventoryArea},
 		{area: AreaReviews, kind: itemReview, description: "Assemble the ordered Repository Review selection.", menu: true, action: (*editor).editReviews, render: renderInventoryArea},
 		{area: AreaChanges, description: "Review or discard unfinished drafts.", menu: true, action: (*editor).reviewDrafts, render: renderActionArea},
@@ -219,6 +219,10 @@ func (model Model) updateAsync(message tea.Msg) (tea.Model, tea.Cmd, bool) {
 	if updated, command, handled := model.updateProfileChoiceMessage(message); handled {
 		return updated, command, true
 	}
+	return model.updateConfigMessage(message)
+}
+
+func (model Model) updateConfigMessage(message tea.Msg) (tea.Model, tea.Cmd, bool) {
 	switch message := message.(type) {
 	case planReadyMsg:
 		model, command := model.receivePlan(message)
@@ -234,6 +238,9 @@ func (model Model) updateAsync(message tea.Msg) (tea.Model, tea.Cmd, bool) {
 		return model, command, true
 	case templateLoadedMsg:
 		model, command := model.receiveTemplate(message)
+		return model, command, true
+	case profileLoadedMsg:
+		model, command := model.receiveProfileLoaded(message)
 		return model, command, true
 	case instructionEditResultMsg:
 		model, command := model.receiveInstructionEdit(message)
@@ -310,6 +317,8 @@ func (model Model) browserAction(key string) (tea.Model, tea.Cmd) {
 	switch key {
 	case "n":
 		return model.browserNew()
+	case "e":
+		return model.browserEdit()
 	case "p":
 		return model.browserCopy()
 	case "a":
@@ -990,6 +999,9 @@ type RunOptions struct {
 	Accessible       bool
 	ModelChoiceCheck func(reviewer, model string) configuration.ModelChoiceCheck
 	Discovery        *discovery.Service
+	// Receipts supplies per-profile execution aggregates for display.
+	// Nil renders profiles exactly as before.
+	Receipts ReceiptProvider
 }
 
 // Run opens the terminal shell over a read-only Manager snapshot.
@@ -1001,6 +1013,7 @@ func Run(manager *configuration.Manager, options RunOptions) error {
 	if err != nil {
 		return err
 	}
+	attachReceipts(&snapshot, options.Receipts)
 	if options.Accessible {
 		model := New(snapshot)
 		editor := &editor{RunOptions: options, manager: manager, drafts: &model.drafts, snapshot: snapshot}

@@ -61,6 +61,10 @@ type HistoryEntry struct {
 	Subject         string                    `json:"subject"`
 	Profile         string                    `json:"profile"`
 	Reviewer        string                    `json:"reviewer"`
+	Model           string                    `json:"model,omitempty"`
+	Status          string                    `json:"status,omitempty"`
+	DurationMS      int64                     `json:"duration_ms,omitempty"`
+	Findings        int                       `json:"findings,omitempty"`
 	Termination     model.TerminationCategory `json:"termination,omitempty"`
 	ReplaysReviewID *model.ReviewID           `json:"replays_review_id,omitempty"`
 	CreatedAt       time.Time                 `json:"created_at"`
@@ -546,6 +550,8 @@ func buildHistoryQuery(query HistoryQuery) (string, []any, int, error) {
 	statement := `SELECT id,lifecycle,
 		json_extract(subject,'$.repository'),json_extract(subject,'$.identity'),
 		json_extract(profile_revision,'$.name'),json_extract(profile_revision,'$.reviewer_id'),
+		COALESCE(json_extract(profile_revision,'$.model'),''),COALESCE(result_status,''),
+		COALESCE(json_extract(timings,'$.total_ms'),0),COALESCE(result_finding_count,0),
 		COALESCE(json_extract(termination,'$.category'),''),created_at,replays_review_id FROM reviews`
 	var predicates []string
 	var arguments []any
@@ -590,7 +596,7 @@ func scanHistoryPage(rows *sql.Rows, limit int) (HistoryPage, error) {
 	page := HistoryPage{Entries: []HistoryEntry{}, Limit: limit}
 	for rows.Next() {
 		var entry HistoryEntry
-		if err := rows.Scan(&entry.ID, &entry.Lifecycle, &entry.Repository, &entry.Subject, &entry.Profile, &entry.Reviewer, &entry.Termination, &entry.CreatedAt, &entry.ReplaysReviewID); err != nil {
+		if err := rows.Scan(&entry.ID, &entry.Lifecycle, &entry.Repository, &entry.Subject, &entry.Profile, &entry.Reviewer, &entry.Model, &entry.Status, &entry.DurationMS, &entry.Findings, &entry.Termination, &entry.CreatedAt, &entry.ReplaysReviewID); err != nil {
 			return HistoryPage{}, err
 		}
 		page.Entries = append(page.Entries, entry)

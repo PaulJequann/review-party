@@ -38,6 +38,7 @@ func executeConfigurationHub(parent context.Context, options configurationHubOpt
 		Context:    ctx,
 		Repository: configuration.Repository(repository),
 		Input:      configurationHubInput(streams.input), Output: streams.output, Accessible: options.accessible,
+		Receipts: profileReceiptProvider(ctx, options.configuration),
 	}
 	if options.discoveryService != nil {
 		hubOptions.Discovery = options.discoveryService()

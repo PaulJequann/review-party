@@ -58,7 +58,7 @@ func newHistoryCommand(streams commandIO) *cobra.Command {
 				Lifecycle: model.Lifecycle(stringFlag(cmd, "lifecycle")), Termination: model.TerminationCategory(stringFlag(cmd, "termination")),
 				Subject: stringFlag(cmd, "subject"), Limit: intFlag(cmd, "limit"),
 			}
-			options := historyOptions{query: query, format: stringFlag(cmd, "format"), configuration: stringFlag(cmd, "config"), sinceText: stringFlag(cmd, "since")}
+			options := historyOptions{query: query, format: stringFlag(cmd, "format"), configuration: stringFlag(cmd, "config"), sinceText: stringFlag(cmd, "since"), summary: boolFlag(cmd, "summary")}
 			return commandResult(executeHistory(cmd.Context(), options, streams.output, streams.errors))
 		},
 	}
@@ -72,6 +72,7 @@ func newHistoryCommand(streams commandIO) *cobra.Command {
 	cmd.Flags().String("subject", "", "Subject identity to match")
 	cmd.Flags().String("since", "", "Include Reviews at or after this RFC3339 timestamp")
 	cmd.Flags().Int("limit", 20, "Maximum Reviews to show")
+	cmd.Flags().Bool("summary", false, "Show per-Profile execution receipts instead of individual Reviews")
 	return cmd
 }
 

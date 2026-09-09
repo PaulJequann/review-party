@@ -19,6 +19,7 @@ type hubCommands struct {
 	plan                func(planRequest) tea.Cmd
 	loadReviewSelection func() tea.Cmd
 	loadTemplate        func(string) tea.Cmd
+	loadProfile         func(scope, name string) tea.Cmd
 }
 
 type hubRuntime struct {
@@ -27,6 +28,7 @@ type hubRuntime struct {
 	output   io.Writer
 	commands hubCommands
 	choices  profileChoiceRuntime
+	receipts ReceiptProvider
 }
 
 type profileChoiceRuntime struct {
@@ -52,20 +54,22 @@ type profileChoicesRefreshedMsg struct {
 }
 
 type planRequest struct {
-	kind    planKind
-	profile configuration.ProfileDraft
-	party   partyFormDraft
-	copy    string
-	review  reviewPlanRequest
+	kind     planKind
+	profile  configuration.ProfileDraft
+	party    partyFormDraft
+	copy     string
+	review   reviewPlanRequest
+	receipts ReceiptProvider
 }
 
 type planKind string
 
 const (
-	planProfile planKind = "profile"
-	planParty   planKind = "party"
-	planCopy    planKind = "copy"
-	planReviews planKind = "reviews"
+	planProfile     planKind = "profile"
+	planProfileEdit planKind = "profile-edit"
+	planParty       planKind = "party"
+	planCopy        planKind = "copy"
+	planReviews     planKind = "reviews"
 )
 
 type reviewPlanRequest struct {
@@ -79,6 +83,7 @@ type publishRequest struct {
 	repository configuration.Repository
 	kind       planKind
 	plan       configuration.Plan
+	receipts   ReceiptProvider
 }
 
 type planReadyMsg struct {
@@ -111,6 +116,14 @@ type templateLoadedMsg struct {
 	err      error
 }
 
+type profileLoadedMsg struct {
+	scope   string
+	name    string
+	profile configuration.Profile
+	found   bool
+	err     error
+}
+
 type instructionEditResultMsg struct {
 	instructions string
 	err          error
@@ -131,9 +144,15 @@ func newHubRuntime(options RunOptions, manager *configuration.Manager) *hubRunti
 			loadTemplate: func(id string) tea.Cmd {
 				return loadTemplateCommand(options.Context, manager, id)
 			},
+			loadProfile: func(scope, name string) tea.Cmd {
+				return loadProfileCommand(profileLoadRequest{
+					context: options.Context, manager: manager, repository: options.Repository, scope: scope, name: name,
+				})
+			},
 		},
 	}
 	runtime.choices = profileChoiceRuntime{service: options.Discovery, manager: manager, repo: options.Repository}
+	runtime.receipts = options.Receipts
 	return runtime
 }
 
@@ -210,6 +229,7 @@ func planRequestCommand(ctx context.Context, manager *configuration.Manager, rep
 			kind: request.kind, summary: summary.String(), warnings: plan.Warnings(),
 			publish: publishPlanCommand(publishRequest{
 				context: ctx, manager: manager, repository: repository, kind: request.kind, plan: plan,
+				receipts: request.receipts,
 			}),
 		}
 	}
@@ -220,9 +240,8 @@ func buildPlan(manager *configuration.Manager, repository configuration.Reposito
 		return configuration.Plan{}, errors.New("Configuration Hub manager is unavailable")
 	}
 	switch request.kind {
-	case planProfile:
-		editor := editor{manager: manager, RunOptions: RunOptions{Repository: repository, ModelChoiceCheck: modelChoiceCheck}}
-		return editor.planProfile(request.profile)
+	case planProfile, planProfileEdit:
+		return buildProfilePlan(manager, repository, modelChoiceCheck, request)
 	case planParty:
 		draft, err := partyDraftFromForm(request.party)
 		if err != nil {
@@ -242,6 +261,14 @@ func buildPlan(manager *configuration.Manager, repository configuration.Reposito
 	}
 }
 
+func buildProfilePlan(manager *configuration.Manager, repository configuration.Repository, modelChoiceCheck func(string, string) configuration.ModelChoiceCheck, request planRequest) (configuration.Plan, error) {
+	editor := editor{manager: manager, RunOptions: RunOptions{Repository: repository, ModelChoiceCheck: modelChoiceCheck}}
+	if request.kind == planProfileEdit {
+		return editor.planProfileEdit(request.profile.Target, request.profile.Name, request.profile)
+	}
+	return editor.planProfile(request.profile)
+}
+
 func publishPlanCommand(request publishRequest) tea.Cmd {
 	return func() tea.Msg {
 		if err := contextError(request.context); err != nil {
@@ -254,6 +281,9 @@ func publishPlanCommand(request publishRequest) tea.Cmd {
 			return publishResultMsg{kind: request.kind, err: err}
 		}
 		snapshot, refreshErr := buildSnapshot(request.manager, request.repository)
+		if refreshErr == nil {
+			attachReceipts(&snapshot, request.receipts)
+		}
 		return publishResultMsg{kind: request.kind, snapshot: snapshot, refreshErr: refreshErr}
 	}
 }
@@ -287,6 +317,27 @@ func loadTemplateCommand(ctx context.Context, manager *configuration.Manager, id
 		}
 		template, found := manager.Template(id)
 		return templateLoadedMsg{template: template, found: found}
+	}
+}
+
+type profileLoadRequest struct {
+	context    context.Context
+	manager    *configuration.Manager
+	repository configuration.Repository
+	scope      string
+	name       string
+}
+
+func loadProfileCommand(request profileLoadRequest) tea.Cmd {
+	return func() tea.Msg {
+		if err := contextError(request.context); err != nil {
+			return profileLoadedMsg{scope: request.scope, name: request.name, err: err}
+		}
+		if request.manager == nil {
+			return profileLoadedMsg{scope: request.scope, name: request.name, err: errors.New("Configuration Hub manager is unavailable")}
+		}
+		profile, found, err := request.manager.LoadProfile(configuration.Scope(request.scope), request.repository, request.name)
+		return profileLoadedMsg{scope: request.scope, name: request.name, profile: profile, found: found, err: err}
 	}
 }
 

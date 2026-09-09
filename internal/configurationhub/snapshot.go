@@ -7,8 +7,54 @@ import (
 	"reviewparty/internal/configuration"
 )
 
-// buildSnapshot adapts the Manager's configuration read model for the Hub.
-// The Bubble Tea model consumes this immutable view without owning storage.
+// ProfileReceipt is one profile's execution aggregate for display. The Hub
+// never queries run storage itself; the caller supplies these read-only.
+type ProfileReceipt struct {
+	Runs           int
+	MedianDuration string
+	TotalFindings  int
+}
+
+// ReceiptProvider returns the receipt for one recorded profile name.
+// The second result is false when no runs are recorded.
+type ReceiptProvider func(profile string) (ProfileReceipt, bool)
+
+// attachReceipts annotates profile inventory details with execution receipts.
+// Entries without a receipt render exactly as before.
+func attachReceipts(snapshot *Snapshot, receipts ReceiptProvider) {
+	if receipts == nil {
+		return
+	}
+	for index := range snapshot.Items {
+		item := &snapshot.Items[index]
+		if item.Kind != itemProfile {
+			continue
+		}
+		receipt, found := receipts(item.Name)
+		if !found {
+			continue
+		}
+		item.Detail += " · " + FormatReceipt(receipt)
+	}
+}
+
+func FormatReceipt(receipt ProfileReceipt) string {
+	return "last " + formatReceiptRuns(receipt.Runs) + " · med " + receipt.MedianDuration + " · " + formatReceiptFindings(receipt.TotalFindings)
+}
+
+func formatReceiptRuns(runs int) string {
+	if runs == 1 {
+		return "1 run"
+	}
+	return fmt.Sprintf("%d runs", runs)
+}
+
+func formatReceiptFindings(findings int) string {
+	if findings == 1 {
+		return "1 finding"
+	}
+	return fmt.Sprintf("%d findings", findings)
+}
 func buildSnapshot(manager *configuration.Manager, repository configuration.Repository) (Snapshot, error) {
 	snapshot := Snapshot{Repository: string(repository)}
 	for _, template := range manager.Templates() {
