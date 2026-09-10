@@ -35,6 +35,7 @@ func receiptFromSummary(summary store.HistorySummary, profile string) (configura
 		}
 		return configurationhub.ProfileReceipt{
 			Runs: entry.Runs, MedianDuration: entry.MedianDuration, TotalFindings: entry.TotalFindings,
+			IncompleteRuns: entry.IncompleteRuns,
 		}, true
 	}
 	return configurationhub.ProfileReceipt{}, false

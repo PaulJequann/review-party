@@ -44,3 +44,14 @@ func TestFormatReceiptUsesSingularForms(t *testing.T) {
 		t.Fatalf("receipt = %q", got)
 	}
 }
+
+func TestFormatReceiptCarriesIncompleteAndOmitsEmptyMedian(t *testing.T) {
+	got := FormatReceipt(ProfileReceipt{Runs: 3, MedianDuration: "2m0s", TotalFindings: 1, IncompleteRuns: 2})
+	if got != "last 3 runs · 2 incomplete · med 2m0s · 1 finding" {
+		t.Fatalf("receipt = %q", got)
+	}
+	onlyIncomplete := FormatReceipt(ProfileReceipt{Runs: 1, IncompleteRuns: 1})
+	if onlyIncomplete != "last 1 run · 1 incomplete · 0 findings" {
+		t.Fatalf("receipt = %q", onlyIncomplete)
+	}
+}

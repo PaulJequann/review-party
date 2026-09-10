@@ -13,6 +13,7 @@ type ProfileReceipt struct {
 	Runs           int
 	MedianDuration string
 	TotalFindings  int
+	IncompleteRuns int
 }
 
 // ReceiptProvider returns the receipt for one recorded profile name.
@@ -39,7 +40,22 @@ func attachReceipts(snapshot *Snapshot, receipts ReceiptProvider) {
 }
 
 func FormatReceipt(receipt ProfileReceipt) string {
-	return "last " + formatReceiptRuns(receipt.Runs) + " · med " + receipt.MedianDuration + " · " + formatReceiptFindings(receipt.TotalFindings)
+	parts := []string{"last " + formatReceiptRuns(receipt.Runs)}
+	if receipt.IncompleteRuns > 0 {
+		parts = append(parts, formatReceiptIncomplete(receipt.IncompleteRuns))
+	}
+	if receipt.MedianDuration != "" {
+		parts = append(parts, "med "+receipt.MedianDuration)
+	}
+	parts = append(parts, formatReceiptFindings(receipt.TotalFindings))
+	return strings.Join(parts, " · ")
+}
+
+func formatReceiptIncomplete(count int) string {
+	if count == 1 {
+		return "1 incomplete"
+	}
+	return fmt.Sprintf("%d incomplete", count)
 }
 
 func formatReceiptRuns(runs int) string {

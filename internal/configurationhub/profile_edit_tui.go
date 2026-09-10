@@ -105,23 +105,24 @@ func (model *Model) completeProfileEditSelectForm() (tea.Model, tea.Cmd) {
 	return model.startProfileEdit(selection)
 }
 
-// browserEdit starts execution editing for the highlighted Profile row.
+// browserEdit starts execution editing for the highlighted browser row. The
+// cursor indexes the full visible list (templates included in the Profiles
+// area), so the highlighted item is used directly; non-profile rows never
+// start the execution flow.
 func (model Model) browserEdit() (tea.Model, tea.Cmd) {
 	if model.browserArea != AreaProfiles {
 		return model, nil
 	}
 	items := model.visibleItems(itemProfile)
-	var profiles []Item
-	for _, item := range items {
-		if item.Kind == itemProfile {
-			profiles = append(profiles, item)
-		}
-	}
-	if len(profiles) == 0 || model.cursor >= len(profiles) {
+	if len(items) == 0 || model.cursor >= len(items) {
 		model.status = "No Profile row is selected."
 		return model, nil
 	}
-	item := profiles[min(model.cursor, len(profiles)-1)]
+	item := items[model.cursor]
+	if item.Kind != itemProfile {
+		model.status = "Highlighted row is a Template; press Enter to start from it instead."
+		return model, nil
+	}
 	model.ensureSession()
 	model.session = newFormSession(model.drafts)
 	model.view = viewForm

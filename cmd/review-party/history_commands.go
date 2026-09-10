@@ -118,12 +118,19 @@ func formatProfileSummary(profile store.ProfileSummary, hasMore bool) string {
 	if hasMore {
 		scope += " (more in ledger)"
 	}
+	if profile.IncompleteRuns > 0 {
+		scope += ", " + formatRunCount(profile.IncompleteRuns) + " incomplete"
+	}
 	models := strings.Join(profile.Models, ", ")
 	if models == "" {
 		models = "unknown model"
 	}
+	median := profile.MedianDuration
+	if median == "" {
+		median = "—"
+	}
 	return strings.Join([]string{
-		profile.Profile, scope, "med " + profile.MedianDuration,
+		profile.Profile, scope, "med " + median,
 		models, formatFindingsCount(profile.TotalFindings),
 	}, " · ")
 }

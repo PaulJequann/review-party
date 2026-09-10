@@ -3,6 +3,8 @@ package store
 import (
 	"sort"
 	"time"
+
+	"reviewparty/internal/model"
 )
 
 // HistorySummary aggregates one page of history entries into per-profile
@@ -14,7 +16,9 @@ type HistorySummary struct {
 	HasMore  bool             `json:"has_more"`
 }
 
-// ProfileSummary is the execution receipt for one recorded Profile.
+// ProfileSummary is the execution receipt for one recorded Profile. Medians
+// and findings cover completed runs only; pending or incomplete runs are
+// counted separately so an unfinished review never renders as a clean one.
 type ProfileSummary struct {
 	Profile          string   `json:"profile"`
 	Runs             int      `json:"runs"`
@@ -22,6 +26,7 @@ type ProfileSummary struct {
 	MedianDuration   string   `json:"median_duration"`
 	TotalFindings    int      `json:"total_findings"`
 	Models           []string `json:"models"`
+	IncompleteRuns   int      `json:"incomplete_runs,omitempty"`
 }
 
 // SummarizeHistory groups entries by recorded Profile in first-seen order.
@@ -45,10 +50,29 @@ func SummarizeHistory(page HistoryPage) HistorySummary {
 }
 
 func summarizeProfile(profile string, entries []HistoryEntry) ProfileSummary {
-	durations := make([]int64, 0, len(entries))
+	completed := make([]HistoryEntry, 0, len(entries))
+	summary := ProfileSummary{Profile: profile, Runs: len(entries)}
+	for _, entry := range entries {
+		if entry.Lifecycle != model.LifecycleCompleted {
+			summary.IncompleteRuns++
+			continue
+		}
+		completed = append(completed, entry)
+	}
+	if len(completed) == 0 {
+		return summary
+	}
+	summary.MedianDurationMS, summary.MedianDuration, summary.TotalFindings, summary.Models = aggregateCompletedRuns(completed)
+	return summary
+}
+
+// aggregateCompletedRuns reduces completed runs into the receipt aggregates:
+// median latency, total findings, and the distinct models used.
+func aggregateCompletedRuns(completed []HistoryEntry) (int64, string, int, []string) {
+	durations := make([]int64, 0, len(completed))
 	models := map[string]struct{}{}
 	var total int
-	for _, entry := range entries {
+	for _, entry := range completed {
 		durations = append(durations, entry.DurationMS)
 		total += entry.Findings
 		if entry.Model != "" {
@@ -56,11 +80,7 @@ func summarizeProfile(profile string, entries []HistoryEntry) ProfileSummary {
 		}
 	}
 	median := medianDuration(durations)
-	return ProfileSummary{
-		Profile: profile, Runs: len(entries),
-		MedianDurationMS: median, MedianDuration: formatDurationMS(median),
-		TotalFindings: total, Models: sortedModels(models),
-	}
+	return median, formatDurationMS(median), total, sortedModels(models)
 }
 
 func medianDuration(values []int64) int64 {
