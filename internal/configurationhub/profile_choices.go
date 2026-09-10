@@ -195,6 +195,9 @@ func (model *Model) completeProfileEffortForm() (tea.Model, tea.Cmd) {
 
 func (model *Model) completeProfileExecutionForm() (tea.Model, tea.Cmd) {
 	model.syncFormDraft()
+	if model.isProfileEdit() {
+		return model.startPlan(planRequest{kind: planProfileEdit, profile: model.drafts.profile})
+	}
 	if profileNeedsSource(model.drafts.profile) {
 		model.session.source = ""
 		return model.withForm(model.openProfileSourceForm())

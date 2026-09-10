@@ -42,6 +42,45 @@ func executeConfigProfileCreate(name string, cmd *cobra.Command, options configu
 	})
 }
 
+func executeConfigProfileEdit(name string, cmd *cobra.Command, options configurationMutationOptions, streams commandIO, discoveryService func() *discovery.Service) int {
+	return runConfigurationCommand(options.format, options.configuration, streams, func(manager *configuration.Manager) (int, error) {
+		scope, err := parseConfigurationScope(stringFlag(cmd, "scope"))
+		if err != nil {
+			return 0, err
+		}
+		update := configuration.ProfileExecutionUpdate{
+			Reviewer: stringFlag(cmd, "reviewer"), Model: stringFlag(cmd, "model"),
+			ReasoningEffort: stringFlag(cmd, "effort"), AttemptDeadline: stringFlag(cmd, "deadline"),
+		}
+		if update.Empty() {
+			return 0, errors.New("supply at least one of --reviewer, --model, --effort, or --deadline")
+		}
+		repository := configuration.Repository(options.repository)
+		effectiveReviewer, effectiveModel := update.Reviewer, update.Model
+		if profile, found, loadErr := manager.LoadProfile(scope, repository, name); loadErr == nil && found {
+			if effectiveReviewer == "" {
+				effectiveReviewer = profile.Reviewer
+			}
+			if effectiveModel == "" {
+				effectiveModel = profile.Model
+			}
+		}
+		check := modelChoiceCheck(modelWarningInput{
+			manager: manager, discovery: discoveryService, repository: options.repository,
+			reviewer: effectiveReviewer, model: effectiveModel,
+		})
+		plan, err := manager.PlanProfileUpdate(repository, scope, name, update)
+		if err != nil {
+			return 0, err
+		}
+		plan = plan.WithWarnings(
+			check.Warning(effectiveReviewer, effectiveModel),
+			profileReceiptWarning(cmd.Context(), options.configuration, name),
+		)
+		return publishConfigurationPlan(manager, plan, options, streams), nil
+	})
+}
+
 type modelWarningInput struct {
 	manager    *configuration.Manager
 	discovery  func() *discovery.Service
@@ -73,31 +112,31 @@ func modelChoiceCheck(input modelWarningInput) configuration.ModelChoiceCheck {
 }
 
 func executeConfigProfileCopy(value, targetValue string, options configurationMutationOptions, streams commandIO) int {
-	return runConfigurationCommand(options.format, options.configuration, streams, func(manager *configuration.Manager) (int, error) {
-		target, err := parseConfigurationScope(targetValue)
-		if err != nil {
-			return 0, err
-		}
-		repository := configuration.Repository(options.repository)
-		plan, err := manager.PlanProfileCopyFromReference(repository, value, target)
-		if err != nil {
-			return 0, err
-		}
-		return publishConfigurationPlan(manager, plan, options, streams), nil
-	})
+	return publishScopedProfilePlan(targetValue, options, streams,
+		func(manager *configuration.Manager, repository configuration.Repository, scope configuration.Scope) (configuration.Plan, error) {
+			return manager.PlanProfileCopyFromReference(repository, value, scope)
+		})
 }
 
 func executeConfigProfileTemplateUpdate(name, scopeValue string, options configurationMutationOptions, streams commandIO) int {
+	return publishScopedProfilePlan(scopeValue, options, streams,
+		func(manager *configuration.Manager, repository configuration.Repository, scope configuration.Scope) (configuration.Plan, error) {
+			return manager.PlanProfileTemplateUpdate(repository, scope, name)
+		})
+}
+
+func publishScopedProfilePlan(scopeValue string, options configurationMutationOptions, streams commandIO, plan func(*configuration.Manager, configuration.Repository, configuration.Scope) (configuration.Plan, error)) int {
 	return runConfigurationCommand(options.format, options.configuration, streams, func(manager *configuration.Manager) (int, error) {
 		scope, err := parseConfigurationScope(scopeValue)
 		if err != nil {
 			return 0, err
 		}
-		plan, err := manager.PlanProfileTemplateUpdate(configuration.Repository(options.repository), scope, name)
+		repository := configuration.Repository(options.repository)
+		staged, err := plan(manager, repository, scope)
 		if err != nil {
 			return 0, err
 		}
-		return publishConfigurationPlan(manager, plan, options, streams), nil
+		return publishConfigurationPlan(manager, staged, options, streams), nil
 	})
 }
 

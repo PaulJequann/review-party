@@ -30,6 +30,9 @@ func executeHistory(ctx context.Context, options historyOptions, stdout, stderr 
 	if err != nil {
 		return printFailure(stderr, err)
 	}
+	if options.summary {
+		return printHistorySummary(store.SummarizeHistory(page), options.format, stdout, stderr)
+	}
 	return printHistory(page, options.format, stdout, stderr)
 }
 
@@ -38,6 +41,7 @@ type historyOptions struct {
 	format        string
 	configuration string
 	sinceText     string
+	summary       bool
 }
 
 func validatedHistoryQuery(options historyOptions) (store.HistoryQuery, error) {
@@ -63,19 +67,10 @@ func resolvedHistoryRepository(repository string) (string, error) {
 }
 
 func printHistory(page store.HistoryPage, format string, stdout, stderr io.Writer) int {
-	if format == "json" {
-		if page.Entries == nil {
-			page.Entries = []store.HistoryEntry{}
-		}
-		if err := json.NewEncoder(stdout).Encode(page); err != nil {
-			return printFailure(stderr, err)
-		}
-		return 0
+	if page.Entries == nil {
+		page.Entries = []store.HistoryEntry{}
 	}
-	if format != "human" {
-		return printFailure(stderr, fmt.Errorf("unknown output format %q", format))
-	}
-	return printCommandOutput(stdout, stderr, func(output *commandOutput) {
+	return renderHistoryOutput(format, stdout, stderr, page, func(output *commandOutput) {
 		for _, entry := range page.Entries {
 			output.write("%s\n", formatHistoryEntry(entry))
 		}
@@ -92,4 +87,64 @@ func formatHistoryEntry(entry store.HistoryEntry) string {
 	}
 	parts = append(parts, entry.CreatedAt.UTC().Format(time.RFC3339))
 	return strings.Join(parts, " · ")
+}
+
+func printHistorySummary(summary store.HistorySummary, format string, stdout, stderr io.Writer) int {
+	if summary.Profiles == nil {
+		summary.Profiles = []store.ProfileSummary{}
+	}
+	return renderHistoryOutput(format, stdout, stderr, summary, func(output *commandOutput) {
+		for _, profile := range summary.Profiles {
+			output.write("%s\n", formatProfileSummary(profile, summary.HasMore))
+		}
+	})
+}
+
+func renderHistoryOutput(format string, stdout, stderr io.Writer, jsonValue any, human func(*commandOutput)) int {
+	if format == "json" {
+		if err := json.NewEncoder(stdout).Encode(jsonValue); err != nil {
+			return printFailure(stderr, err)
+		}
+		return 0
+	}
+	if format != "human" {
+		return printFailure(stderr, fmt.Errorf("unknown output format %q", format))
+	}
+	return printCommandOutput(stdout, stderr, human)
+}
+
+func formatProfileSummary(profile store.ProfileSummary, hasMore bool) string {
+	scope := "last " + formatRunCount(profile.Runs)
+	if hasMore {
+		scope += " (more in ledger)"
+	}
+	if profile.IncompleteRuns > 0 {
+		scope += ", " + formatRunCount(profile.IncompleteRuns) + " incomplete"
+	}
+	models := strings.Join(profile.Models, ", ")
+	if models == "" {
+		models = "unknown model"
+	}
+	median := profile.MedianDuration
+	if median == "" {
+		median = "—"
+	}
+	return strings.Join([]string{
+		profile.Profile, scope, "med " + median,
+		models, formatFindingsCount(profile.TotalFindings),
+	}, " · ")
+}
+
+func formatRunCount(runs int) string {
+	if runs == 1 {
+		return "1 run"
+	}
+	return fmt.Sprintf("%d runs", runs)
+}
+
+func formatFindingsCount(findings int) string {
+	if findings == 1 {
+		return "1 finding"
+	}
+	return fmt.Sprintf("%d findings", findings)
 }

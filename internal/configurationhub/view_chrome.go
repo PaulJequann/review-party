@@ -84,7 +84,7 @@ func (model Model) focusedArea() Area {
 
 func planArea(kind planKind) Area {
 	switch kind {
-	case planProfile, planCopy:
+	case planProfile, planProfileEdit, planCopy:
 		return AreaProfiles
 	case planParty:
 		return AreaParties
@@ -99,7 +99,8 @@ func formArea(kind formKind) Area {
 	switch kind {
 	case formProfileFields, formProfileChoicesLoading, formProfileModel, formProfileModelManual,
 		formProfileEffort, formProfileEffortManual, formProfileDeadline, formProfileSource,
-		formProfileTemplate, formProfileTemplateLoading, formProfileInstructions, formEditor:
+		formProfileTemplate, formProfileTemplateLoading, formProfileInstructions, formEditor,
+		formProfileEdit, formProfileEditLoading:
 		return AreaProfiles
 	case formParty:
 		return AreaParties
@@ -120,7 +121,7 @@ func formArea(kind formKind) Area {
 
 func (model Model) publishedTarget(kind planKind) string {
 	switch kind {
-	case planProfile:
+	case planProfile, planProfileEdit:
 		return fmt.Sprintf("profile %q", model.drafts.profile.Name)
 	case planParty:
 		return fmt.Sprintf("party %q", model.drafts.party.name)
@@ -166,7 +167,7 @@ func (model Model) actionHints() []actionHint {
 	hints := []actionHint{{key: "↑/↓", label: "navigate"}}
 	switch model.browserArea {
 	case AreaProfiles:
-		hints = append(hints, actionHint{key: "n", label: "new"}, actionHint{key: "p", label: "copy"})
+		hints = append(hints, actionHint{key: "n", label: "new"}, actionHint{key: "e", label: "edit"}, actionHint{key: "p", label: "copy"})
 	case AreaParties:
 		hints = append(hints, actionHint{key: "n", label: "new"})
 	case AreaReviews:
@@ -240,7 +241,7 @@ func (model Model) renderFormFrame(options renderOptions) string {
 		case formNone, formOverview, formProfileFields, formProfileSource, formProfileTemplate,
 			formProfileChoicesLoading, formProfileModel, formProfileModelManual, formProfileEffort,
 			formProfileEffortManual, formProfileDeadline, formProfileTemplateLoading, formProfileInstructions, formParty, formReviewOperation,
-			formReviewLoading, formReviewFields, formCopy, formChanges:
+			formReviewLoading, formReviewFields, formCopy, formChanges, formProfileEdit, formProfileEditLoading:
 			// The active form supplies the content.
 		}
 	}

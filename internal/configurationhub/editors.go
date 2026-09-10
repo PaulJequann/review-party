@@ -80,6 +80,7 @@ func (e *editor) refresh() error {
 	if err != nil {
 		return err
 	}
+	attachReceipts(&snapshot, e.Receipts)
 	e.snapshot = snapshot
 	return nil
 }

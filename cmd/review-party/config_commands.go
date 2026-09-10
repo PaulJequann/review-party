@@ -75,8 +75,8 @@ func newConfigValidateCommand(streams commandIO) *cobra.Command {
 }
 
 func newConfigProfileCommand(streams commandIO, dependencies configurationDependencies) *cobra.Command {
-	cmd := &cobra.Command{Use: "profile", Short: "Create or copy Review Profiles", Args: cobra.NoArgs, RunE: showCommandHelp}
-	cmd.AddCommand(newConfigProfileCreateCommand(streams, dependencies), newConfigProfileCopyCommand(streams), newConfigProfileTemplateUpdateCommand(streams))
+	cmd := &cobra.Command{Use: "profile", Short: "Create, edit, or copy Review Profiles", Args: cobra.NoArgs, RunE: showCommandHelp}
+	cmd.AddCommand(newConfigProfileCreateCommand(streams, dependencies), newConfigProfileEditCommand(streams, dependencies), newConfigProfileCopyCommand(streams), newConfigProfileTemplateUpdateCommand(streams))
 	return cmd
 }
 
@@ -108,6 +108,22 @@ func newConfigProfileCreateCommand(streams commandIO, dependencies configuration
 	addConfigMutationFlags(cmd, true, false, string(configuration.ScopeGlobal))
 	cmd.MarkFlagsMutuallyExclusive("template", "blank")
 	cmd.MarkFlagsMutuallyExclusive("instructions", "instructions-file")
+	return cmd
+}
+
+func newConfigProfileEditCommand(streams commandIO, dependencies configurationDependencies) *cobra.Command {
+	cmd := newConfigLeafCommand("edit NAME", "Edit one existing Review Profile's execution settings", cobra.ExactArgs(1), func(cmd *cobra.Command, args []string) error {
+		options := configurationMutationOptions{
+			repository: stringFlag(cmd, "repo"), format: stringFlag(cmd, "format"),
+			configuration: stringFlag(cmd, "config"), yes: boolFlag(cmd, "yes"),
+		}
+		return commandResult(executeConfigProfileEdit(args[0], cmd, options, streams, dependencies.discoveryService))
+	})
+	cmd.Flags().String("reviewer", "", "Reviewer identifier")
+	cmd.Flags().String("model", "", "Model identifier")
+	cmd.Flags().String("effort", "", "Reasoning effort")
+	cmd.Flags().String("deadline", "", "Positive Attempt deadline, such as 3m")
+	addConfigMutationFlags(cmd, true, false, string(configuration.ScopeGlobal))
 	return cmd
 }
 
