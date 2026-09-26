@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"reviewparty/internal/model"
 	"reviewparty/internal/result"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -65,8 +68,9 @@ func TestCopilotUnavailableModelIsClassifiedWithoutRetry(t *testing.T) {
 
 func TestSupportedReviewersResolveToMatchingAdapters(t *testing.T) {
 	catalog := defaultReviewerCatalog()
-	want := []string{"codex", "copilot", "grok", "opencode"}
+	want := []string{"claude", "codex", "copilot", "grok", "opencode"}
 	wantCandidates := map[string]reviewerCandidate{
+		"claude":   {ID: "claude", Model: "claude-opus-5-5", Effort: "high", Harness: "claude-code-cli", Transport: "direct-cli"},
 		"codex":    {ID: "codex", Model: "gpt-5.6-luna", Effort: "high", Harness: "codex-cli", Transport: "direct-cli"},
 		"copilot":  {ID: "copilot", Model: "auto", Effort: "auto", Harness: "github-copilot-cli", Transport: "direct-cli"},
 		"grok":     {ID: "grok", Model: "grok-4.5", Effort: "high", Harness: "grok-build-cli", Transport: "direct-cli"},
@@ -190,5 +194,154 @@ func TestDecodeFailurePreservesHarnessFailureClassification(t *testing.T) {
 	assertFailureLocation(t, execution, model.TerminationAuthenticationFailure, model.PhaseReviewerExecution)
 	if execution.AssistantText != "not-json" {
 		t.Fatalf("assistant text = %q", execution.AssistantText)
+	}
+}
+
+func TestClaudeCommandRestrictsCapabilities(t *testing.T) {
+	got := claudeCommand(reviewerCandidate{Model: "claude-opus-5-5", Effort: "high"}, "")
+	want := []string{"claude", "-p", "--output-format", "stream-json", "--verbose", "--model", "claude-opus-5-5", "--tools", "Read,Grep,Glob", "--permission-mode", "dontAsk", "--permission-prompts", "none", "--restricted", "--safe-mode", "--strict-mcp-config", "--no-session-persistence", "--effort", "high"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("command = %#v, want %#v", got, want)
+	}
+}
+
+func TestClaudeCommandOmitsDefaultEffort(t *testing.T) {
+	for _, effort := range []string{"", "default"} {
+		if command := claudeCommand(reviewerCandidate{Model: "claude-opus-5-5", Effort: effort}, ""); slices.Contains(command, "--effort") {
+			t.Fatalf("effort %q command = %#v", effort, command)
+		}
+	}
+}
+
+func TestClaudeRejectsAutoEffort(t *testing.T) {
+	check := (claudeAdapter{}).Check(context.Background(), reviewerCandidate{ID: "claude", Model: "claude-opus-5-5", Effort: "auto"})
+	if check.Available || !strings.Contains(check.Diagnostic, "does not support explicit effort") {
+		t.Fatalf("availability = %#v, want explicit unsupported-effort diagnostic", check)
+	}
+}
+
+func TestClaudeDecoderJoinsTextBlocksAndResolvesModel(t *testing.T) {
+	output := []byte(`{"type":"system","subtype":"init","model":"claude-opus-5-5"}` + "\n" +
+		`{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"text","text":"Inspecting files."},{"type":"tool_use","input":{"pattern":"**/*.go"}}]}}` + "\n" +
+		`{"type":"user","message":{"role":"user","content":"tool output"}}` + "\n" +
+		`{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"thinking","thinking":"ignored"}]}}` + "\n" +
+		`{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"text","text":"` + strings.ReplaceAll(cleanReview, "\n", "\\n") + `"}]}}` + "\n" +
+		`{"type":"result","subtype":"success","is_error":false,"result":"ignored final copy"}` + "\n")
+	decoded, err := decodeClaudeOutput(output)
+	assertReviewWithPreamble(t, decoded.assistantText, err)
+	if decoded.model != "claude-opus-5-5" || decoded.incomplete || decoded.diagnostic != "" {
+		t.Fatalf("decoded = %#v", decoded)
+	}
+}
+
+func TestClaudeInBandErrorIsIncompleteDespiteCleanExit(t *testing.T) {
+	output := []byte(`{"type":"assistant","message":{"model":"<synthetic>","content":[{"type":"text","text":"Not logged in · Please run /login"}]}}` + "\n" +
+		`{"type":"result","subtype":"success","is_error":true,"result":"Not logged in · Please run /login"}` + "\n")
+	decoded, err := (claudeAdapter{}).Decode(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded.assistantText != "" {
+		t.Fatalf("synthetic harness text leaked into assistant text: %q", decoded.assistantText)
+	}
+	execution := finalizeHarnessRun(commandRun{}, decoded, "claude")
+	assertAttemptOutcome(t, execution, model.AttemptReviewerUnavailable)
+	assertFailureLocation(t, execution, model.TerminationAuthenticationFailure, model.PhaseReviewerExecution)
+}
+
+func TestClaudeMissingResultEventIsIncomplete(t *testing.T) {
+	output := []byte(`{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"text","text":"` + strings.ReplaceAll(cleanReview, "\n", "\\n") + `"}]}}` + "\n")
+	decoded, err := (claudeAdapter{}).Decode(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	execution := finalizeHarnessRun(commandRun{}, decoded, "claude")
+	if execution.Outcome == model.AttemptCompleted {
+		t.Fatalf("run without a result event completed: %#v", execution)
+	}
+	if execution.AssistantText != cleanReview || !strings.Contains(execution.Diagnostic, "without a result event") {
+		t.Fatalf("execution = %#v", execution)
+	}
+}
+
+func TestClaudeRepositoryInstructionsLoadClaudeThenAgents(t *testing.T) {
+	repository := t.TempDir()
+	writeInstruction(t, repository, "AGENTS.md", "agents rule")
+	writeInstruction(t, repository, "CLAUDE.md", "claude rule")
+	instructions, err := repositoryInstructions(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claude, agents := strings.Index(instructions, "claude rule"), strings.Index(instructions, "agents rule")
+	if claude < 0 || agents < claude || !strings.Contains(instructions, "Contents of AGENTS.md") {
+		t.Fatalf("instructions = %q", instructions)
+	}
+}
+
+func TestClaudeRepositoryInstructionsLoadLinkedFileOnce(t *testing.T) {
+	repository := t.TempDir()
+	writeInstruction(t, repository, "AGENTS.md", "shared rule")
+	if err := os.Symlink("AGENTS.md", filepath.Join(repository, "CLAUDE.md")); err != nil {
+		t.Fatal(err)
+	}
+	instructions, err := repositoryInstructions(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(instructions, "shared rule") != 1 {
+		t.Fatalf("instructions = %q", instructions)
+	}
+}
+
+func TestClaudeRepositoryInstructionsRejectEscapingSymlink(t *testing.T) {
+	repository, outside := t.TempDir(), t.TempDir()
+	writeInstruction(t, outside, "secret", "outside content")
+	if err := os.Symlink(filepath.Join(outside, "secret"), filepath.Join(repository, "AGENTS.md")); err != nil {
+		t.Fatal(err)
+	}
+	instructions, err := repositoryInstructions(repository)
+	if err == nil || strings.Contains(instructions, "outside content") {
+		t.Fatalf("instructions = %q, err = %v", instructions, err)
+	}
+}
+
+func TestClaudeRepositoryInstructionsHonorBudget(t *testing.T) {
+	repository := t.TempDir()
+	writeInstruction(t, repository, "CLAUDE.md", strings.Repeat("c", claudeInstructionBudget+10))
+	writeInstruction(t, repository, "AGENTS.md", "agents rule")
+	instructions, err := repositoryInstructions(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(instructions, "c") < claudeInstructionBudget || strings.Contains(instructions, "agents rule") || len(instructions) > claudeInstructionBudget+200 {
+		t.Fatalf("instructions length = %d", len(instructions))
+	}
+}
+
+func TestClaudePrepareAppendsRepositoryInstructions(t *testing.T) {
+	repository := t.TempDir()
+	prepared, err := (claudeAdapter{}).Prepare(attemptSpec{Repository: repository, Candidate: reviewerCandidate{ID: "claude", Model: "claude-opus-5-5"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(prepared.command.Args, "--append-system-prompt") {
+		t.Fatalf("empty repository appended instructions: %#v", prepared.command.Args)
+	}
+	writeInstruction(t, repository, "AGENTS.md", "agents rule")
+	prepared, err = (claudeAdapter{}).Prepare(attemptSpec{Repository: repository, Candidate: reviewerCandidate{ID: "claude", Model: "claude-opus-5-5"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := prepared.command.Args
+	index := slices.Index(args, "--append-system-prompt")
+	if index < 0 || index+1 >= len(args) || !strings.Contains(args[index+1], "agents rule") {
+		t.Fatalf("args = %#v", args)
+	}
+}
+
+func writeInstruction(t *testing.T, directory, name, content string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(directory, name), []byte(content), 0o600); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -33,6 +33,7 @@ func defaultReviewerCatalog() reviewerCatalog {
 		{candidate: reviewerCandidate{ID: "opencode", Effort: "default", Harness: "opencode-cli", Transport: "direct-cli"}, capabilities: capabilities, validateCandidate: validateOpenCodeCandidate, executor: newDirectExecutor(openCodeAdapter{})},
 		{candidate: reviewerCandidate{ID: "copilot", Model: "auto", Effort: "auto", Harness: "github-copilot-cli", Transport: "direct-cli"}, capabilities: capabilities, validateCandidate: validateCopilotCandidate, executor: newDirectExecutor(copilotAdapter{})},
 		{candidate: reviewerCandidate{ID: "codex", Model: "gpt-5.6-luna", Effort: "high", Harness: "codex-cli", Transport: "direct-cli"}, capabilities: capabilities, validateCandidate: validateCodexCandidate, executor: newDirectExecutor(codexAdapter{})},
+		{candidate: reviewerCandidate{ID: "claude", Model: "claude-opus-5-5", Effort: "high", Harness: "claude-code-cli", Transport: "direct-cli"}, capabilities: capabilities, validateCandidate: validateClaudeCandidate, executor: newDirectExecutor(claudeAdapter{})},
 	})
 }
 

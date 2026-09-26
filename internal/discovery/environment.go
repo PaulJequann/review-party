@@ -30,6 +30,7 @@ func addReviewerEnvironmentNames(allowed map[string]bool, reviewer string) {
 		"opencode": {"OPENCODE_CONFIG", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY", "GROQ_API_KEY", "OPENROUTER_API_KEY", "MISTRAL_API_KEY", "DEEPSEEK_API_KEY"},
 		"copilot":  {"GH_TOKEN", "GITHUB_TOKEN"},
 		"codex":    {"CODEX_HOME", "OPENAI_API_KEY", "CODEX_API_KEY"},
+		"claude":   {"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CONFIG_DIR"},
 	}[reviewer] {
 		allowed[name] = true
 	}
