@@ -151,7 +151,7 @@ func NewService(options Options) *Service {
 	return &Service{adapters: adapters, cache: options.Cache, cacheLocks: make(map[string]*sync.Mutex), forgetGens: make(map[string]*atomic.Uint64), deadline: deadline, now: now}
 }
 
-// NewDefaultService wires the four Reviewers currently supported by Review
+// NewDefaultService wires the five Reviewers currently supported by Review
 // Party. Each adapter remains independent, so one unavailable harness does
 // not prevent another from being observed.
 func NewDefaultService() *Service {
@@ -159,6 +159,7 @@ func NewDefaultService() *Service {
 	return NewService(Options{
 		Adapters: []Adapter{
 			NewGrokAdapter(runner), NewOpenCodeAdapter(runner), NewCopilotAdapter(), NewCodexAdapter(),
+			NewClaudeAdapter(runner),
 		},
 		Cache: DefaultCache(),
 	})

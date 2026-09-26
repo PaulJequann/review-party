@@ -267,9 +267,18 @@ Configuration rejects those fields. Unknown fields, unsupported versions,
 unknown Reviewers, and invalid selections fail closed. Loading or resolving
 absent configuration creates no files.
 
-Review Party currently invokes all four harnesses directly (Grok, OpenCode,
-Copilot, Codex). ACPX remains a future transport option rather than part of
-the current execution path.
+Review Party currently invokes all five harnesses directly (Grok, OpenCode,
+Copilot, Codex, Claude Code). ACPX remains a future transport option rather
+than part of the current execution path. The Claude Code Reviewer runs with
+only the Read, Grep, and Glob tools, `--restricted` and `--safe-mode`
+isolation, no MCP servers, and no session persistence. That isolation also
+turns off Claude Code's own instruction loading, and restoring it would load
+the reviewed revision's `.claude/settings.json`. Review Party instead appends
+the repository-root `CLAUDE.md` and `AGENTS.md` to the system prompt, capped
+at 32 KiB like Codex's default, and fails the Attempt if either is a symlink
+that escapes the repository. It authenticates through Claude Code's own login
+or an allowlisted `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, or
+`CLAUDE_CODE_OAUTH_TOKEN`.
 
 Review an exact committed range with full object provenance and an isolated
 repository view:
@@ -539,4 +548,6 @@ Profile creation reports a warning and requires TTY confirmation or explicit
 `--yes` authorization. Noninteractive callers must pass `--yes` to receive the
 plan and warning in the command result; without it, the command exits before
 displaying the warning. Copilot currently reports discovery as unsupported with
-its documented login action.
+its documented login action. Claude Code reports its authentication status and
+harness version but has no model-list interface, so its models are entered
+manually.

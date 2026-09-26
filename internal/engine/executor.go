@@ -17,6 +17,7 @@ func reviewerEnvironment(reviewer string, additions ...string) []string {
 		"opencode": {"OPENCODE_CONFIG", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY", "GROQ_API_KEY", "OPENROUTER_API_KEY", "MISTRAL_API_KEY", "DEEPSEEK_API_KEY"},
 		"copilot":  {"GH_TOKEN", "GITHUB_TOKEN"},
 		"codex":    {"OPENAI_API_KEY", "CODEX_API_KEY"},
+		"claude":   {"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CONFIG_DIR"},
 	}[reviewer] {
 		allowed[name] = true
 	}
@@ -92,6 +93,9 @@ type decodedHarnessOutput struct {
 	diagnostic    string
 	model         string
 	effort        string
+	// incomplete marks a run the harness itself reported as unfinished, so a
+	// clean process exit cannot turn it into a completed attempt.
+	incomplete bool
 }
 
 type harnessAdapter interface {
@@ -287,8 +291,12 @@ func finalizeHarnessRun(run commandRun, decoded decodedHarnessOutput, harness st
 		execution.AssistantText = decoded.assistantText
 		return execution
 	}
-	if run.WaitErr != nil {
-		execution := classifyHarnessFailure(decoded.diagnostic, run.WaitErr)
+	waitErr := run.WaitErr
+	if waitErr == nil && decoded.incomplete {
+		waitErr = errors.New(harness + " reported an incomplete run")
+	}
+	if waitErr != nil {
+		execution := classifyHarnessFailure(decoded.diagnostic, waitErr)
 		execution.AssistantText = decoded.assistantText
 		execution.ResolvedModel = decoded.model
 		execution.ResolvedEffort = decoded.effort
