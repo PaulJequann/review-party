@@ -230,12 +230,9 @@ func (model *Model) openProfileSourceForm() tea.Cmd {
 }
 
 func (model Model) profileTemplateOptions() []huh.Option[string] {
-	options := make([]huh.Option[string], 0)
-	for _, item := range model.snapshot.Items {
-		if item.Kind != itemTemplate {
-			continue
-		}
-		options = append(options, huh.NewOption(item.Name+" ("+item.Detail+")", item.Name))
+	options := make([]huh.Option[string], 0, len(model.snapshot.Templates))
+	for _, template := range model.snapshot.Templates {
+		options = append(options, huh.NewOption(template.ID+" (Review Profile Template "+template.Revision+")", template.ID))
 	}
 	return options
 }

@@ -8,7 +8,6 @@ import (
 func TestAttachReceiptsAnnotatesProfilesOnly(t *testing.T) {
 	snapshot := Snapshot{Items: []Item{
 		{Scope: "global", Kind: itemProfile, Name: "bugs", Detail: "grok / grok-4.5"},
-		{Scope: "global", Kind: itemTemplate, Name: "bugs", Detail: "Review Profile Template v1"},
 		{Scope: "global", Kind: itemParty, Name: "baseline", Detail: "1 Profile"},
 	}}
 	attachReceipts(&snapshot, func(profile string) (ProfileReceipt, bool) {

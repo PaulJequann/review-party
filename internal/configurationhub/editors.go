@@ -116,7 +116,7 @@ func runAccessibleForm(ctx context.Context, form *huh.Form, input io.ReadCloser)
 
 func (e *editor) search() error {
 	var query string
-	if err := e.form(huh.NewInput().Title("Search Templates, Profiles, Parties, and Reviews").Value(&query)); err != nil {
+	if err := e.form(huh.NewInput().Title("Search Profiles, Parties, and Reviews").Value(&query)); err != nil {
 		return err
 	}
 	if err := e.refresh(); err != nil {

@@ -37,10 +37,9 @@ const (
 type ItemKind string
 
 const (
-	itemTemplate ItemKind = "Template"
-	itemProfile  ItemKind = "Profile"
-	itemParty    ItemKind = "Party"
-	itemReview   ItemKind = "Review"
+	itemProfile ItemKind = "Profile"
+	itemParty   ItemKind = "Party"
+	itemReview  ItemKind = "Review"
 )
 
 // ItemScope labels the source of one Hub inventory item.
@@ -58,6 +57,7 @@ type Item struct {
 type Snapshot struct {
 	Repository string
 	Items      []Item
+	Templates  []configuration.Template
 	Overview   []string
 	Warnings   []string
 }
@@ -974,15 +974,11 @@ func (model Model) renderStatus(options renderOptions) string {
 func (model Model) visibleItems(kind ItemKind) []Item {
 	var visible []Item
 	for _, item := range model.snapshot.Items {
-		if itemVisibleInArea(item.Kind, kind) && matches(item, model.query) {
+		if item.Kind == kind && matches(item, model.query) {
 			visible = append(visible, item)
 		}
 	}
 	return visible
-}
-
-func itemVisibleInArea(item, area ItemKind) bool {
-	return item == area || (area == itemProfile && item == itemTemplate)
 }
 
 func matches(item Item, query string) bool {

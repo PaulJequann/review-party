@@ -72,10 +72,7 @@ func formatReceiptFindings(findings int) string {
 	return fmt.Sprintf("%d findings", findings)
 }
 func buildSnapshot(manager *configuration.Manager, repository configuration.Repository) (Snapshot, error) {
-	snapshot := Snapshot{Repository: string(repository)}
-	for _, template := range manager.Templates() {
-		snapshot.Items = append(snapshot.Items, Item{Scope: "template", Kind: itemTemplate, Name: template.ID, Detail: "Review Profile Template " + template.Revision})
-	}
+	snapshot := Snapshot{Repository: string(repository), Templates: manager.Templates()}
 	profiles, err := manager.ProfileInventory(repository)
 	if err != nil {
 		return snapshot, err
