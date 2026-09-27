@@ -22,6 +22,7 @@ digest() {
 validate_run_dir() {
   [ -n "${1:-}" ] || fail 'run directory is required'
   case "$1" in
+    */../*|*/..) fail 'run directory must not contain .. segments' ;;
     "$scratch_root"/*) ;;
     *) fail "run directory is outside $scratch_root" ;;
   esac
@@ -33,6 +34,19 @@ manifest_value() {
   key=$1
   file=$2
   awk -F '\t' -v key="$key" '$1 == key { print $2; found = 1; exit } END { if (!found) exit 1 }' "$file"
+}
+
+# Hashes the full working tree, including uncommitted and untracked
+# non-ignored files, without touching the real index.
+source_tree() {
+  source_repository=$1
+  git_dir=$(git -C "$source_repository" rev-parse --absolute-git-dir)
+  index=$(mktemp)
+  if [ -f "$git_dir/index" ]; then cp "$git_dir/index" "$index"; else rm -f "$index"; fi
+  tree=$(GIT_INDEX_FILE="$index" git -C "$source_repository" add -A 2>/dev/null &&
+    GIT_INDEX_FILE="$index" git -C "$source_repository" write-tree) || { rm -f "$index"; fail 'cannot hash the source tree'; }
+  rm -f "$index"
+  printf '%s\n' "$tree"
 }
 
 launch() {
@@ -52,7 +66,10 @@ launch() {
   evidence="$run_dir/evidence"
   mkdir -p "$binary_dir" "$config_root" "$state_root" "$target_repository" "$evidence"
 
+  tree_before_build=$(source_tree "$repository")
   PATH="$binary_dir:$PATH" "$repository/scripts/install-local.sh" "$binary_dir" >/dev/null
+  built_tree=$(source_tree "$repository")
+  [ "$built_tree" = "$tree_before_build" ] || fail 'source tree changed during the build; launch again'
   git -C "$target_repository" init -q
   git -C "$target_repository" config user.email verify@review-party.local
   git -C "$target_repository" config user.name 'Review Party Verifier'
@@ -61,6 +78,11 @@ launch() {
   git -C "$target_repository" commit -qm 'verification fixture'
 
   source_revision=$(git -C "$repository" rev-parse HEAD)
+  if [ "$built_tree" = "$(git -C "$repository" rev-parse 'HEAD^{tree}')" ]; then
+    source_dirty=no
+  else
+    source_dirty=yes
+  fi
   binary="$binary_dir/review-party"
   binary_digest=$(digest "$binary")
   config_file="$config_root/review-party/config.json"
@@ -70,6 +92,8 @@ launch() {
     printf 'run_identity\t%s\n' "$run_id"
     printf 'repository_root\t%s\n' "$repository"
     printf 'source_revision\t%s\n' "$source_revision"
+    printf 'source_tree\t%s\n' "$built_tree"
+    printf 'source_dirty\t%s\n' "$source_dirty"
     printf 'binary\t%s\n' "$binary"
     printf 'binary_sha256\t%s\n' "$binary_digest"
     printf 'config_root\t%s\n' "$config_root"
@@ -78,6 +102,7 @@ launch() {
     printf 'state_directory\t%s\n' "$state_directory"
     printf 'target_repository\t%s\n' "$target_repository"
     printf 'evidence_directory\t%s\n' "$evidence"
+    printf 'terminal_session\tverify-review-party-%s\n' "$(printf '%s' "$run_id" | tr '.' '_')"
   } > "$run_dir/ownership.tsv"
   printf '%s\n' "$run_id" > "$config_root/verify-review-party.owner"
 
@@ -96,6 +121,8 @@ doctor() {
   expected_revision=${VERIFY_REVIEW_PARTY_EXPECTED_REVISION:-$recorded_revision}
   current_revision=$(git -C "$recorded_repository" rev-parse HEAD 2>/dev/null) || fail 'cannot read the current source revision'
   [ "$current_revision" = "$expected_revision" ] || fail "source revision mismatch: expected $expected_revision, got $current_revision"
+  recorded_tree=$(manifest_value source_tree "$manifest")
+  [ "$(source_tree "$recorded_repository")" = "$recorded_tree" ] || fail 'source tree mismatch: the working tree changed since launch; launch a fresh run'
 
   binary=$(manifest_value binary "$manifest")
   [ -x "$binary" ] || fail "owned binary is missing or not executable at $binary"
@@ -164,6 +191,11 @@ capture() {
   return "$status"
 }
 
+manifest_path() {
+  validate_run_dir "$1"
+  manifest_value "$2" "$1/ownership.tsv" || fail "manifest has no $2 entry"
+}
+
 cleanup() {
   run_dir=$1
   validate_run_dir "$run_dir"
@@ -178,7 +210,8 @@ cleanup() {
 case "${1:-}" in
   launch) [ "$#" -eq 1 ] || fail 'usage: verify.sh launch'; launch ;;
   doctor) [ "$#" -eq 2 ] || fail 'usage: verify.sh doctor RUN_DIR'; doctor "$2" ;;
+  path) [ "$#" -eq 3 ] || fail 'usage: verify.sh path RUN_DIR KEY'; manifest_path "$2" "$3" ;;
   capture) [ "$#" -ge 5 ] || fail 'usage: verify.sh capture RUN_DIR EVIDENCE -- COMMAND [ARGS...]'; shift; capture "$@" ;;
   cleanup) [ "$#" -eq 2 ] || fail 'usage: verify.sh cleanup RUN_DIR'; cleanup "$2" ;;
-  *) fail 'usage: verify.sh launch | doctor RUN_DIR | capture RUN_DIR EVIDENCE -- COMMAND [ARGS...] | cleanup RUN_DIR' ;;
+  *) fail 'usage: verify.sh launch | doctor RUN_DIR | path RUN_DIR KEY | capture RUN_DIR EVIDENCE -- COMMAND [ARGS...] | cleanup RUN_DIR' ;;
 esac

@@ -9,13 +9,13 @@ Review Party creates a complete saved Profile from a packaged Template and expos
 
 ## Source evidence
 
-- `cmd/review-party/standard_commands.go:148-166` registers the explicit
-  `config` command family and Profile mutation subcommands.
-- `cmd/review-party/config_profile_mutations.go:12-41` builds a typed Profile
-  draft, checks the model choice, plans the mutation, and routes publication
-  through the confirmation boundary.
-- `cmd/review-party/config_show.go:30-48` renders read-only configuration
-  results through the command output path.
+- `newConfigCommand` in `cmd/review-party/standard_commands.go` registers the
+  explicit `config` command family and Profile mutation subcommands.
+- `executeConfigProfileCreate` in `cmd/review-party/config_profile_mutations.go`
+  builds a typed Profile draft, checks the model choice, plans the mutation,
+  and routes publication through the confirmation boundary.
+- `executeConfigurationShow` in `cmd/review-party/config_show.go` renders
+  read-only configuration results through the command output path.
 
 Drift: none. The command remains the non-interactive Profile path; the
 terminal-backed Hub is covered separately by

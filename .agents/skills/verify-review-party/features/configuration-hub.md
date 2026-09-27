@@ -11,33 +11,35 @@ same configuration operations.
 - `HUB-PLAN-PREVIEW-PUBLISH`
 - `HUB-ACCESSIBLE-PUBLISH`
 
+## Source evidence
+
+- `newConfigCommand` in `cmd/review-party/standard_commands.go` exposes
+  `config`, the `--accessible` flag, and the explicit command family.
+- `executeConfigurationHub` in `cmd/review-party/config_hub.go` requires
+  terminal input/output, resolves the repository, and routes the selected mode
+  through the Hub.
+- `newAreaSpecs` in `internal/configurationhub/model.go` defines the Overview,
+  Profiles, Parties, Repository Reviews, and Review Changes areas;
+  `updateNavigation` and `openSelectedArea` own menu navigation and area
+  opening; `View` owns the alt-screen title and terminal view.
+- `renderPlanPreviewFrame` and `renderPlanActionBar` in
+  `internal/configurationhub/view_chrome.go` render the plan preview and
+  publish controls; `receivePlan` and `receivePublishResult` in
+  `internal/configurationhub/interactive_forms.go` handle plan receipt,
+  publication, refreshed snapshots, and the success outcome.
+- `runAccessibleForm`, `chooseAction`, `confirmExit`, and
+  `reviewAndPublishWithPreview` in `internal/configurationhub/editors.go`
+  implement the accessible form and plan/publication flow.
+
+Drift: none. The normal and accessible entry points are separate adapters, so
+both need live coverage.
+
 ## How to get to it (user POV)
 
 - Run `review-party config --repo PATH --config PATH` in a terminal.
 - Run `review-party config --accessible --repo PATH --config PATH` for
   non-redrawing prompts in a terminal.
 - Use the Profiles area to create a Profile, review its plan, and publish it.
-
-## Source evidence
-
-- `cmd/review-party/standard_commands.go:148-166` exposes `config`, the
-  `--accessible` flag, and the explicit command family.
-- `cmd/review-party/config_hub.go:26-53` requires terminal input/output,
-  resolves the repository, and routes the selected mode through the Hub.
-- `internal/configurationhub/model.go:79-87` defines the current Overview,
-  Profiles, Parties, Repository Reviews, and Review Changes areas;
-  `internal/configurationhub/model.go:388-423` owns menu navigation and area
-  opening; `internal/configurationhub/model.go:447-460` owns the alt-screen
-  title and terminal view.
-- `internal/configurationhub/view_chrome.go:10-35` renders the plan preview
-  and publish controls; `internal/configurationhub/model.go:580-616` handles
-  plan receipt, publication, refreshed snapshots, and the success outcome.
-- `internal/configurationhub/editors.go:75-88` and `:160-217` implement the
-  accessible form and plan/publication flow.
-
-Drift: this feature was absent from the authored map. The current source has a
-separate terminal boundary and a separate accessible adapter, so both entry
-points need live coverage.
 
 ## Driving it with the CLI
 
@@ -63,43 +65,48 @@ terminal` in the capture transcript. The helper also records the status in
 doctor.
 
 For the positive normal-TUI drive, start the session using the terminal
-procedure in `features/README.md`. Wait for `Menu`, then perform this
-sequence, capturing each named state:
+procedure in `features/README.md`. Every capture below goes to
+`$evidence/configuration-hub/NAME.txt`.
 
-1. Send `Down`, then `Enter` to open Profiles, and send `n` for a new Profile.
-2. Wait for `Configuration scope`. Capture the full 120x30 frame, including
-   the bottom border, `tab next`, `shift+tab previous`, `enter continue`, and
-   `? help`. Resize to 80x24 and require those controls to remain visible.
-   Send `Down` to choose Repository scope, then Tab through the fields entering,
-   in order: `ui-bugs`, `codex`, `gpt-5.6-luna`, `high`, and `8m`. Require each
-   focused input to remain inside the box. On the deadline field, send
-   Shift+Tab and confirm focus returns to Reasoning effort without changing
-   `high`. Send Tab to return to the deadline, resize to 120x30, and confirm
-   the focused deadline and navigation controls remain visible. Send Enter
-   to continue to the instruction source; Tab alone does not submit the form.
-3. Accept the default Template instruction source, accept the first packaged
-   template, and accept the default `Edit instructions with $EDITOR?` answer.
-4. Capture `configuration-hub/menu.txt`, `profiles-browser.txt`, and
-   `profile-form.txt` as those states appear. Wait for `Plan preview` and
-   capture `configuration-hub/plan-preview.txt`. It must show `ui-bugs`,
-   `codex`, `gpt-5.6-luna`, and the Repository scope, with `p` available to
-   publish.
-5. Send `p`, wait for `Published profile "ui-bugs"`, capture
-   `configuration-hub/published.txt`, send `esc` to return to the menu, then
-   send `Enter` to reopen Profiles. Send `p` (copy)
-   and wait for `Repository Profile to copy to Global Configuration`; capture
-   `configuration-hub/copy-form.txt`. It must show the published `ui-bugs`
-   among the selectable Repository Profiles. Send `C-[` twice to return to
-   the menu without publishing the copy.
-6. Send `q`, and require the session to
-   exit. The run-owned repository Profile at
+1. **Menu.** Wait for `Menu`. Capture `menu.txt`; it must show `Menu` and
+   `Overview` in separate panes.
+2. **Profiles browser.** Send `Down`, then `Enter`. Capture
+   `profiles-browser.txt`, then send `n` for a new Profile.
+3. **Profile form layout.** Wait for `Configuration scope`. Capture
+   `profile-form.txt`: the full 120x30 frame must include the bottom border,
+   `tab next`, `shift+tab previous`, `enter continue`, and `? help`. Run
+   `tmux resize-window -t "$session" -x 80 -y 24`, capture
+   `profile-form-80x24.txt`, and require the same controls to remain visible.
+4. **Profile fields.** Send `Down` to choose Repository scope, then Tab
+   through the fields entering, in order: `ui-bugs`, `codex`, `gpt-5.6-luna`,
+   `high`, and `8m`. Require each focused input to remain inside the box. On
+   the deadline field, send Shift+Tab and confirm focus returns to Reasoning
+   effort without changing `high`. Send Tab to return to the deadline, run
+   `tmux resize-window -t "$session" -x 120 -y 30`, and capture
+   `profile-form-deadline.txt` showing the focused deadline and navigation
+   controls. Send Enter to continue to the instruction source; Tab alone does
+   not submit the form.
+5. **Instructions.** Accept the default Template instruction source, accept
+   the first packaged template, and accept the default
+   `Edit instructions with $EDITOR?` answer.
+6. **Plan preview.** Wait for `Plan preview` and capture `plan-preview.txt`.
+   It must show `ui-bugs`, `codex`, `gpt-5.6-luna`, and the Repository scope,
+   with `p` available to publish.
+7. **Publish.** Send `p`, wait for `Published profile "ui-bugs"`, and capture
+   `published.txt`.
+8. **Copy form.** Send `esc` to return to the menu, then `Enter` to reopen
+   Profiles. Send `p` (copy) and wait for
+   `Repository Profile to copy to Global Configuration`. Capture
+   `copy-form.txt`; it must list the published `ui-bugs` among the selectable
+   Repository Profiles. Send `C-[` twice to return to the menu without
+   publishing the copy.
+9. **Exit.** Send `q` and require the session to exit. The run-owned
+   repository Profile at
    `$run_dir/runtime/repository/.reviewparty/profiles/ui-bugs/profile.json`
    must exist, and no `ui-bugs` Profile may exist in the Global configuration
    root.
 
-The expected evidence is a wide menu with `Menu` and `Overview` in separate
-panes, the Profiles browser and Profile form handles, a copy form handle, a
-plan preview, and a published outcome. Run doctor, then use `capture` for a
+Run doctor, then use `capture` for a
 read-only second view:
 
 ```sh
@@ -114,27 +121,24 @@ and `8m`, and require validation to report `"valid": true`.
 
 Use a fresh launched baseline and run doctor before the drive. Start the same
 terminal command with `--accessible`. Wait for each prompt before sending the
-next logical line; Huh selects use numeric choices and confirmations use `y`
-or `n`. The representative Profile flow is:
+next logical line. Huh selects take the number printed beside the choice, so
+read the prompt and send the number for the named label; confirmations use
+`y` or `n`. The representative Profile flow is:
 
-```text
-2        # Configuration Hub menu: Profiles
-2        # Configuration scope: Repository
-1        # Instruction source: Template
-1        # First packaged template
-n        # Keep template instructions
-ui-accessible
-codex
-gpt-5.6-luna
-high
-8m
-y        # Publish this complete plan?
-6        # Copy a Repository Profile to Global Configuration
-1        # ui-accessible (repository)
-n        # Decline publishing the copy
-8        # Configuration Hub menu: Exit
-y        # Discard unfinished drafts and exit
-```
+| Prompt | Answer |
+| --- | --- |
+| Configuration Hub menu | the `Profiles` choice |
+| Configuration scope | the `Repository` choice |
+| Instruction source | the `Template` choice |
+| Template | the first packaged template |
+| Edit instructions | `n` |
+| Name, Reviewer, model, effort, deadline | `ui-accessible`, `codex`, `gpt-5.6-luna`, `high`, `8m` |
+| Publish this complete plan? | `y` |
+| Next action | the choice that copies a Repository Profile to Global Configuration |
+| Profile to copy | `ui-accessible` under the `[repository]` label |
+| Publish the copy? | `n` |
+| Configuration Hub menu | the `Exit` choice |
+| Discard unfinished drafts and exit? | `y` |
 
 Capture the plan prompt at `configuration-hub/accessible-plan.txt`. The copy
 step must offer `ui-accessible` under a `[repository]` label, and declining it

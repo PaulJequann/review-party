@@ -9,11 +9,12 @@ Review Party exposes build provenance through its `version` command, while docto
 
 ## Source evidence
 
-- `cmd/review-party/version.go:16-38` exposes human and JSON provenance through
-  `review-party version`.
-- `.agents/skills/verify-review-party/scripts/verify.sh:85-116` binds doctor to
-  the recorded source revision, binary digest, binary identity, and run-owned
-  resources.
+- `newVersionCommand` and `writeVersion` in `cmd/review-party/version.go`
+  expose human and JSON provenance through `review-party version`.
+- `doctor` and `source_tree` in
+  `.agents/skills/verify-review-party/scripts/verify.sh` bind the run to the
+  recorded source revision, working-tree fingerprint, binary digest, binary
+  identity, and run-owned resources.
 
 Drift: none. The live recipe below exercises both version formats and the
 revision guard.
@@ -35,5 +36,6 @@ Negative control: Run `mkdir -p "$run_dir/evidence/binary-identity"`, then run `
 
 ## Gotchas
 
-- Development builds may emit an empty JSON provenance object. The human command still names Review Party, and doctor uses the recorded executable digest plus Git revision for the run binding.
+- Development builds may emit an empty JSON provenance object. The human command still names Review Party, and doctor uses the recorded executable digest, Git revision, and working-tree fingerprint for the run binding.
+- A dirty checkout is allowed. The manifest's `source_dirty` entry says whether the binary includes uncommitted changes; report it with the evidence. Any source edit after launch makes doctor fail with `source tree mismatch`.
 - Running a `review-party` found elsewhere on `PATH` invalidates the proof. `capture` always selects the owned binary.

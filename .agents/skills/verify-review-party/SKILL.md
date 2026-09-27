@@ -20,7 +20,7 @@ printf '%s\n' "$run_dir"
 
 `launch` creates a unique identity under `scratch/verify-review-party/`, installs the current checkout into the run, creates an isolated Git repository, and initializes Review Party with run-owned XDG configuration and state. The CLI is ready when launch's final doctor check prints `doctor: ready`.
 
-Review Party is a short-lived CLI. It owns no server, listening port, session, container, device, or long-running PID. The run manifest records the source revision, installed binary and digest, XDG roots, target repository, managed state directory, and evidence directory. Local recipes need no authentication.
+Review Party is a short-lived CLI. It owns no server, listening port, session, container, device, or long-running PID. The run manifest records the source revision, a fingerprint of the working tree the binary was built from (including uncommitted and untracked files), whether that tree was dirty, the installed binary and digest, XDG roots, target repository, managed state directory, evidence directory, and terminal session name. Local recipes need no authentication.
 
 ## Doctor
 
@@ -30,7 +30,7 @@ Run the read-only diagnostic before every drive:
 .agents/skills/verify-review-party/scripts/verify.sh doctor "$run_dir"
 ```
 
-Doctor succeeds only when the run identity is valid, the checkout remains at the recorded Git revision, the installed binary digest matches, the binary identifies itself as Review Party, and the owned repository, XDG roots, state database, and ownership marker exist. An absent Global Configuration file is valid until a command publishes one. Doctor names the first mismatched fact on stderr.
+Doctor succeeds only when the run identity is valid, the checkout remains at the recorded Git revision, the working tree still matches the fingerprint taken at build time, the installed binary digest matches, the binary identifies itself as Review Party, and the owned repository, XDG roots, state database, and ownership marker exist. An absent Global Configuration file is valid until a command publishes one. Doctor names the first mismatched fact on stderr. Editing source after launch invalidates the run; launch a fresh one rather than continuing.
 
 ## Drive
 
@@ -67,4 +67,4 @@ Stop every PTY session before cleanup. Cleanup removes only the run's recorded `
 
 ## Helper
 
-`scripts/verify.sh` requires a POSIX shell, Git, Go, and either `sha256sum` or `shasum`. Its commands are `launch`, `doctor RUN_DIR`, `capture RUN_DIR EVIDENCE -- COMMAND [ARGS...]`, and `cleanup RUN_DIR`. Terminal recipes additionally require `tmux` or an equivalent PTY driver, plus the driver's screen-capture and key-input operations. The helper must remain executable.
+`scripts/verify.sh` requires a POSIX shell, Git, Go, and either `sha256sum` or `shasum`. Its commands are `launch`, `doctor RUN_DIR`, `path RUN_DIR KEY`, `capture RUN_DIR EVIDENCE -- COMMAND [ARGS...]`, and `cleanup RUN_DIR`. `path` prints one manifest value, such as `binary`, `config_file`, or `terminal_session`; use it instead of spelling run-owned paths by hand. Terminal recipes additionally require `tmux` or an equivalent PTY driver, plus the driver's screen-capture and key-input operations. The helper must remain executable.
