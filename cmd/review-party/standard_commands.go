@@ -19,12 +19,13 @@ func newReplayCommand(streams commandIO) *cobra.Command {
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			options := replayOptions{
-				id: model.ReviewID(args[0]), format: stringFlag(cmd, "format"), configuration: stringFlag(cmd, "config"),
+				id: model.ReviewID(args[0]), format: stringFlag(cmd, "format"), configuration: stringFlag(cmd, "config"), full: boolFlag(cmd, "full"),
 			}
 			return commandResult(executeReplay(cmd.Context(), options, streams.output, streams.errors))
 		},
 	}
 	addFormatFlag(cmd)
+	addFullFlag(cmd)
 	addConfigurationFlag(cmd)
 	return cmd
 }
@@ -36,11 +37,12 @@ func newInspectCommand(streams commandIO) *cobra.Command {
 		Example: "  review-party inspect rp_... --format json\n  review-party inspect rb_...",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			options := inspectOptions{id: model.ReviewID(args[0]), format: stringFlag(cmd, "format"), verifyArtifacts: boolFlag(cmd, "verify-artifacts"), configuration: stringFlag(cmd, "config")}
+			options := inspectOptions{id: model.ReviewID(args[0]), format: stringFlag(cmd, "format"), verifyArtifacts: boolFlag(cmd, "verify-artifacts"), full: boolFlag(cmd, "full"), configuration: stringFlag(cmd, "config")}
 			return commandResult(executeInspect(cmd.Context(), options, streams.output, streams.errors))
 		},
 	}
 	addFormatFlag(cmd)
+	addFullFlag(cmd)
 	addConfigurationFlag(cmd)
 	cmd.Flags().Bool("verify-artifacts", false, "Verify referenced artifact files")
 	return cmd

@@ -190,6 +190,22 @@ preserved in the Review Bundle (`rb_…`, inspectable via
 unavailable saved Reviewer, or rejected model fails closed before any Reviewer
 launches.
 
+`run`, `inspect`, and `replay` print findings first. Human output leads with
+each Review's status, summary, and numbered findings, then its Profile,
+Reviewer, and Subject. A Review Bundle prints one block per member, labelled
+`<scope>:<profile>`, before its selection, warnings, and Subject. A member that
+never started reads `not started`. JSON output always has a top-level `reviews`
+array, so `jq '.reviews[].findings'` works for a single Review and for a Bundle.
+Bundle output adds a `bundle` object. A member that never started has lifecycle
+`pending` and no `id`. A member whose Review Record cannot be read keeps its
+`id`, has lifecycle `unreadable`, and carries the cause in `read_error`; the
+other members still print, and the command exits with status 1. With
+`--format json`, `--full` includes each complete Review Record under `record`:
+the raw result, patch, changed paths, passes, attempts, and artifact
+references. Human `--full` output adds the raw result, artifact references,
+changed paths, and patch. `run` and `replay` exit with status 2 when the Review
+or Bundle is incomplete.
+
 Each saved Profile fixes its Reviewer, model, reasoning effort, Attempt
 deadline, and instructions. Ordinary `run`, explain, replay, and Party
 commands do not accept execution overrides. A different cost or quality choice is a
@@ -456,12 +472,14 @@ New Review Records use schema version 3 and retain machine-readable operational
 facts alongside the canonical result. Canonical-v2 results expose an ordered
 `findings` collection with each Reviewer claim's severity, category, validated
 location string, failure, evidence, smallest safe correction, and regression
-test intent; `finding_count` is derived from that collection. JSON inspection
-also includes the exact runtime version/VCS information available from the built binary, immutable
-Subject size facts, owned-phase and total timings, and a categorical termination
-with its phase when a Review is incomplete. Review lifecycle remains limited to
-Pending, Running, Completed, and Incomplete; execution phases are diagnostic
-facts rather than additional states.
+test intent; `finding_count` is derived from that collection. Each `reviews`
+entry of `inspect --format json` carries the collection as `findings`, plus a
+categorical termination with its phase when a Review is incomplete. `inspect
+--full --format json` adds the complete record under `record`, with the exact
+runtime version/VCS information available from the built binary, immutable
+Subject size facts, and owned-phase and total timings. Review lifecycle remains
+limited to Pending, Running, Completed, and Incomplete; execution phases are
+diagnostic facts rather than additional states.
 
 Review Party distinguishes unavailable Reviewers, authentication failures,
 deadlines, cancellation, transport failures, malformed harness output, result
@@ -478,8 +496,9 @@ instead of importing or rewriting it.
 New Attempts keep bounded constructed prompts and decoded assistant text as
 private files under the Review Party state root, while their Review Record holds
 only relative paths, byte counts, SHA-256 digests, and truncation state. Use
-`inspect --format json` for automation or ordinary `inspect` to see references;
-add `--verify-artifacts` to reopen and validate every referenced file. Artifact
+`inspect --full --format json` for automation or `inspect --full` to see
+references. Without `--full`, `inspect` omits the patch and artifact references.
+Add `--verify-artifacts` to reopen and validate every referenced file. Artifact
 contents are intentionally not printed. The filesystem artifact store rejects
 paths outside its configured root and reports missing or digest-mismatched files
 as integrity failures. Treat artifacts as sensitive review context.
