@@ -161,3 +161,56 @@ func TestQuietAttemptPublishesNoNoiseArtifact(t *testing.T) {
 		t.Fatalf("artifacts = %d, want prompt and assistant text only", len(attempt.Artifacts))
 	}
 }
+
+func TestCodexFailureWithStderrCauseKeepsTheInBandDiagnosticInTheNoiseRecord(t *testing.T) {
+	stdout := codexEventStream(
+		`{"type":"thread.started","thread_id":"t"}`,
+		codexRetryEvent("codex sandbox: seccomp filter install failed"),
+	)
+	stderr := "2026-09-25T23:03:10.000000Z ERROR codex_core::codex: " + codexUnauthorizedMessage + "\n"
+
+	execution := executeWithStub(t, codexAdapter{}, commandRun{Stdout: stdout, Stderr: stderr, WaitErr: errors.New("exit status 1")})
+
+	assertFailureLocation(t, execution, model.TerminationAuthenticationFailure, model.PhaseReviewerExecution)
+	if !strings.Contains(execution.Diagnostic, "401 Unauthorized") {
+		t.Fatalf("diagnostic = %q, want the stderr 401 cause", execution.Diagnostic)
+	}
+	if !strings.Contains(execution.ReviewerNoise, "seccomp filter install failed") {
+		t.Fatalf("reviewer noise = %q, want the in-band seccomp error preserved", execution.ReviewerNoise)
+	}
+}
+
+func TestCodexCancelledAttemptKeepsTheInBandDiagnosticInTheNoiseRecord(t *testing.T) {
+	stdout := codexEventStream(
+		`{"type":"thread.started","thread_id":"t"}`,
+		codexRetryEvent("429 Too Many Requests"),
+	)
+
+	execution := executeWithStub(t, codexAdapter{}, commandRun{Stdout: stdout, WaitErr: errors.New("signal: killed"), ContextErr: context.DeadlineExceeded})
+
+	assertFailureLocation(t, execution, model.TerminationDeadlineExceeded, model.PhaseReviewerExecution)
+	if !strings.Contains(execution.ReviewerNoise, "429 Too Many Requests") {
+		t.Fatalf("reviewer noise = %q, want the in-band error preserved", execution.ReviewerNoise)
+	}
+}
+
+func TestCodexCompletedAttemptSurfacesAnInBandErrorThatIsNotTransportNoise(t *testing.T) {
+	stdout := codexEventStream(
+		`{"type":"thread.started","thread_id":"t"}`,
+		codexRetryEvent("Reconnecting... 1/5 (failed to connect to websocket: HTTP error: 405 Method Not Allowed)"),
+		codexMessageEvent(cleanReview),
+		`{"type":"turn.failed","error":{"message":"`+codexUnauthorizedMessage+`"}}`,
+	)
+
+	execution := executeWithStub(t, codexAdapter{}, commandRun{Stdout: stdout})
+
+	if execution.Outcome != model.AttemptCompleted {
+		t.Fatalf("outcome = %q", execution.Outcome)
+	}
+	if !strings.Contains(execution.Diagnostic, "401 Unauthorized") || strings.Contains(execution.Diagnostic, "405") {
+		t.Fatalf("diagnostic = %q, want the 401 without the 405 reconnect", execution.Diagnostic)
+	}
+	if !strings.Contains(execution.ReviewerNoise, "Reconnecting... 1/5") {
+		t.Fatalf("reviewer noise = %q, want the reconnect preserved", execution.ReviewerNoise)
+	}
+}
