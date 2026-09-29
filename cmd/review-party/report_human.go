@@ -4,6 +4,7 @@ import (
 	"io"
 	"strings"
 
+	"reviewparty/internal/engine"
 	"reviewparty/internal/model"
 )
 
@@ -21,11 +22,7 @@ func printHumanReport(output io.Writer, report reviewReport, configuration strin
 }
 
 func writeHumanEntry(output *commandOutput, label string, entry reviewEntry) {
-	if entry.ID == "" {
-		output.write("%s · not started\n", label)
-		return
-	}
-	if entry.Lifecycle == lifecycleUnreadable {
+	if entry.Lifecycle == engine.LifecycleUnreadable {
 		output.write("%s · unreadable\nread error: %s\n", label, entry.ReadError)
 		writeHumanMisses(output, entry.Misses)
 		return
@@ -102,11 +99,14 @@ func writeFullRecord(output *commandOutput, record model.ReviewRecord) {
 }
 
 func writeInspectHint(output *commandOutput, id, configuration string) {
-	output.write("inspect: review-party inspect %s", id)
-	if configuration != defaultUserConfigurationPath() {
-		output.write(" --config %s", shellQuoteArgument(configuration))
+	output.write("inspect: review-party inspect %s%s\n", id, configurationArgument(configuration))
+}
+
+func configurationArgument(configuration string) string {
+	if configuration == "" || configuration == defaultUserConfigurationPath() {
+		return ""
 	}
-	output.write("\n")
+	return " --config " + shellQuoteArgument(configuration)
 }
 
 func shortIdentity(identity string) string {

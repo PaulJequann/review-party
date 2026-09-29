@@ -16,8 +16,8 @@ type reviewRecordProjection struct {
 }
 
 func (p reviewRecordProjection) save(record model.ReviewRecord) (returnErr error) {
-	if record.SchemaVersion != model.CurrentReviewRecordSchemaVersion {
-		return fmt.Errorf("save review record schema %d: current schema is %d", record.SchemaVersion, model.CurrentReviewRecordSchemaVersion)
+	if err := requireCurrentReviewSchema(record); err != nil {
+		return err
 	}
 	tx, err := p.db.Begin()
 	if err != nil {
@@ -31,6 +31,13 @@ func (p reviewRecordProjection) save(record model.ReviewRecord) (returnErr error
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit review ledger write: %w", err)
+	}
+	return nil
+}
+
+func requireCurrentReviewSchema(record model.ReviewRecord) error {
+	if record.SchemaVersion != model.CurrentReviewRecordSchemaVersion {
+		return fmt.Errorf("save review record schema %d: current schema is %d", record.SchemaVersion, model.CurrentReviewRecordSchemaVersion)
 	}
 	return nil
 }
@@ -207,6 +214,9 @@ func loadReviewValues(tx *sql.Tx, id model.ReviewID) (reviewValues, error) {
 	row := tx.QueryRow("SELECT lifecycle,subject,profile_revision,profile_snapshot,result_status,result_summary,result_raw,result_finding_count,termination,runtime,timings,created_at,updated_at,replays_review_id FROM reviews WHERE id = ?", id)
 	var values reviewValues
 	if err := row.Scan(&values.lifecycle, &values.subject, &values.profile, &values.snapshot, &values.status, &values.summary, &values.raw, &values.findingCount, &values.termination, &values.runtime, &values.timings, &values.createdAt, &values.updatedAt, &values.replaysReviewID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return values, notFoundAs(string(id), err)
+		}
 		return values, fmt.Errorf("read review record %q: %w", id, err)
 	}
 	return values, nil

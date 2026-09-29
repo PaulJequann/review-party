@@ -218,7 +218,7 @@ func (execution missExecution) remove(ctx context.Context, request engine.MissRe
 	if err != nil {
 		return printFailure(execution.stderr, err)
 	}
-	return renderHistoryOutput(execution.format, execution.stdout, execution.stderr, outcomes, func(output *commandOutput) {
+	return renderLedgerOutput(execution.format, execution.stdout, execution.stderr, outcomes, func(output *commandOutput) {
 		for _, outcome := range outcomes {
 			output.write("%s %s\n", outcome.ID, strings.ReplaceAll(string(outcome.Status), "-", " "))
 		}
@@ -229,7 +229,7 @@ func (execution missExecution) printMisses(misses []model.Miss, listed bool) int
 	if misses == nil {
 		misses = []model.Miss{}
 	}
-	return renderHistoryOutput(execution.format, execution.stdout, execution.stderr, misses, func(output *commandOutput) {
+	return renderLedgerOutput(execution.format, execution.stdout, execution.stderr, misses, func(output *commandOutput) {
 		for _, miss := range misses {
 			output.write("%s\n", formatMiss(miss, listed))
 		}

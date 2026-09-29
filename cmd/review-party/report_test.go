@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"reviewparty/internal/engine"
 	"reviewparty/internal/model"
 	"reviewparty/internal/store"
 )
@@ -122,6 +123,13 @@ func TestReportFindingsAreAnArrayEvenWithoutAResult(t *testing.T) {
 	}
 }
 
+func stoppedMemberRecord(id model.ReviewID, profile string) model.ReviewRecord {
+	record := largePatchRecord(id, profile, 0)
+	record.Lifecycle, record.Result = model.LifecycleIncomplete, nil
+	record.Termination = &model.ReviewTermination{Category: model.TerminationCancelled, Phase: model.PhaseAvailabilityCheck, Message: "the Review Bundle stopped before this Review finished: context canceled"}
+	return record
+}
+
 type fakeReviewLoader map[model.ReviewID]model.ReviewRecord
 
 func (loader fakeReviewLoader) Inspect(_ context.Context, id model.ReviewID) (model.ReviewRecord, error) {
@@ -134,15 +142,16 @@ func (loader fakeReviewLoader) Inspect(_ context.Context, id model.ReviewID) (mo
 
 func TestBundleReportInlinesEveryMembersFindings(t *testing.T) {
 	loader := fakeReviewLoader{
-		"rp_bugs":    largePatchRecord("rp_bugs", "bugs", 2),
-		"rp_quality": largePatchRecord("rp_quality", "code-quality", 0),
+		"rp_bugs":     largePatchRecord("rp_bugs", "bugs", 2),
+		"rp_quality":  largePatchRecord("rp_quality", "code-quality", 0),
+		"rp_security": stoppedMemberRecord("rp_security", "security"),
 	}
 	bundle := model.ReviewBundle{
 		ID: "rb_report", Lifecycle: model.LifecycleIncomplete,
 		Members: []model.BundleMember{
 			{Scope: "global", Profile: "bugs", ReviewID: "rp_bugs", Lifecycle: model.LifecycleCompleted, Origin: "party:baseline"},
 			{Scope: "repository", Profile: "code-quality", ReviewID: "rp_quality", Lifecycle: model.LifecycleCompleted},
-			{Scope: "global", Profile: "security", Lifecycle: model.LifecyclePending},
+			{Scope: "global", Profile: "security", ReviewID: "rp_security", Lifecycle: model.LifecycleIncomplete},
 		},
 	}
 	report := bundleReport(context.Background(), loader, bundle, false)
@@ -166,7 +175,7 @@ func TestBundleReportInlinesEveryMembersFindings(t *testing.T) {
 	want := []entryFacts{
 		{"rp_bugs", model.LifecycleCompleted, model.ResultFindings, "global", "party:baseline", 2, false, true},
 		{"rp_quality", model.LifecycleCompleted, model.ResultClean, "repository", "", 0, false, true},
-		{"", model.LifecyclePending, "", "global", "", 0, false, false},
+		{"rp_security", model.LifecycleIncomplete, "", "global", "", 0, false, true},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("entries = %+v, want %+v", got, want)
@@ -294,7 +303,7 @@ func saveInspectBundleFixture(t *testing.T, stateHome string, bundle model.Revie
 		bundle.Members = append(bundle.Members, model.BundleMember{Scope: "global", Profile: record.ProfileRevision.Name, ReviewID: record.ID, Lifecycle: record.Lifecycle})
 	}
 	bundle.Members = append(bundle.Members, dangling...)
-	if err := ledger.CreateReviewBundle(bundle); err != nil {
+	if err := ledger.CreateReviewBundle(bundle, nil); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -320,7 +329,7 @@ func TestInspectBundleReportsAnUnreadableMemberBesideTheOthers(t *testing.T) {
 		t.Fatalf("finding counts = %v, want the healthy member's 2 findings beside the unreadable member", got)
 	}
 	unreadable := report.Reviews[1]
-	if got, want := []any{unreadable.ID, unreadable.Lifecycle, unreadable.Status}, []any{missing, lifecycleUnreadable, model.ResultStatus("")}; !reflect.DeepEqual(got, want) {
+	if got, want := []any{unreadable.ID, unreadable.Lifecycle, unreadable.Status}, []any{missing, engine.LifecycleUnreadable, model.ResultStatus("")}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("unreadable member id, lifecycle, status = %v, want %v", got, want)
 	}
 	if !strings.Contains(unreadable.ReadError, string(missing)) {

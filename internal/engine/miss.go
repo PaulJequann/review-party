@@ -183,10 +183,6 @@ func (conductor *Conductor) completedMemberReviews(bundle model.ReviewBundleID, 
 	reviews := make([]model.ReviewID, 0, len(members))
 	var unusable []string
 	for _, member := range members {
-		if member.ReviewID == "" {
-			unusable = append(unusable, memberLabel(member)+" (no review)")
-			continue
-		}
 		lifecycle, err := conductor.reviewLifecycle(member.ReviewID)
 		if err != nil {
 			return nil, err

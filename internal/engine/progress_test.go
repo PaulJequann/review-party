@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -41,56 +42,89 @@ func progressTestConductor(t *testing.T, repository string, limit int, recorder 
 	return conductor
 }
 
-func TestRunEmitsLiveProgressEvents(t *testing.T) {
-	repository := changedTestRepository(t)
-	recorder := &runProgressRecorder{}
-	conductor := progressTestConductor(t, repository, 1, recorder)
-
-	bundle := runRun(t, conductor, model.RunSelection{Repository: repository, Subject: model.WorkingChanges()})
-
-	events := recorder.collected()
-	if len(events) != 4 {
-		t.Fatalf("events = %#v, want 4 (2 members × start+finish)", events)
+func sleepingProgressConductor(t *testing.T, repository string, limit int, recorder *runProgressRecorder) *Conductor {
+	t.Helper()
+	executor := &scriptedExecutor{
+		availability: availability{Available: true},
+		execute: func(ctx context.Context, _ attemptSpec) attemptExecution {
+			select {
+			case <-ctx.Done():
+				return contextExecution(ctx.Err())
+			case <-time.After(10 * time.Millisecond):
+				return attemptExecution{AssistantText: cleanReview, Outcome: model.AttemptCompleted}
+			}
+		},
 	}
-	total := len(bundle.Members)
-	for index, event := range events {
-		if event.Total != total {
-			t.Fatalf("event %d total = %d, want %d", index, event.Total, total)
-		}
-	}
-	for _, member := range bundle.Members {
-		started, finished := progressEventsForMember(events, member)
-		if started == nil || finished == nil {
-			t.Fatalf("member %s:%s missing start or finish in %#v", member.Scope, member.Profile, events)
-		}
-		if started.Kind != model.RunProgressStarted || finished.Kind != model.RunProgressFinished {
-			t.Fatalf("member %s:%s kinds = %s/%s", member.Scope, member.Profile, started.Kind, finished.Kind)
-		}
-		if finished.ReviewID != member.ReviewID || finished.Lifecycle != member.Lifecycle {
-			t.Fatalf("finish = %#v, want review %q lifecycle %q", finished, member.ReviewID, member.Lifecycle)
-		}
-		if finished.Status != string(model.ResultClean) || finished.FindingCount != 0 {
-			t.Fatalf("finish = %#v, want clean completion", finished)
+	conductor := testPartyConductor(t, map[string]attemptExecutor{defaultReviewer: executor})
+	writeRepositorySelection(t, repository, configuration.ReviewSelection{
+		ConcurrencyLimit: limit,
+		Global:           []configuration.SelectionItem{{Profile: "bugs"}, {Profile: "code-quality"}},
+		Repository:       []configuration.SelectionItem{},
+	})
+	conductor.progress = recorder.record
+	return conductor
+}
+
+func TestRunReportsEveryMemberTransition(t *testing.T) {
+	for _, limit := range []int{1, 2} {
+		repository := changedTestRepository(t)
+		recorder := &runProgressRecorder{}
+		conductor := sleepingProgressConductor(t, repository, limit, recorder)
+
+		bundle := runRun(t, conductor, model.RunSelection{Repository: repository, Subject: model.WorkingChanges()})
+
+		events := recorder.collected()
+		requireBundleOutcome(t, bundle, 2, model.LifecycleCompleted)
+		requirePendingBeforeAnyStart(t, events, bundle)
+		for _, member := range bundle.Members {
+			requireMemberTransitions(t, events, member)
 		}
 	}
 }
 
-func TestRunEmitsProgressForConcurrentMembers(t *testing.T) {
-	repository := changedTestRepository(t)
-	recorder := &runProgressRecorder{}
-	conductor := progressTestConductor(t, repository, 2, recorder)
-
-	bundle := runRun(t, conductor, model.RunSelection{Repository: repository, Subject: model.WorkingChanges()})
-
-	events := recorder.collected()
-	if len(events) != len(bundle.Members)*2 {
-		t.Fatalf("events = %d, want %d (start+finish per member)", len(events), len(bundle.Members)*2)
-	}
-	for _, member := range bundle.Members {
-		started, finished := progressEventsForMember(events, member)
-		if started == nil || finished == nil {
-			t.Fatalf("concurrent member %s:%s missing start or finish in %#v", member.Scope, member.Profile, events)
+func requirePendingBeforeAnyStart(t *testing.T, events []model.RunProgressEvent, bundle model.ReviewBundle) {
+	t.Helper()
+	pending := 0
+	for index, event := range events {
+		if event.BundleID != bundle.ID || event.ReviewID == "" || event.Total != len(bundle.Members) {
+			t.Fatalf("event %d = %#v, want bundle %q, a Review ID, and total %d", index, event, bundle.ID, len(bundle.Members))
 		}
+		if event.Kind != model.RunProgressPending {
+			continue
+		}
+		if index != pending || event.Index != pending || event.ReviewID != bundle.Members[pending].ReviewID {
+			t.Fatalf("event %d = %#v, want pending member %d before any other event", index, event, pending)
+		}
+		pending++
+	}
+	if pending != len(bundle.Members) {
+		t.Fatalf("pending events = %d, want %d", pending, len(bundle.Members))
+	}
+}
+
+func requireMemberTransitions(t *testing.T, events []model.RunProgressEvent, member model.BundleMember) {
+	t.Helper()
+	var observed []model.RunProgressEvent
+	for _, event := range events {
+		if event.ReviewID == member.ReviewID {
+			observed = append(observed, event)
+		}
+	}
+	want := []model.RunProgressKind{model.RunProgressPending, model.RunProgressStarted, model.RunProgressAttempt, model.RunProgressFinished}
+	if len(observed) != len(want) {
+		t.Fatalf("member %s events = %#v, want kinds %v", member.ReviewID, observed, want)
+	}
+	for index, event := range observed {
+		if event.Kind != want[index] {
+			t.Fatalf("member %s event %d = %s, want %s", member.ReviewID, index, event.Kind, want[index])
+		}
+	}
+	if observed[2].Attempt != 1 {
+		t.Fatalf("attempt event = %#v, want attempt 1", observed[2])
+	}
+	finished := observed[3]
+	if finished.Lifecycle != member.Lifecycle || finished.Status != string(model.ResultClean) || finished.Category != "" {
+		t.Fatalf("finish = %#v, want clean %s completion", finished, member.Lifecycle)
 	}
 }
 
@@ -124,15 +158,15 @@ func TestRunProgressReportsIncompleteMembers(t *testing.T) {
 	bundle := runRun(t, conductor, model.RunSelection{Repository: repository, Subject: model.WorkingChanges()})
 
 	events := recorder.collected()
-	if len(events) != 2 {
-		t.Fatalf("events = %#v, want start+finish for one unavailable member", events)
+	if len(events) != 3 {
+		t.Fatalf("events = %#v, want pending, started, and finished for one unavailable member", events)
 	}
-	finished := events[1]
-	if finished.Kind != model.RunProgressFinished || finished.Lifecycle != model.LifecycleIncomplete {
-		t.Fatalf("finish event = %#v, want incomplete lifecycle", finished)
+	finished := events[2]
+	if finished.Kind != model.RunProgressFinished || finished.Lifecycle != model.LifecycleIncomplete || finished.Category != model.TerminationReviewerUnavailable {
+		t.Fatalf("finish event = %#v, want an incomplete reviewer_unavailable lifecycle", finished)
 	}
-	if finished.Message == "" {
-		t.Fatalf("finish event = %#v, want the availability diagnostic", finished)
+	if finished.Message != "reviewer is offline" {
+		t.Fatalf("finish message = %q, want the availability diagnostic", finished.Message)
 	}
 	if bundle.Lifecycle != model.LifecycleIncomplete {
 		t.Fatalf("bundle lifecycle = %q, want incomplete", bundle.Lifecycle)
@@ -153,14 +187,9 @@ func TestReviewExplicitProfileEmitsProgressEvents(t *testing.T) {
 	}
 
 	events := recorder.collected()
-	if len(events) != 2 {
-		t.Fatalf("events = %#v, want start+finish for the explicit Profile", events)
-	}
-	if events[0].Kind != model.RunProgressStarted || events[1].Kind != model.RunProgressFinished {
-		t.Fatalf("events = %#v, want started then finished", events)
-	}
-	if events[1].ReviewID != record.ID {
-		t.Fatalf("finish review = %q, want %q", events[1].ReviewID, record.ID)
+	requireMemberTransitions(t, events, model.BundleMember{ReviewID: record.ID, Lifecycle: record.Lifecycle})
+	if len(events) != 4 || events[0].BundleID != "" {
+		t.Fatalf("events = %#v, want four transitions outside any bundle", events)
 	}
 }
 
@@ -194,8 +223,8 @@ func TestRunProgressStartedWaitsForConcurrencyGate(t *testing.T) {
 	bundle := runRun(t, conductor, model.RunSelection{Repository: repository, Subject: model.WorkingChanges()})
 
 	events := recorder.collected()
-	if len(events) != len(bundle.Members)*2 {
-		t.Fatalf("events = %d, want %d (start+finish per member)", len(events), len(bundle.Members)*2)
+	if len(events) != len(bundle.Members)*4 {
+		t.Fatalf("events = %d, want %d (four transitions per member)", len(events), len(bundle.Members)*4)
 	}
 	running := 0
 	for index, event := range events {
@@ -207,6 +236,7 @@ func TestRunProgressStartedWaitsForConcurrencyGate(t *testing.T) {
 			}
 		case model.RunProgressFinished:
 			running--
+		case model.RunProgressPending, model.RunProgressAttempt:
 		}
 	}
 	if running != 0 {
@@ -214,25 +244,22 @@ func TestRunProgressStartedWaitsForConcurrencyGate(t *testing.T) {
 	}
 }
 
-func progressEventsForMember(events []model.RunProgressEvent, member model.BundleMember) (*model.RunProgressEvent, *model.RunProgressEvent) {
-	var started, finished *model.RunProgressEvent
-	for index := range events {
-		event := &events[index]
-		if event.Profile != member.Profile || event.Scope != member.Scope {
-			continue
-		}
-		switch event.Kind {
-		case model.RunProgressStarted:
-			started = event
-		case model.RunProgressFinished:
-			finished = event
-		}
-	}
-	return started, finished
-}
-
 // compile-time guard: the recorder satisfies the sink signature used by New.
 var _ func(model.RunProgressEvent) = (*runProgressRecorder)(nil).record
 
 // ensure time import stays meaningful for future timing assertions in this file.
 var _ = time.Now
+
+func TestFinishedProgressReportsAHardErrorBesideTheTermination(t *testing.T) {
+	record := model.ReviewRecord{
+		ID: "rp_A", Lifecycle: model.LifecycleIncomplete,
+		Termination: &model.ReviewTermination{Category: model.TerminationCancelled, Message: "cancelled"},
+	}
+
+	event := memberProgress{reviewID: record.ID, total: 1}.finished(record, errors.New("save review: disk full"), 0)
+
+	want := model.RunProgressEvent{Kind: model.RunProgressFinished, ReviewID: "rp_A", Total: 1, Lifecycle: model.LifecycleIncomplete, Category: model.TerminationCancelled, Message: "cancelled", Error: "save review: disk full"}
+	if event != want {
+		t.Fatalf("finish event = %#v, want the record's termination and the hard error apart", event)
+	}
+}

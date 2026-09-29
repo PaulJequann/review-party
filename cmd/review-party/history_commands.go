@@ -74,7 +74,7 @@ func printHistory(page store.HistoryPage, format string, stdout, stderr io.Write
 	if page.Entries == nil {
 		page.Entries = []store.HistoryEntry{}
 	}
-	return renderHistoryOutput(format, stdout, stderr, page, func(output *commandOutput) {
+	return renderLedgerOutput(format, stdout, stderr, page, func(output *commandOutput) {
 		for _, entry := range page.Entries {
 			output.write("%s\n", formatHistoryEntry(entry))
 		}
@@ -97,14 +97,14 @@ func printHistorySummary(summary store.HistorySummary, format string, stdout, st
 	if summary.Profiles == nil {
 		summary.Profiles = []store.ProfileSummary{}
 	}
-	return renderHistoryOutput(format, stdout, stderr, summary, func(output *commandOutput) {
+	return renderLedgerOutput(format, stdout, stderr, summary, func(output *commandOutput) {
 		for _, profile := range summary.Profiles {
 			output.write("%s\n", formatProfileSummary(profile, summary.HasMore))
 		}
 	})
 }
 
-func renderHistoryOutput(format string, stdout, stderr io.Writer, jsonValue any, human func(*commandOutput)) int {
+func renderLedgerOutput(format string, stdout, stderr io.Writer, jsonValue any, human func(*commandOutput)) int {
 	if format == "json" {
 		if err := json.NewEncoder(stdout).Encode(jsonValue); err != nil {
 			return printFailure(stderr, err)

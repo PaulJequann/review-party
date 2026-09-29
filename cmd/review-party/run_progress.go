@@ -3,43 +3,28 @@ package main
 import (
 	"fmt"
 	"io"
-	"os"
+	"strings"
 	"sync"
-
-	"github.com/mattn/go-isatty"
 
 	"reviewparty/internal/model"
 )
 
-// Live run progress rendering. The engine emits one event per reviewer start
-// and completion; this append-only renderer prints one stderr line per event
-// so a run shows live per-reviewer activity instead of minutes of silence.
-// Lines are append-only: safe under concurrency, piped or redirected runs
-// stay silent, and the final bundle document remains the last output.
+const progressMessageLimit = 160
 
-// runProgressRenderer serializes progress events from concurrent reviewers and
-// renders each as one stderr line.
 type runProgressRenderer struct {
-	mutex   sync.Mutex
-	output  io.Writer
-	stopped bool
+	mutex         sync.Mutex
+	output        io.Writer
+	configuration string
+	announced     bool
+	stopped       bool
 }
 
-// newRunProgressSink returns the renderer for one run and its engine sink, or
-// (nil, nil) when progress must stay silent: non-human output (JSON stdout
-// must remain a single parseable document) or a non-terminal stderr (pipes and
-// CI logs keep clean, prefixable output).
-func newRunProgressSink(format string, stderr io.Writer) (*runProgressRenderer, func(model.RunProgressEvent)) {
-	if format != "human" || stderr == nil || !isStderrTerminal(stderr) {
+func newRunProgressSink(quiet bool, stderr io.Writer, configuration string) (*runProgressRenderer, func(model.RunProgressEvent)) {
+	if quiet || stderr == nil {
 		return nil, nil
 	}
-	renderer := &runProgressRenderer{output: stderr}
+	renderer := &runProgressRenderer{output: stderr, configuration: configuration}
 	return renderer, renderer.handle
-}
-
-func isStderrTerminal(stderr io.Writer) bool {
-	file, ok := stderr.(*os.File)
-	return ok && (isatty.IsTerminal(file.Fd()) || isatty.IsCygwinTerminal(file.Fd()))
 }
 
 // handle satisfies engine.Config.Progress; events arrive from multiple
@@ -50,11 +35,25 @@ func (renderer *runProgressRenderer) handle(event model.RunProgressEvent) {
 	if renderer.stopped {
 		return
 	}
-	fmt.Fprintf(renderer.output, "%s\n", renderRunProgressEvent(event)) //nolint:errcheck // Progress is best-effort; a closed stderr must not fail the run.
+	lines := renderRunProgressEvent(event) + "\n"
+	if !renderer.announced {
+		renderer.announced = true
+		lines = renderer.header(event) + "\n" + lines
+	}
+	io.WriteString(renderer.output, lines) //nolint:errcheck // Progress is best-effort; a closed stderr must not fail the run.
 }
 
-// stop makes late events inert so the final bundle document is the last output
-// a human sees. Safe to call on a nil renderer or more than once.
+func (renderer *runProgressRenderer) header(event model.RunProgressEvent) string {
+	suffix := configurationArgument(renderer.configuration)
+	id := string(event.ReviewID)
+	subject := "review " + id
+	if event.BundleID != "" {
+		id = string(event.BundleID)
+		subject = fmt.Sprintf("bundle %s · %d review(s)", id, event.Total)
+	}
+	return fmt.Sprintf("%s · status: review-party status %s%s · wait: review-party wait %s%s", subject, id, suffix, id, suffix)
+}
+
 func (renderer *runProgressRenderer) stop() {
 	if renderer == nil {
 		return
@@ -69,30 +68,60 @@ func renderRunProgressEvent(event model.RunProgressEvent) string {
 	if event.Scope == "explicit" {
 		label = event.Profile
 	}
+	member := fmt.Sprintf("%s [%d/%d] %s", label, event.Index+1, event.Total, event.ReviewID)
 	switch event.Kind {
+	case model.RunProgressPending:
+		return fmt.Sprintf("◌ %s pending", member)
 	case model.RunProgressStarted:
-		return fmt.Sprintf("▶ %s [%d/%d] %s/%s running", label, event.Index+1, event.Total, event.Reviewer, event.Model)
+		return fmt.Sprintf("▶ %s started · %s/%s", member, event.Reviewer, event.Model)
+	case model.RunProgressAttempt:
+		return fmt.Sprintf("· %s attempt %d", member, event.Attempt)
 	case model.RunProgressFinished:
-		return fmt.Sprintf("✔ %s %s", label, runProgressOutcome(event))
+		return renderRunProgressFinished(member, event)
 	default:
-		return fmt.Sprintf("· %s %s", label, event.Kind)
+		return fmt.Sprintf("· %s %s", member, event.Kind)
 	}
 }
 
-func runProgressOutcome(event model.RunProgressEvent) string {
-	outcome := string(event.Lifecycle)
-	switch {
-	case event.Lifecycle == model.LifecycleCompleted && event.Status == string(model.ResultClean):
-		outcome += " · clean"
-	case event.Lifecycle == model.LifecycleCompleted:
-		outcome += fmt.Sprintf(" · %d finding(s)", event.FindingCount)
-	case event.Message != "":
-		outcome += " · " + event.Message
+func renderRunProgressFinished(member string, event model.RunProgressEvent) string {
+	symbol := "✖"
+	if event.Lifecycle == model.LifecycleCompleted && event.Error == "" {
+		symbol = "✔"
+	}
+	parts := []string{fmt.Sprintf("%s %s %s", symbol, member, event.Lifecycle)}
+	if result := completedResultLabel(event.Lifecycle, event.Status, event.FindingCount); result != "" {
+		parts = append(parts, result)
+	}
+	if event.Category != "" {
+		parts = append(parts, string(event.Category))
+	}
+	if event.Error != "" {
+		parts = append(parts, boundedProgressMessage(event.Error))
 	}
 	if event.ElapsedMS > 0 {
-		outcome += " · " + formatProgressElapsed(event.ElapsedMS)
+		parts = append(parts, formatProgressElapsed(event.ElapsedMS))
 	}
-	return outcome
+	return strings.Join(parts, " · ")
+}
+
+func completedResultLabel(lifecycle model.Lifecycle, status string, findingCount int) string {
+	switch {
+	case lifecycle != model.LifecycleCompleted:
+		return ""
+	case status == string(model.ResultClean):
+		return "clean"
+	default:
+		return fmt.Sprintf("%d finding(s)", findingCount)
+	}
+}
+
+func boundedProgressMessage(message string) string {
+	line, _, _ := strings.Cut(message, "\n")
+	runes := []rune(line)
+	if len(runes) <= progressMessageLimit {
+		return line
+	}
+	return string(runes[:progressMessageLimit]) + "…"
 }
 
 // formatProgressElapsed renders milliseconds as m/s durations for progress lines.

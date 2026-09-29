@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 
+	"reviewparty/internal/engine"
 	"reviewparty/internal/model"
 	"reviewparty/internal/store"
 )
@@ -31,7 +32,7 @@ type bundleSummary struct {
 }
 
 type reviewEntry struct {
-	ID              model.ReviewID            `json:"id,omitempty"`
+	ID              model.ReviewID            `json:"id"`
 	Lifecycle       model.Lifecycle           `json:"lifecycle"`
 	Status          model.ResultStatus        `json:"status,omitempty"`
 	Termination     *model.ReviewTermination  `json:"termination,omitempty"`
@@ -46,8 +47,6 @@ type reviewEntry struct {
 	Record          *model.ReviewRecord       `json:"record,omitempty"`
 	ReadError       string                    `json:"read_error,omitempty"`
 }
-
-const lifecycleUnreadable model.Lifecycle = "unreadable"
 
 type profileSummary struct {
 	Name                   string `json:"name"`
@@ -93,14 +92,17 @@ func bundleReport(ctx context.Context, loader reviewLoader, bundle model.ReviewB
 }
 
 func memberEntry(ctx context.Context, loader reviewLoader, member model.BundleMember, full bool) reviewEntry {
-	if member.ReviewID == "" {
-		return unstartedEntry(member)
-	}
 	record, err := loader.Inspect(ctx, member.ReviewID)
 	if err != nil {
-		entry := unstartedEntry(member)
-		entry.ID, entry.Lifecycle, entry.ReadError = member.ReviewID, lifecycleUnreadable, err.Error()
-		return entry
+		return reviewEntry{
+			ID:        member.ReviewID,
+			Lifecycle: engine.LifecycleUnreadable,
+			Findings:  []model.Finding{},
+			Misses:    []model.Miss{},
+			Profile:   profileSummary{Name: member.Profile, Scope: member.Scope, Revision: member.ProfileRevision},
+			Origin:    member.Origin,
+			ReadError: err.Error(),
+		}
 	}
 	entry := recordEntry(record, full)
 	entry.Profile.Scope = member.Scope
@@ -110,11 +112,8 @@ func memberEntry(ctx context.Context, loader reviewLoader, member model.BundleMe
 
 func (report reviewReport) attachMisses(ctx context.Context, loader missLoader) error {
 	for index, entry := range report.Reviews {
-		if entry.ID == "" {
-			continue
-		}
 		misses, err := loader.Misses(ctx, store.MissQuery{ReviewID: entry.ID})
-		if err != nil && entry.Lifecycle == lifecycleUnreadable {
+		if err != nil && entry.Lifecycle == engine.LifecycleUnreadable {
 			report.Reviews[index].ReadError += "; load misses: " + err.Error()
 			continue
 		}
@@ -154,7 +153,7 @@ func (report reviewReport) incomplete() bool {
 func (report reviewReport) readFailure() error {
 	var failures []error
 	for _, entry := range report.Reviews {
-		if entry.Lifecycle == lifecycleUnreadable {
+		if entry.Lifecycle == engine.LifecycleUnreadable {
 			failures = append(failures, fmt.Errorf("read bundle member %s:%s review %s: %s", entry.Profile.Scope, entry.Profile.Name, entry.ID, entry.ReadError))
 		}
 	}
@@ -198,16 +197,6 @@ func recordEntry(record model.ReviewRecord, full bool) reviewEntry {
 		entry.Record = &record
 	}
 	return entry
-}
-
-func unstartedEntry(member model.BundleMember) reviewEntry {
-	return reviewEntry{
-		Lifecycle: member.Lifecycle,
-		Findings:  []model.Finding{},
-		Misses:    []model.Miss{},
-		Profile:   profileSummary{Name: member.Profile, Scope: member.Scope, Revision: member.ProfileRevision},
-		Origin:    member.Origin,
-	}
 }
 
 func summarizeBundle(bundle model.ReviewBundle) *bundleSummary {

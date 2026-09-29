@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"reviewparty/internal/engine"
 	"reviewparty/internal/model"
 	"reviewparty/internal/store"
 	"reviewparty/internal/subject"
@@ -25,7 +26,6 @@ const (
 	missReviewRepoBugs model.ReviewID       = "rp_1723200000004_0123456789abcdef"
 	missBundle         model.ReviewBundleID = "rb_1723200000000_0123456789abcdef"
 	missMixedBundle    model.ReviewBundleID = "rb_1723200000001_0123456789abcdef"
-	missUnrunBundle    model.ReviewBundleID = "rb_1723200000002_0123456789abcdef"
 	missScopedBundle   model.ReviewBundleID = "rb_1723200000003_0123456789abcdef"
 )
 
@@ -69,10 +69,9 @@ func newMissLedger(t *testing.T) missLedger {
 	for _, bundle := range []model.ReviewBundle{
 		missReviewBundle(missBundle, missReviewBugs, missReviewSecurity),
 		missReviewBundle(missMixedBundle, missReviewBugs, missReviewRunning),
-		missReviewBundle(missUnrunBundle, missReviewBugs, ""),
 		missScopedReviewBundle(),
 	} {
-		if err := ledger.CreateReviewBundle(bundle); err != nil {
+		if err := ledger.CreateReviewBundle(bundle, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -98,7 +97,7 @@ func missReview(id model.ReviewID, profile, repository string, lifecycle model.L
 }
 
 func missReviewBundle(id model.ReviewBundleID, reviews ...model.ReviewID) model.ReviewBundle {
-	names := map[model.ReviewID]string{missReviewBugs: "bugs", missReviewSecurity: "security", missReviewRunning: "style", "": "perf"}
+	names := map[model.ReviewID]string{missReviewBugs: "bugs", missReviewSecurity: "security", missReviewRunning: "style"}
 	members := make([]model.BundleMember, 0, len(reviews))
 	for _, review := range reviews {
 		members = append(members, model.BundleMember{Scope: "global", Profile: names[review], Lifecycle: model.LifecycleCompleted, ReviewID: review})
@@ -216,7 +215,6 @@ func TestMissAddOnUnusableTargetWritesNothing(t *testing.T) {
 	for target, message := range map[[2]string]string{
 		{string(missReviewRunning), ""}: "is incomplete; misses attach only to completed reviews",
 		{string(missMixedBundle), ""}:   "cannot take a miss: global:style (" + string(missReviewRunning) + " incomplete)",
-		{string(missUnrunBundle), ""}:   "cannot take a miss: global:perf (no review)",
 		{string(missBundle), "perf"}:    `no member with profile "perf"; members: global:bugs, global:security`,
 	} {
 		exit, _, stderr := fixture.run("miss", "add", "--review", target[0], "--profile", target[1], "--path", "a.go", "--source", "human", "--description", "d", "--recorded-by", "pj")
@@ -406,8 +404,8 @@ func TestInspectBundleShowsMissesOfAnUnreadableMember(t *testing.T) {
 	fixture.corruptReview(t, missReviewSecurity, "timings", "[]")
 
 	unreadable := fixture.inspectUnreadableBundle(t)[missReviewSecurity]
-	if unreadable.Lifecycle != lifecycleUnreadable {
-		t.Fatalf("security lifecycle = %q, want %q", unreadable.Lifecycle, lifecycleUnreadable)
+	if unreadable.Lifecycle != engine.LifecycleUnreadable {
+		t.Fatalf("security lifecycle = %q, want %q", unreadable.Lifecycle, engine.LifecycleUnreadable)
 	}
 	requireMissReviews(t, *unreadable.Misses, missReviewSecurity)
 	_, stdout, _ := fixture.run("inspect", string(missBundle))

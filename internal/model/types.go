@@ -238,26 +238,30 @@ type BundleTermination struct {
 type RunProgressKind string
 
 const (
+	RunProgressPending  RunProgressKind = "pending"
 	RunProgressStarted  RunProgressKind = "started"
+	RunProgressAttempt  RunProgressKind = "attempt"
 	RunProgressFinished RunProgressKind = "finished"
 )
 
-// RunProgressEvent is one live per-reviewer progress fact emitted while a run
-// executes. Kind distinguishes member start from completion.
 type RunProgressEvent struct {
-	Kind         RunProgressKind `json:"kind"`
-	Index        int             `json:"index"`
-	Total        int             `json:"total"`
-	Scope        string          `json:"scope"`
-	Profile      string          `json:"profile"`
-	Reviewer     string          `json:"reviewer"`
-	Model        string          `json:"model"`
-	ReviewID     ReviewID        `json:"review_id,omitempty"`
-	Lifecycle    Lifecycle       `json:"lifecycle,omitempty"`
-	Status       string          `json:"status,omitempty"`
-	FindingCount int             `json:"finding_count,omitempty"`
-	ElapsedMS    int64           `json:"elapsed_ms,omitempty"`
-	Message      string          `json:"message,omitempty"`
+	Kind         RunProgressKind     `json:"kind"`
+	BundleID     ReviewBundleID      `json:"bundle_id,omitempty"`
+	ReviewID     ReviewID            `json:"review_id"`
+	Index        int                 `json:"index"`
+	Total        int                 `json:"total"`
+	Scope        string              `json:"scope"`
+	Profile      string              `json:"profile"`
+	Reviewer     string              `json:"reviewer"`
+	Model        string              `json:"model"`
+	Attempt      int                 `json:"attempt,omitempty"`
+	Lifecycle    Lifecycle           `json:"lifecycle,omitempty"`
+	Status       string              `json:"status,omitempty"`
+	FindingCount int                 `json:"finding_count,omitempty"`
+	Category     TerminationCategory `json:"category,omitempty"`
+	ElapsedMS    int64               `json:"elapsed_ms,omitempty"`
+	Message      string              `json:"message,omitempty"`
+	Error        string              `json:"error,omitempty"`
 }
 
 // ReviewBundle records the executed selection behind one run.

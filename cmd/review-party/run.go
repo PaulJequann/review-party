@@ -31,7 +31,12 @@ func newRunCommand(streams commandIO) *cobra.Command {
 
 Without --profile or --party, runs the repository's complete saved selection
 from .reviewparty/config.json reviews. An explicit Profile or Party replaces
-the saved selection for this one run and never changes configuration.`,
+the saved selection for this one run and never changes configuration.
+
+While the run is in progress, stderr carries a lifecycle heartbeat that names
+the Review Bundle or Review and each member's transitions. Stdout carries only
+the final result. --quiet suppresses the heartbeat. Use review-party status to
+check a run from another shell and review-party wait to block until it ends.`,
 		Example:           "  review-party run --repo .\n  review-party run --profile code-quality\n  review-party run --party baseline --base main --head HEAD",
 		Args:              cobra.NoArgs,
 		ValidArgsFunction: cobra.NoFileCompletions,
@@ -45,7 +50,7 @@ the saved selection for this one run and never changes configuration.`,
 				repository: stringFlag(cmd, "repo"), subject: subjectReference,
 				format: stringFlag(cmd, "format"), configuration: stringFlag(cmd, "config"), full: boolFlag(cmd, "full"),
 			}
-			renderer, sink := newRunProgressSink(options.format, streams.errors)
+			renderer, sink := newRunProgressSink(boolFlag(cmd, "quiet"), streams.errors, options.configuration)
 			defer renderer.stop()
 			options.progress = sink
 			return commandResult(executeRun(cmd.Context(), options, streams.output, streams.errors))
@@ -55,6 +60,7 @@ the saved selection for this one run and never changes configuration.`,
 	cmd.Flags().String("party", "", "Run exactly this Party instead of the saved selection; prefix global: or repository: for an exact scope")
 	cmd.RegisterFlagCompletionFunc("profile", completeProfileNames) //nolint:errcheck // Cobra completion registration is best-effort
 	cmd.RegisterFlagCompletionFunc("party", completePartyNames)     //nolint:errcheck // Cobra completion registration is best-effort
+	cmd.Flags().Bool("quiet", false, "Suppress the stderr lifecycle heartbeat")
 	cmd.MarkFlagsMutuallyExclusive("profile", "party")
 	addReviewFlags(cmd)
 	return cmd
@@ -87,10 +93,14 @@ type runConductor interface {
 
 func executeRunWithConductor(ctx context.Context, conductor runConductor, options runOptions, streams commandIO) int {
 	report, err := runReport(ctx, conductor, options)
-	if err != nil {
-		return printFailure(streams.errors, err)
+	return printRunOutcome(streams, report, err, reportOptions{format: options.format, configuration: options.configuration})
+}
+
+func printRunOutcome(streams commandIO, report reviewReport, runErr error, options reportOptions) int {
+	if runErr != nil {
+		return printFailure(streams.errors, runErr)
 	}
-	if err := printReport(streams.output, report, reportOptions{format: options.format, configuration: options.configuration}); err != nil {
+	if err := printReport(streams.output, report, options); err != nil {
 		return printFailure(streams.errors, err)
 	}
 	if err := report.readFailure(); err != nil {

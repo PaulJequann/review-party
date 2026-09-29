@@ -39,10 +39,10 @@ func TestPrintReportJSONCarriesTheBundleSummary(t *testing.T) {
 }
 
 func TestExecuteRunReturnsUsageExitForIncompleteBundle(t *testing.T) {
-	conductor := &fakeRunConductor{records: fakeReviewLoader{"rp_member": largePatchRecord("rp_member", "bugs", 1)}}
+	conductor := &fakeRunConductor{records: fakeReviewLoader{"rp_member": largePatchRecord("rp_member", "bugs", 1), "rp_security": stoppedMemberRecord("rp_security", "security")}}
 	conductor.runBundle = model.ReviewBundle{ID: "rb_incomplete", Lifecycle: model.LifecycleIncomplete, Members: []model.BundleMember{
 		{Scope: "global", Profile: "bugs", ReviewID: "rp_member", Lifecycle: model.LifecycleCompleted},
-		{Scope: "global", Profile: "security", Lifecycle: model.LifecyclePending},
+		{Scope: "global", Profile: "security", ReviewID: "rp_security", Lifecycle: model.LifecycleIncomplete},
 	}}
 	var stdout, stderr bytes.Buffer
 	exit := executeRunWithConductor(context.Background(), conductor, runOptions{format: "json", subject: model.WorkingChanges()}, commandIO{output: &stdout, errors: &stderr})
@@ -72,7 +72,7 @@ func TestInspectDispatchesBundleIDsToBundleInspection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := ledger.CreateReviewBundle(bundle); err != nil {
+	if err := ledger.CreateReviewBundle(bundle, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := ledger.Close(); err != nil {
@@ -84,4 +84,18 @@ func TestInspectDispatchesBundleIDsToBundleInspection(t *testing.T) {
 		t.Fatalf("Bundle inspection exit = %d, stderr = %q", exit, stderr.String())
 	}
 	requireBundleSummary(t, decodeReport(t, stdout.String()), bundle.ID, bundle.Lifecycle)
+}
+
+func TestInspectReportsUnknownIDsWithoutSQLText(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	repository := testGitRepository(t)
+	runMainCommand(t, []string{"init", "--repo", repository})
+	for _, id := range []string{"rp_1724232000000_0123456789abcdef", "rb_1724232000000_0123456789abcdef"} {
+		var stdout, stderr bytes.Buffer
+		exit := run(context.Background(), []string{"inspect", id}, &stdout, &stderr)
+		want := "review-party: no review with id \"" + id + "\"\n"
+		if exit != 1 || stderr.String() != want {
+			t.Fatalf("inspect %s exit = %d, stderr = %q, want exit 1 and %q", id, exit, stderr.String(), want)
+		}
+	}
 }

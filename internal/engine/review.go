@@ -34,15 +34,16 @@ func newReviewRunner(store store.RecordStore, now func() time.Time, buildProvena
 	}
 }
 
-func (runner *reviewRunner) pendingRecord(subject model.ReviewSubject, profile compiledProfile, timings model.ReviewTimings, replaysReviewID *model.ReviewID) (model.ReviewRecord, error) {
+func (runner *reviewRunner) pendingRecord(prepared preparedReview, replaysReviewID *model.ReviewID) (model.ReviewRecord, error) {
 	id, err := newReviewID(runner.now())
 	if err != nil {
 		return model.ReviewRecord{}, err
 	}
 	now := runner.now().UTC()
 	runtime := runner.buildProvenance()
-	passes := make([]model.PassRecord, 0, len(profile.revision.Passes))
-	for _, planned := range profile.revision.Passes {
+	timings := prepared.timings
+	passes := make([]model.PassRecord, 0, len(prepared.profile.revision.Passes))
+	for _, planned := range prepared.profile.revision.Passes {
 		passes = append(passes, model.PassRecord{Name: planned.Name, Required: planned.Required, Attempts: []model.AttemptRecord{}})
 	}
 	return model.ReviewRecord{
@@ -50,9 +51,9 @@ func (runner *reviewRunner) pendingRecord(subject model.ReviewSubject, profile c
 		ID:              id,
 		ReplaysReviewID: replaysReviewID,
 		Lifecycle:       model.LifecyclePending,
-		Subject:         subject,
-		ProfileRevision: profile.revision,
-		ProfileSnapshot: profile.snapshot,
+		Subject:         prepared.subject.ReviewSubject,
+		ProfileRevision: prepared.profile.revision,
+		ProfileSnapshot: prepared.profile.snapshot,
 		Passes:          passes,
 		Runtime:         &runtime,
 		Timings:         &timings,
@@ -61,15 +62,27 @@ func (runner *reviewRunner) pendingRecord(subject model.ReviewSubject, profile c
 	}, nil
 }
 
-func (runner *reviewRunner) runPreparedReview(ctx context.Context, prepared preparedReview, replaysReviewID *model.ReviewID, reviewStarted time.Time) (model.ReviewRecord, error) {
-	record, err := runner.pendingRecord(prepared.subject.ReviewSubject, prepared.profile, prepared.timings, replaysReviewID)
+func (runner *reviewRunner) startReview(prepared preparedReview, replaysReviewID *model.ReviewID) (model.ReviewRecord, error) {
+	record, err := runner.pendingRecord(prepared, replaysReviewID)
 	if err != nil {
 		return model.ReviewRecord{}, err
 	}
 	if err := runner.store.Save(record); err != nil {
 		return model.ReviewRecord{}, err
 	}
+	return record, nil
+}
 
+func (runner *reviewRunner) runPreparedReview(ctx context.Context, prepared preparedReview, replaysReviewID *model.ReviewID, reviewStarted time.Time) (model.ReviewRecord, error) {
+	record, err := runner.startReview(prepared, replaysReviewID)
+	if err != nil {
+		return model.ReviewRecord{}, err
+	}
+	return runner.runPendingReview(ctx, pendingReview{prepared: prepared, record: record}, reviewStarted, nil)
+}
+
+func (runner *reviewRunner) runPendingReview(ctx context.Context, member pendingReview, reviewStarted time.Time, onAttempt func(int)) (model.ReviewRecord, error) {
+	record, prepared := member.record, member.prepared
 	record.Lifecycle = model.LifecycleRunning
 	record.UpdatedAt = runner.now().UTC()
 	if err := runner.store.Save(record); err != nil {
@@ -91,6 +104,7 @@ func (runner *reviewRunner) runPreparedReview(ctx context.Context, prepared prep
 		executor:      executor,
 		reviewStarted: reviewStarted,
 		deadline:      prepared.deadline,
+		onAttempt:     onAttempt,
 	})
 }
 
@@ -129,6 +143,7 @@ type passExecution struct {
 	executor      attemptExecutor
 	reviewStarted time.Time
 	deadline      time.Duration
+	onAttempt     func(int)
 }
 
 func (runner *reviewRunner) executePass(ctx context.Context, pass passExecution) (model.ReviewRecord, error) {
@@ -218,6 +233,9 @@ func (runner *reviewRunner) executeAttempt(ctx context.Context, record model.Rev
 		case <-ctx.Done():
 			return contextExecution(ctx.Err()), nil
 		}
+	}
+	if pass.onAttempt != nil {
+		pass.onAttempt(record.AttemptCount() + 1)
 	}
 	execution = pass.executor.Execute(ctx, attemptSpec{Repository: checkout.Repository, Prompt: prompt, Candidate: pass.profile.reviewer.candidate})
 	return execution, nil
