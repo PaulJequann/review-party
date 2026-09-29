@@ -85,3 +85,17 @@ func TestInspectDispatchesBundleIDsToBundleInspection(t *testing.T) {
 	}
 	requireBundleSummary(t, decodeReport(t, stdout.String()), bundle.ID, bundle.Lifecycle)
 }
+
+func TestInspectReportsUnknownIDsWithoutSQLText(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	repository := testGitRepository(t)
+	runMainCommand(t, []string{"init", "--repo", repository})
+	for _, id := range []string{"rp_1724232000000_0123456789abcdef", "rb_1724232000000_0123456789abcdef"} {
+		var stdout, stderr bytes.Buffer
+		exit := run(context.Background(), []string{"inspect", id}, &stdout, &stderr)
+		want := "review-party: no review with id \"" + id + "\"\n"
+		if exit != 1 || stderr.String() != want {
+			t.Fatalf("inspect %s exit = %d, stderr = %q, want exit 1 and %q", id, exit, stderr.String(), want)
+		}
+	}
+}

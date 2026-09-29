@@ -207,6 +207,9 @@ func loadReviewValues(tx *sql.Tx, id model.ReviewID) (reviewValues, error) {
 	row := tx.QueryRow("SELECT lifecycle,subject,profile_revision,profile_snapshot,result_status,result_summary,result_raw,result_finding_count,termination,runtime,timings,created_at,updated_at,replays_review_id FROM reviews WHERE id = ?", id)
 	var values reviewValues
 	if err := row.Scan(&values.lifecycle, &values.subject, &values.profile, &values.snapshot, &values.status, &values.summary, &values.raw, &values.findingCount, &values.termination, &values.runtime, &values.timings, &values.createdAt, &values.updatedAt, &values.replaysReviewID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return values, notFoundAs(string(id), err)
+		}
 		return values, fmt.Errorf("read review record %q: %w", id, err)
 	}
 	return values, nil

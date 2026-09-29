@@ -107,7 +107,7 @@ func (p bundleProjection) load(id model.ReviewBundleID) (model.ReviewBundle, err
 	var completedAt sql.NullTime
 	err := p.db.QueryRow(`SELECT id,description,revision,repository,subject_kind,subject_identity,lifecycle,termination,selection,warnings,deduplicated,members,concurrency_limit,created_at,updated_at,completed_at FROM review_bundles WHERE id=?`, id).Scan(&bundle.ID, &bundle.Description, &bundle.Revision, &bundle.Repository, &bundle.SubjectKind, &bundle.SubjectIdentity, &bundle.Lifecycle, &payloads.termination, &payloads.selection, &payloads.warnings, &payloads.deduplicated, &payloads.members, &bundle.ConcurrencyLimit, &bundle.CreatedAt, &bundle.UpdatedAt, &completedAt)
 	if err != nil {
-		return model.ReviewBundle{}, err
+		return model.ReviewBundle{}, notFoundAs(string(id), err)
 	}
 	if err := decodeBundlePayloads(&bundle, payloads); err != nil {
 		return model.ReviewBundle{}, err

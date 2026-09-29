@@ -36,6 +36,27 @@ var ErrReviewRecordStateNotInitialized = errors.New("Review Party is not initial
 var ErrReviewRecordStateRequiresPreparation = errors.New("Review Party state requires preparation")
 var errLedgerUpgradesInPlace = fmt.Errorf("%w", ErrReviewRecordStateRequiresPreparation)
 
+// ErrReviewNotFound marks a lookup of a Review or Review Bundle ID the ledger
+// does not hold.
+var ErrReviewNotFound = errors.New("no review with id")
+
+type reviewNotFoundError struct{ id string }
+
+func (failure reviewNotFoundError) Error() string {
+	return fmt.Sprintf("no review with id %q", failure.id)
+}
+
+func (failure reviewNotFoundError) Is(target error) bool { return target == ErrReviewNotFound }
+
+func (failure reviewNotFoundError) Unwrap() error { return sql.ErrNoRows }
+
+func notFoundAs(id string, err error) error {
+	if errors.Is(err, sql.ErrNoRows) {
+		return reviewNotFoundError{id: id}
+	}
+	return err
+}
+
 //go:embed migrations/*.sql
 var migrationFiles embed.FS
 
