@@ -27,6 +27,10 @@ same configuration operations.
   publish controls; `receivePlan` and `receivePublishResult` in
   `internal/configurationhub/interactive_forms.go` handle plan receipt,
   publication, refreshed snapshots, and the success outcome.
+- `profileModelOptions` in `internal/configurationhub/profile_choices.go`
+  lists Refresh first and marks the current model; `completeProfileModelForm`
+  reopens discovery on Refresh and `editAccessibleModel` does the same for
+  the accessible adapter.
 - `runAccessibleForm`, `chooseAction`, `confirmExit`, and
   `reviewAndPublishWithPreview` in `internal/configurationhub/editors.go`
   implement the accessible form and plan/publication flow.
@@ -77,30 +81,40 @@ procedure in `features/README.md`. Every capture below goes to
    `tab next`, `shift+tab previous`, `enter continue`, and `? help`. Run
    `tmux resize-window -t "$session" -x 80 -y 24`, capture
    `profile-form-80x24.txt`, and require the same controls to remain visible.
-4. **Profile fields.** Send `Down` to choose Repository scope, then Tab
-   through the fields entering, in order: `ui-bugs`, `codex`, `gpt-5.6-luna`,
-   `high`, and `8m`. Require each focused input to remain inside the box. On
-   the deadline field, send Shift+Tab and confirm focus returns to Reasoning
-   effort without changing `high`. Send Tab to return to the deadline, run
-   `tmux resize-window -t "$session" -x 120 -y 30`, and capture
-   `profile-form-deadline.txt` showing the focused deadline and navigation
-   controls. Send Enter to continue to the instruction source; Tab alone does
-   not submit the form.
-5. **Instructions.** Accept the default Template instruction source, accept
+4. **Profile fields.** Run `tmux resize-window -t "$session" -x 120 -y 30`.
+   Send `Down` to choose Repository scope, `Tab`, type `ui-bugs`, `Tab`, then
+   `Down` to choose `codex` in the Reviewer select. Capture
+   `profile-fields.txt` with the name and Reviewer inside the box, then send
+   Enter; Tab alone does not submit the form.
+5. **Model.** Wait for `Model availability` and capture `profile-model.txt`.
+   The Model select must list `↻ Refresh available models` first, with the
+   cursor on it for a new Profile, then `gpt-5.6-luna`, then
+   `Enter a model ID manually`. Send Enter on Refresh, wait for the Model
+   select to return, and capture `profile-model-refreshed.txt`; the owned
+   HOME reports `codex` unavailable, so the list is unchanged. Send `Down`,
+   then Enter to choose `gpt-5.6-luna`.
+6. **Effort and deadline.** The unavailable Reviewer reports no effort
+   choices, so `Reasoning effort` is a text input. Type `high` and send Enter.
+   At `Attempt deadline`, type `8m` and send Enter.
+7. **Instructions.** Accept the default Template instruction source, accept
    the first packaged template, and accept the default
    `Edit instructions with $EDITOR?` answer.
-6. **Plan preview.** Wait for `Plan preview` and capture `plan-preview.txt`.
+8. **Plan preview.** Wait for `Plan preview` and capture `plan-preview.txt`.
    It must show `ui-bugs`, `codex`, `gpt-5.6-luna`, and the Repository scope,
    with `p` available to publish.
-7. **Publish.** Send `p`, wait for `Published profile "ui-bugs"`, and capture
+9. **Publish.** Send `p`, wait for `Published profile "ui-bugs"`, and capture
    `published.txt`.
-8. **Copy form.** Send `esc` to return to the menu, then `Enter` to reopen
+10. **Copy form.** Send `esc` to return to the menu, then `Enter` to reopen
    Profiles. Send `p` (copy) and wait for
    `Repository Profile to copy to Global Configuration`. Capture
    `copy-form.txt`; it must list the published `ui-bugs` among the selectable
    Repository Profiles. Send `C-[` twice to return to the menu without
    publishing the copy.
-9. **Exit.** Send `q` and require the session to exit. The run-owned
+11. **Edit keeps the current model.** Send `Enter` to reopen Profiles, then
+   `e` on `ui-bugs`. Send Enter on the Reviewer select, wait for the Model
+   select, and capture `edit-model.txt`; the cursor must be on
+   `gpt-5.6-luna [current]`. Send `C-[` until the menu returns.
+12. **Exit.** Send `q` and require the session to exit. The run-owned
    repository Profile at
    `$run_dir/runtime/repository/.reviewparty/profiles/ui-bugs/profile.json`
    must exist, and no `ui-bugs` Profile may exist in the Global configuration
@@ -128,17 +142,24 @@ read the prompt and send the number for the named label; confirmations use
 | Prompt | Answer |
 | --- | --- |
 | Configuration Hub menu | the `Profiles` choice |
+| Profiles | the `Create a new Profile` choice |
 | Configuration scope | the `Repository` choice |
+| Profile name | `ui-accessible` |
+| Reviewer | `codex` |
+| Model | `↻ Refresh available models`, then `gpt-5.6-luna` when the prompt returns |
+| Reasoning effort, Attempt deadline | `high`, `8m` |
 | Instruction source | the `Template` choice |
 | Template | the first packaged template |
-| Edit instructions | `n` |
-| Name, Reviewer, model, effort, deadline | `ui-accessible`, `codex`, `gpt-5.6-luna`, `high`, `8m` |
+| Edit instructions with $EDITOR? | `n` |
 | Publish this complete plan? | `y` |
-| Next action | the choice that copies a Repository Profile to Global Configuration |
-| Profile to copy | `ui-accessible` under the `[repository]` label |
-| Publish the copy? | `n` |
+| Configuration Hub menu | the choice that copies a Repository Profile to Global Configuration |
+| Repository Profile to copy | `ui-accessible` under the `[repository]` label |
+| Publish this complete plan? | `n` |
 | Configuration Hub menu | the `Exit` choice |
 | Discard unfinished drafts and exit? | `y` |
+
+The Refresh answer must print the Reviewer diagnostic and ask for the Model
+again with Refresh still listed first.
 
 Capture the plan prompt at `configuration-hub/accessible-plan.txt`. The copy
 step must offer `ui-accessible` under a `[repository]` label, and declining it
