@@ -707,7 +707,7 @@ func (s *LedgerRecordStore) InFlight(repository string) (InFlight, error) {
 	if err != nil {
 		return InFlight{}, err
 	}
-	reviews, err := queryInFlightIDs[model.ReviewID](s.db, `SELECT id FROM reviews WHERE json_extract(subject,'$.repository') = ? AND lifecycle IN ('pending','running') ORDER BY created_at DESC, id DESC`, repository)
+	reviews, err := queryInFlightIDs[model.ReviewID](s.db, `SELECT id FROM reviews WHERE json_extract(subject,'$.repository') = ? AND lifecycle IN ('pending','running') AND id NOT IN (SELECT json_extract(member.value,'$.review_id') FROM review_bundles, json_each(review_bundles.members) AS member WHERE json_extract(member.value,'$.review_id') IS NOT NULL) ORDER BY created_at DESC, id DESC`, repository)
 	if err != nil {
 		return InFlight{}, err
 	}

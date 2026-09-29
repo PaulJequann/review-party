@@ -44,23 +44,16 @@ func (conductor *Conductor) InFlight(ctx context.Context, repository string) ([]
 	if err != nil {
 		return nil, err
 	}
-	statuses := make([]model.ReviewStatus, 0, len(ids.Bundles)+len(ids.Reviews))
-	members := map[model.ReviewID]bool{}
+	runIDs := make([]string, 0, len(ids.Bundles)+len(ids.Reviews))
 	for _, id := range ids.Bundles {
-		status, err := conductor.bundleStatus(ctx, id)
-		if err != nil {
-			return nil, err
-		}
-		for _, member := range status.Reviews {
-			members[member.ReviewID] = true
-		}
-		statuses = append(statuses, status)
+		runIDs = append(runIDs, string(id))
 	}
 	for _, id := range ids.Reviews {
-		if members[id] {
-			continue
-		}
-		status, err := conductor.Status(ctx, string(id))
+		runIDs = append(runIDs, string(id))
+	}
+	statuses := make([]model.ReviewStatus, 0, len(runIDs))
+	for _, id := range runIDs {
+		status, err := conductor.Status(ctx, id)
 		if err != nil {
 			return nil, err
 		}

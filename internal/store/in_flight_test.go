@@ -8,17 +8,22 @@ import (
 	"reviewparty/internal/model"
 )
 
-func TestLedgerListsInFlightBundlesAndReviewsForOneRepositoryNewestFirst(t *testing.T) {
+func TestLedgerListsInFlightBundlesAndStandaloneReviewsForOneRepositoryNewestFirst(t *testing.T) {
 	ledger := newTestLedger(t, t.TempDir())
 	defer closeTestResource(t, ledger.Close)
 	base := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
-	for _, bundle := range []model.ReviewBundle{
+	bundles := []model.ReviewBundle{
 		inFlightBundleFixture("rb_1725192000000_000000000000000a", "/repo", model.LifecycleRunning, base),
 		inFlightBundleFixture("rb_1725192000000_000000000000000b", "/repo", model.LifecyclePending, base.Add(2*time.Minute)),
 		inFlightBundleFixture("rb_1725192000000_000000000000000c", "/repo", model.LifecycleCompleted, base.Add(3*time.Minute)),
 		inFlightBundleFixture("rb_1725192000000_000000000000000d", "/repo", model.LifecycleIncomplete, base.Add(4*time.Minute)),
 		inFlightBundleFixture("rb_1725192000000_000000000000000e", "/other", model.LifecycleRunning, base.Add(5*time.Minute)),
-	} {
+		inFlightBundleFixture("rb_1725192000000_000000000000000f", "/repo", model.LifecycleCompleted, base),
+		inFlightBundleFixture("rb_1725192000000_0000000000000010", "/repo", model.LifecycleIncomplete, base),
+	}
+	bundles[5].Members = []model.BundleMember{{Scope: "global", Profile: "bugs"}}
+	bundles[6].Members = []model.BundleMember{{Scope: "global", Profile: "bugs", ReviewID: "rp_1725192000000_000000000000000f"}}
+	for _, bundle := range bundles {
 		if err := ledger.CreateReviewBundle(bundle, nil); err != nil {
 			t.Fatal(err)
 		}
@@ -32,6 +37,7 @@ func TestLedgerListsInFlightBundlesAndReviewsForOneRepositoryNewestFirst(t *test
 		inFlightReviewFixture("rp_1725192000000_000000000000000b", "/repo", model.LifecyclePending, base.Add(3*time.Minute)),
 		completed, incomplete,
 		inFlightReviewFixture("rp_1725192000000_000000000000000e", "/other", model.LifecycleRunning, base.Add(5*time.Minute)),
+		inFlightReviewFixture("rp_1725192000000_000000000000000f", "/repo", model.LifecycleRunning, base.Add(6*time.Minute)),
 	)
 
 	got, err := ledger.InFlight("/repo")
