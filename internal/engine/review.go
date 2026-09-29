@@ -80,12 +80,13 @@ func (runner *reviewRunner) runPreparedReview(ctx context.Context, prepared prep
 	if err != nil {
 		return model.ReviewRecord{}, err
 	}
-	return runner.runPendingReview(ctx, record, prepared, reviewStarted)
+	return runner.runPendingReview(ctx, record, prepared, reviewStarted, nil)
 }
 
 // runPendingReview drives an already persisted pending Review Record through
-// availability, execution, validation, and persistence.
-func (runner *reviewRunner) runPendingReview(ctx context.Context, record model.ReviewRecord, prepared preparedReview, reviewStarted time.Time) (model.ReviewRecord, error) {
+// availability, execution, validation, and persistence. onAttempt, when set,
+// receives each attempt number as the attempt begins executing.
+func (runner *reviewRunner) runPendingReview(ctx context.Context, record model.ReviewRecord, prepared preparedReview, reviewStarted time.Time, onAttempt func(int)) (model.ReviewRecord, error) {
 	record.Lifecycle = model.LifecycleRunning
 	record.UpdatedAt = runner.now().UTC()
 	if err := runner.store.Save(record); err != nil {
@@ -107,6 +108,7 @@ func (runner *reviewRunner) runPendingReview(ctx context.Context, record model.R
 		executor:      executor,
 		reviewStarted: reviewStarted,
 		deadline:      prepared.deadline,
+		onAttempt:     onAttempt,
 	})
 }
 
@@ -145,6 +147,7 @@ type passExecution struct {
 	executor      attemptExecutor
 	reviewStarted time.Time
 	deadline      time.Duration
+	onAttempt     func(int)
 }
 
 func (runner *reviewRunner) executePass(ctx context.Context, pass passExecution) (model.ReviewRecord, error) {
@@ -234,6 +237,9 @@ func (runner *reviewRunner) executeAttempt(ctx context.Context, record model.Rev
 		case <-ctx.Done():
 			return contextExecution(ctx.Err()), nil
 		}
+	}
+	if pass.onAttempt != nil {
+		pass.onAttempt(record.AttemptCount() + 1)
 	}
 	execution = pass.executor.Execute(ctx, attemptSpec{Repository: checkout.Repository, Prompt: prompt, Candidate: pass.profile.reviewer.candidate})
 	return execution, nil

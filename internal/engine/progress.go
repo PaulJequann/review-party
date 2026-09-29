@@ -7,13 +7,15 @@ import (
 	"reviewparty/internal/model"
 )
 
-// Live run progress: optional per-reviewer events emitted while a Review
-// selection executes. The Conductor owns the sink; bundle execution and
-// explicit Profile reviews cross runReviewWithProgress so progress lines stay
-// uniform across sequential and concurrent members. Concurrent selections
-// admit members through a progress gate so a member reports running only when
-// the concurrency limit actually starts it, never while it waits in the
-// launch queue. Eval and Replay keep the silent runPreparedReview seam.
+// Live run progress: one event per Review lifecycle transition while a Review
+// selection executes. Every member reports pending before any member starts,
+// then started, each attempt, and finished. The Conductor owns the sink;
+// bundle execution and explicit Profile reviews cross runReviewWithProgress so
+// progress stays uniform across sequential and concurrent members. Concurrent
+// selections admit members through a progress gate so a member reports
+// started only when the concurrency limit actually starts it, never while it
+// waits in the launch queue. Eval and Replay keep the silent runPreparedReview
+// seam.
 
 // emitRunProgress reports one progress fact to the configured sink. A nil sink
 // keeps execution fully silent.
@@ -24,25 +26,77 @@ func (conductor *Conductor) emitRunProgress(event model.RunProgressEvent) {
 	conductor.progress(event)
 }
 
-// runReviewWithProgress executes one prepared Review and reports its start and
-// completion as live progress events. scope is the bare selection scope the
-// renderer combines with the Profile name; index is the zero-based member
-// ordinal within the total selection, and started is the Review timing origin
-// so the reported elapsed time matches the persisted Review Record. When the
-// context carries a progress gate, the start event waits for admission so
-// queued members stay silent until the concurrency limit starts them.
-func (conductor *Conductor) runReviewWithProgress(ctx context.Context, member pendingReview, scope string, index, total int, started time.Time) (model.ReviewRecord, error) {
+// memberProgress identifies one Review in every progress event it emits.
+type memberProgress struct {
+	bundleID model.ReviewBundleID
+	reviewID model.ReviewID
+	scope    string
+	index    int
+	total    int
+	revision model.ProfileRevision
+}
+
+// bundleMemberProgress identifies the member at index. record supplies the
+// Review ID and Profile Revision, so a stopped member that never launched
+// reports the same identity as one that ran.
+func bundleMemberProgress(bundle model.ReviewBundle, index int, record model.ReviewRecord) memberProgress {
+	return memberProgress{
+		bundleID: bundle.ID, reviewID: record.ID, scope: bundleMemberScope(bundle, index),
+		index: index, total: len(bundle.Members), revision: record.ProfileRevision,
+	}
+}
+
+func (member memberProgress) event(kind model.RunProgressKind) model.RunProgressEvent {
+	return model.RunProgressEvent{
+		Kind: kind, BundleID: member.bundleID, ReviewID: member.reviewID,
+		Index: member.index, Total: member.total, Scope: member.scope,
+		Profile: member.revision.Name, Reviewer: member.revision.ReviewerID, Model: member.revision.Model,
+	}
+}
+
+// finished reports the Review's outcome. A hard execution error wins over the
+// recorded termination because it explains why the selection stopped.
+func (member memberProgress) finished(record model.ReviewRecord, err error, elapsedMS int64) model.RunProgressEvent {
+	event := member.event(model.RunProgressFinished)
+	event.Lifecycle = record.Lifecycle
+	event.ElapsedMS = elapsedMS
+	if record.Result != nil {
+		event.Status = string(record.Result.Status)
+		event.FindingCount = record.Result.FindingCount()
+	}
+	switch {
+	case err != nil:
+		event.Message = err.Error()
+	case record.Termination != nil:
+		event.Category = record.Termination.Category
+		event.Message = record.Termination.Message
+	}
+	return event
+}
+
+// runReviewWithProgress executes one pending Review and reports its start,
+// each attempt, and its outcome. started is the Review timing origin so the
+// reported elapsed time matches the persisted Review Record. When the context
+// carries a progress gate, the start event waits for admission so queued
+// members stay silent until the concurrency limit starts them.
+func (conductor *Conductor) runReviewWithProgress(ctx context.Context, member pendingReview, progress memberProgress, started time.Time) (model.ReviewRecord, error) {
 	runner := conductor.getRunner()
 	release, admitted := acquireProgressGate(ctx)
 	if !admitted {
 		// The run was cancelled while this member waited for admission; the
-		// execution path below records the cancellation without a running line.
-		return runner.runPendingReview(ctx, member.record, member.prepared, started)
+		// execution path records the cancellation without a started line.
+		record, err := runner.runPendingReview(ctx, member.record, member.prepared, started, nil)
+		conductor.emitRunProgress(progress.finished(record, err, elapsedMilliseconds(started, conductor.now().UTC())))
+		return record, err
 	}
 	defer release()
-	conductor.emitRunProgress(reviewProgressStarted(member.prepared, scope, index, total))
-	record, err := runner.runPendingReview(ctx, member.record, member.prepared, started)
-	conductor.emitRunProgress(conductor.reviewProgressFinished(member.prepared, record, err, scope, index, total, started))
+	conductor.emitRunProgress(progress.event(model.RunProgressStarted))
+	record, err := runner.runPendingReview(ctx, member.record, member.prepared, started, func(number int) {
+		event := progress.event(model.RunProgressAttempt)
+		event.Attempt = number
+		conductor.emitRunProgress(event)
+	})
+	conductor.emitRunProgress(progress.finished(record, err, elapsedMilliseconds(started, conductor.now().UTC())))
 	return record, err
 }
 
@@ -75,37 +129,4 @@ func acquireProgressGate(ctx context.Context) (func(), bool) {
 	case <-ctx.Done():
 		return func() {}, false
 	}
-}
-
-// reviewProgressStarted builds the start event for one prepared member.
-func reviewProgressStarted(member preparedReview, scope string, index, total int) model.RunProgressEvent {
-	revision := member.profile.revision
-	return model.RunProgressEvent{
-		Kind: model.RunProgressStarted, Index: index, Total: total, Scope: scope,
-		Profile: revision.Name, Reviewer: revision.ReviewerID, Model: revision.Model,
-	}
-}
-
-// reviewProgressFinished builds the completion event for one executed member.
-// A hard execution error wins over the recorded termination because it
-// explains why the selection stopped.
-func (conductor *Conductor) reviewProgressFinished(member preparedReview, record model.ReviewRecord, err error, scope string, index, total int, started time.Time) model.RunProgressEvent {
-	revision := member.profile.revision
-	event := model.RunProgressEvent{
-		Kind: model.RunProgressFinished, Index: index, Total: total, Scope: scope,
-		Profile: revision.Name, Reviewer: revision.ReviewerID, Model: revision.Model,
-		ReviewID: record.ID, Lifecycle: record.Lifecycle,
-		ElapsedMS: elapsedMilliseconds(started, conductor.now().UTC()),
-	}
-	if record.Result != nil {
-		event.Status = string(record.Result.Status)
-		event.FindingCount = record.Result.FindingCount()
-	}
-	switch {
-	case err != nil:
-		event.Message = err.Error()
-	case record.Termination != nil:
-		event.Message = string(record.Termination.Category) + ": " + record.Termination.Message
-	}
-	return event
 }

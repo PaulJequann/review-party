@@ -166,7 +166,8 @@ func (conductor *Conductor) executeBundleSequential(ctx context.Context, ledger 
 		if err := ctx.Err(); err != nil {
 			return conductor.stopBundle(ledger, &bundle, err)
 		}
-		record, err := conductor.runReviewWithProgress(ctx, prepared.members[index], bundleMemberScope(bundle, index), index, len(prepared.members), conductor.now().UTC())
+		member := prepared.members[index]
+		record, err := conductor.runReviewWithProgress(ctx, member, bundleMemberProgress(bundle, index, member.record), conductor.now().UTC())
 		var hardErr error
 		bundle, hardErr = conductor.absorbBundleMember(ledger, bundle, concurrentMemberResult{index: index, record: record, err: err})
 		if hardErr != nil {
@@ -223,7 +224,7 @@ func (conductor *Conductor) launchBundleMembers(ctx context.Context, prepared pr
 		}
 		started++
 		go func(index int, member pendingReview) {
-			record, err := conductor.runReviewWithProgress(ctx, member, bundleMemberScope(prepared.bundle, index), index, len(prepared.members), conductor.now().UTC())
+			record, err := conductor.runReviewWithProgress(ctx, member, bundleMemberProgress(prepared.bundle, index, member.record), conductor.now().UTC())
 			results <- concurrentMemberResult{index: index, record: record, err: err}
 		}(index, prepared.members[index])
 	}
@@ -317,6 +318,7 @@ func (conductor *Conductor) finishStoppedMembers(bundle *model.ReviewBundle, cat
 		if record.Lifecycle == model.LifecyclePending || record.Lifecycle == model.LifecycleRunning {
 			record, err = conductor.finishStoppedMember(record, category, cause)
 			failures = errors.Join(failures, err)
+			conductor.emitRunProgress(bundleMemberProgress(*bundle, index, record).finished(record, err, record.Timings.TotalMS))
 		}
 		mirrorBundleMember(&bundle.Members[index], record)
 	}

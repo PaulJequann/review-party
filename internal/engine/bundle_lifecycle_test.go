@@ -57,6 +57,8 @@ func TestStoppedBundleFinalizesMembersThatNeverStarted(t *testing.T) {
 		return attemptExecution{AssistantText: cleanReview, Outcome: model.AttemptCompleted}
 	}
 	conductor := testPartyConductor(t, map[string]attemptExecutor{defaultReviewer: executor})
+	recorder := &runProgressRecorder{}
+	conductor.progress = recorder.record
 	twoMemberSequentialSelection(t, repository)
 
 	bundle, err := conductor.Run(ctx, model.RunSelection{Repository: repository, Subject: model.WorkingChanges()})
@@ -80,9 +82,31 @@ func TestStoppedBundleFinalizesMembersThatNeverStarted(t *testing.T) {
 		t.Fatalf("unstarted member attempts = %d, want 0", record.AttemptCount())
 	}
 	requireAttemptCount(t, executor, 1)
+	requireStoppedMemberProgress(t, recorder.collected(), skipped.ReviewID)
 	persisted := inspectBundleRecord(t, conductor, bundle.ID)
 	if persisted.Members[1].Lifecycle != model.LifecycleIncomplete {
 		t.Fatalf("persisted unstarted member = %#v, want incomplete", persisted.Members[1])
+	}
+}
+
+// requireStoppedMemberProgress proves a member that never started still reports
+// its pending and terminal transitions, and nothing in between.
+func requireStoppedMemberProgress(t *testing.T, events []model.RunProgressEvent, id model.ReviewID) {
+	t.Helper()
+	var kinds []model.RunProgressKind
+	var finished model.RunProgressEvent
+	for _, event := range events {
+		if event.ReviewID != id {
+			continue
+		}
+		kinds = append(kinds, event.Kind)
+		finished = event
+	}
+	if len(kinds) != 2 || kinds[0] != model.RunProgressPending || kinds[1] != model.RunProgressFinished {
+		t.Fatalf("unstarted member progress = %v, want pending then finished", kinds)
+	}
+	if finished.Lifecycle != model.LifecycleIncomplete || finished.Category != model.TerminationCancelled {
+		t.Fatalf("unstarted member finish = %#v, want incomplete cancelled", finished)
 	}
 }
 

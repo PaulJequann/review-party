@@ -28,6 +28,9 @@ func (conductor *Conductor) Run(ctx context.Context, selection model.RunSelectio
 	if err != nil {
 		return model.ReviewBundle{}, err
 	}
+	for index, member := range prepared.members {
+		conductor.emitRunProgress(bundleMemberProgress(prepared.bundle, index, member.record).event(model.RunProgressPending))
+	}
 	return conductor.executePreparedBundle(ctx, ledger, prepared)
 }
 
@@ -59,7 +62,9 @@ func (conductor *Conductor) ReviewExplicitProfile(ctx context.Context, selection
 	if err != nil {
 		return model.ReviewRecord{}, err
 	}
-	return conductor.runReviewWithProgress(ctx, pendingReview{prepared: prepared, record: record}, "explicit", 0, 1, reviewStarted)
+	progress := memberProgress{reviewID: record.ID, scope: "explicit", total: 1, revision: record.ProfileRevision}
+	conductor.emitRunProgress(progress.event(model.RunProgressPending))
+	return conductor.runReviewWithProgress(ctx, pendingReview{prepared: prepared, record: record}, progress, reviewStarted)
 }
 
 type plannedSelection struct {
