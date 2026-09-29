@@ -25,7 +25,8 @@ Without an ID, lists the Review Bundles and Reviews still pending or running
 for the repository. A run is stale when the ledger shows no progress for longer
 than its longest execution deadline plus two minutes: its process has most
 likely died. Exits 0 whenever the lookup succeeds, whatever the lifecycle, and
-1 after printing when a run is stale or a member's Review Record cannot be read.
+1 after printing when a member's Review Record cannot be read. With an ID, a
+stale run also exits 1; the listing marks stale runs and still exits 0.
 Use wait to block until a run finishes.`,
 		Example: "  review-party status rb_...\n  review-party status rp_... --format json\n  review-party status --repo .",
 		Args:    cobra.MaximumNArgs(1),
@@ -77,7 +78,7 @@ func executeRunStatus(ctx context.Context, conductor *engine.Conductor, options 
 	}
 	return statusOutcome(streams.errors, renderLedgerOutput(options.format, streams.output, streams.errors, status, func(output *commandOutput) {
 		printHumanStatus(output, status, options)
-	}), status)
+	}), append(memberReadErrors(status), staleRunError(status))...)
 }
 
 func executeInFlightStatus(ctx context.Context, conductor *engine.Conductor, options statusOptions, streams commandIO) int {
@@ -99,26 +100,29 @@ func executeInFlightStatus(ctx context.Context, conductor *engine.Conductor, opt
 			}
 			printHumanStatus(output, status, options)
 		}
-	}), statuses...)
+	}), memberReadErrors(statuses...)...)
 }
 
-func statusOutcome(stderr io.Writer, exit int, statuses ...model.ReviewStatus) int {
+func statusOutcome(stderr io.Writer, exit int, failures ...error) int {
 	if exit != 0 {
 		return exit
 	}
+	if err := errors.Join(failures...); err != nil {
+		return printFailure(stderr, err)
+	}
+	return 0
+}
+
+func memberReadErrors(statuses ...model.ReviewStatus) []error {
 	var failures []error
 	for _, status := range statuses {
-		failures = append(failures, staleRunError(status))
 		for _, member := range status.Reviews {
 			if member.ReadError != "" {
 				failures = append(failures, fmt.Errorf("read bundle member %s review %s: %s", statusMemberLabel(member), member.ReviewID, member.ReadError))
 			}
 		}
 	}
-	if err := errors.Join(failures...); err != nil {
-		return printFailure(stderr, err)
-	}
-	return 0
+	return failures
 }
 
 // staleRunError names a run the ledger shows as having lost its process.

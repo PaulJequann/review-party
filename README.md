@@ -233,8 +233,11 @@ passes first, `wait` exits 1 and the run keeps going.
 Every Attempt transition writes the ledger, so a run that shows no progress
 for longer than its longest Attempt deadline plus two minutes has most likely
 lost its process. `status` marks such a run stale ("no progress for 12m0s; the
-run may have died") and exits 1 after printing, and `wait` exits 1 with the
-same message instead of waiting on it.
+run may have died"). `status ID` on a stale run exits 1 after printing, and
+`wait` exits 1 with the same message instead of waiting on it. The in-flight
+listing (`status` without an ID) marks each stale run the same way but still
+exits 0, because nothing retires a dead run and the listing would otherwise
+fail for good.
 
 Each saved Profile fixes its Reviewer, model, reasoning effort, Attempt
 deadline, and instructions. Ordinary `run`, explain, replay, and Party

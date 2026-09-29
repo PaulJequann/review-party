@@ -43,6 +43,16 @@ func runStale(t *testing.T, id string, arguments ...string) string {
 	return stdout
 }
 
+// runClean runs the CLI and requires it to exit 0 with nothing on stderr.
+func runClean(t *testing.T, arguments ...string) string {
+	t.Helper()
+	exit, stdout, stderr := runCLI(arguments...)
+	if exit != 0 || stderr != "" {
+		t.Fatalf("%v exit = %d, stderr = %q; want 0 and no stderr; stdout =\n%s", arguments, exit, stderr, stdout)
+	}
+	return stdout
+}
+
 func TestStatusMarksARunWithNoProgressPastItsDeadlineStaleAndFails(t *testing.T) {
 	newStatusLedger(t).writeStaleBundle()
 	stdout := runStale(t, staleBundleID, "status", staleBundleID)
@@ -61,11 +71,52 @@ func TestStatusMarksARunWithNoProgressPastItsDeadlineStaleAndFails(t *testing.T)
 	}
 }
 
-func TestStatusWithoutIDFailsWhenAnInFlightRunIsStale(t *testing.T) {
+// The in-flight listing marks a stale run but still exits 0: nothing retires
+// a dead run, so failing here would fail every later listing too.
+func TestStatusWithoutIDListsAStaleRunAndExitsZero(t *testing.T) {
 	fixture := newStatusLedger(t)
 	fixture.writeStaleBundle()
-	if stdout := runStale(t, staleBundleID, "status", "--repo", fixture.repository); !strings.Contains(stdout, "stale: "+wantStaleDiagnosis+"\n") {
-		t.Fatalf("in-flight output =\n%s", stdout)
+	if stdout := runClean(t, "status", "--repo", fixture.repository); !strings.Contains(stdout, "stale: "+wantStaleDiagnosis+"\n") {
+		t.Fatalf("in-flight output =\n%s\nwant the stale line", stdout)
+	}
+	var report inFlightReport
+	if err := json.Unmarshal([]byte(runClean(t, "status", "--repo", fixture.repository, "--format", "json")), &report); err != nil {
+		t.Fatal(err)
+	}
+	stale := map[string]bool{}
+	for _, entry := range report.InFlight {
+		stale[entry.ID] = entry.Stale != nil
+	}
+	if !stale[staleBundleID] {
+		t.Fatalf("in-flight staleness by id = %v, want %s marked stale", stale, staleBundleID)
+	}
+}
+
+// A queued member of a sequential bundle waits on the members ahead of it, so
+// its own old row must not read stale while its siblings keep writing.
+func TestStatusJudgesAQueuedMemberThroughItsBundleProgress(t *testing.T) {
+	fixture := newStatusLedger(t)
+	recent, old := time.Now().UTC().Add(-3*time.Minute), time.Now().UTC().Add(-30*time.Minute)
+	records := []model.ReviewRecord{
+		fixture.record("rp_1725192000000_00000000000000d1", model.LifecycleCompleted, 0),
+		fixture.record("rp_1725192000000_00000000000000d2", model.LifecycleRunning, 0),
+		fixture.record("rp_1725192000000_00000000000000d3", model.LifecyclePending, 0),
+	}
+	for index := range records {
+		records[index].CreatedAt, records[index].UpdatedAt = old, recent
+	}
+	queued := &records[2]
+	queued.UpdatedAt = old
+	bundle := fixture.bundle("rb_1725192000000_00000000000000d0", model.LifecycleRunning, 0, records)
+	bundle.CreatedAt, bundle.UpdatedAt = old, recent
+	fixture.write(func(ledger *store.LedgerRecordStore) error { return ledger.CreateReviewBundle(bundle, records) })
+
+	var status model.ReviewStatus
+	if err := json.Unmarshal([]byte(runClean(t, "status", string(queued.ID), "--format", "json")), &status); err != nil {
+		t.Fatal(err)
+	}
+	if status.Stale != nil {
+		t.Fatalf("queued member stale = %#v, want no stale signal", status.Stale)
 	}
 }
 
