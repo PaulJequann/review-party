@@ -172,18 +172,22 @@ func TestConfigProfileMutationsAcceptScopePrefixMatchingScope(t *testing.T) {
 
 func TestConfigProfileMutationsLetScopePrefixChooseScopeWhenFlagOmitted(t *testing.T) {
 	repository := isolatedProfilesRepository(t)
-	createGlobalBugsProfile(t)
-	writeRepositoryBugsProfile(t, repository)
-	edit := runConfigCommand(t, []string{"config", "profile", "edit", "repository:bugs", "--model", "grok-4.6", "--yes", "--format", "json"})
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	requireConfigSuccess(t, []string{
+		"config", "profile", "create", "bugs", "--scope", "repository", "--repo", repository, "--blank",
+		"--instructions", "Find bugs.\n", "--reviewer", "grok", "--model", "grok-4.5", "--effort", "high",
+		"--deadline", "1m", "--yes", "--format", "json",
+	})
+	edit := runConfigCommand(t, []string{"config", "profile", "edit", "repository:bugs", "--repo", repository, "--model", "grok-4.6", "--yes", "--format", "json"})
 	requireCommandSuccess(t, edit)
-	metadata, err := os.ReadFile(filepath.Join(repository, ".reviewparty", "profiles", "bugs", "profile.json"))
-	if err != nil {
-		t.Fatal(err)
+	if !strings.Contains(edit.stdout, "profiles.bugs.model") {
+		t.Fatalf("edit output = %q", edit.stdout)
 	}
-	if !strings.Contains(string(metadata), "grok-4.6") {
-		t.Fatalf("repository Profile metadata = %s", metadata)
+	explained := explainedProfileSource(t, "explain", "repository:bugs", "--repo", repository)
+	if !strings.HasPrefix(explained, "repository:") {
+		t.Fatalf("explained source = %q", explained)
 	}
-	update := runConfigCommand(t, []string{"config", "profile", "update-template", "repository:bugs", "--yes", "--format", "json"})
+	update := runConfigCommand(t, []string{"config", "profile", "update-template", "repository:bugs", "--repo", repository, "--yes", "--format", "json"})
 	if strings.Contains(update.stdout+update.stderr, "--scope") {
 		t.Fatalf("update-template named a flag the caller never typed: %q %q", update.stdout, update.stderr)
 	}
