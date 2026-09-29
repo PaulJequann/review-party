@@ -237,6 +237,7 @@ func TestRunProgressStartedWaitsForConcurrencyGate(t *testing.T) {
 			}
 		case model.RunProgressFinished:
 			running--
+		case model.RunProgressPending, model.RunProgressAttempt:
 		}
 	}
 	if running != 0 {
