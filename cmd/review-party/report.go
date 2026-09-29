@@ -31,7 +31,7 @@ type bundleSummary struct {
 }
 
 type reviewEntry struct {
-	ID              model.ReviewID            `json:"id,omitempty"`
+	ID              model.ReviewID            `json:"id"`
 	Lifecycle       model.Lifecycle           `json:"lifecycle"`
 	Status          model.ResultStatus        `json:"status,omitempty"`
 	Termination     *model.ReviewTermination  `json:"termination,omitempty"`
@@ -93,14 +93,16 @@ func bundleReport(ctx context.Context, loader reviewLoader, bundle model.ReviewB
 }
 
 func memberEntry(ctx context.Context, loader reviewLoader, member model.BundleMember, full bool) reviewEntry {
-	if member.ReviewID == "" {
-		return unstartedEntry(member)
-	}
 	record, err := loader.Inspect(ctx, member.ReviewID)
 	if err != nil {
-		entry := unstartedEntry(member)
-		entry.ID, entry.Lifecycle, entry.ReadError = member.ReviewID, lifecycleUnreadable, err.Error()
-		return entry
+		return reviewEntry{
+			ID:        member.ReviewID,
+			Lifecycle: lifecycleUnreadable,
+			Findings:  []model.Finding{},
+			Profile:   profileSummary{Name: member.Profile, Scope: member.Scope, Revision: member.ProfileRevision},
+			Origin:    member.Origin,
+			ReadError: err.Error(),
+		}
 	}
 	entry := recordEntry(record, full)
 	entry.Profile.Scope = member.Scope
@@ -198,16 +200,6 @@ func recordEntry(record model.ReviewRecord, full bool) reviewEntry {
 		entry.Record = &record
 	}
 	return entry
-}
-
-func unstartedEntry(member model.BundleMember) reviewEntry {
-	return reviewEntry{
-		Lifecycle: member.Lifecycle,
-		Findings:  []model.Finding{},
-		Misses:    []model.Miss{},
-		Profile:   profileSummary{Name: member.Profile, Scope: member.Scope, Revision: member.ProfileRevision},
-		Origin:    member.Origin,
-	}
 }
 
 func summarizeBundle(bundle model.ReviewBundle) *bundleSummary {

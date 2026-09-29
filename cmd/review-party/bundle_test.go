@@ -39,10 +39,10 @@ func TestPrintReportJSONCarriesTheBundleSummary(t *testing.T) {
 }
 
 func TestExecuteRunReturnsUsageExitForIncompleteBundle(t *testing.T) {
-	conductor := &fakeRunConductor{records: fakeReviewLoader{"rp_member": largePatchRecord("rp_member", "bugs", 1)}}
+	conductor := &fakeRunConductor{records: fakeReviewLoader{"rp_member": largePatchRecord("rp_member", "bugs", 1), "rp_security": stoppedMemberRecord("rp_security", "security")}}
 	conductor.runBundle = model.ReviewBundle{ID: "rb_incomplete", Lifecycle: model.LifecycleIncomplete, Members: []model.BundleMember{
 		{Scope: "global", Profile: "bugs", ReviewID: "rp_member", Lifecycle: model.LifecycleCompleted},
-		{Scope: "global", Profile: "security", Lifecycle: model.LifecyclePending},
+		{Scope: "global", Profile: "security", ReviewID: "rp_security", Lifecycle: model.LifecycleIncomplete},
 	}}
 	var stdout, stderr bytes.Buffer
 	exit := executeRunWithConductor(context.Background(), conductor, runOptions{format: "json", subject: model.WorkingChanges()}, commandIO{output: &stdout, errors: &stderr})

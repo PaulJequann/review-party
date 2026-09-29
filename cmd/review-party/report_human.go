@@ -21,10 +21,6 @@ func printHumanReport(output io.Writer, report reviewReport, configuration strin
 }
 
 func writeHumanEntry(output *commandOutput, label string, entry reviewEntry) {
-	if entry.ID == "" {
-		output.write("%s · not started\n", label)
-		return
-	}
 	if entry.Lifecycle == lifecycleUnreadable {
 		output.write("%s · unreadable\nread error: %s\n", label, entry.ReadError)
 		writeHumanMisses(output, entry.Misses)

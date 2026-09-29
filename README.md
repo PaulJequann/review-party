@@ -198,8 +198,9 @@ each Review's status, summary, and numbered findings, then its Profile,
 Reviewer, and Subject. A Review Bundle prints one block per member, labelled
 `<scope>:<profile>`, before its selection, warnings, and Subject. JSON output always has a top-level `reviews`
 array, so `jq '.reviews[].findings'` works for a single Review and for a Bundle.
-Bundle output adds a `bundle` object. A member that never started has lifecycle
-`pending` and no `id`. A member whose Review Record cannot be read keeps its
+Bundle output adds a `bundle` object. Every member has an `id` from the moment
+the Bundle exists; a member the Bundle stopped before it finished is
+`incomplete` with a `termination` that says so. A member whose Review Record cannot be read keeps its
 `id`, has lifecycle `unreadable`, and carries the cause in `read_error`; the
 other members still print, and the command exits with status 1. With
 `--format json`, `--full` includes each complete Review Record under `record`:
