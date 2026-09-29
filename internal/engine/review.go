@@ -91,8 +91,10 @@ func (runner *reviewRunner) runPendingReview(ctx context.Context, member pending
 	}
 
 	prompt := prepared.profile.prompt(record.Subject)
-	if termination := runner.preflightInput(prepared.profile.reviewer, prompt); termination != nil {
-		return runner.finishIncomplete(record, *termination, reviewStarted)
+	if ctx.Err() == nil {
+		if termination := runner.preflightInput(prepared.profile.reviewer, prompt); termination != nil {
+			return runner.finishIncomplete(record, *termination, reviewStarted)
+		}
 	}
 
 	executor := prepared.profile.reviewer.executor
