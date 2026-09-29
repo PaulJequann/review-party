@@ -13,8 +13,9 @@ import (
 )
 
 type reviewReport struct {
-	Bundle  *bundleSummary `json:"bundle,omitempty"`
-	Reviews []reviewEntry  `json:"reviews"`
+	Bundle   *bundleSummary `json:"bundle,omitempty"`
+	Reviews  []reviewEntry  `json:"reviews"`
+	Feedback string         `json:"feedback,omitempty"`
 }
 
 type bundleSummary struct {
@@ -37,7 +38,7 @@ type reviewEntry struct {
 	Status          model.ResultStatus        `json:"status,omitempty"`
 	Termination     *model.ReviewTermination  `json:"termination,omitempty"`
 	Summary         string                    `json:"summary,omitempty"`
-	Findings        []model.Finding           `json:"findings"`
+	Findings        []reportFinding           `json:"findings"`
 	Misses          []model.Miss              `json:"misses"`
 	Profile         profileSummary            `json:"profile"`
 	Origin          string                    `json:"origin,omitempty"`
@@ -46,6 +47,17 @@ type reviewEntry struct {
 	ReplaysReviewID *model.ReviewID           `json:"replays_review_id,omitempty"`
 	Record          *model.ReviewRecord       `json:"record,omitempty"`
 	ReadError       string                    `json:"read_error,omitempty"`
+}
+
+// reportFinding is a Finding with the Caller's current Verdict on it, if any.
+type reportFinding struct {
+	model.Finding
+	Verdict *verdictView `json:"verdict,omitempty"`
+}
+
+type verdictView struct {
+	Value  model.Verdict `json:"value"`
+	Reason string        `json:"reason"`
 }
 
 type profileSummary struct {
@@ -70,8 +82,9 @@ type reviewLoader interface {
 	Inspect(context.Context, model.ReviewID) (model.ReviewRecord, error)
 }
 
-type missLoader interface {
+type annotationLoader interface {
 	Misses(context.Context, store.MissQuery) ([]model.Miss, error)
+	FindingVerdicts(context.Context, store.VerdictQuery) ([]model.FindingVerdict, error)
 }
 
 type reportOptions struct {
@@ -97,7 +110,7 @@ func memberEntry(ctx context.Context, loader reviewLoader, member model.BundleMe
 		return reviewEntry{
 			ID:        member.ReviewID,
 			Lifecycle: engine.LifecycleUnreadable,
-			Findings:  []model.Finding{},
+			Findings:  []reportFinding{},
 			Misses:    []model.Miss{},
 			Profile:   profileSummary{Name: member.Profile, Scope: member.Scope, Revision: member.ProfileRevision},
 			Origin:    member.Origin,
@@ -110,22 +123,119 @@ func memberEntry(ctx context.Context, loader reviewLoader, member model.BundleMe
 	return entry
 }
 
-func (report reviewReport) attachMisses(ctx context.Context, loader missLoader) error {
-	for index, entry := range report.Reviews {
-		misses, err := loader.Misses(ctx, store.MissQuery{ReviewIDs: []model.ReviewID{entry.ID}})
-		if err != nil && entry.Lifecycle == engine.LifecycleUnreadable {
-			report.Reviews[index].ReadError += "; load misses: " + err.Error()
-			continue
+// annotate attaches each review's misses and the current Verdict on each of its
+// findings. It reads both before changing the report, so a failure leaves the
+// report unannotated.
+func (report reviewReport) annotate(ctx context.Context, loader annotationLoader) error {
+	verdicts, err := report.loadVerdicts(ctx, loader)
+	if err != nil {
+		return err
+	}
+	misses, missFailures, err := report.loadMisses(ctx, loader)
+	if err != nil {
+		return err
+	}
+	for index := range report.Reviews {
+		entry := &report.Reviews[index]
+		entry.attachVerdicts(verdicts)
+		for _, miss := range misses {
+			if miss.ReviewID == entry.ID {
+				entry.Misses = append(entry.Misses, miss)
+			}
 		}
-		if err != nil {
-			return fmt.Errorf("load misses for review %s: %w", entry.ID, err)
+		if failure, failed := missFailures[entry.ID]; failed {
+			entry.ReadError += "; load misses: " + failure
 		}
-		report.Reviews[index].Misses = append(report.Reviews[index].Misses, misses...)
 	}
 	return nil
 }
 
+// loadVerdicts reads the Verdicts on every readable review in one query. An
+// unreadable review shows no findings, and an empty query would read every
+// review's Verdicts, so neither is asked for.
+func (report reviewReport) loadVerdicts(ctx context.Context, loader annotationLoader) ([]model.FindingVerdict, error) {
+	var readable []model.ReviewID
+	for _, entry := range report.Reviews {
+		if entry.Lifecycle != engine.LifecycleUnreadable {
+			readable = append(readable, entry.ID)
+		}
+	}
+	if len(readable) == 0 {
+		return nil, nil
+	}
+	verdicts, err := loader.FindingVerdicts(ctx, store.VerdictQuery{ReviewIDs: readable})
+	if err != nil {
+		return nil, fmt.Errorf("load finding verdicts: %w", err)
+	}
+	return verdicts, nil
+}
+
+// loadMisses reads every review's misses in one query. That query fails as a
+// whole when one bundle member's ledger row is corrupt, so on failure it reads
+// each review alone: an unreadable member's failure is returned by review ID
+// to join its read error, and any other failure fails the report.
+func (report reviewReport) loadMisses(ctx context.Context, loader annotationLoader) ([]model.Miss, map[model.ReviewID]string, error) {
+	ids := make([]model.ReviewID, 0, len(report.Reviews))
+	for _, entry := range report.Reviews {
+		ids = append(ids, entry.ID)
+	}
+	if misses, err := loader.Misses(ctx, store.MissQuery{ReviewIDs: ids}); err == nil {
+		return misses, nil, nil
+	}
+	var misses []model.Miss
+	failures := map[model.ReviewID]string{}
+	for _, entry := range report.Reviews {
+		own, err := loader.Misses(ctx, store.MissQuery{ReviewIDs: []model.ReviewID{entry.ID}})
+		switch {
+		case err == nil:
+			misses = append(misses, own...)
+		case entry.Lifecycle == engine.LifecycleUnreadable:
+			failures[entry.ID] = err.Error()
+		default:
+			return nil, nil, fmt.Errorf("load misses for review %s: %w", entry.ID, err)
+		}
+	}
+	return misses, failures, nil
+}
+
+// attachVerdicts shows each current Verdict on its finding. A stale Verdict
+// judged text the finding no longer holds, so that finding shows as unjudged.
+func (entry *reviewEntry) attachVerdicts(verdicts []model.FindingVerdict) {
+	current := map[int]*verdictView{}
+	for _, verdict := range verdicts {
+		if verdict.ReviewID != entry.ID || verdict.Stale {
+			continue
+		}
+		current[verdict.Ordinal] = &verdictView{Value: verdict.Verdict, Reason: verdict.Reason}
+	}
+	for index := range entry.Findings {
+		entry.Findings[index].Verdict = current[entry.Findings[index].Ordinal]
+	}
+}
+
+// feedbackHint tells the Caller how to judge the report's findings while any
+// finding is unjudged. Bundle members number their findings separately, so a
+// bundle's hint leaves REVIEW for the Caller to name.
+func feedbackHint(report reviewReport, configuration string) string {
+	review := ""
+	for _, entry := range report.Reviews {
+		for _, finding := range entry.Findings {
+			if finding.Verdict == nil {
+				review = string(entry.ID)
+			}
+		}
+	}
+	if review == "" {
+		return ""
+	}
+	if report.Bundle != nil {
+		review = "REVIEW"
+	}
+	return "review-party finding record " + review + configurationArgument(configuration) + " <<'EOF'\nN accept|reject|defer REASON\nEOF"
+}
+
 func printReport(output io.Writer, report reviewReport, options reportOptions) error {
+	report.Feedback = feedbackHint(report, options.configuration)
 	switch options.format {
 	case "json":
 		encoder := json.NewEncoder(output)
@@ -166,7 +276,7 @@ func recordEntry(record model.ReviewRecord, full bool) reviewEntry {
 		ID:          record.ID,
 		Lifecycle:   record.Lifecycle,
 		Termination: record.Termination,
-		Findings:    []model.Finding{},
+		Findings:    []reportFinding{},
 		Misses:      []model.Miss{},
 		Profile: profileSummary{
 			Name:                   record.ProfileRevision.Name,
@@ -189,8 +299,8 @@ func recordEntry(record model.ReviewRecord, full bool) reviewEntry {
 	if record.Result != nil {
 		entry.Status = record.Result.Status
 		entry.Summary = record.Result.Summary
-		if record.Result.Findings != nil {
-			entry.Findings = record.Result.Findings
+		for _, finding := range record.Result.Findings {
+			entry.Findings = append(entry.Findings, reportFinding{Finding: finding})
 		}
 	}
 	if full {

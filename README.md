@@ -84,8 +84,9 @@ configuration. Pass `--config PATH` consistently to init, Review, inspect,
 history, status, and wait when using a non-default configuration.
 Initialization is idempotent for current state. Review, inspect, history,
 status, and wait refuse to create state. A
-schema 10 ledger requires one `review-party init` run, which adds the misses
-table and keeps every recorded Review; other commands refuse that ledger until
+schema 10 or 11 ledger requires one `review-party init` run, which adds the
+misses and finding verdict tables it lacks and keeps every recorded Review;
+other commands refuse that ledger until
 then, and `--backup-incompatible` refuses it because it is compatible. Review Party is pre-release and does not upgrade other retired ledger
 schemas. Back up an incompatible ledger and its SQLite sidecars first, then
 authorize fresh state in a separate command:
@@ -312,6 +313,37 @@ active misses beneath its findings, and its JSON `reviews` entries carry them as
 `replay` just created. An unreadable Bundle member still shows its misses; if
 they cannot be loaded either, its `read_error` says so and the other members
 still print.
+
+Record a verdict on each finding of a Review, so later work can measure which
+findings a Profile gets right:
+
+```sh
+review-party finding record rp_... <<'EOF'
+1 accept nil map write is reachable from the handler
+2 reject the caller already checks the length
+EOF
+review-party finding list --repo . --profile bugs
+```
+
+Each stdin line is `N accept|reject|defer REASON`, where `N` is the finding
+number the report prints and `REASON` is one line of 1 to 240 bytes. The lines
+record together or not at all: a malformed line, a repeated finding number, or a
+Bundle id exits 2, and a finding number the Review lacks or an unknown Review
+exits 1, each without writes. Any Review with findings takes verdicts, including
+an incomplete one. Repeating a finding's current verdict records nothing, and a
+different verdict supersedes it; output is `recorded N` with the unchanged and
+changed counts when there are any. A verdict judges the finding's text, so when
+a Review is saved again with different text under that number, the verdict
+shows as `stale` in `finding list` and the finding counts as unjudged.
+`--recorded-by` defaults to the OS username.
+
+`inspect` and `wait` print each current verdict beneath its finding, and JSON
+findings carry it as `verdict` with `value` and `reason`. While any finding in
+the report is unjudged, the report ends with a `feedback:` line (JSON
+`feedback`) naming the command to record verdicts; a Bundle's hint says
+`REVIEW` in place of a member id, since each member numbers its findings
+separately. `wait` prints misses too; if it cannot load misses or verdicts, it
+warns on stderr, prints the result without them, and exits as `run` would.
 
 ## Global and Repository Configuration
 

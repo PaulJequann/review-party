@@ -17,8 +17,9 @@ func newWaitCommand(streams commandIO) *cobra.Command {
 		Use:   "wait REVIEW_OR_BUNDLE_ID",
 		Short: "Wait for a Review Bundle or Review to finish and print its result",
 		Long: `Wait until a Review Bundle (rb_…) or Review (rp_…) is completed or
-incomplete, checking the ledger once a second, then print the result exactly
-as run would have and exit with run's exit code.
+incomplete, checking the ledger once a second, then print the result as run
+would have, plus any misses and verdicts recorded since, and exit with run's
+exit code.
 
 Use it to reattach to a run started elsewhere. --timeout bounds how long wait
 blocks: once it passes with the run still pending or running, wait exits 1 and
@@ -64,28 +65,48 @@ type waitConductor interface {
 	Status(context.Context, string) (model.ReviewStatus, error)
 	Inspect(context.Context, model.ReviewID) (model.ReviewRecord, error)
 	InspectBundle(context.Context, model.ReviewBundleID) (model.ReviewBundle, error)
+	annotationLoader
 }
 
 func executeWait(ctx context.Context, conductor waitConductor, options waitOptions, streams commandIO) int {
+	status, err := awaitFinished(ctx, conductor, options)
+	if err != nil {
+		return printStatusFailure(streams.errors, err)
+	}
+	report, err := finishedReport(ctx, conductor, status, options.full)
+	if err != nil {
+		return printFailure(streams.errors, err)
+	}
+	// The run's result stands without its misses and verdicts, so a failure to
+	// read them is a warning and wait still prints the result and exits as run did.
+	if err := report.annotate(ctx, conductor); err != nil {
+		printCommandError(streams.errors, 0, fmt.Errorf("warning: %w; showing the result without misses or verdicts", err))
+	}
+	return printRunOutcome(streams, report, nil, reportOptions{format: options.format, configuration: options.configuration})
+}
+
+// awaitFinished checks the run's status once an interval until it is finished,
+// failing when the status cannot be read, the run looks stale, the context ends,
+// or the timeout passes first.
+func awaitFinished(ctx context.Context, conductor waitConductor, options waitOptions) (model.ReviewStatus, error) {
 	deadline, stop := waitTimeout(options.timeout)
 	defer stop()
 	for {
 		status, err := conductor.Status(ctx, options.id)
 		if err != nil {
-			return printStatusFailure(streams.errors, err)
+			return model.ReviewStatus{}, err
 		}
 		if status.Lifecycle.Terminal() {
-			report, err := finishedReport(ctx, conductor, status, options.full)
-			return printRunOutcome(streams, report, err, reportOptions{format: options.format, configuration: options.configuration})
+			return status, nil
 		}
 		if err := staleRunError(status); err != nil {
-			return printFailure(streams.errors, err)
+			return model.ReviewStatus{}, err
 		}
 		select {
 		case <-ctx.Done():
-			return printFailure(streams.errors, ctx.Err())
+			return model.ReviewStatus{}, ctx.Err()
 		case <-deadline:
-			return printFailure(streams.errors, fmt.Errorf("timed out after %s waiting for %s (%s)", options.timeout, options.id, status.Lifecycle))
+			return model.ReviewStatus{}, fmt.Errorf("timed out after %s waiting for %s (%s)", options.timeout, options.id, status.Lifecycle)
 		case <-time.After(options.interval):
 		}
 	}

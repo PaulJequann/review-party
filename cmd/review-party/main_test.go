@@ -473,7 +473,7 @@ func TestPrintReportJSONIncludesStructuredFindings(t *testing.T) {
 	if len(inspected.Reviews) != 1 || len(inspected.Reviews[0].Findings) != 1 {
 		t.Fatalf("reviews = %#v, want one review with one structured finding", inspected.Reviews)
 	}
-	if inspected.Reviews[0].Findings[0] != record.Result.Findings[0] {
+	if inspected.Reviews[0].Findings[0] != (reportFinding{Finding: record.Result.Findings[0]}) {
 		t.Fatalf("finding = %#v, want %#v", inspected.Reviews[0].Findings[0], record.Result.Findings[0])
 	}
 }

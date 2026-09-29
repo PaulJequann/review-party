@@ -94,6 +94,54 @@ func seedCostBundle(t testing.TB, ledger *store.LedgerRecordStore) {
 	}
 }
 
+// costJudgments is what an agent types to judge the three-finding review.
+const costJudgments = "1 accept nil map write is reachable from the handler\n2 reject the caller already checks the length\n3 defer needs the retry refactor first\n"
+
+// seedJudged records verdicts on the first judged findings of the three-finding review.
+func seedJudged(judged int) func(testing.TB, *store.LedgerRecordStore) {
+	return func(t testing.TB, ledger *store.LedgerRecordStore) {
+		t.Helper()
+		seedReviews(costRecord(costThreeReview, "bugs", 3))(t, ledger)
+		lines := strings.Split(costJudgments, "\n")[:judged]
+		judgments := make([]model.Judgment, 0, judged)
+		for _, line := range lines {
+			judgment, err := parseJudgmentLine(line)
+			if err != nil {
+				t.Fatal(err)
+			}
+			judgments = append(judgments, judgment)
+		}
+		batch := store.VerdictBatch{ReviewID: costThreeReview, Judgments: judgments, RecordedBy: "agent", RecordedAt: costClock}
+		if _, err := ledger.RecordVerdicts(batch); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func findingCostScenarios() []agentCostScenario {
+	threeFindings := seedReviews(costRecord(costThreeReview, "bugs", 3))
+	record := []string{"finding", "record", string(costThreeReview)}
+	scenarios := []agentCostScenario{
+		{surface: "finding.record.human.three", args: record, stdin: costJudgments, seed: threeFindings},
+		{surface: "finding.record.json.three", args: append(record, "--format", "json"), stdin: costJudgments, seed: threeFindings},
+		{surface: "finding.record.human.repeat", args: record, stdin: costJudgments, seed: seedJudged(3)},
+		{surface: "error.finding.record.missing-finding", args: record, stdin: "4 accept nil map write is reachable from the handler\n", seed: threeFindings},
+		{surface: "error.finding.record.bad-verb", args: record, stdin: "1 accepted nil map write is reachable from the handler\n", seed: threeFindings},
+		{surface: "finding.list.human.judged-3", args: []string{"finding", "list", string(costThreeReview)}, seed: seedJudged(3)},
+		{surface: "finding.list.json.judged-3", args: []string{"finding", "list", string(costThreeReview), "--format", "json"}, seed: seedJudged(3)},
+		{surface: "help.finding.record", args: []string{"finding", "record", "--help"}},
+	}
+	for _, judged := range []int{1, 3} {
+		for _, format := range []string{"human", "json"} {
+			scenarios = append(scenarios, agentCostScenario{
+				surface: fmt.Sprintf("report.inspect.%s.judged-%d", format, judged),
+				args:    []string{"inspect", string(costThreeReview), "--format", format}, seed: seedJudged(judged),
+			})
+		}
+	}
+	return scenarios
+}
+
 func agentCostScenarios() []agentCostScenario {
 	var scenarios []agentCostScenario
 	for _, review := range []struct {
@@ -115,6 +163,7 @@ func agentCostScenarios() []agentCostScenario {
 			args:    []string{"wait", string(costThreeReview), "--format", format}, seed: threeFindings,
 		})
 	}
+	scenarios = append(scenarios, findingCostScenarios()...)
 	return append(scenarios,
 		agentCostScenario{surface: "report.inspect.human.bundle-3", args: []string{"inspect", string(costBundle)}, seed: seedCostBundle},
 		agentCostScenario{surface: "report.inspect.json.bundle-3", args: []string{"inspect", string(costBundle), "--format", "json"}, seed: seedCostBundle},
@@ -207,6 +256,7 @@ var agentCostBudgets = []struct {
 }{
 	{"report.inspect.human.findings-0", "a clean review prints no feedback hint", func(row agentCostRow) bool { return row.outBytes == 276 }},
 	{"report.inspect.json.findings-0", "a clean review prints no feedback hint", func(row agentCostRow) bool { return row.outBytes == 708 }},
+	{"finding.record.human.three", "recording prints at most 40 bytes", func(row agentCostRow) bool { return row.outBytes <= 40 }},
 }
 
 func checkAgentCostBudgets(t *testing.T, rows []agentCostRow) {
@@ -220,6 +270,16 @@ func checkAgentCostBudgets(t *testing.T, rows []agentCostRow) {
 		if !ok || !budget.check(row) {
 			t.Errorf("%s breaks its budget (%s): %+v", budget.surface, budget.promise, row)
 		}
+	}
+}
+
+func TestFeedbackHintStaysSmall(t *testing.T) {
+	prepareAgentCostState(t, agentCostScenario{seed: seedReviews(costRecord(costThreeReview, "bugs", 3))})
+	var stdout, stderr bytes.Buffer
+	execute(context.Background(), []string{"inspect", string(costThreeReview)}, productionCommandIO(strings.NewReader(""), &stdout, &stderr))
+	_, hint, ok := strings.Cut(stdout.String(), "\nfeedback: ")
+	if hint = "feedback: " + hint; !ok || len(hint) > 115 {
+		t.Fatalf("the feedback hint must be at most 115 bytes, got %d:\n%s", len(hint), stdout.String())
 	}
 }
 
@@ -276,6 +336,14 @@ func benchmarkAgentSurface(b *testing.B, scenario agentCostScenario) {
 
 func BenchmarkInspectThreeFindingsHuman(b *testing.B) {
 	benchmarkAgentSurface(b, agentCostScenario{args: []string{"inspect", string(costThreeReview)}, seed: seedReviews(costRecord(costThreeReview, "bugs", 3))})
+}
+
+func BenchmarkFindingRecordThree(b *testing.B) {
+	benchmarkAgentSurface(b, agentCostScenario{args: []string{"finding", "record", string(costThreeReview)}, stdin: costJudgments, seed: seedJudged(3)})
+}
+
+func BenchmarkFindingList(b *testing.B) {
+	benchmarkAgentSurface(b, agentCostScenario{args: []string{"finding", "list", string(costThreeReview)}, seed: seedJudged(3)})
 }
 
 func BenchmarkInspectThreeFindingsJSON(b *testing.B) {
