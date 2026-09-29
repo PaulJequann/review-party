@@ -2,7 +2,7 @@
 
 ## Baseline
 
-Run `scripts/verify.sh launch` from the repository root. Launch builds the current checkout and creates one isolated Git repository, XDG configuration root, XDG state root, explicit managed state directory, and evidence directory. It initializes Review Party once. No authentication or seed Review Records are required.
+Run `scripts/verify.sh launch` from the repository root. Launch builds the current checkout and creates one isolated Git repository, HOME, XDG configuration root, XDG state root, explicit managed state directory, and evidence directory. The owned HOME keeps the operator's own skills and user-level executables out of every recipe. A Reviewer installed only under the operator's HOME is therefore reported as unavailable; recipes save Reviewer and model as configuration data and never prove availability. It initializes Review Party once. No authentication or seed Review Records are required.
 
 Every recipe starts from this baseline unless it says otherwise. Use a fresh run for each recipe so Profile and history state cannot leak between features.
 
@@ -19,7 +19,7 @@ before the positive path.
 ## Terminal drives
 
 The Configuration Hub requires a terminal. Use one fresh `tmux` session for a
-terminal recipe, with the run-owned XDG roots, binary, and session name from
+terminal recipe, with the run-owned HOME, XDG roots, binary, and session name from
 the manifest:
 
 ```sh
@@ -27,13 +27,14 @@ verify=.agents/skills/verify-review-party/scripts/verify.sh
 binary=$("$verify" path "$run_dir" binary)
 config_root=$("$verify" path "$run_dir" config_root)
 state_root=$("$verify" path "$run_dir" state_root)
+home=$("$verify" path "$run_dir" home)
 config_file=$("$verify" path "$run_dir" config_file)
 target_repository=$("$verify" path "$run_dir" target_repository)
 evidence=$("$verify" path "$run_dir" evidence_directory)
 session=$("$verify" path "$run_dir" terminal_session)
 : "${session:?terminal session is required}"
 tmux new-session -d -x 120 -y 30 -s "$session" -- \
-  env TERM=xterm-256color EDITOR=true XDG_CONFIG_HOME="$config_root" XDG_STATE_HOME="$state_root" \
+  env TERM=xterm-256color EDITOR=true HOME="$home" XDG_CONFIG_HOME="$config_root" XDG_STATE_HOME="$state_root" \
   "$binary" config --repo "$target_repository" --config "$config_file"
 ```
 
@@ -59,3 +60,4 @@ Evidence stays under `$run_dir/evidence/`, which is ignored through the reposito
 - [Managed initialization and history](managed-initialization.md) verifies idempotent initialization and read-only history against isolated state.
 - [Profile configuration](profile-configuration.md) verifies explicit non-interactive Profile publication and a read-only second view.
 - [Configuration Hub](configuration-hub.md) verifies the terminal shell, responsive navigation, plan-preview publication, and accessible prompt publication.
+- [Skill Templates](skill-templates.md) verifies that a skill in the caller's HOME becomes a Review Profile Template, reports drift and an unavailable source, and appears in the Hub Template picker.

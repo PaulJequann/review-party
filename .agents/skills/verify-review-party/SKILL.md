@@ -1,6 +1,6 @@
 ---
 name: verify-review-party
-description: Drive Review Party through its public CLI to verify binary identity, isolated initialization and history, explicit Profile configuration, or terminal-backed Configuration Hub flows without launching a Reviewer.
+description: Drive Review Party through its public CLI to verify binary identity, isolated initialization and history, explicit Profile configuration, skill-imported Review Profile Templates, or terminal-backed Configuration Hub flows without launching a Reviewer.
 ---
 
 # Verify Review Party
@@ -18,9 +18,9 @@ run_dir=$(.agents/skills/verify-review-party/scripts/verify.sh launch)
 printf '%s\n' "$run_dir"
 ```
 
-`launch` creates a unique identity under `scratch/verify-review-party/`, installs the current checkout into the run, creates an isolated Git repository, and initializes Review Party with run-owned XDG configuration and state. The CLI is ready when launch's final doctor check prints `doctor: ready`.
+`launch` creates a unique identity under `scratch/verify-review-party/`, installs the current checkout into the run, creates an isolated Git repository, and initializes Review Party with a run-owned HOME and run-owned XDG configuration and state. The CLI is ready when launch's final doctor check prints `doctor: ready`.
 
-Review Party is a short-lived CLI. It owns no server, listening port, session, container, device, or long-running PID. The run manifest records the source revision, a fingerprint of the working tree the binary was built from (including uncommitted and untracked files), whether that tree was dirty, the installed binary and digest, XDG roots, target repository, managed state directory, evidence directory, and terminal session name. Local recipes need no authentication.
+Review Party is a short-lived CLI. It owns no server, listening port, session, container, device, or long-running PID. The run manifest records the source revision, a fingerprint of the working tree the binary was built from (including uncommitted and untracked files), whether that tree was dirty, the installed binary and digest, HOME, XDG roots, target repository, managed state directory, evidence directory, and terminal session name. Local recipes need no authentication.
 
 ## Doctor
 
@@ -30,11 +30,11 @@ Run the read-only diagnostic before every drive:
 .agents/skills/verify-review-party/scripts/verify.sh doctor "$run_dir"
 ```
 
-Doctor succeeds only when the run identity is valid, the checkout remains at the recorded Git revision, the working tree still matches the fingerprint taken at build time, the installed binary digest matches, the binary identifies itself as Review Party, and the owned repository, XDG roots, state database, and ownership marker exist. An absent Global Configuration file is valid until a command publishes one. Doctor names the first mismatched fact on stderr. Editing source after launch invalidates the run; launch a fresh one rather than continuing.
+Doctor succeeds only when the run identity is valid, the checkout remains at the recorded Git revision, the working tree still matches the fingerprint taken at build time, the installed binary digest matches, the binary identifies itself as Review Party, and the owned repository, HOME, XDG roots, state database, and ownership marker exist. An absent Global Configuration file is valid until a command publishes one. Doctor names the first mismatched fact on stderr. Editing source after launch invalidates the run; launch a fresh one rather than continuing.
 
 ## Drive
 
-Use the literal commands in the selected feature file. Run CLI commands through `capture` so each entry point receives the owned XDG roots and produces one transcript:
+Use the literal commands in the selected feature file. Run CLI commands through `capture` so each entry point receives the owned HOME and XDG roots and produces one transcript:
 
 ```sh
 .agents/skills/verify-review-party/scripts/verify.sh capture "$run_dir" FEATURE/ENTRY.txt -- review-party ARGS...

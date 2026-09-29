@@ -53,6 +53,11 @@ result contract does not require every agent to use the same wire protocol.
 When running Review Party against the current checkout as a bounded local
 dogfood review, load and follow the `dogfood-review-party` skill.
 
+## Verification
+
+To verify a CLI or Configuration Hub change on the real binary, load and
+follow the `verify-review-party` skill.
+
 ## No Deletions (Absolute)
 
 You may **not** delete any file or directory without explicit user approval for
