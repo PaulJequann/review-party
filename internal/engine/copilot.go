@@ -124,7 +124,7 @@ func applyCopilotEvent(decoded *decodedCopilotOutput, chunks *strings.Builder, e
 }
 
 func classifyCopilotFailure(diagnostic string, waitErr error) attemptExecution {
-	return classifyHarnessFailure(diagnostic, waitErr)
+	return classifyHarnessFailure(decodedHarnessOutput{diagnostic: diagnostic}, waitErr)
 }
 
 func compactDiagnostic(value string) string {

@@ -35,7 +35,7 @@ func (codexAdapter) Prepare(spec attemptSpec) (preparedAttempt, error) {
 
 func (codexAdapter) Decode(output []byte) (decodedHarnessOutput, error) {
 	decoded, err := decodeCodexOutput(output)
-	return decodedHarnessOutput{assistantText: decoded.assistantText, diagnostic: decoded.diagnostic}, err
+	return decodedHarnessOutput{assistantText: decoded.assistantText, diagnostic: decoded.diagnostic, noise: strings.Join(decoded.noise, "\n")}, err
 }
 
 func codexCommand(candidate reviewerCandidate, repository string) []string {
@@ -66,6 +66,28 @@ func usesCodexEffort(candidate reviewerCandidate) bool {
 type decodedCodexOutput struct {
 	assistantText string
 	diagnostic    string
+	noise         []string
+}
+
+func (decoded *decodedCodexOutput) report(message string) {
+	if message == "" || message == decoded.diagnostic {
+		return
+	}
+	if isCodexTransportNoise(message) {
+		decoded.noise = append(decoded.noise, message)
+		return
+	}
+	if decoded.diagnostic != "" {
+		decoded.noise = append(decoded.noise, decoded.diagnostic)
+	}
+	decoded.diagnostic = message
+}
+
+func isCodexTransportNoise(message string) bool {
+	normalized := strings.ToLower(message)
+	return strings.HasPrefix(normalized, "reconnecting...") ||
+		strings.HasPrefix(normalized, "falling back from websockets") ||
+		strings.Contains(normalized, "failed to connect to websocket")
 }
 
 type codexEvent struct {
@@ -119,19 +141,17 @@ func applyCodexEvent(decoded *decodedCodexOutput, text *strings.Builder, event c
 			}
 			text.WriteString(event.Item.Text)
 		case "error":
-			if event.Item.Message != "" {
-				decoded.diagnostic = event.Item.Message
-			}
+			decoded.report(event.Item.Message)
 		}
 	case "error":
 		if event.Message != "" {
-			decoded.diagnostic = event.Message
-		} else if event.Error != nil && event.Error.Message != "" {
-			decoded.diagnostic = event.Error.Message
+			decoded.report(event.Message)
+		} else if event.Error != nil {
+			decoded.report(event.Error.Message)
 		}
 	case "turn.failed":
-		if event.Error != nil && event.Error.Message != "" {
-			decoded.diagnostic = event.Error.Message
+		if event.Error != nil {
+			decoded.report(event.Error.Message)
 		}
 	}
 }
