@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/spf13/cobra"
 
@@ -44,7 +45,7 @@ func executeConfigProfileCreate(name string, cmd *cobra.Command, options configu
 
 func executeConfigProfileEdit(name string, cmd *cobra.Command, options configurationMutationOptions, streams commandIO, discoveryService func() *discovery.Service) int {
 	return runConfigurationCommand(options.format, options.configuration, streams, func(manager *configuration.Manager) (int, error) {
-		scope, err := parseConfigurationScope(stringFlag(cmd, "scope"))
+		scope, name, err := scopedProfileTarget(manager, cmd, name)
 		if err != nil {
 			return 0, err
 		}
@@ -121,8 +122,32 @@ func executeConfigProfileCopy(value, targetValue string, options configurationMu
 func executeConfigProfileTemplateUpdate(name, scopeValue string, options configurationMutationOptions, streams commandIO) int {
 	return publishScopedProfilePlan(scopeValue, options, streams,
 		func(manager *configuration.Manager, repository configuration.Repository, scope configuration.Scope) (configuration.Plan, error) {
-			return manager.PlanProfileTemplateUpdate(repository, scope, name)
+			bare, err := scopedProfileName(manager, scope, name)
+			if err != nil {
+				return configuration.Plan{}, err
+			}
+			return manager.PlanProfileTemplateUpdate(repository, scope, bare)
 		})
+}
+
+func scopedProfileTarget(manager *configuration.Manager, cmd *cobra.Command, value string) (configuration.Scope, string, error) {
+	scope, err := parseConfigurationScope(stringFlag(cmd, "scope"))
+	if err != nil {
+		return "", "", err
+	}
+	name, err := scopedProfileName(manager, scope, value)
+	return scope, name, err
+}
+
+func scopedProfileName(manager *configuration.Manager, scope configuration.Scope, value string) (string, error) {
+	qualified, name, err := manager.ParseProfileReference(value)
+	if err != nil {
+		return "", err
+	}
+	if qualified != "" && qualified != scope {
+		return "", fmt.Errorf("profile %q conflicts with --scope %s", value, scope)
+	}
+	return name, nil
 }
 
 func publishScopedProfilePlan(scopeValue string, options configurationMutationOptions, streams commandIO, plan func(*configuration.Manager, configuration.Repository, configuration.Scope) (configuration.Plan, error)) int {

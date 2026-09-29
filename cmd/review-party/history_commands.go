@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"reviewparty/internal/configuration"
 	"reviewparty/internal/engine"
 	"reviewparty/internal/store"
 	"reviewparty/internal/subject"
@@ -47,6 +48,9 @@ type historyOptions struct {
 func validatedHistoryQuery(options historyOptions) (store.HistoryQuery, error) {
 	if options.query.Limit < 1 || options.query.Limit > store.MaxHistoryLimit {
 		return store.HistoryQuery{}, fmt.Errorf("history accepts --limit N and --format human|json")
+	}
+	if scope, name := configuration.ParseScopedReference(options.query.Profile); scope != "" {
+		return store.HistoryQuery{}, fmt.Errorf("--profile %q names a %s Profile, but history does not record a Profile's scope; filter by the bare name %q", options.query.Profile, scope, name)
 	}
 	if options.sinceText == "" {
 		return options.query, nil

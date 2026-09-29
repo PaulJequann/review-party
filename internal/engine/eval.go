@@ -276,6 +276,9 @@ func validateExperimentSelection(experiment model.ExperimentConfiguration) error
 	if experiment.Profile == "" {
 		return errors.New("eval experiment requires an explicit profile")
 	}
+	if scope, _ := configuration.ParseScopedReference(experiment.Profile); scope == configuration.ScopeRepository {
+		return fmt.Errorf("eval Profile %q cannot name a repository Profile; eval Profiles resolve from global Configuration", experiment.Profile)
+	}
 	if experiment.Reviewer == "" {
 		return errors.New("eval experiment requires an explicit reviewer")
 	}

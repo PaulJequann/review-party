@@ -186,6 +186,16 @@ func ParseScopedReference(value string) (Scope, string) {
 	}
 }
 
+// ParseProfileReference parses one Profile reference typed by a caller and
+// applies the manager's name rule to its bare name.
+func (manager *Manager) ParseProfileReference(value string) (Scope, string, error) {
+	scope, name := ParseScopedReference(value)
+	if err := manager.validateName(name); err != nil {
+		return "", "", fmt.Errorf("profile name %q: %w", value, err)
+	}
+	return scope, name, nil
+}
+
 // scopedKey is one exact scoped identity used for deduplication.
 type scopedKey struct {
 	scope   Scope

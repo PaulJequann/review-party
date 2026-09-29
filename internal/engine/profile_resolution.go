@@ -1,7 +1,6 @@
 package engine
 
 import (
-	"fmt"
 	"sort"
 	"time"
 
@@ -40,9 +39,9 @@ func (conductor *Conductor) resolveProfile(request profileRequest) (resolvedProf
 	if conductor.configuration == nil {
 		return resolvedProfile{}, errConfigurationNotConfigured
 	}
-	scope, name := configuration.ParseScopedReference(request.name)
-	if err := validateAuthoredName(name); err != nil {
-		return resolvedProfile{}, fmt.Errorf("profile name %q: %w", request.name, err)
+	scope, name, err := conductor.configuration.ParseProfileReference(request.name)
+	if err != nil {
+		return resolvedProfile{}, err
 	}
 	effective, err := conductor.configuration.Resolve(configuration.Request{Repository: configuration.Repository(request.repository)})
 	if err != nil {
