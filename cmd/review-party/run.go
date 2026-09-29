@@ -88,10 +88,16 @@ type runConductor interface {
 
 func executeRunWithConductor(ctx context.Context, conductor runConductor, options runOptions, streams commandIO) int {
 	report, err := runReport(ctx, conductor, options)
-	if err != nil {
-		return printFailure(streams.errors, err)
+	return printRunOutcome(streams, report, err, reportOptions{format: options.format, configuration: options.configuration})
+}
+
+// printRunOutcome prints a run's report and picks run's exit code; wait reuses
+// it so a finished run reads and exits exactly as run did.
+func printRunOutcome(streams commandIO, report reviewReport, runErr error, options reportOptions) int {
+	if runErr != nil {
+		return printFailure(streams.errors, runErr)
 	}
-	if err := printReport(streams.output, report, reportOptions{format: options.format, configuration: options.configuration}); err != nil {
+	if err := printReport(streams.output, report, options); err != nil {
 		return printFailure(streams.errors, err)
 	}
 	if err := report.readFailure(); err != nil {
