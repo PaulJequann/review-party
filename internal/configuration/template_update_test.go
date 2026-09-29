@@ -176,3 +176,27 @@ func assertTemplateUpdateInstructions(t *testing.T, manager *Manager, root strin
 		t.Error(err)
 	}
 }
+
+func TestTemplateUpdateDiffShowsOnlyTheChangedLines(t *testing.T) {
+	numbered := "1\n2\n3\n4\n5\n6\n7\n8\n9\n"
+	for _, test := range []struct {
+		name, before, after, hunk string
+	}{
+		{"middle line", numbered, strings.Replace(numbered, "5\n", "five\n", 1), "@@ -2,7 +2,7 @@\n 2\n 3\n 4\n-5\n+five\n 6\n 7\n 8"},
+		{"appended line", "a\nb\n", "a\nb\nc\n", "@@ -1,2 +1,3 @@\n a\n b\n+c"},
+		{"whole file", "packaged old\n", "packaged new\n", "@@ -1,1 +1,1 @@\n-packaged old\n+packaged new"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			seedBugsProfile(t, root, test.before, "")
+			plan, err := newBugsManager(root, "new", test.after).PlanProfileTemplateUpdate("", ScopeGlobal, "bugs")
+			if err != nil || !plan.Valid() {
+				t.Fatalf("update plan = valid %t, err %v", plan.Valid(), err)
+			}
+			want := "instructions.md diff:\n--- current\n+++ Template\n" + test.hunk
+			if warnings := plan.Warnings(); len(warnings) == 0 || warnings[0] != want {
+				t.Fatalf("warnings = %#v, want first %q", warnings, want)
+			}
+		})
+	}
+}

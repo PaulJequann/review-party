@@ -15,42 +15,64 @@ const skillTemplatePrefix = "skill:"
 
 const maximumListedBundledFiles = 5
 
-func SkillTemplates(rootsByPrecedence []string) []Template {
-	seen := map[string]bool{}
-	var templates []Template
-	for _, root := range rootsByPrecedence {
-		templates = append(templates, rootSkillTemplates(root, seen)...)
-	}
-	return templates
+type SkillTemplateSet struct {
+	Templates []Template
+	Skipped   []SkippedTemplate
 }
 
-func rootSkillTemplates(root string, seen map[string]bool) []Template {
+type SkippedTemplate struct {
+	TemplateID string `json:"template_id"`
+	Path       string `json:"path"`
+	Reason     string `json:"reason"`
+}
+
+func SkillTemplates(rootsByPrecedence []string) SkillTemplateSet {
+	seen := map[string]bool{}
+	var set SkillTemplateSet
+	for _, root := range rootsByPrecedence {
+		set.addRoot(root, seen)
+	}
+	return set
+}
+
+func (set *SkillTemplateSet) addRoot(root string, seen map[string]bool) {
 	entries, err := os.ReadDir(root)
 	if err != nil {
-		return nil
+		return
 	}
-	var templates []Template
 	for _, entry := range entries {
 		name := entry.Name()
 		if seen[name] || strings.HasPrefix(name, ".") {
 			continue
 		}
-		if template, ok := loadSkillTemplate(filepath.Join(root, name), name); ok {
-			seen[name] = true
-			templates = append(templates, template)
+		template, skipped, found := loadSkillTemplate(filepath.Join(root, name), name)
+		if !found {
+			continue
 		}
+		if skipped.Reason != "" {
+			set.Skipped = append(set.Skipped, skipped)
+			continue
+		}
+		seen[name] = true
+		set.Templates = append(set.Templates, template)
 	}
-	return templates
 }
 
-func loadSkillTemplate(directory, name string) (Template, bool) {
-	content, found, err := readRegularFile(directory, filepath.Join(directory, "SKILL.md"), "skill", MaximumDocumentBytes)
-	if err != nil || !found {
-		return Template{}, false
+func loadSkillTemplate(directory, name string) (Template, SkippedTemplate, bool) {
+	path := filepath.Join(directory, "SKILL.md")
+	skipped := SkippedTemplate{TemplateID: skillTemplatePrefix + name, Path: path}
+	content, found, err := readRegularFile(directory, path, "skill", MaximumDocumentBytes)
+	if err != nil {
+		skipped.Reason = err.Error()
+		return Template{}, skipped, true
+	}
+	if !found {
+		return Template{}, SkippedTemplate{}, false
 	}
 	body := stripFrontmatter(string(content))
 	if body == "" {
-		return Template{}, false
+		skipped.Reason = fmt.Sprintf("%s has no instructions after its frontmatter", path)
+		return Template{}, skipped, true
 	}
 	instructions := skillInstructions(name, body)
 	digest := sha256.Sum256([]byte(instructions))
@@ -59,7 +81,7 @@ func loadSkillTemplate(directory, name string) (Template, bool) {
 		Revision:     "sha256-" + hex.EncodeToString(digest[:])[:12],
 		Instructions: instructions,
 		BundledFiles: skillBundledFiles(directory),
-	}, true
+	}, SkippedTemplate{}, true
 }
 
 func stripFrontmatter(content string) string {

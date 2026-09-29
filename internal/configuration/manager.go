@@ -58,6 +58,7 @@ type Options struct {
 	// PackagedDefaultReviewer is the effective default reviewer when nothing is authored.
 	PackagedDefaultReviewer string
 	Templates               []Template
+	SkippedTemplates        []SkippedTemplate
 	// ValidateName validates authored Profile and Party references; nil skips the check.
 	ValidateName func(string) error
 }
@@ -87,6 +88,7 @@ type Manager struct {
 	packaged         packagedDefaults
 	nameValidator    func(string) error
 	templates        []Template
+	skippedTemplates []SkippedTemplate
 	publication      *publicationModule
 }
 
@@ -118,6 +120,7 @@ func NewManager(options Options) *Manager {
 		packaged:         packagedDefaults{defaultReviewer: options.PackagedDefaultReviewer},
 		nameValidator:    options.ValidateName,
 		templates:        append([]Template(nil), options.Templates...),
+		skippedTemplates: append([]SkippedTemplate(nil), options.SkippedTemplates...),
 		publication:      newPublicationModule(),
 	}
 }

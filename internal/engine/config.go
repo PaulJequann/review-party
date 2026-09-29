@@ -29,11 +29,13 @@ func ReviewPartyConfigurationOptions() configuration.Options {
 }
 
 func reviewPartyConfigurationOptions() configuration.Options {
+	skills := configuration.SkillTemplates(callerHomeSkillRoots())
 	return configuration.Options{
 		Reviewers:               supportedReviewerIDs(),
 		PackagedReviewerModels:  packagedReviewerModels(),
 		PackagedDefaultReviewer: defaultReviewer,
-		Templates:               append(packagedReviewProfileTemplates(), configuration.SkillTemplates(callerHomeSkillRoots())...),
+		Templates:               append(packagedReviewProfileTemplates(), skills.Templates...),
+		SkippedTemplates:        skills.Skipped,
 		ValidateName:            validateAuthoredName,
 	}
 }

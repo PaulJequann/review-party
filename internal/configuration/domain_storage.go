@@ -43,7 +43,7 @@ func (manager *Manager) TemplateDrift(repository Repository) ([]TemplateDrift, e
 
 // TemplateDriftForProfiles computes drift from an already-read inventory.
 func (manager *Manager) TemplateDriftForProfiles(profiles []Definition[Profile]) []TemplateDrift {
-	var result []TemplateDrift
+	result := []TemplateDrift{}
 	for _, definition := range profiles {
 		profile := definition.Value
 		if definition.Err != nil || profile.TemplateID == "" {
@@ -55,9 +55,10 @@ func (manager *Manager) TemplateDriftForProfiles(profiles []Definition[Profile])
 		}
 		drift := TemplateDrift{
 			Scope: definition.Scope, Profile: profile.Name, TemplateID: profile.TemplateID,
-			TemplateRevision: profile.TemplateRevision, SourceUnavailable: !found,
+			TemplateRevision: profile.TemplateRevision, Status: TemplateSourceUnavailable,
 		}
 		if found {
+			drift.Status = TemplateUpdateAvailable
 			drift.AvailableRevision = template.Revision
 			drift.Customized = templateInstructionsCustomized(profile, template)
 		}
@@ -156,18 +157,47 @@ func (manager *Manager) stageTemplateUpdate(request templateUpdateRequest) (Plan
 	// instructions, invisible to drift.
 	change := Change{Field: "profiles." + request.name + ".template_revision", Scope: request.scope, Path: filepath.Dir(entry.Path), Before: profile.TemplateRevision, After: template.Revision, HadBefore: true, HadAfter: true}
 	plan = newFilePlan(manager, request.scope, change, writes)
-	plan = plan.WithWarnings(request.instructionReplacementWarning(), template.bundledFilesWarning())
+	plan = plan.WithWarnings(request.instructionDiffWarning(), template.bundledFilesWarning())
 	if templateInstructionsCustomized(profile, template) {
 		plan = plan.WithWarnings("replaces customized instructions.md; execution settings are kept")
 	}
 	return plan, nil
 }
 
-func (request templateUpdateRequest) instructionReplacementWarning() string {
-	before, after := request.profile.Instructions, request.template.Instructions
-	removed := strings.ReplaceAll(strings.TrimSuffix(before, "\n"), "\n", "\n-")
-	added := strings.ReplaceAll(strings.TrimSuffix(after, "\n"), "\n", "\n+")
-	return "instructions.md replacement diff:\n--- current\n+++ Template\n-" + removed + "\n+" + added
+const instructionDiffContextLines = 3
+
+// instructionDiffWarning renders one unified hunk spanning the first through
+// the last changed line, which covers a typical single-region edit without a
+// full line-matching diff.
+func (request templateUpdateRequest) instructionDiffWarning() string {
+	before := strings.Split(strings.TrimSuffix(request.profile.Instructions, "\n"), "\n")
+	after := strings.Split(strings.TrimSuffix(request.template.Instructions, "\n"), "\n")
+	prefix, suffix := unchangedEdges(before, after)
+	start := max(prefix-instructionDiffContextLines, 0)
+	trailing := min(suffix, instructionDiffContextLines)
+	beforeEnd, afterEnd := len(before)-suffix, len(after)-suffix
+	var diff strings.Builder
+	fmt.Fprintf(&diff, "instructions.md diff:\n--- current\n+++ Template\n@@ -%d,%d +%d,%d @@", start+1, beforeEnd+trailing-start, start+1, afterEnd+trailing-start)
+	for _, section := range []struct {
+		marker string
+		lines  []string
+	}{{" ", before[start:prefix]}, {"-", before[prefix:beforeEnd]}, {"+", after[prefix:afterEnd]}, {" ", before[beforeEnd : beforeEnd+trailing]}} {
+		for _, line := range section.lines {
+			diff.WriteString("\n" + section.marker + line)
+		}
+	}
+	return diff.String()
+}
+
+func unchangedEdges(before, after []string) (prefix, suffix int) {
+	shorter := min(len(before), len(after))
+	for prefix < shorter && before[prefix] == after[prefix] {
+		prefix++
+	}
+	for suffix < shorter-prefix && before[len(before)-1-suffix] == after[len(after)-1-suffix] {
+		suffix++
+	}
+	return prefix, suffix
 }
 
 // PlanProfileCreation validates and stages one complete two-file Profile.
@@ -257,7 +287,7 @@ func (manager *Manager) profileFromDraft(draft ProfileDraft) (Profile, string, e
 	}
 	template, found := manager.Template(draft.TemplateID)
 	if !found {
-		return Profile{}, "", fmt.Errorf("unknown Review Profile Template %q", draft.TemplateID)
+		return Profile{}, "", manager.unknownTemplateError(draft.TemplateID)
 	}
 	if draft.TemplateRevision != "" && draft.TemplateRevision != template.Revision {
 		return Profile{}, "", fmt.Errorf("Template %q revision %q is unavailable", draft.TemplateID, draft.TemplateRevision)

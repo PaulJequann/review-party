@@ -4,13 +4,15 @@ Review Party imports each skill in the caller's `~/.agents/skills` and
 `~/.claude/skills` as a Review Profile Template named `skill:NAME`. A Profile
 created from one records the skill's revision, reports drift when the skill
 changes, and reports an unavailable source when the skill is removed while its
-saved instructions keep running.
+saved instructions keep running. A skill whose `SKILL.md` cannot become a
+Template is reported as skipped.
 
 ## Sub-features
 
 - `SKILL-TEMPLATE-CREATE`
 - `SKILL-TEMPLATE-DRIFT-UPDATE`
 - `SKILL-TEMPLATE-SOURCE-UNAVAILABLE`
+- `SKILL-TEMPLATE-SKIPPED`
 - `SKILL-TEMPLATE-HUB`
 
 ## Source evidence
@@ -21,11 +23,17 @@ saved instructions keep running.
   `skillBundledFiles` in `internal/configuration/skill_template.go` strip the
   frontmatter, frame the body with the read-only preamble, derive the
   `sha256-` revision, and list bundled files while skipping `SKILL.md`,
-  `agents/`, and dot entries.
+  `agents/`, and dot entries. `SkillTemplates` returns a `SkillTemplateSet`
+  whose `Skipped` entries name each unreadable, oversized, or empty
+  `SKILL.md`.
+- `unknownTemplateError` in `internal/configuration/template_lookup.go`
+  names the skip reason when a create requests a skipped skill.
 - `TemplateDriftForProfiles` in `internal/configuration/domain_storage.go`
-  reports drift and sets `source_unavailable` when a recorded Template is gone.
+  reports drift with `status: update_available`, or `source_unavailable`
+  when a recorded Template is gone.
 - `doctorTemplateDriftLine` in `cmd/review-party/doctor.go` renders both drift
-  lines.
+  lines, and `executeDoctor` lists skipped Templates in text and in JSON
+  `skipped_templates`.
 - `appendTemplateDrift`, `templateDriftMessage`, and `templateDriftDetail` in
   `internal/configurationhub/snapshot.go` render the Hub Overview warning and
   the Profiles detail suffix; `profileTemplateOptions` in
@@ -70,6 +78,25 @@ set -e
 Require exit 1 and `unknown Review Profile Template "skill:nope"` on stderr.
 No `audit` Profile may exist afterward. Run doctor.
 
+### Skipped skill
+
+```sh
+empty="$home/.agents/skills/verify-empty"
+mkdir -p "$empty"
+printf -- '---\nname: verify-empty\n---\n' > "$empty/SKILL.md"
+"$verify" capture "$run_dir" skill-templates/skipped.txt -- review-party doctor --repo "$target_repository" --config "$config_file"
+set +e
+"$verify" capture "$run_dir" skill-templates/negative-skipped.txt -- review-party config profile create audit --template skill:verify-empty --reviewer codex --model gpt-5.6-luna --effort high --deadline 8m --yes --repo "$target_repository" --config "$config_file"
+set -e
+rm -rf "$empty"
+```
+
+Require `skipped.txt` to exit 0 and print `Template skipped:
+skill:verify-empty: .../verify-empty/SKILL.md has no instructions after its
+frontmatter`. Require `negative-skipped.txt` to exit 1 with
+`Review Profile Template "skill:verify-empty" was skipped:` on stderr, and no
+`audit` Profile may exist afterward. Run doctor.
+
 ### Create, drift, update, unavailable
 
 ```sh
@@ -92,15 +119,15 @@ Require, from each transcript's `.stdout` and `.stderr`:
 2. `readback.json.txt` `instructions` starts with
    ``This Profile was imported from the `verify-audit` skill.``, ends with
    `Flag tests that assert nothing.`, and omits `frontmatter must not reach`.
-3. `drift.json.txt` has one `template_drift` entry for `audit` with a
-   `template_revision` equal to the create revision, a different
-   `available_revision`, and `customized: false`.
+3. `drift.json.txt` has one `template_drift` entry for `audit` with
+   `status: update_available`, a `template_revision` equal to the create
+   revision, a different `available_revision`, and `customized: false`.
 4. `update.txt` publishes the new revision, and `after-update.json.txt` has
-   no `template_drift` entries.
+   `template_drift: []` and `skipped_templates: []`.
 5. `unavailable.txt` exits 0 and prints
    `Template source unavailable: global:audit skill:verify-audit@sha256-...;
    saved instructions still run`. `unavailable.json.txt` has `valid: true`
-   and `source_unavailable: true` with no `available_revision`.
+   and `status: source_unavailable` with no `available_revision`.
 
 ## Driving it in the Configuration Hub
 

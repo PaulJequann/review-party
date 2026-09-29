@@ -63,14 +63,21 @@ type Template struct {
 	BundledFiles []string `json:"bundled_files,omitempty"`
 }
 
+type TemplateDriftStatus string
+
+const (
+	TemplateUpdateAvailable   TemplateDriftStatus = "update_available"
+	TemplateSourceUnavailable TemplateDriftStatus = "source_unavailable"
+)
+
 type TemplateDrift struct {
-	Scope             Scope  `json:"scope"`
-	Profile           string `json:"profile"`
-	TemplateID        string `json:"template_id"`
-	TemplateRevision  string `json:"template_revision"`
-	AvailableRevision string `json:"available_revision,omitempty"`
-	SourceUnavailable bool   `json:"source_unavailable,omitempty"`
-	Customized        bool   `json:"customized"`
+	Scope             Scope               `json:"scope"`
+	Profile           string              `json:"profile"`
+	TemplateID        string              `json:"template_id"`
+	TemplateRevision  string              `json:"template_revision"`
+	Status            TemplateDriftStatus `json:"status"`
+	AvailableRevision string              `json:"available_revision,omitempty"`
+	Customized        bool                `json:"customized"`
 }
 
 // Party is an ordered, flat group of scoped Profile references.

@@ -15,9 +15,10 @@ type doctorOptions struct {
 }
 
 type doctorResult struct {
-	Valid         bool                          `json:"valid"`
-	Validation    configurationValidationResult `json:"validation"`
-	TemplateDrift []configuration.TemplateDrift `json:"template_drift"`
+	Valid         bool                            `json:"valid"`
+	Validation    configurationValidationResult   `json:"validation"`
+	TemplateDrift []configuration.TemplateDrift   `json:"template_drift"`
+	Skipped       []configuration.SkippedTemplate `json:"skipped_templates"`
 }
 
 func newDoctorCommand(streams commandIO) *cobra.Command {
@@ -38,7 +39,7 @@ func executeDoctor(options doctorOptions, streams commandIO) int {
 		if driftErr != nil {
 			return 0, driftErr
 		}
-		result := doctorResult{Valid: validationErr == nil, Validation: validation, TemplateDrift: drift}
+		result := doctorResult{Valid: validationErr == nil, Validation: validation, TemplateDrift: drift, Skipped: manager.SkippedTemplates()}
 		result.Validation.Valid = validationErr == nil
 		if validationErr != nil {
 			result.Validation.Error = validationErr.Error()
@@ -55,17 +56,22 @@ func executeDoctor(options doctorOptions, streams commandIO) int {
 		if validationErr != nil {
 			return printFailure(streams.errors, validationErr), nil
 		}
-		return printConfigOutput(streams, func(output *commandOutput) {
-			output.write("configuration is valid\n")
-			for _, item := range drift {
-				output.write("%s\n", doctorTemplateDriftLine(item))
-			}
-		}), nil
+		return printConfigOutput(streams, result.writeText), nil
 	})
 }
 
+func (result doctorResult) writeText(output *commandOutput) {
+	output.write("configuration is valid\n")
+	for _, item := range result.TemplateDrift {
+		output.write("%s\n", doctorTemplateDriftLine(item))
+	}
+	for _, item := range result.Skipped {
+		output.write("Template skipped: %s: %s\n", item.TemplateID, item.Reason)
+	}
+}
+
 func doctorTemplateDriftLine(item configuration.TemplateDrift) string {
-	if item.SourceUnavailable {
+	if item.Status == configuration.TemplateSourceUnavailable {
 		return fmt.Sprintf("Template source unavailable: %s:%s %s@%s; saved instructions still run", item.Scope, item.Profile, item.TemplateID, item.TemplateRevision)
 	}
 	return fmt.Sprintf("Template update: %s:%s %s → %s", item.Scope, item.Profile, item.TemplateRevision, item.AvailableRevision)

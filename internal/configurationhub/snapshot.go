@@ -112,7 +112,7 @@ func appendTemplateDrift(snapshot *Snapshot, drift []configuration.TemplateDrift
 }
 
 func templateDriftMessage(item configuration.TemplateDrift) string {
-	if item.SourceUnavailable {
+	if item.Status == configuration.TemplateSourceUnavailable {
 		return fmt.Sprintf("%s Profile %q: Template %s source unavailable; saved instructions still run", item.Scope, item.Profile, item.TemplateID)
 	}
 	message := fmt.Sprintf("%s Profile %q: Template %s drift (%s → %s)", item.Scope, item.Profile, item.TemplateID, item.TemplateRevision, item.AvailableRevision)
@@ -123,7 +123,7 @@ func templateDriftMessage(item configuration.TemplateDrift) string {
 }
 
 func templateDriftDetail(item configuration.TemplateDrift) string {
-	if item.SourceUnavailable {
+	if item.Status == configuration.TemplateSourceUnavailable {
 		return " · Template source unavailable"
 	}
 	return " · Template update available"

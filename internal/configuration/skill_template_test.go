@@ -20,7 +20,7 @@ func TestSkillTemplatesDiscoverCallerSkillsInRootOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	templates := SkillTemplates([]string{primary, secondary, filepath.Join(primary, "missing")})
+	templates := SkillTemplates([]string{primary, secondary, filepath.Join(primary, "missing")}).Templates
 
 	var ids []string
 	for _, template := range templates {
@@ -45,7 +45,7 @@ func TestSkillTemplateFramesBodyAndListsBundledFiles(t *testing.T) {
 	writeDocument(t, filepath.Join(skills, "audit", "references", ".gitignore"), "*.tmp")
 	writeDocument(t, filepath.Join(skills, "audit", ".cache", "state.json"), "{}")
 
-	templates := SkillTemplates([]string{skills})
+	templates := SkillTemplates([]string{skills}).Templates
 
 	if len(templates) != 1 {
 		t.Fatalf("templates = %#v", templates)
@@ -68,7 +68,7 @@ func TestSkillTemplateCreationWarnsAboutUnreadableBundledFiles(t *testing.T) {
 	for _, name := range []string{"a.md", "b.md", "c.md", "d.md", "e.md", "f.md"} {
 		writeDocument(t, filepath.Join(skills, "review", "references", name), name)
 	}
-	manager := NewManager(Options{GlobalRoot: t.TempDir(), Reviewers: []string{"codex"}, Templates: SkillTemplates([]string{skills})})
+	manager := NewManager(Options{GlobalRoot: t.TempDir(), Reviewers: []string{"codex"}, Templates: SkillTemplates([]string{skills}).Templates})
 
 	plan := requireProfilePlan(t, manager, skillProfileDraft("review"))
 
@@ -82,15 +82,15 @@ func TestEditedSkillSurfacesAsTemplateDriftAndUpdates(t *testing.T) {
 	skills, root := t.TempDir(), t.TempDir()
 	skillPath := filepath.Join(skills, "audit", "SKILL.md")
 	writeDocument(t, skillPath, "---\nname: audit\n---\nFirst rubric.\n")
-	original := NewManager(Options{GlobalRoot: root, Reviewers: []string{"codex"}, Templates: SkillTemplates([]string{skills})})
+	original := NewManager(Options{GlobalRoot: root, Reviewers: []string{"codex"}, Templates: SkillTemplates([]string{skills}).Templates})
 	requirePublishedPlan(t, original, requireProfilePlan(t, original, skillProfileDraft("audit")), nil)
 
 	writeDocument(t, skillPath, "---\nname: audit\n---\nSecond rubric.\n")
-	manager := NewManager(Options{GlobalRoot: root, Reviewers: []string{"codex"}, Templates: SkillTemplates([]string{skills})})
+	manager := NewManager(Options{GlobalRoot: root, Reviewers: []string{"codex"}, Templates: SkillTemplates([]string{skills}).Templates})
 
 	before, _ := original.Template("skill:audit")
 	after, _ := manager.Template("skill:audit")
-	want := []TemplateDrift{{Scope: ScopeGlobal, Profile: "audit", TemplateID: "skill:audit", TemplateRevision: before.Revision, AvailableRevision: after.Revision}}
+	want := []TemplateDrift{{Scope: ScopeGlobal, Profile: "audit", TemplateID: "skill:audit", TemplateRevision: before.Revision, Status: TemplateUpdateAvailable, AvailableRevision: after.Revision}}
 	drift, err := manager.TemplateDrift("")
 	if err != nil {
 		t.Fatal(err)
@@ -109,11 +109,11 @@ func TestTemplateUpdateRejectsSkillThatOutgrowsProfileLimit(t *testing.T) {
 	skills, root := t.TempDir(), t.TempDir()
 	skillPath := filepath.Join(skills, "audit", "SKILL.md")
 	writeDocument(t, skillPath, "First rubric.\n")
-	original := NewManager(Options{GlobalRoot: root, Reviewers: []string{"codex"}, Templates: SkillTemplates([]string{skills})})
+	original := NewManager(Options{GlobalRoot: root, Reviewers: []string{"codex"}, Templates: SkillTemplates([]string{skills}).Templates})
 	requirePublishedPlan(t, original, requireProfilePlan(t, original, skillProfileDraft("audit")), nil)
 
 	writeDocument(t, skillPath, strings.Repeat("x", MaximumDocumentBytes-16)+"\n")
-	manager := NewManager(Options{GlobalRoot: root, Reviewers: []string{"codex"}, Templates: SkillTemplates([]string{skills})})
+	manager := NewManager(Options{GlobalRoot: root, Reviewers: []string{"codex"}, Templates: SkillTemplates([]string{skills}).Templates})
 	plan, err := manager.PlanProfileTemplateUpdate("", ScopeGlobal, "audit")
 	if err != nil {
 		t.Fatal(err)
@@ -129,22 +129,59 @@ func TestTemplateUpdateRejectsSkillThatOutgrowsProfileLimit(t *testing.T) {
 func TestDeletedSkillSurfacesAsUnavailableTemplateSource(t *testing.T) {
 	skills, root := t.TempDir(), t.TempDir()
 	writeDocument(t, filepath.Join(skills, "audit", "SKILL.md"), "Audit the tests.")
-	original := NewManager(Options{GlobalRoot: root, Reviewers: []string{"codex"}, Templates: SkillTemplates([]string{skills})})
+	original := NewManager(Options{GlobalRoot: root, Reviewers: []string{"codex"}, Templates: SkillTemplates([]string{skills}).Templates})
 	requirePublishedPlan(t, original, requireProfilePlan(t, original, skillProfileDraft("audit")), nil)
 	recorded, _ := original.Template("skill:audit")
 
 	if err := os.RemoveAll(filepath.Join(skills, "audit")); err != nil {
 		t.Fatal(err)
 	}
-	manager := NewManager(Options{GlobalRoot: root, Reviewers: []string{"codex"}, Templates: SkillTemplates([]string{skills})})
+	manager := NewManager(Options{GlobalRoot: root, Reviewers: []string{"codex"}, Templates: SkillTemplates([]string{skills}).Templates})
 
 	drift, err := manager.TemplateDrift("")
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []TemplateDrift{{Scope: ScopeGlobal, Profile: "audit", TemplateID: "skill:audit", TemplateRevision: recorded.Revision, SourceUnavailable: true}}
+	want := []TemplateDrift{{Scope: ScopeGlobal, Profile: "audit", TemplateID: "skill:audit", TemplateRevision: recorded.Revision, Status: TemplateSourceUnavailable}}
 	if !reflect.DeepEqual(drift, want) {
 		t.Fatalf("drift = %#v, want %#v", drift, want)
+	}
+}
+
+func TestBrokenSkillsAreReportedAsSkippedTemplates(t *testing.T) {
+	skills := t.TempDir()
+	writeDocument(t, filepath.Join(skills, "empty", "SKILL.md"), "---\nname: empty\n---\n")
+	writeDocument(t, filepath.Join(skills, "huge", "SKILL.md"), strings.Repeat("x", MaximumDocumentBytes+1))
+	writeDocument(t, filepath.Join(skills, "notes", "README.md"), "No skill here.")
+
+	skipped := SkillTemplates([]string{skills}).Skipped
+
+	var ids []string
+	for _, item := range skipped {
+		ids = append(ids, item.TemplateID)
+	}
+	if !reflect.DeepEqual(ids, []string{"skill:empty", "skill:huge"}) {
+		t.Fatalf("skipped = %#v", skipped)
+	}
+	if skipped[0].Path != filepath.Join(skills, "empty", "SKILL.md") || skipped[0].Reason != filepath.Join(skills, "empty", "SKILL.md")+" has no instructions after its frontmatter" {
+		t.Fatalf("empty skill = %#v", skipped[0])
+	}
+	if !strings.Contains(skipped[1].Reason, "exceeds") {
+		t.Fatalf("huge skill = %#v", skipped[1])
+	}
+}
+
+func TestCreatingFromSkippedSkillNamesTheReason(t *testing.T) {
+	skills := t.TempDir()
+	writeDocument(t, filepath.Join(skills, "empty", "SKILL.md"), "---\nname: empty\n---\n")
+	loaded := SkillTemplates([]string{skills})
+	manager := NewManager(Options{GlobalRoot: t.TempDir(), Reviewers: []string{"codex"}, Templates: loaded.Templates, SkippedTemplates: loaded.Skipped})
+
+	_, err := manager.PlanProfileCreation("", skillProfileDraft("empty"))
+
+	want := `Review Profile Template "skill:empty" was skipped: ` + filepath.Join(skills, "empty", "SKILL.md") + ` has no instructions after its frontmatter`
+	if err == nil || err.Error() != want {
+		t.Fatalf("error = %v, want %s", err, want)
 	}
 }
 
