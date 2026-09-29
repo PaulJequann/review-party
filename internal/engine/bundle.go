@@ -22,8 +22,6 @@ type preparedBundle struct {
 	members []pendingReview
 }
 
-// pendingReview pairs a prepared member with its persisted pending Review
-// Record, so the member's Review ID exists before any member launches.
 type pendingReview struct {
 	prepared preparedReview
 	record   model.ReviewRecord
@@ -289,8 +287,6 @@ func (conductor *Conductor) finalizeBundle(ledger store.BundleStore, bundle mode
 	return bundle, nil
 }
 
-// stopBundle ends the bundle as incomplete. Callers invoke it only after every
-// launched member has returned, so no member Review is still executing.
 func (conductor *Conductor) stopBundle(ledger store.BundleStore, bundle *model.ReviewBundle, cause error) (model.ReviewBundle, error) {
 	category := evalFailureCategory(cause)
 	memberErr := conductor.finishStoppedMembers(bundle, category, cause)
@@ -304,9 +300,6 @@ func (conductor *Conductor) stopBundle(ledger store.BundleStore, bundle *model.R
 	return *bundle, errors.Join(cause, memberErr)
 }
 
-// finishStoppedMembers moves every member Review the stop left pending or
-// running to incomplete, so each member ID reaches a terminal lifecycle that
-// inspect, status, and wait can report. It mirrors the ledger into the bundle.
 func (conductor *Conductor) finishStoppedMembers(bundle *model.ReviewBundle, category model.TerminationCategory, cause error) error {
 	var failures error
 	for index := range bundle.Members {
@@ -325,9 +318,6 @@ func (conductor *Conductor) finishStoppedMembers(bundle *model.ReviewBundle, cat
 	return failures
 }
 
-// finishStoppedMember records why a member never finished. A pending member
-// never reached its availability check, so it ends there with no elapsed time;
-// a running member was stopped during execution.
 func (conductor *Conductor) finishStoppedMember(record model.ReviewRecord, category model.TerminationCategory, cause error) (model.ReviewRecord, error) {
 	termination := model.ReviewTermination{Category: category, Phase: model.PhaseAvailabilityCheck, Message: "the Review Bundle stopped before this Review finished: " + cause.Error()}
 	started := conductor.now().UTC()

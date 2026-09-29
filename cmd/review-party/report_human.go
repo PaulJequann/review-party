@@ -102,8 +102,6 @@ func writeInspectHint(output *commandOutput, id, configuration string) {
 	output.write("inspect: review-party inspect %s%s\n", id, configurationArgument(configuration))
 }
 
-// configurationArgument is the --config suffix a printed follow-up command
-// needs to reach the same Global Configuration, or "" for the default.
 func configurationArgument(configuration string) string {
 	if configuration == "" || configuration == defaultUserConfigurationPath() {
 		return ""

@@ -96,8 +96,6 @@ func executeRunWithConductor(ctx context.Context, conductor runConductor, option
 	return printRunOutcome(streams, report, err, reportOptions{format: options.format, configuration: options.configuration})
 }
 
-// printRunOutcome prints a run's report and picks run's exit code; wait reuses
-// it so a finished run reads and exits exactly as run did.
 func printRunOutcome(streams commandIO, report reviewReport, runErr error, options reportOptions) int {
 	if runErr != nil {
 		return printFailure(streams.errors, runErr)

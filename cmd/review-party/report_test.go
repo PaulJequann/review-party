@@ -123,8 +123,6 @@ func TestReportFindingsAreAnArrayEvenWithoutAResult(t *testing.T) {
 	}
 }
 
-// stoppedMemberRecord is a bundle member the bundle stopped before it
-// produced a result.
 func stoppedMemberRecord(id model.ReviewID, profile string) model.ReviewRecord {
 	record := largePatchRecord(id, profile, 0)
 	record.Lifecycle, record.Result = model.LifecycleIncomplete, nil

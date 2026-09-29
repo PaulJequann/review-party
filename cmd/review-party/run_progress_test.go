@@ -98,8 +98,6 @@ func TestQuietRunInstallsNoProgressSink(t *testing.T) {
 	}
 }
 
-// progressRunConductor emits lifecycle events through the run's progress sink
-// before returning its bundle, standing in for the engine.
 type progressRunConductor struct {
 	fakeRunConductor
 	progress func(model.RunProgressEvent)

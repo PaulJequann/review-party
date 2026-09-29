@@ -82,8 +82,6 @@ func TestWaitTimesOutOnARunThatIsStillInFlight(t *testing.T) {
 	}
 }
 
-// flippingConductor finishes the pending Review in the ledger right after
-// wait's first check observes it in flight.
 type flippingConductor struct {
 	*engine.Conductor
 	fixture statusLedger

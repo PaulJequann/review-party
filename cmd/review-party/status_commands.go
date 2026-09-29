@@ -52,7 +52,6 @@ type statusOptions struct {
 	now           func() time.Time
 }
 
-// inFlightReport is the JSON document for status without an ID.
 type inFlightReport struct {
 	Repository string               `json:"repository"`
 	InFlight   []model.ReviewStatus `json:"in_flight"`
@@ -93,8 +92,6 @@ func executeStatus(ctx context.Context, options statusOptions, streams commandIO
 	}), statuses...)
 }
 
-// statusOutcome fails a printed status that names a Review it could not read,
-// as inspect and run do for an unreadable Review Bundle member.
 func statusOutcome(stderr io.Writer, exit int, statuses ...model.ReviewStatus) int {
 	if exit != 0 {
 		return exit
@@ -113,8 +110,6 @@ func statusOutcome(stderr io.Writer, exit int, statuses ...model.ReviewStatus) i
 	return 0
 }
 
-// printStatusFailure reports an id that names neither a Review Bundle nor a
-// Review as a usage error and every other lookup failure as a failure.
 func printStatusFailure(stderr io.Writer, err error) int {
 	if errors.Is(err, engine.ErrUnsupportedStatusID) {
 		return printCommandError(stderr, usageExitCode, err)

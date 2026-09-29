@@ -36,8 +36,6 @@ var ErrReviewRecordStateNotInitialized = errors.New("Review Party is not initial
 var ErrReviewRecordStateRequiresPreparation = errors.New("Review Party state requires preparation")
 var errLedgerUpgradesInPlace = fmt.Errorf("%w", ErrReviewRecordStateRequiresPreparation)
 
-// ErrReviewNotFound marks a lookup of a Review or Review Bundle ID the ledger
-// does not hold.
 var ErrReviewNotFound = errors.New("no review with id")
 
 type reviewNotFoundError struct{ id string }
@@ -699,8 +697,6 @@ func scanHistoryPage(rows *sql.Rows, limit int) (HistoryPage, error) {
 	return page, nil
 }
 
-// InFlight names the pending and running Review Bundles and Reviews recorded
-// for one repository, newest first.
 type InFlight struct {
 	Bundles []model.ReviewBundleID
 	Reviews []model.ReviewID

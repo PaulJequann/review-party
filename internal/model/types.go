@@ -244,9 +244,6 @@ const (
 	RunProgressFinished RunProgressKind = "finished"
 )
 
-// RunProgressEvent is one live per-Review lifecycle transition emitted while a
-// run executes. Every event names its Review; bundle members also name their
-// Review Bundle.
 type RunProgressEvent struct {
 	Kind         RunProgressKind     `json:"kind"`
 	BundleID     ReviewBundleID      `json:"bundle_id,omitempty"`

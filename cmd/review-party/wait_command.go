@@ -87,9 +87,6 @@ func executeWait(ctx context.Context, conductor waitConductor, options waitOptio
 	}
 }
 
-// reportFinishedRun renders a finished Review Bundle or Review through run's
-// own report and exit code so wait prints and exits exactly as the run did. A
-// stopped Review Bundle reports its stop cause, which run printed as a failure.
 func reportFinishedRun(ctx context.Context, conductor waitConductor, status model.ReviewStatus, options waitOptions, streams commandIO) int {
 	printing := reportOptions{format: options.format, configuration: options.configuration}
 	if status.Kind == model.ReviewStatusReview {

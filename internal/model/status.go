@@ -2,7 +2,6 @@ package model
 
 import "time"
 
-// ReviewStatusKind names what a ReviewStatus describes.
 type ReviewStatusKind string
 
 const (
@@ -24,9 +23,6 @@ type ReviewStatus struct {
 	Reviews     []ReviewStatusMember `json:"reviews"`
 }
 
-// ReviewStatusMember is one Review's lifecycle as the ledger records it.
-// UpdatedAt lets a reader spot an in-flight Review whose process stopped
-// writing.
 type ReviewStatusMember struct {
 	ReviewID     ReviewID           `json:"review_id"`
 	Scope        string             `json:"scope,omitempty"`
@@ -43,7 +39,6 @@ type ReviewStatusMember struct {
 	ReadError    string             `json:"read_error,omitempty"`
 }
 
-// Terminal reports whether the lifecycle can no longer change.
 func (lifecycle Lifecycle) Terminal() bool {
 	return lifecycle == LifecycleCompleted || lifecycle == LifecycleIncomplete
 }

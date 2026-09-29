@@ -26,8 +26,6 @@ const (
 	completedReviewID  = "rp_1725192000000_00000000000000a3"
 )
 
-// statusLedger is a temporary ledger seeded with in-flight, completed,
-// incomplete, and stopped Review Bundles and standalone Reviews.
 type statusLedger struct {
 	t          *testing.T
 	directory  string

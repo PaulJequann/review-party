@@ -89,8 +89,6 @@ func TestStoppedBundleFinalizesMembersThatNeverStarted(t *testing.T) {
 	}
 }
 
-// requireStoppedMemberProgress proves a member that never started still reports
-// its pending and terminal transitions, and nothing in between.
 func requireStoppedMemberProgress(t *testing.T, events []model.RunProgressEvent, id model.ReviewID) {
 	t.Helper()
 	var kinds []model.RunProgressKind

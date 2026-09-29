@@ -62,8 +62,6 @@ func (runner *reviewRunner) pendingRecord(prepared preparedReview, replaysReview
 	}, nil
 }
 
-// startReview persists the pending Review Record so its ID is inspectable
-// before any execution begins.
 func (runner *reviewRunner) startReview(prepared preparedReview, replaysReviewID *model.ReviewID) (model.ReviewRecord, error) {
 	record, err := runner.pendingRecord(prepared, replaysReviewID)
 	if err != nil {
@@ -83,9 +81,6 @@ func (runner *reviewRunner) runPreparedReview(ctx context.Context, prepared prep
 	return runner.runPendingReview(ctx, record, prepared, reviewStarted, nil)
 }
 
-// runPendingReview drives an already persisted pending Review Record through
-// availability, execution, validation, and persistence. onAttempt, when set,
-// receives each attempt number as the attempt begins executing.
 func (runner *reviewRunner) runPendingReview(ctx context.Context, record model.ReviewRecord, prepared preparedReview, reviewStarted time.Time, onAttempt func(int)) (model.ReviewRecord, error) {
 	record.Lifecycle = model.LifecycleRunning
 	record.UpdatedAt = runner.now().UTC()

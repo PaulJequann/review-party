@@ -9,18 +9,8 @@ import (
 	"reviewparty/internal/model"
 )
 
-// Live run heartbeat. The engine emits one event per Review lifecycle
-// transition; this append-only renderer prints one stderr line per event for
-// every output format, so JSON stdout stays a single document while a human or
-// a calling agent still sees which Reviews are pending, running, and done.
-
-// progressMessageLimit bounds a hard-error message so a multi-kilobyte store
-// or subprocess error cannot flood the heartbeat.
 const progressMessageLimit = 160
 
-// runProgressRenderer serializes progress events from concurrent reviewers and
-// renders each as one stderr line, after a one-time header naming the run's
-// status and wait commands.
 type runProgressRenderer struct {
 	mutex         sync.Mutex
 	output        io.Writer
@@ -29,8 +19,6 @@ type runProgressRenderer struct {
 	stopped       bool
 }
 
-// newRunProgressSink returns the renderer for one run and its engine sink, or
-// (nil, nil) when --quiet suppresses the heartbeat.
 func newRunProgressSink(quiet bool, stderr io.Writer, configuration string) (*runProgressRenderer, func(model.RunProgressEvent)) {
 	if quiet || stderr == nil {
 		return nil, nil
@@ -66,8 +54,6 @@ func (renderer *runProgressRenderer) header(event model.RunProgressEvent) string
 	return fmt.Sprintf("%s · status: review-party status %s%s · wait: review-party wait %s%s", subject, id, suffix, id, suffix)
 }
 
-// stop makes late events inert so the final result document is the last output
-// a human sees. Safe to call on a nil renderer or more than once.
 func (renderer *runProgressRenderer) stop() {
 	if renderer == nil {
 		return

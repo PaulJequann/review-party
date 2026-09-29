@@ -81,8 +81,6 @@ func TestRunReportsEveryMemberTransition(t *testing.T) {
 	}
 }
 
-// requirePendingBeforeAnyStart proves a caller learns every member ID, in
-// member order, before the first member starts.
 func requirePendingBeforeAnyStart(t *testing.T, events []model.RunProgressEvent, bundle model.ReviewBundle) {
 	t.Helper()
 	pending := 0

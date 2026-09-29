@@ -22,8 +22,6 @@ func nullableTime(value time.Time) any {
 	return value.UTC()
 }
 
-// create writes the bundle row and every member's pending Review Record in one
-// transaction, so a caller never observes a bundle whose members are missing.
 func (p bundleProjection) create(bundle model.ReviewBundle, members []model.ReviewRecord) (returnErr error) {
 	payloads, err := renderBundlePayload(bundle)
 	if err != nil {

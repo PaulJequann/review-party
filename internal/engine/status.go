@@ -11,17 +11,10 @@ import (
 	"reviewparty/internal/store"
 )
 
-// ErrUnsupportedStatusID reports an id that names neither a Review Bundle nor
-// a Review.
 var ErrUnsupportedStatusID = errors.New("status accepts a Review Bundle id (rb_…) or a Review id (rp_…)")
 
-// LifecycleUnreadable marks a Review whose record cannot be read. Status and
-// reports use it; the ledger never stores it, so it stays out of the model's
-// Lifecycle enum.
 const LifecycleUnreadable model.Lifecycle = "unreadable"
 
-// Status reads the current lifecycle of one Review Bundle or Review without
-// waiting for it.
 func (conductor *Conductor) Status(ctx context.Context, id string) (model.ReviewStatus, error) {
 	switch {
 	case strings.HasPrefix(id, "rb_"):
@@ -37,8 +30,6 @@ func (conductor *Conductor) Status(ctx context.Context, id string) (model.Review
 	}
 }
 
-// InFlight lists the pending and running Review Bundles for a repository and
-// the pending and running Reviews that belong to none of them, newest first.
 func (conductor *Conductor) InFlight(ctx context.Context, repository string) ([]model.ReviewStatus, error) {
 	ledger, ok := conductor.store.(interface {
 		InFlight(string) (store.InFlight, error)
