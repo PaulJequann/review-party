@@ -11,17 +11,12 @@ import (
 	"reviewparty/internal/store"
 )
 
-// MissTarget is the review, or the review bundle members, a miss attaches to.
-// Only a bundle target carries a profile, because a profile narrows a bundle
-// to its matching members and means nothing for a single review.
 type MissTarget struct {
 	review  model.ReviewID
 	bundle  model.ReviewBundleID
 	profile string
 }
 
-// ParseMissTarget reads an rp_ review id, or an rb_ bundle id with an optional
-// member profile. Every error it returns is a caller usage error.
 func ParseMissTarget(id, profile string) (MissTarget, error) {
 	if !validReviewID(model.ReviewID(id)) {
 		return MissTarget{}, fmt.Errorf("invalid miss target %q; expected a review id (rp_...) or a review bundle id (rb_...)", id)
@@ -55,9 +50,6 @@ type MissRemovalRequest struct {
 	RemovedBy string
 }
 
-// RecordMiss attaches one miss to each targeted review, all or none. Only
-// completed reviews can miss a bug, so any other targeted review fails the
-// whole request.
 func (conductor *Conductor) RecordMiss(_ context.Context, request MissRequest) ([]model.Miss, error) {
 	ledger, err := conductor.missStore()
 	if err != nil {
@@ -173,8 +165,6 @@ func targetedBundleMembers(bundle model.ReviewBundle, profile string) ([]model.B
 	return matched, nil
 }
 
-// completedMemberReviews reports every unusable member at once so a caller can
-// narrow the request in one step instead of discovering them one at a time.
 func (conductor *Conductor) completedMemberReviews(bundle model.ReviewBundleID, members []model.BundleMember) ([]model.ReviewID, error) {
 	reviews := make([]model.ReviewID, 0, len(members))
 	var unusable []string

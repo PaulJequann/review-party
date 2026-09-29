@@ -24,8 +24,6 @@ const ledgerFilename = "ledger.sqlite"
 // continued past the last released migration so no obsolete ledger can collide.
 const currentLedgerSchemaVersion = 11
 
-// ledgerMigrations is the ordered additive chain. Its first step is the oldest
-// schema that preparation upgrades in place.
 var ledgerMigrations = []struct {
 	version int
 	path    string

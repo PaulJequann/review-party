@@ -487,8 +487,6 @@ func TestPrepareReplacesObsoleteLedgersInPlace(t *testing.T) {
 	}
 }
 
-// writeObsoleteLedger saves a review in a current ledger, then rewrites it with
-// seed into the shape of an obsolete one.
 func writeObsoleteLedger(t *testing.T, directory string, seed string) model.ReviewRecord {
 	t.Helper()
 	ledger := newTestLedger(t, directory)
