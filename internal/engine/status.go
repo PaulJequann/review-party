@@ -160,6 +160,10 @@ func reviewStatusMember(record model.ReviewRecord, scope string) model.ReviewSta
 		Lifecycle: record.Lifecycle, Attempts: record.AttemptCount(), Termination: record.Termination,
 		UpdatedAt: record.UpdatedAt,
 	}
+	if record.Lifecycle == model.LifecycleRunning {
+		// A running Review records its Attempt only once the Attempt ends.
+		member.Attempts++
+	}
 	if record.Result != nil {
 		member.Status = string(record.Result.Status)
 		member.FindingCount = record.Result.FindingCount()

@@ -35,12 +35,14 @@ type StaleRun struct {
 }
 
 type ReviewStatusMember struct {
-	ReviewID     ReviewID           `json:"review_id"`
-	Scope        string             `json:"scope,omitempty"`
-	Profile      string             `json:"profile"`
-	Reviewer     string             `json:"reviewer"`
-	Model        string             `json:"model,omitempty"`
-	Lifecycle    Lifecycle          `json:"lifecycle"`
+	ReviewID  ReviewID  `json:"review_id"`
+	Scope     string    `json:"scope,omitempty"`
+	Profile   string    `json:"profile"`
+	Reviewer  string    `json:"reviewer"`
+	Model     string    `json:"model,omitempty"`
+	Lifecycle Lifecycle `json:"lifecycle"`
+	// Attempts counts recorded Attempts plus the one a running Review has in
+	// flight.
 	Attempts     int                `json:"attempts"`
 	Status       string             `json:"status,omitempty"`
 	FindingCount int                `json:"finding_count"`

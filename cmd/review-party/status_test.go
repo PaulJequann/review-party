@@ -110,7 +110,7 @@ func (fixture statusLedger) record(id model.ReviewID, lifecycle model.Lifecycle,
 		Passes:          []model.PassRecord{{Name: "review", Required: true, Attempts: []model.AttemptRecord{}}},
 		CreatedAt:       created, UpdatedAt: created,
 	}
-	if lifecycle != model.LifecyclePending {
+	if lifecycle.Terminal() {
 		record.Passes[0].Attempts = []model.AttemptRecord{{Number: 1, Outcome: model.AttemptCompleted, Provenance: model.ReviewerProvenance{ReviewerID: "grok", Model: "grok-4.5"}, StartedAt: created, CompletedAt: created}}
 		record.Timings = &model.ReviewTimings{TotalMS: 65000}
 	}
