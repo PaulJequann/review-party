@@ -98,6 +98,7 @@ func memberEntry(ctx context.Context, loader reviewLoader, member model.BundleMe
 			ID:        member.ReviewID,
 			Lifecycle: engine.LifecycleUnreadable,
 			Findings:  []model.Finding{},
+			Misses:    []model.Miss{},
 			Profile:   profileSummary{Name: member.Profile, Scope: member.Scope, Revision: member.ProfileRevision},
 			Origin:    member.Origin,
 			ReadError: err.Error(),
@@ -111,11 +112,8 @@ func memberEntry(ctx context.Context, loader reviewLoader, member model.BundleMe
 
 func (report reviewReport) attachMisses(ctx context.Context, loader missLoader) error {
 	for index, entry := range report.Reviews {
-		if entry.ID == "" {
-			continue
-		}
 		misses, err := loader.Misses(ctx, store.MissQuery{ReviewID: entry.ID})
-		if err != nil && entry.Lifecycle == lifecycleUnreadable {
+		if err != nil && entry.Lifecycle == engine.LifecycleUnreadable {
 			report.Reviews[index].ReadError += "; load misses: " + err.Error()
 			continue
 		}
