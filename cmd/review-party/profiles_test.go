@@ -110,7 +110,7 @@ func TestExplainScopedMissingProfileNamesTheScope(t *testing.T) {
 	if result.exitCode == 0 {
 		t.Fatalf("explain repository:bugs succeeded: %q", result.stdout)
 	}
-	if !strings.Contains(result.stderr, "Repository") || strings.Contains(result.stderr, "must match") {
+	if !strings.Contains(result.stderr, "in repository Configuration") || strings.Contains(result.stderr, "must match") {
 		t.Fatalf("stderr = %q", result.stderr)
 	}
 }

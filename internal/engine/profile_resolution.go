@@ -40,21 +40,29 @@ func (conductor *Conductor) resolveProfile(request profileRequest) (resolvedProf
 	if conductor.configuration == nil {
 		return resolvedProfile{}, errConfigurationNotConfigured
 	}
-	if err := validateAuthoredName(request.name); err != nil {
+	scope, name := configuration.ParseScopedReference(request.name)
+	if err := validateAuthoredName(name); err != nil {
 		return resolvedProfile{}, fmt.Errorf("profile name %q: %w", request.name, err)
 	}
 	effective, err := conductor.configuration.Resolve(configuration.Request{Repository: configuration.Repository(request.repository)})
 	if err != nil {
 		return resolvedProfile{}, err
 	}
-	profile, found, err := conductor.configuration.ResolveProfile(configuration.Repository(request.repository), request.name)
+	profile, found, err := conductor.loadProfile(request.repository, scope, name)
 	if err != nil {
 		return resolvedProfile{}, err
 	}
 	if !found {
-		return resolvedProfile{}, UnknownProfileError{Name: request.name, Available: conductor.authoredProfileNames(request.repository)}
+		return resolvedProfile{}, UnknownProfileError{Name: name, Scope: scope, Available: conductor.profileNamesInScope(request.repository, scope)}
 	}
 	return resolvedFromProfile(profile, effective)
+}
+
+func (conductor *Conductor) loadProfile(repository string, scope configuration.Scope, name string) (configuration.Profile, bool, error) {
+	if scope == "" {
+		return conductor.configuration.ResolveProfile(configuration.Repository(repository), name)
+	}
+	return conductor.configuration.ResolveProfileReference(configuration.Repository(repository), configuration.ProfileReference{Scope: scope, Profile: name})
 }
 
 func resolvedFromProfile(profile configuration.Profile, effective configuration.Effective) (resolvedProfile, error) {
@@ -71,8 +79,10 @@ func (profile resolvedProfile) configurationProfile() configuration.Profile {
 
 type profileInventoryFilter func(configuration.Definition[configuration.Profile]) bool
 
-func (conductor *Conductor) authoredProfileNames(repository string) []string {
-	return conductor.profileNames(repository, func(configuration.Definition[configuration.Profile]) bool { return true })
+func (conductor *Conductor) profileNamesInScope(repository string, scope configuration.Scope) []string {
+	return conductor.profileNames(repository, func(definition configuration.Definition[configuration.Profile]) bool {
+		return scope == "" || definition.Scope == scope
+	})
 }
 
 func (conductor *Conductor) profileNames(repository string, include profileInventoryFilter) []string {
