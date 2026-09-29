@@ -323,6 +323,10 @@ func (model *Model) openReviewFieldsForm() tea.Cmd {
 
 func (model *Model) openCopyForm() tea.Cmd {
 	options := model.repositoryProfileOptions()
+	if len(options) == 0 {
+		model.status = "No Repository Profiles exist to copy."
+		return nil
+	}
 	return model.openForm(formCopy, []huh.Field{
 		huh.NewSelect[string]().Title("Repository Profile to copy to Global Configuration").Options(options...).Value(&model.session.copyName),
 	})
