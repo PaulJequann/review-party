@@ -117,5 +117,5 @@ func (store *Store) resolve(relative string) (string, error) {
 }
 
 func validKind(kind string) bool {
-	return kind == "assistant-text" || kind == "constructed-prompt" || kind == "native-stdout" || kind == "native-stderr"
+	return kind == "assistant-text" || kind == "constructed-prompt" || kind == "reviewer-noise" || kind == "native-stdout" || kind == "native-stderr"
 }

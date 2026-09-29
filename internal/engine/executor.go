@@ -92,6 +92,7 @@ type preparedAttempt struct {
 type decodedHarnessOutput struct {
 	assistantText string
 	diagnostic    string
+	noise         string
 	model         string
 	effort        string
 	// incomplete marks a run the harness itself reported as unfinished, so a
@@ -160,7 +161,6 @@ func (executor directExecutor) executePrepared(ctx context.Context, spec attempt
 	if decodeErr != nil {
 		return decodedRunFailure(run, decodeErr, executor.adapter.Name())
 	}
-	diagnostic := strings.TrimSpace(strings.Join([]string{decoded.diagnostic, run.Stderr}, " "))
 	model := decoded.model
 	if model == "" {
 		model = spec.Candidate.Model
@@ -169,7 +169,7 @@ func (executor directExecutor) executePrepared(ctx context.Context, spec attempt
 	if effort == "" {
 		effort = spec.Candidate.Effort
 	}
-	decoded.diagnostic = diagnostic
+	decoded.noise = joinReport(decoded.noise, run.Stderr)
 	decoded.model = model
 	decoded.effort = effort
 	return finalizeHarnessRun(run, decoded, executor.adapter.Name())
@@ -284,6 +284,12 @@ func contextExecution(err error) attemptExecution {
 }
 
 func finalizeHarnessRun(run commandRun, decoded decodedHarnessOutput, harness string) attemptExecution {
+	execution := classifyHarnessRun(run, decoded, harness)
+	execution.ReviewerNoise = reviewerNoise(execution, decoded)
+	return execution
+}
+
+func classifyHarnessRun(run commandRun, decoded decodedHarnessOutput, harness string) attemptExecution {
 	if run.StartErr != nil {
 		return failedExecution(model.AttemptReviewerUnavailable, model.TerminationReviewerUnavailable, model.PhaseHarnessLaunch, run.StartErr.Error())
 	}
@@ -297,25 +303,41 @@ func finalizeHarnessRun(run commandRun, decoded decodedHarnessOutput, harness st
 		waitErr = errors.New(harness + " reported an incomplete run")
 	}
 	if waitErr != nil {
-		execution := classifyHarnessFailure(decoded.diagnostic, waitErr)
+		execution := classifyHarnessFailure(decoded, waitErr)
 		execution.AssistantText = decoded.assistantText
 		execution.ResolvedModel = decoded.model
 		execution.ResolvedEffort = decoded.effort
 		return execution
 	}
 	if decoded.assistantText == "" {
-		if strings.TrimSpace(decoded.diagnostic) != "" {
-			return classifyHarnessFailure(decoded.diagnostic, errors.New(harness+" produced no assistant text"))
+		if strings.TrimSpace(joinReport(decoded.diagnostic, decoded.noise)) != "" {
+			return classifyHarnessFailure(decoded, errors.New(harness+" produced no assistant text"))
 		}
 		return failedExecution(model.AttemptInvalidResult, model.TerminationMalformedOutput, model.PhaseOutputDecode, harness+" produced no assistant text")
 	}
 	return attemptExecution{
 		AssistantText:  decoded.assistantText,
 		Outcome:        model.AttemptCompleted,
-		Diagnostic:     compactDiagnostic(decoded.diagnostic),
 		ResolvedModel:  decoded.model,
 		ResolvedEffort: decoded.effort,
 	}
+}
+
+func reviewerNoise(execution attemptExecution, decoded decodedHarnessOutput) string {
+	if execution.Outcome == model.AttemptCompleted {
+		return joinReport(decoded.diagnostic, decoded.noise)
+	}
+	return decoded.noise
+}
+
+func joinReport(parts ...string) string {
+	nonEmpty := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			nonEmpty = append(nonEmpty, trimmed)
+		}
+	}
+	return strings.Join(nonEmpty, "\n")
 }
 
 func overflowExecution(run commandRun, harness string) attemptExecution {
@@ -326,23 +348,38 @@ func overflowExecution(run commandRun, harness string) attemptExecution {
 }
 
 func decodedRunFailure(run commandRun, decodeErr error, harness string) attemptExecution {
-	diagnostic := strings.TrimSpace(strings.Join([]string{run.Stderr, decodeErr.Error()}, " "))
+	decoded := decodedHarnessOutput{assistantText: string(run.Stdout), diagnostic: decodeErr.Error(), noise: run.Stderr}
 	if run.WaitErr != nil || run.ContextErr != nil {
-		return finalizeHarnessRun(run, decodedHarnessOutput{assistantText: string(run.Stdout), diagnostic: diagnostic}, harness)
+		return finalizeHarnessRun(run, decoded, harness)
 	}
-	execution := failedExecution(model.AttemptInvalidResult, model.TerminationMalformedOutput, model.PhaseOutputDecode, compactDiagnostic(diagnostic))
-	execution.AssistantText = string(run.Stdout)
+	execution := failedExecution(model.AttemptInvalidResult, model.TerminationMalformedOutput, model.PhaseOutputDecode, compactDiagnostic(decoded.diagnostic))
+	execution.AssistantText = decoded.assistantText
+	execution.ReviewerNoise = decoded.noise
 	return execution
 }
 
-func classifyHarnessFailure(diagnostic string, waitErr error) attemptExecution {
-	category := diagnosticFailureCategory(diagnostic)
+func classifyHarnessFailure(decoded decodedHarnessOutput, waitErr error) attemptExecution {
+	category := diagnosticFailureCategory(joinReport(decoded.diagnostic, decoded.noise))
 	outcome := attemptOutcomeForTermination(category)
-	message := compactDiagnostic(diagnostic)
+	message := decisiveDiagnostic(decoded, category)
 	if message == "" && waitErr != nil {
 		message = waitErr.Error()
 	}
 	return failedExecution(outcome, category, model.PhaseReviewerExecution, message)
+}
+
+func decisiveDiagnostic(decoded decodedHarnessOutput, category model.TerminationCategory) string {
+	if category != model.TerminationUnknownFailure {
+		for line := range strings.Lines(joinReport(decoded.diagnostic, decoded.noise)) {
+			if diagnosticFailureCategory(line) == category {
+				return compactDiagnostic(line)
+			}
+		}
+	}
+	if decoded.diagnostic != "" {
+		return compactDiagnostic(decoded.diagnostic)
+	}
+	return compactDiagnostic(decoded.noise)
 }
 
 func diagnosticFailureCategory(diagnostic string) model.TerminationCategory {

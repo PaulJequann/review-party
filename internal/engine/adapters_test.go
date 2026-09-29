@@ -182,7 +182,7 @@ func assertReviewWithPreamble(t *testing.T, assistantText string, err error) {
 }
 
 func TestOpenCodeAuthenticationFailureIsUnavailable(t *testing.T) {
-	execution := classifyHarnessFailure("Token refresh failed: 401", context.Canceled)
+	execution := classifyHarnessFailure(decodedHarnessOutput{diagnostic: "Token refresh failed: 401"}, context.Canceled)
 	assertAttemptOutcome(t, execution, model.AttemptReviewerUnavailable)
 	assertFailureLocation(t, execution, model.TerminationAuthenticationFailure, model.PhaseReviewerExecution)
 }
