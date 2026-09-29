@@ -47,6 +47,14 @@ func TestTemplateCannotResolveAsExecutableProfile(t *testing.T) {
 	}
 }
 
+func TestUnknownProfileWithNoAuthoredProfilesSaysSo(t *testing.T) {
+	manager := configuration.NewManager(configuration.Options{GlobalRoot: t.TempDir(), Reviewers: []string{"codex"}})
+	_, err := compileTestProfile(manager, "missing", model.ReviewSubject{})
+	if err == nil || err.Error() != `unknown review profile "missing"; no Profiles are configured` {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func TestUnknownProfileReportsInvalidAuthoredNames(t *testing.T) {
 	root := t.TempDir()
 	manager := configuration.NewManager(configuration.Options{GlobalRoot: root, Reviewers: []string{"grok", "opencode", "copilot", "codex"}})

@@ -45,6 +45,9 @@ type UnknownProfileError struct {
 }
 
 func (failure UnknownProfileError) Error() string {
+	if len(failure.Available) == 0 {
+		return fmt.Sprintf("unknown review profile %q; no Profiles are configured", failure.Name)
+	}
 	return fmt.Sprintf("unknown review profile %q; expected %s", failure.Name, strings.Join(failure.Available, ", "))
 }
 
