@@ -37,7 +37,7 @@ func (grokAdapter) Prepare(spec attemptSpec) (preparedAttempt, error) {
 	return preparedAttempt{command: command, cleanup: func() error { return os.Remove(promptPath) }}, nil
 }
 
-func (grokAdapter) Decode(output []byte) (decodedHarnessOutput, error) {
+func (grokAdapter) Decode(output []byte, _ string) (decodedHarnessOutput, error) {
 	assistantText, err := decodeGrokOutput(output)
 	return decodedHarnessOutput{assistantText: assistantText}, err
 }

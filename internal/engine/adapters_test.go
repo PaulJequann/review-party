@@ -189,7 +189,7 @@ func TestOpenCodeAuthenticationFailureIsUnavailable(t *testing.T) {
 
 func TestDecodeFailurePreservesHarnessFailureClassification(t *testing.T) {
 	run := commandRun{Stdout: []byte("not-json"), Stderr: "authentication failed", WaitErr: errors.New("exit status 1")}
-	execution := decodedRunFailure(run, errors.New("decode event"), "opencode")
+	execution := decodedRunFailure(run, decodedHarnessOutput{}, errors.New("decode event"), "opencode")
 	assertAttemptOutcome(t, execution, model.AttemptReviewerUnavailable)
 	assertFailureLocation(t, execution, model.TerminationAuthenticationFailure, model.PhaseReviewerExecution)
 	if execution.AssistantText != "not-json" {
@@ -237,7 +237,7 @@ func TestClaudeDecoderJoinsTextBlocksAndResolvesModel(t *testing.T) {
 func TestClaudeInBandErrorIsIncompleteDespiteCleanExit(t *testing.T) {
 	output := []byte(`{"type":"assistant","message":{"model":"<synthetic>","content":[{"type":"text","text":"Not logged in · Please run /login"}]}}` + "\n" +
 		`{"type":"result","subtype":"success","is_error":true,"result":"Not logged in · Please run /login"}` + "\n")
-	decoded, err := (claudeAdapter{}).Decode(output)
+	decoded, err := (claudeAdapter{}).Decode(output, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -251,7 +251,7 @@ func TestClaudeInBandErrorIsIncompleteDespiteCleanExit(t *testing.T) {
 
 func TestClaudeMissingResultEventIsIncomplete(t *testing.T) {
 	output := []byte(`{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"text","text":"` + strings.ReplaceAll(cleanReview, "\n", "\\n") + `"}]}}` + "\n")
-	decoded, err := (claudeAdapter{}).Decode(output)
+	decoded, err := (claudeAdapter{}).Decode(output, "")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -71,6 +71,18 @@ func TestOtherAdaptersDoNotClassifyTheCodexRejection(t *testing.T) {
 	assertFailureLocation(t, execution, model.TerminationUnknownFailure, model.PhaseReviewerExecution)
 }
 
+func TestCodexInputRejectionSurvivesUndecodableStdout(t *testing.T) {
+	execution := executeWithStub(t, codexAdapter{}, commandRun{Stdout: []byte("not json\n"), Stderr: codexInputTooLargeRejection, WaitErr: errors.New("exit status 1")})
+
+	assertFailureLocation(t, execution, model.TerminationInputTooLarge, model.PhaseReviewerExecution)
+}
+
+func TestCancelledAttemptWinsOverAnInputRejection(t *testing.T) {
+	execution := executeWithStub(t, codexAdapter{}, commandRun{Stdout: codexEventStream(`{"type":"thread.started","thread_id":"t"}`), Stderr: codexInputTooLargeRejection, WaitErr: errors.New("signal: interrupt"), ContextErr: context.Canceled})
+
+	assertFailureLocation(t, execution, model.TerminationCancelled, model.PhaseReviewerExecution)
+}
+
 func TestInputTooLargeIsNeverRetried(t *testing.T) {
 	termination := &model.ReviewTermination{Category: model.TerminationInputTooLarge, Phase: model.PhaseInputPreflight}
 	if retryableTermination(termination) {

@@ -39,7 +39,7 @@ func (copilotAdapter) Prepare(spec attemptSpec) (preparedAttempt, error) {
 	return preparedAttempt{command: command}, nil
 }
 
-func (copilotAdapter) Decode(output []byte) (decodedHarnessOutput, error) {
+func (copilotAdapter) Decode(output []byte, _ string) (decodedHarnessOutput, error) {
 	decoded, err := decodeCopilotOutput(output)
 	return decodedHarnessOutput{
 		assistantText: decoded.assistantText,

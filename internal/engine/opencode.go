@@ -34,7 +34,7 @@ func (openCodeAdapter) Prepare(spec attemptSpec) (preparedAttempt, error) {
 	return preparedAttempt{command: command}, nil
 }
 
-func (openCodeAdapter) Decode(output []byte) (decodedHarnessOutput, error) {
+func (openCodeAdapter) Decode(output []byte, _ string) (decodedHarnessOutput, error) {
 	decoded, err := decodeOpenCodeOutput(output)
 	return decodedHarnessOutput{assistantText: decoded.assistantText, diagnostic: decoded.diagnostic}, err
 }

@@ -23,7 +23,7 @@ func (stubHarnessAdapter) Prepare(attemptSpec) (preparedAttempt, error) {
 	return preparedAttempt{command: exec.Command("stub")}, nil
 }
 
-func (adapter stubHarnessAdapter) Decode(output []byte) (decodedHarnessOutput, error) {
+func (adapter stubHarnessAdapter) Decode(output []byte, _ string) (decodedHarnessOutput, error) {
 	return adapter.decode(output)
 }
 
