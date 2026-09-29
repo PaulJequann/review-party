@@ -383,6 +383,9 @@ func (s *LedgerRecordStore) requirePreparedSchema() error {
 	if version > currentLedgerSchemaVersion {
 		return fmt.Errorf("review ledger schema %d is newer than supported schema %d", version, currentLedgerSchemaVersion)
 	}
+	if version != currentLedgerSchemaVersion && upgradableLedgerVersion(version) {
+		return fmt.Errorf("%w: review ledger schema %d upgrades in place to schema %d; run review-party init", ErrReviewRecordStateRequiresPreparation, version, currentLedgerSchemaVersion)
+	}
 	if version != currentLedgerSchemaVersion {
 		return fmt.Errorf("%w: review ledger schema %d requires state preparation for schema %d", ErrReviewRecordStateRequiresPreparation, version, currentLedgerSchemaVersion)
 	}

@@ -327,8 +327,9 @@ func TestSchemaTenLedgerRequiresPreparationWithoutUpgrading(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := deferred.ListMisses(MissQuery{}); !errors.Is(err, ErrReviewRecordStateRequiresPreparation) {
-		t.Fatalf("error = %v", err)
+	_, err = deferred.ListMisses(MissQuery{})
+	if !errors.Is(err, ErrReviewRecordStateRequiresPreparation) || !strings.Contains(err.Error(), "run review-party init") {
+		t.Fatalf("error = %v, want a preparation error naming review-party init", err)
 	}
 	if version := readSchemaVersion(t, directory); version != 10 {
 		t.Fatalf("schema version = %d, want unchanged 10", version)
