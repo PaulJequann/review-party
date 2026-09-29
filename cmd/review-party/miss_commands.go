@@ -242,17 +242,3 @@ func formatMiss(miss model.Miss, listed bool) string {
 	}
 	return strings.Join(parts, " · ")
 }
-
-func attachReviewMisses(ctx context.Context, conductor *engine.Conductor, report reviewReport) error {
-	for index, entry := range report.Reviews {
-		if entry.ID == "" {
-			continue
-		}
-		misses, err := conductor.Misses(ctx, store.MissQuery{ReviewID: entry.ID})
-		if err != nil {
-			return fmt.Errorf("load misses for review %s: %w", entry.ID, err)
-		}
-		report.Reviews[index].Misses = append(report.Reviews[index].Misses, misses...)
-	}
-	return nil
-}

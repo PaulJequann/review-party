@@ -8,6 +8,7 @@ import (
 	"io"
 
 	"reviewparty/internal/model"
+	"reviewparty/internal/store"
 )
 
 type reviewReport struct {
@@ -70,6 +71,10 @@ type reviewLoader interface {
 	Inspect(context.Context, model.ReviewID) (model.ReviewRecord, error)
 }
 
+type missLoader interface {
+	Misses(context.Context, store.MissQuery) ([]model.Miss, error)
+}
+
 type reportOptions struct {
 	format        string
 	configuration string
@@ -101,6 +106,20 @@ func memberEntry(ctx context.Context, loader reviewLoader, member model.BundleMe
 	entry.Profile.Scope = member.Scope
 	entry.Origin = member.Origin
 	return entry
+}
+
+func (report reviewReport) attachMisses(ctx context.Context, loader missLoader) error {
+	for index, entry := range report.Reviews {
+		if entry.ID == "" {
+			continue
+		}
+		misses, err := loader.Misses(ctx, store.MissQuery{ReviewID: entry.ID})
+		if err != nil {
+			return fmt.Errorf("load misses for review %s: %w", entry.ID, err)
+		}
+		report.Reviews[index].Misses = append(report.Reviews[index].Misses, misses...)
+	}
+	return nil
 }
 
 func printReport(output io.Writer, report reviewReport, options reportOptions) error {
