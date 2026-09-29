@@ -1,8 +1,11 @@
 package configurationhub
 
 import (
+	"slices"
 	"strings"
 	"testing"
+
+	"reviewparty/internal/configuration"
 )
 
 func TestPluralizedCountUsesSingularOnlyForOne(t *testing.T) {
@@ -23,5 +26,31 @@ func TestPluralizedCountUsesSingularOnlyForOne(t *testing.T) {
 	}
 	if strings.Contains(pluralizedCount("Party", 0), "Partys") {
 		t.Fatalf("pluralizedCount(Party, 0) = %q, want regular plural", pluralizedCount("Party", 0))
+	}
+}
+
+func TestSnapshotWarnsAboutSkippedTemplates(t *testing.T) {
+	const want = "Template skill:empty skipped: /x/SKILL.md has no instructions after its frontmatter"
+	for _, test := range []struct {
+		name    string
+		skipped []configuration.SkippedTemplate
+		want    []string
+	}{
+		{name: "skipped", skipped: []configuration.SkippedTemplate{{TemplateID: "skill:empty", Path: "/x/SKILL.md", Reason: "/x/SKILL.md has no instructions after its frontmatter"}}, want: []string{want}},
+		{name: "none"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			manager := configuration.NewManager(configuration.Options{
+				GlobalRoot: t.TempDir(), Reviewers: []string{"codex"},
+				SkippedTemplates: test.skipped,
+			})
+			snapshot, err := buildSnapshot(manager, configuration.Repository(t.TempDir()))
+			if err != nil {
+				t.Fatalf("buildSnapshot: %v", err)
+			}
+			if !slices.Equal(snapshot.Warnings, test.want) {
+				t.Fatalf("warnings = %#v, want %#v", snapshot.Warnings, test.want)
+			}
+		})
 	}
 }

@@ -80,6 +80,9 @@ func buildSnapshot(manager *configuration.Manager, repository configuration.Repo
 	appendHubProfiles(&snapshot, profiles)
 	drift := manager.TemplateDriftForProfiles(profiles)
 	appendTemplateDrift(&snapshot, drift)
+	for _, skipped := range manager.SkippedTemplates() {
+		snapshot.Warnings = append(snapshot.Warnings, fmt.Sprintf("Template %s skipped: %s", skipped.TemplateID, skipped.Reason))
+	}
 	parties, err := manager.PartyInventory(repository)
 	if err != nil {
 		return snapshot, err

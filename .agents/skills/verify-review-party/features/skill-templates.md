@@ -36,7 +36,8 @@ Template is reported as skipped.
   `skipped_templates`.
 - `appendTemplateDrift`, `templateDriftMessage`, and `templateDriftDetail` in
   `internal/configurationhub/snapshot.go` render the Hub Overview warning and
-  the Profiles detail suffix; `profileTemplateOptions` in
+  the Profiles detail suffix, and `buildSnapshot` there adds one Overview
+  warning per skipped Template; `profileTemplateOptions` in
   `internal/configurationhub/interactive_forms.go` lists the Template picker.
 
 Drift: none.
@@ -153,6 +154,19 @@ block above, then start the Hub with the terminal procedure in
    skill:verify-audit source unavailable; saved instructions still run`. Send
    `Down`, then `Enter`, capture `hub-profiles-unavailable.txt`, and require
    `hub-audit` to carry `· Template source unavailable`. Send `q`.
+5. **Skipped skill.** Seed the empty fixture from the CLI "Skipped skill"
+   section without removing it:
+
+   ```sh
+   empty="$home/.agents/skills/verify-empty"
+   mkdir -p "$empty"
+   printf -- '---\nname: verify-empty\n---\n' > "$empty/SKILL.md"
+   ```
+
+   Start a fresh Hub session and capture `hub-overview-skipped.txt`. The
+   Overview must warn `Template skill:verify-empty skipped:
+   .../verify-empty/SKILL.md has no instructions after its frontmatter`.
+   Send `q`, then run `rm -rf "$empty"`.
 
 Read-only second view:
 
