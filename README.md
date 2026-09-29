@@ -85,7 +85,7 @@ history when using a non-default configuration. Initialization is idempotent
 for current state. Review, inspect, and history refuse to create state. A
 schema 10 ledger requires one `review-party init` run, which adds the misses
 table and keeps every recorded Review; other commands refuse that ledger until
-then. Review Party is pre-release and does not upgrade other retired ledger
+then, and `--backup-incompatible` refuses it because it is compatible. Review Party is pre-release and does not upgrade other retired ledger
 schemas. Back up an incompatible ledger and its SQLite sidecars first, then
 authorize fresh state in a separate command:
 

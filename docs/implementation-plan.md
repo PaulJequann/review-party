@@ -80,9 +80,12 @@ slice status and this checklist when the acceptance evidence is committed.
 Current state: Slices 10 through 20, Slice 17a, Slices 26 and 26a, Configuration
 Hub Slice 4, DEV-56 through DEV-60, and DEV-66 through DEV-69 are complete. PR #11 removed the
 pre-release Review Record compatibility paths and replaced the incremental SQL
-migration chain with one initial schema. Retired local state requires a fresh
-`review-party init`; future work must not restore legacy import or rollback
-behavior. Configuration Hub Slice 5 is next; its focused plan overrides the
+migration chain with one initial schema, recorded as schema 10. DEV-131 added an
+additive migration registry on top of it: schema 11 adds the `misses` table,
+and `review-party init` upgrades a schema 10 ledger in place without losing its
+Reviews. State older than schema 10 still requires a fresh `review-party init`;
+future work must not restore legacy import or rollback behavior, and new schema
+changes extend the registry rather than replacing current ledgers. Configuration Hub Slice 5 is next; its focused plan overrides the
 older Slice 21 cursor until the configuration and execution replacement is
 complete. Linear otherwise owns future work selection; use Ready issues there
 before the older roadmap below as execution authority.
