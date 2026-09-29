@@ -220,3 +220,29 @@ func assertSizeWarnings(t *testing.T, warnings []string, want string) {
 		t.Fatalf("warning = %q, want %q", warnings[0], want)
 	}
 }
+
+func TestCancelledReviewIsNotReportedAsInputTooLarge(t *testing.T) {
+	repository := unicodeChangedRepository(t)
+	characters := measuredPrompt(t, repository)
+	harness := newSizeHarness(t, characters-1)
+	planned, err := harness.conductor.planSelection(testSelection(repository))
+	if err != nil {
+		t.Fatal(err)
+	}
+	member := planned.members[0]
+	prepared := planned.preparedSubject.review(member.profile, member.timings)
+	gate := make(chan struct{}, 1)
+	gate <- struct{}{}
+	ctx, cancel := context.WithCancel(context.WithValue(context.Background(), attemptGateContextKey{}, gate))
+	cancel()
+
+	record, err := harness.conductor.runPreparedReview(ctx, prepared, nil, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	assertTermination(t, record, model.TerminationCancelled, model.PhaseReviewerExecution)
+	if warned := harness.warnings.all(); len(warned) != 0 {
+		t.Fatalf("warned for a cancelled review: %v", warned)
+	}
+}
