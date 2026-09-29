@@ -240,6 +240,21 @@ func TestMissAddOnBundleProfileSelectsOneScope(t *testing.T) {
 	requireMissReviews(t, fixture.add(t, "--review", string(missBundle), "--profile", "global:security"), missReviewSecurity)
 }
 
+func TestMissAddKeepsPathsInsideTheRepository(t *testing.T) {
+	fixture := newMissLedger(t)
+	for _, path := range []string{"/tmp/a.go", "../other/a.go", "internal/../../a.go", ".", "internal/..", " "} {
+		exit, _, stderr := fixture.run("miss", "add", "--review", string(missReviewBugs), "--path", path, "--source", "human", "--description", "d", "--recorded-by", "pj")
+		if want := "must be a repository-relative path inside the repository"; exit != usageExitCode || !strings.Contains(stderr, want) {
+			t.Errorf("--path %q exit = %d, stderr = %q, want %q", path, exit, stderr, want)
+		}
+	}
+	requireMissReviews(t, fixture.list(t))
+	added := fixture.add(t, "--review", string(missReviewBugs), "--path", "./internal/../internal//a.go")
+	if got := added[0].Location.Path; got != "internal/a.go" {
+		t.Fatalf("stored path = %q, want the cleaned internal/a.go", got)
+	}
+}
+
 func TestMissListFiltersByRepositoryAndProfile(t *testing.T) {
 	fixture := newMissLedger(t)
 	fixture.add(t, "--review", string(missReviewBugs))

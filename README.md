@@ -265,6 +265,9 @@ request fails without writes when a targeted member has no completed Review.
 `--profile` takes a bare Profile name or the `global:bugs` form the Bundle's
 report prints. A bare name that matches more than one member, such as
 `global:bugs` and `repository:bugs`, fails and lists the qualified choices.
+`--path` must stay inside the repository: absolute paths and paths that climb
+out with `..` fail, and the path is stored in cleaned form, so
+`./internal/../internal/a.go` is stored as `internal/a.go`.
 Each miss reads its repository, Subject, and Profile from the Review record
 rather than copying them. `--recorded-by` and `--removed-by` default to the OS
 username. Removal keeps the miss as a tombstone with its reason, remover, and

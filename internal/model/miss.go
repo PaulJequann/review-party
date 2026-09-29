@@ -2,6 +2,8 @@ package model
 
 import (
 	"fmt"
+	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -25,6 +27,14 @@ func ParseMissSource(text string) (MissSource, error) {
 		}
 	}
 	return "", fmt.Errorf("unsupported miss source %q; expected codex-pr, human, incident, or other", text)
+}
+
+func ParseMissPath(text string) (string, error) {
+	cleaned := filepath.Clean(strings.TrimSpace(text))
+	if cleaned == "." || !filepath.IsLocal(cleaned) {
+		return "", fmt.Errorf("miss path %q must be a repository-relative path inside the repository", text)
+	}
+	return filepath.ToSlash(cleaned), nil
 }
 
 type MissLocation struct {

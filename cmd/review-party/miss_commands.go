@@ -43,8 +43,8 @@ func newMissAddCommand(streams commandIO) *cobra.Command {
 	addFormatFlag(cmd)
 	addConfigurationFlag(cmd)
 	cmd.Flags().String("review", "", "Review id (rp_...) or Review Bundle id (rb_...) that missed the bug")
-	cmd.Flags().String("profile", "", "Bundle member Profile to attach the miss to; all members when omitted")
-	cmd.Flags().String("path", "", "Repository-relative path of the missed bug")
+	cmd.Flags().String("profile", "", "Bundle member Profile, bare or scope-qualified (global:bugs), to attach the miss to; all members when omitted")
+	cmd.Flags().String("path", "", "Path of the missed bug, relative to and inside the repository")
 	cmd.Flags().Int("line", 0, "Line of the missed bug")
 	cmd.Flags().String("source", "", "Who found the miss: codex-pr, human, incident, or other")
 	cmd.Flags().String("description", "", "What the Review missed")
@@ -113,9 +113,13 @@ func parseMissAddRequest(cmd *cobra.Command) (engine.MissRequest, error) {
 	if cmd.Flags().Changed("line") && line < 1 {
 		return engine.MissRequest{}, fmt.Errorf("--line must be at least 1")
 	}
-	path, description := stringFlag(cmd, "path"), stringFlag(cmd, "description")
-	if strings.TrimSpace(path) == "" || strings.TrimSpace(description) == "" {
-		return engine.MissRequest{}, fmt.Errorf("miss add requires a non-empty --path and --description")
+	path, err := model.ParseMissPath(stringFlag(cmd, "path"))
+	if err != nil {
+		return engine.MissRequest{}, err
+	}
+	description := stringFlag(cmd, "description")
+	if strings.TrimSpace(description) == "" {
+		return engine.MissRequest{}, fmt.Errorf("miss add requires a non-empty --description")
 	}
 	recordedBy, err := actorFlag(cmd, "recorded-by")
 	if err != nil {
