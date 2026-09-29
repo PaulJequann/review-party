@@ -22,9 +22,11 @@ const (
 	missReviewSecurity model.ReviewID       = "rp_1723200000001_0123456789abcdef"
 	missReviewOther    model.ReviewID       = "rp_1723200000002_0123456789abcdef"
 	missReviewRunning  model.ReviewID       = "rp_1723200000003_0123456789abcdef"
+	missReviewRepoBugs model.ReviewID       = "rp_1723200000004_0123456789abcdef"
 	missBundle         model.ReviewBundleID = "rb_1723200000000_0123456789abcdef"
 	missMixedBundle    model.ReviewBundleID = "rb_1723200000001_0123456789abcdef"
 	missUnrunBundle    model.ReviewBundleID = "rb_1723200000002_0123456789abcdef"
+	missScopedBundle   model.ReviewBundleID = "rb_1723200000003_0123456789abcdef"
 )
 
 type missLedger struct {
@@ -58,6 +60,7 @@ func newMissLedger(t *testing.T) missLedger {
 		missReview(missReviewSecurity, "security", fixture.repository, model.LifecycleCompleted),
 		missReview(missReviewOther, "bugs", fixture.other, model.LifecycleCompleted),
 		missReview(missReviewRunning, "style", fixture.repository, model.LifecycleIncomplete),
+		missReview(missReviewRepoBugs, "bugs", fixture.repository, model.LifecycleCompleted),
 	} {
 		if err := ledger.Save(record); err != nil {
 			t.Fatal(err)
@@ -67,6 +70,7 @@ func newMissLedger(t *testing.T) missLedger {
 		missReviewBundle(missBundle, missReviewBugs, missReviewSecurity),
 		missReviewBundle(missMixedBundle, missReviewBugs, missReviewRunning),
 		missReviewBundle(missUnrunBundle, missReviewBugs, ""),
+		missScopedReviewBundle(),
 	} {
 		if err := ledger.CreateReviewBundle(bundle); err != nil {
 			t.Fatal(err)
@@ -103,6 +107,12 @@ func missReviewBundle(id model.ReviewBundleID, reviews ...model.ReviewID) model.
 		ID: id, Lifecycle: model.LifecycleCompleted, Members: members,
 		Warnings: []model.BundleWarning{}, Deduplicated: []model.SkippedDuplicate{},
 	}
+}
+
+func missScopedReviewBundle() model.ReviewBundle {
+	bundle := missReviewBundle(missScopedBundle, missReviewBugs)
+	bundle.Members = append(bundle.Members, model.BundleMember{Scope: "repository", Profile: "bugs", Lifecycle: model.LifecycleCompleted, ReviewID: missReviewRepoBugs})
+	return bundle
 }
 
 func (fixture missLedger) run(arguments ...string) (int, string, string) {
@@ -205,9 +215,9 @@ func TestMissAddOnUnusableTargetWritesNothing(t *testing.T) {
 	fixture := newMissLedger(t)
 	for target, message := range map[[2]string]string{
 		{string(missReviewRunning), ""}: "is incomplete; misses attach only to completed reviews",
-		{string(missMixedBundle), ""}:   "cannot take a miss: style (" + string(missReviewRunning) + " incomplete)",
-		{string(missUnrunBundle), ""}:   "cannot take a miss: perf (no review)",
-		{string(missBundle), "perf"}:    `no member with profile "perf"; members: bugs, security`,
+		{string(missMixedBundle), ""}:   "cannot take a miss: global:style (" + string(missReviewRunning) + " incomplete)",
+		{string(missUnrunBundle), ""}:   "cannot take a miss: global:perf (no review)",
+		{string(missBundle), "perf"}:    `no member with profile "perf"; members: global:bugs, global:security`,
 	} {
 		exit, _, stderr := fixture.run("miss", "add", "--review", target[0], "--profile", target[1], "--path", "a.go", "--source", "human", "--description", "d", "--recorded-by", "pj")
 		if exit != 1 || !strings.Contains(stderr, message) {
@@ -216,6 +226,18 @@ func TestMissAddOnUnusableTargetWritesNothing(t *testing.T) {
 	}
 	requireMissReviews(t, fixture.list(t))
 	requireMissReviews(t, fixture.add(t, "--review", string(missMixedBundle), "--profile", "bugs"), missReviewBugs)
+}
+
+func TestMissAddOnBundleProfileSelectsOneScope(t *testing.T) {
+	fixture := newMissLedger(t)
+	exit, _, stderr := fixture.run("miss", "add", "--review", string(missScopedBundle), "--profile", "bugs", "--path", "a.go", "--source", "human", "--description", "d", "--recorded-by", "pj")
+	if want := `profile "bugs" matches more than one member; choose one of: global:bugs, repository:bugs`; exit != 1 || !strings.Contains(stderr, want) {
+		t.Fatalf("ambiguous add exit = %d, stderr = %q, want %q", exit, stderr, want)
+	}
+	requireMissReviews(t, fixture.list(t))
+	requireMissReviews(t, fixture.add(t, "--review", string(missScopedBundle), "--profile", "repository:bugs"), missReviewRepoBugs)
+	requireMissReviews(t, fixture.add(t, "--review", string(missScopedBundle), "--profile", "global:bugs"), missReviewBugs)
+	requireMissReviews(t, fixture.add(t, "--review", string(missBundle), "--profile", "global:security"), missReviewSecurity)
 }
 
 func TestMissListFiltersByRepositoryAndProfile(t *testing.T) {

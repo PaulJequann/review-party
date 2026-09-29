@@ -262,6 +262,9 @@ review-party miss remove ms_... --reason "intended behavior"
 attaches only to a completed Review. A Review Bundle id attaches one miss to
 every member Review, or only to the member named by `--profile`; the whole
 request fails without writes when a targeted member has no completed Review.
+`--profile` takes a bare Profile name or the `global:bugs` form the Bundle's
+report prints. A bare name that matches more than one member, such as
+`global:bugs` and `repository:bugs`, fails and lists the qualified choices.
 Each miss reads its repository, Subject, and Profile from the Review record
 rather than copying them. `--recorded-by` and `--removed-by` default to the OS
 username. Removal keeps the miss as a tombstone with its reason, remover, and

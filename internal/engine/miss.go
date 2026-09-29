@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"reviewparty/internal/configuration"
 	"reviewparty/internal/model"
 	"reviewparty/internal/store"
 )
@@ -151,18 +152,31 @@ func targetedBundleMembers(bundle model.ReviewBundle, profile string) ([]model.B
 	if profile == "" {
 		return bundle.Members, nil
 	}
+	scope, _ := configuration.ParseScopedReference(profile)
 	var matched []model.BundleMember
-	profiles := make([]string, 0, len(bundle.Members))
+	var labels, matchedLabels []string
 	for _, member := range bundle.Members {
-		profiles = append(profiles, member.Profile)
-		if member.Profile == profile {
+		labels = append(labels, memberLabel(member))
+		reference := member.Profile
+		if scope != "" {
+			reference = memberLabel(member)
+		}
+		if reference == profile {
 			matched = append(matched, member)
+			matchedLabels = append(matchedLabels, memberLabel(member))
 		}
 	}
-	if len(matched) == 0 {
-		return nil, fmt.Errorf("review bundle %q has no member with profile %q; members: %s", bundle.ID, profile, strings.Join(profiles, ", "))
+	switch len(matched) {
+	case 0:
+		return nil, fmt.Errorf("review bundle %q has no member with profile %q; members: %s", bundle.ID, profile, strings.Join(labels, ", "))
+	case 1:
+		return matched, nil
 	}
-	return matched, nil
+	return nil, fmt.Errorf("review bundle %q: profile %q matches more than one member; choose one of: %s", bundle.ID, profile, strings.Join(matchedLabels, ", "))
+}
+
+func memberLabel(member model.BundleMember) string {
+	return member.Scope + ":" + member.Profile
 }
 
 func (conductor *Conductor) completedMemberReviews(bundle model.ReviewBundleID, members []model.BundleMember) ([]model.ReviewID, error) {
@@ -170,7 +184,7 @@ func (conductor *Conductor) completedMemberReviews(bundle model.ReviewBundleID, 
 	var unusable []string
 	for _, member := range members {
 		if member.ReviewID == "" {
-			unusable = append(unusable, member.Profile+" (no review)")
+			unusable = append(unusable, memberLabel(member)+" (no review)")
 			continue
 		}
 		lifecycle, err := conductor.reviewLifecycle(member.ReviewID)
@@ -178,7 +192,7 @@ func (conductor *Conductor) completedMemberReviews(bundle model.ReviewBundleID, 
 			return nil, err
 		}
 		if lifecycle != model.LifecycleCompleted {
-			unusable = append(unusable, fmt.Sprintf("%s (%s %s)", member.Profile, member.ReviewID, lifecycle))
+			unusable = append(unusable, fmt.Sprintf("%s (%s %s)", memberLabel(member), member.ReviewID, lifecycle))
 			continue
 		}
 		reviews = append(reviews, member.ReviewID)
