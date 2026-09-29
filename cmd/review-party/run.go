@@ -45,7 +45,7 @@ the saved selection for this one run and never changes configuration.`,
 				repository: stringFlag(cmd, "repo"), subject: subjectReference,
 				format: stringFlag(cmd, "format"), configuration: stringFlag(cmd, "config"), full: boolFlag(cmd, "full"),
 			}
-			renderer, sink := newRunProgressSink(options.format, streams.errors)
+			renderer, sink := newRunProgressSink(boolFlag(cmd, "quiet"), streams.errors, options.configuration)
 			defer renderer.stop()
 			options.progress = sink
 			return commandResult(executeRun(cmd.Context(), options, streams.output, streams.errors))
@@ -55,6 +55,7 @@ the saved selection for this one run and never changes configuration.`,
 	cmd.Flags().String("party", "", "Run exactly this Party instead of the saved selection; prefix global: or repository: for an exact scope")
 	cmd.RegisterFlagCompletionFunc("profile", completeProfileNames) //nolint:errcheck // Cobra completion registration is best-effort
 	cmd.RegisterFlagCompletionFunc("party", completePartyNames)     //nolint:errcheck // Cobra completion registration is best-effort
+	cmd.Flags().Bool("quiet", false, "Suppress the stderr lifecycle heartbeat")
 	cmd.MarkFlagsMutuallyExclusive("profile", "party")
 	addReviewFlags(cmd)
 	return cmd
