@@ -3,8 +3,12 @@ package configurationhub
 import (
 	"bytes"
 	"context"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	tea "charm.land/bubbletea/v2"
 
 	"reviewparty/internal/configuration"
 	"reviewparty/internal/discovery"
@@ -41,7 +45,7 @@ func TestAccessibleProfileSelectsCachedModelAndReportedEffort(t *testing.T) {
 			ID: "reported-model", ReasoningEfforts: []string{"low", "high"},
 		}}}},
 	})
-	input := "1\nselected\n1\n1\n2\n8m\n2\nReview carefully.\nn\ny\n"
+	input := "1\nselected\n1\n2\n2\n8m\n2\nReview carefully.\nn\ny\n"
 	var output bytes.Buffer
 	editor := editor{manager: manager, RunOptions: RunOptions{
 		Context: context.Background(), Input: newLineInput(input), Output: &output, Accessible: true, Discovery: service,
@@ -62,6 +66,63 @@ func TestAccessibleProfileSelectsCachedModelAndReportedEffort(t *testing.T) {
 		if gotFields[index] != wantFields[index] {
 			t.Fatalf("published execution fields = %#v", profile)
 		}
+	}
+}
+
+// secondDiscoveryAdapter reports no models until its second observation, so
+// only a manual refresh can surface them.
+type secondDiscoveryAdapter struct {
+	calls  *atomic.Int32
+	models []discovery.Model
+}
+
+func (secondDiscoveryAdapter) Reviewer() string { return "codex" }
+func (adapter secondDiscoveryAdapter) Discover(context.Context) discovery.Observation {
+	observation := discovery.Observation{
+		Status: discovery.StatusSupported, Authentication: discovery.Authentication{Status: discovery.AuthAvailable},
+	}
+	if adapter.calls.Add(1) >= 2 {
+		observation.Models = adapter.models
+	}
+	return observation
+}
+
+func TestAccessibleProfileRefreshSelectsFreshModelAndEffort(t *testing.T) {
+	manager := configuration.NewManager(configuration.Options{
+		GlobalRoot: t.TempDir(), Reviewers: []string{"codex"}, ValidateName: func(string) error { return nil },
+	})
+	service := discovery.NewService(discovery.Options{
+		Adapters: []discovery.Adapter{secondDiscoveryAdapter{calls: &atomic.Int32{}, models: []discovery.Model{{
+			ID: "fresh-model", ReasoningEfforts: []string{"medium", "max"},
+		}}}},
+		Cache: profileChoiceCache{result: discovery.Result{Reviewer: "codex", Status: discovery.StatusSupported, ObservedAt: time.Now(), Models: []discovery.Model{{
+			ID: "cached-model", ReasoningEfforts: []string{"low", "high"},
+		}}}},
+	})
+	// Bounded context: a script misaligned with the prompts aborts instead of hanging.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	input := strings.Join([]string{
+		"1", "refreshed", "1", // scope, name, reviewer
+		"1",  // model: refresh (cached-model only before refresh)
+		"3",  // model after refresh: fresh-model
+		"2",  // effort reported by fresh-model: max
+		"8m", // deadline
+		"2", "Review carefully.", "n", "y",
+	}, "\n")
+	var output bytes.Buffer
+	editor := editor{manager: manager, RunOptions: RunOptions{
+		Context: ctx, Input: newHoldingInput(input), Output: &output, Accessible: true, Discovery: service,
+	}}
+	if err := editor.createProfile(); err != nil {
+		t.Fatalf("create profile: %v\n%s", err, output.String())
+	}
+	profile, found, err := manager.LoadProfile(configuration.ScopeGlobal, "", "refreshed")
+	if err != nil || !found {
+		t.Fatalf("load profile: found=%v err=%v", found, err)
+	}
+	if profile.Model != "fresh-model" || profile.ReasoningEffort != "max" {
+		t.Fatalf("published model/effort = %q/%q, want fresh-model/max\n%s", profile.Model, profile.ReasoningEffort, output.String())
 	}
 }
 
@@ -126,22 +187,133 @@ func TestProfileChoiceRefreshFromAbandonedGenerationIsIgnored(t *testing.T) {
 	}
 }
 
-func TestProfileModelOptionsExposeProvenanceAndManualEntry(t *testing.T) {
-	options := profileModelOptions([]discovery.ModelChoice{{
-		Model:   discovery.Model{ID: "luna", DisplayName: "Luna"},
-		Sources: []discovery.ChoiceSource{discovery.ChoiceSourceCached, discovery.ChoiceSourceConfigured},
+func TestProfileModelFormShowsModelsDiscoveredAfterOpening(t *testing.T) {
+	model := hubModelAtSize(t, 120, 40)
+	state := &model.session.profile
+	state.draft = configuration.ProfileDraft{Name: "bugs", Reviewer: "codex", Model: "old-model"}
+	openSteppedForm(t, &model, model.openProfileModelForm)
+
+	updated, command := model.Update(profileChoicesRefreshedMsg{reviewer: "codex", result: discovery.Result{
+		Reviewer: "codex", Status: discovery.StatusSupported,
+		Authentication: discovery.Authentication{Status: discovery.AuthAvailable},
+		Models:         []discovery.Model{{ID: "discovered-model"}},
 	}})
-	if len(options) != 2 {
-		t.Fatalf("model options = %#v", options)
+	model = pumpHubMessages(t, requireHubModel(t, updated), command)
+	view := model.form.View()
+	if !strings.Contains(view, "discovered-model") {
+		t.Fatalf("model form did not show the discovered model:\n%s", view)
 	}
-	values := []string{options[0].Value, options[1].Value}
-	wantValues := []string{"luna", manualProfileChoice}
-	for index := range wantValues {
-		if values[index] != wantValues[index] {
-			t.Fatalf("model options = %#v", options)
+	if !strings.Contains(view, "Reviewer codex: supported") {
+		t.Fatalf("model form did not show the discovery diagnostic:\n%s", view)
+	}
+}
+
+// pumpHubMessages runs follow-up commands until none remain. Spinner ticks
+// settle on their own once options finish loading, so nothing is filtered;
+// an unsettled queue or a hung command fails instead of being dropped.
+func pumpHubMessages(t *testing.T, model Model, command tea.Cmd) Model {
+	t.Helper()
+	pending := []tea.Cmd{command}
+	for steps := 0; len(pending) > 0; steps++ {
+		if steps == 100 {
+			t.Fatal("Hub commands did not settle within 100 steps")
 		}
+		next := pending[0]
+		pending = pending[1:]
+		if next == nil {
+			continue
+		}
+		message := runHubTestCommand(t, next)
+		if batch, ok := message.(tea.BatchMsg); ok {
+			pending = append(pending, batch...)
+			continue
+		}
+		if message == nil {
+			continue
+		}
+		updated, follow := model.Update(message)
+		model = requireHubModel(t, updated)
+		pending = append(pending, follow)
 	}
-	if options[0].Key != "Luna (luna) [cached, configured]" {
-		t.Fatalf("model label = %q", options[0].Key)
+	return model
+}
+
+func runHubTestCommand(t *testing.T, command tea.Cmd) tea.Msg {
+	t.Helper()
+	result := make(chan tea.Msg, 1)
+	go func() { result <- command() }()
+	select {
+	case message := <-result:
+		return message
+	case <-time.After(5 * time.Second):
+		t.Fatal("Hub command did not return within 5s")
+		return nil
+	}
+}
+
+func TestProfileModelOptionsOfferRefreshFirstAndMarkCurrent(t *testing.T) {
+	choices := []discovery.ModelChoice{
+		{Model: discovery.Model{ID: "luna"}},
+		{Model: discovery.Model{ID: "sol"}},
+	}
+	for _, test := range []struct {
+		name    string
+		current string
+		keys    []string
+		values  []string
+	}{
+		{"current listed", "sol",
+			[]string{"↻ Refresh available models", "luna", "sol [current]", "Enter a model ID manually"},
+			[]string{refreshProfileChoice, "luna", "sol", manualProfileChoice}},
+		{"current missing", "retired",
+			[]string{"↻ Refresh available models", "luna", "sol", "retired [current]", "Enter a model ID manually"},
+			[]string{refreshProfileChoice, "luna", "sol", "retired", manualProfileChoice}},
+		{"no current", "",
+			[]string{"↻ Refresh available models", "luna", "sol", "Enter a model ID manually"},
+			[]string{refreshProfileChoice, "luna", "sol", manualProfileChoice}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			options := profileModelOptions(choices, test.current)
+			if len(options) != len(test.keys) {
+				t.Fatalf("model options = %#v", options)
+			}
+			for index, option := range options {
+				if option.Key != test.keys[index] || option.Value != test.values[index] {
+					t.Fatalf("option %d = %q/%q, want %q/%q", index, option.Key, option.Value, test.keys[index], test.values[index])
+				}
+			}
+		})
+	}
+}
+
+func TestProfileModelRefreshReopensDiscovery(t *testing.T) {
+	service := discovery.NewService(discovery.Options{Adapters: []discovery.Adapter{
+		profileChoiceAdapter{reviewer: "codex", models: []discovery.Model{{ID: "fresh-model"}}},
+	}})
+	manager := configuration.NewManager(configuration.Options{GlobalRoot: t.TempDir(), Reviewers: []string{"codex"}})
+	runtime := newHubRuntime(RunOptions{Context: context.Background(), Discovery: service}, manager)
+	defer runtime.closeProfileChoices()
+	model := hubModelAtSize(t, 120, 40)
+	model.runtime = runtime
+	state := &model.session.profile
+	state.draft = configuration.ProfileDraft{Name: "bugs", Reviewer: "codex", Model: "old-model"}
+	openSteppedForm(t, &model, model.openProfileModelForm)
+	state = &model.session.profile
+	state.selected = refreshProfileChoice
+
+	updated, command := model.completeProfileModelForm()
+	model = requireHubModel(t, updated)
+	if model.formKind != formProfileChoicesLoading {
+		t.Fatalf("form kind after refresh = %q", model.formKind)
+	}
+	if model.session.profile.draft.Model != "old-model" {
+		t.Fatalf("refresh changed the draft model to %q", model.session.profile.draft.Model)
+	}
+	model = pumpHubMessages(t, model, command)
+	if model.formKind != formProfileModel {
+		t.Fatalf("form kind after discovery = %q", model.formKind)
+	}
+	if view := model.form.View(); !strings.Contains(view, "fresh-model") || !strings.Contains(view, "old-model [current]") {
+		t.Fatalf("refreshed model form:\n%s", view)
 	}
 }

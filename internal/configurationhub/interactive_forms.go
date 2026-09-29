@@ -68,7 +68,10 @@ type profileFormState struct {
 	diagnostic  string
 }
 
-const manualProfileChoice = "__manual__"
+const (
+	manualProfileChoice  = "__manual__"
+	refreshProfileChoice = "__refresh__"
+)
 
 func newFormSession(drafts draftSet) *formSession {
 	return &formSession{

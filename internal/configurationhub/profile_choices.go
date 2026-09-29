@@ -27,10 +27,12 @@ func (model Model) updateProfileChoiceMessage(message tea.Msg) (tea.Model, tea.C
 func (model *Model) openProfileModelForm() tea.Cmd {
 	state := &model.session.profile
 	state.selected = state.draft.Model
+	// huh hashes bindings with hashstructure, which ignores unexported
+	// fields, so bind the fields themselves rather than the state struct.
 	return model.openForm(formProfileModel, []huh.Field{
-		huh.NewNote().Title("Model availability").DescriptionFunc(func() string { return profileChoiceDiagnostic(state) }, state),
-		huh.NewSelect[string]().Title("Model").Description("Press / to filter. Cached choices are not proof of current access.").
-			OptionsFunc(func() []huh.Option[string] { return profileModelOptions(state.choices) }, state).
+		huh.NewNote().Title("Model availability").DescriptionFunc(func() string { return profileChoiceDiagnostic(state) }, &state.diagnostic),
+		huh.NewSelect[string]().Title("Model").Description("Press / to filter.").
+			OptionsFunc(func() []huh.Option[string] { return profileModelOptions(state.choices, state.draft.Model) }, &state.choices).
 			Value(&state.selected).Filtering(true).WithHeight(7),
 	})
 }
@@ -71,25 +73,25 @@ func (model *Model) profileIdentityFields(state *profileFormState) []huh.Field {
 	return []huh.Field{name.input, huh.NewSelect[string]().Title(reviewerSpec.title).Options(options...).Accessor(reviewer)}
 }
 
-func profileModelOptions(choices []discovery.ModelChoice) []huh.Option[string] {
-	options := make([]huh.Option[string], 0, len(choices)+1)
+// profileModelOptions lists refresh first, then every choice, marking the
+// Profile's current model. A current model absent from the choices is still
+// listed so keeping it never requires manual entry.
+func profileModelOptions(choices []discovery.ModelChoice, current string) []huh.Option[string] {
+	options := make([]huh.Option[string], 0, len(choices)+3)
+	options = append(options, huh.NewOption("↻ Refresh available models", refreshProfileChoice))
+	listed := false
 	for _, choice := range choices {
 		label := choice.Model.ID
-		if choice.Model.DisplayName != "" && choice.Model.DisplayName != choice.Model.ID {
-			label = choice.Model.DisplayName + " (" + choice.Model.ID + ")"
+		if choice.Model.ID == current {
+			label += " [current]"
+			listed = true
 		}
-		label += " [" + choiceSources(choice.Sources) + "]"
 		options = append(options, huh.NewOption(label, choice.Model.ID))
 	}
-	return append(options, huh.NewOption("Enter a model ID manually", manualProfileChoice))
-}
-
-func choiceSources(sources []discovery.ChoiceSource) string {
-	values := make([]string, len(sources))
-	for index, source := range sources {
-		values[index] = string(source)
+	if !listed && current != "" {
+		options = append(options, huh.NewOption(current+" [current]", current))
 	}
-	return strings.Join(values, ", ")
+	return append(options, huh.NewOption("Enter a model ID manually", manualProfileChoice))
 }
 
 func profileChoiceDiagnostic(state *profileFormState) string {
@@ -174,6 +176,9 @@ func (model *Model) completeProfileFieldsForm() (tea.Model, tea.Cmd) {
 
 func (model *Model) completeProfileModelForm() (tea.Model, tea.Cmd) {
 	state := &model.session.profile
+	if state.selected == refreshProfileChoice {
+		return model.completeProfileFieldsForm()
+	}
 	if state.selected == manualProfileChoice {
 		return model.withForm(model.openProfileManualModelForm())
 	}
@@ -229,6 +234,11 @@ func (model *Model) receiveProfileChoicesRefreshed(message profileChoicesRefresh
 	}
 	state.choices = discovery.MergeChoices(state.choices, message.result.Models, discovery.ChoiceSourceDiscovered)
 	state.diagnostic = profileDiscoveryDiagnostic(message.result)
+	if model.formKind == formProfileModel {
+		// Deliver the refresh to the open form so its bound options and
+		// diagnostic re-evaluate without waiting for the next keypress.
+		return model.updateForm(message)
+	}
 	return *model, nil
 }
 
@@ -254,7 +264,8 @@ func (e *editor) editProfileFieldsWithChoices(draft *configuration.ProfileDraft)
 		return err
 	}
 	defer closeSession()
-	if err := e.editAccessibleModel(draft, choices); err != nil {
+	choices, err = e.editAccessibleModel(draft, choices)
+	if err != nil {
 		return err
 	}
 	if err := e.editAccessibleEffort(draft, choices); err != nil {
@@ -300,12 +311,16 @@ func (e *editor) editAccessibleProfileIdentity(draft *configuration.ProfileDraft
 	return nil
 }
 
-func (e *editor) accessibleProfileChoices(reviewer string) ([]discovery.ModelChoice, func(), error) {
+func (e *editor) openAccessibleChoices(reviewer string) discovery.ChoiceSession {
 	sources, err := e.manager.ProfileModelChoices(e.Repository, reviewer)
 	if err != nil {
 		sources = configuration.ProfileModelChoiceSources{}
 	}
-	session := e.Discovery.Open(e.Context, discovery.ChoiceRequest{Reviewer: reviewer, Configured: sources.Configured, Packaged: sources.Packaged})
+	return e.Discovery.Open(e.Context, discovery.ChoiceRequest{Reviewer: reviewer, Configured: sources.Configured, Packaged: sources.Packaged})
+}
+
+func (e *editor) accessibleProfileChoices(reviewer string) ([]discovery.ModelChoice, func(), error) {
+	session := e.openAccessibleChoices(reviewer)
 	choices := session.Choices
 	if len(choices) == 0 {
 		// No immediate choices: wait for the bounded refresh instead of
@@ -328,26 +343,48 @@ func (e *editor) accessibleProfileChoices(reviewer string) ([]discovery.ModelCho
 	return choices, session.Close, writeErr
 }
 
-func (e *editor) editAccessibleModel(draft *configuration.ProfileDraft, choices []discovery.ModelChoice) error {
+// refreshAccessibleChoices waits for one live observation, which the
+// discovery deadline bounds, and merges it into fresh immediate choices.
+func (e *editor) refreshAccessibleChoices(reviewer string) ([]discovery.ModelChoice, error) {
+	session := e.openAccessibleChoices(reviewer)
+	defer session.Close()
+	choices := session.Choices
+	result, ok := <-session.Refresh
+	if !ok {
+		return choices, nil
+	}
+	_, err := fmt.Fprintln(e.Output, profileDiscoveryDiagnostic(result))
+	return discovery.MergeChoices(choices, result.Models, discovery.ChoiceSourceDiscovered), err
+}
+
+// editAccessibleModel returns the choices in effect after any manual
+// refresh so effort prompts read the same observation.
+func (e *editor) editAccessibleModel(draft *configuration.ProfileDraft, choices []discovery.ModelChoice) ([]discovery.ModelChoice, error) {
 	selected := draft.Model
 	if selected == "" && len(choices) > 0 {
 		selected = choices[0].Model.ID
 	}
-	if err := e.form(huh.NewSelect[string]().Title("Model").Options(profileModelOptions(choices)...).Value(&selected)); err != nil {
-		return err
-	}
-	if selected == manualProfileChoice {
-		entered := draft.Model
-		if err := e.form(huh.NewInput().Title("Model ID").Value(&entered)); err != nil {
-			return err
-		}
-		model, _ := profileFieldSpecFor("model")
-		model.set(draft, entered)
-		return nil
+	if err := e.form(huh.NewSelect[string]().Title("Model").Options(profileModelOptions(choices, draft.Model)...).Value(&selected)); err != nil {
+		return choices, err
 	}
 	model, _ := profileFieldSpecFor("model")
-	model.set(draft, selected)
-	return nil
+	switch selected {
+	case refreshProfileChoice:
+		refreshed, err := e.refreshAccessibleChoices(draft.Reviewer)
+		if err != nil {
+			return refreshed, err
+		}
+		return e.editAccessibleModel(draft, refreshed)
+	case manualProfileChoice:
+		entered := draft.Model
+		if err := e.form(huh.NewInput().Title("Model ID").Value(&entered)); err != nil {
+			return choices, err
+		}
+		model.set(draft, entered)
+	default:
+		model.set(draft, selected)
+	}
+	return choices, nil
 }
 
 func (e *editor) editAccessibleEffort(draft *configuration.ProfileDraft, choices []discovery.ModelChoice) error {

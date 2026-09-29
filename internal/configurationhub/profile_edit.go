@@ -178,7 +178,8 @@ func (e *editor) reviseEditChoice(draft *configuration.ProfileDraft, field strin
 	}
 	defer closeSession()
 	if field == "model" {
-		return e.editAccessibleModel(draft, choices)
+		_, err := e.editAccessibleModel(draft, choices)
+		return err
 	}
 	return e.editAccessibleEffort(draft, choices)
 }
