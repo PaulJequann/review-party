@@ -154,15 +154,38 @@ func TestHistoryRejectsScopePrefixedProfileFilter(t *testing.T) {
 
 func TestConfigProfileMutationsAcceptScopePrefixMatchingScope(t *testing.T) {
 	isolatedProfilesRepository(t)
-	createGlobalBugsProfile(t)
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	requireConfigSuccess(t, []string{
+		"config", "profile", "create", "bugs", "--template", "bugs", "--reviewer", "grok",
+		"--model", "grok-4.5", "--effort", "high", "--deadline", "1m", "--yes", "--format", "json",
+	})
 	edit := runConfigCommand(t, []string{"config", "profile", "edit", "global:bugs", "--scope", "global", "--model", "grok-4.6", "--yes", "--format", "json"})
 	requireCommandSuccess(t, edit)
 	if !strings.Contains(edit.stdout, "profiles.bugs.model") {
 		t.Fatalf("edit output = %q", edit.stdout)
 	}
 	update := runConfigCommand(t, []string{"config", "profile", "update-template", "global:bugs", "--scope", "global", "--yes", "--format", "json"})
-	if strings.Contains(update.stdout+update.stderr, "must match") {
-		t.Fatalf("update-template rejected the prefix: %q %q", update.stdout, update.stderr)
+	if !strings.Contains(update.stdout, "already uses Template") {
+		t.Fatalf("update-template output = %q", update.stdout)
+	}
+}
+
+func TestConfigProfileMutationsLetScopePrefixChooseScopeWhenFlagOmitted(t *testing.T) {
+	repository := isolatedProfilesRepository(t)
+	createGlobalBugsProfile(t)
+	writeRepositoryBugsProfile(t, repository)
+	edit := runConfigCommand(t, []string{"config", "profile", "edit", "repository:bugs", "--model", "grok-4.6", "--yes", "--format", "json"})
+	requireCommandSuccess(t, edit)
+	metadata, err := os.ReadFile(filepath.Join(repository, ".reviewparty", "profiles", "bugs", "profile.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(metadata), "grok-4.6") {
+		t.Fatalf("repository Profile metadata = %s", metadata)
+	}
+	update := runConfigCommand(t, []string{"config", "profile", "update-template", "repository:bugs", "--yes", "--format", "json"})
+	if strings.Contains(update.stdout+update.stderr, "--scope") {
+		t.Fatalf("update-template named a flag the caller never typed: %q %q", update.stdout, update.stderr)
 	}
 }
 
