@@ -104,6 +104,9 @@ func resumeStateBackup(directory string) (StateBackup, error) {
 }
 
 func recoverableIncompatibility(err error) bool {
+	if errors.Is(err, errLedgerUpgradesInPlace) {
+		return false
+	}
 	return errors.Is(err, ErrReviewRecordStateRequiresPreparation) ||
 		strings.Contains(err.Error(), "newer than supported schema") ||
 		strings.Contains(err.Error(), "is corrupt")
