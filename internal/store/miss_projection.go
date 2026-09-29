@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"reviewparty/internal/model"
-	"strings"
 	"time"
 )
 
@@ -25,7 +24,7 @@ type MissRecord struct {
 type MissQuery struct {
 	Repository     string
 	Profile        string
-	ReviewID       model.ReviewID
+	ReviewIDs      []model.ReviewID
 	IncludeRemoved bool
 }
 
@@ -98,7 +97,10 @@ func insertMiss(tx *sql.Tx, record MissRecord) (model.Miss, error) {
 }
 
 func (p missProjection) list(query MissQuery) (misses []model.Miss, returnErr error) {
-	statement, arguments := buildMissListQuery(query)
+	statement, arguments, err := buildMissListQuery(query)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := p.db.Query(statement, arguments...)
 	if err != nil {
 		return nil, err
@@ -115,27 +117,18 @@ func (p missProjection) list(query MissQuery) (misses []model.Miss, returnErr er
 	return misses, rows.Err()
 }
 
-func buildMissListQuery(query MissQuery) (string, []any) {
-	var predicates []string
-	var arguments []any
-	for _, filter := range []queryFilter{
+func buildMissListQuery(query MissQuery) (string, []any, error) {
+	reviews, err := reviewIDsFilter("m.review_id", query.ReviewIDs)
+	if err != nil {
+		return "", nil, err
+	}
+	where, arguments := whereClause([]queryFilter{
 		{"json_extract(r.subject,'$.repository') = ?", query.Repository, query.Repository != ""},
 		{"json_extract(r.profile_revision,'$.name') = ?", query.Profile, query.Profile != ""},
-		{"m.review_id = ?", query.ReviewID, query.ReviewID != ""},
-	} {
-		if filter.enabled {
-			predicates = append(predicates, filter.predicate)
-			arguments = append(arguments, filter.value)
-		}
-	}
-	if !query.IncludeRemoved {
-		predicates = append(predicates, "m.removed_at IS NULL")
-	}
-	statement := missSelect
-	if len(predicates) > 0 {
-		statement += " WHERE " + strings.Join(predicates, " AND ")
-	}
-	return statement + " ORDER BY m.recorded_at,m.rowid", arguments
+		reviews,
+		{"m.removed_at IS ?", nil, !query.IncludeRemoved},
+	})
+	return missSelect + where + " ORDER BY m.recorded_at,m.rowid", arguments, nil
 }
 
 func (p missProjection) remove(ids []model.MissID, removal model.MissRemoval) (outcomes []MissRemovalOutcome, returnErr error) {

@@ -59,7 +59,7 @@ func executeInspect(ctx context.Context, options inspectOptions, stdout, stderr 
 		report, err = inspectRecordReport(ctx, conductor, options)
 	}
 	if err == nil {
-		err = report.attachMisses(ctx, conductor)
+		err = report.annotate(ctx, conductor)
 	}
 	if err != nil {
 		return printFailure(stderr, err)

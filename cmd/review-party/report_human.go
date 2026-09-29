@@ -12,11 +12,14 @@ func printHumanReport(output io.Writer, report reviewReport, configuration strin
 	return writeCommandOutput(output, func(output *commandOutput) {
 		if report.Bundle != nil {
 			writeHumanBundle(output, *report.Bundle, report.Reviews, configuration)
-			return
+		} else {
+			for _, entry := range report.Reviews {
+				writeHumanEntry(output, "review "+string(entry.ID), entry)
+				writeInspectHint(output, string(entry.ID), configuration)
+			}
 		}
-		for _, entry := range report.Reviews {
-			writeHumanEntry(output, "review "+string(entry.ID), entry)
-			writeInspectHint(output, string(entry.ID), configuration)
+		if report.Feedback != "" {
+			output.write("feedback: %s\n", report.Feedback)
 		}
 	})
 }
@@ -51,12 +54,16 @@ func writeHumanMisses(output *commandOutput, misses []model.Miss) {
 	}
 }
 
-func writeHumanFinding(output *commandOutput, finding model.Finding) {
+func writeHumanFinding(output *commandOutput, finding reportFinding) {
 	const indent = "     "
 	output.write("  %d. %s · %s · %s\n", finding.Ordinal, finding.Severity, finding.Category, finding.Location)
-	for _, field := range []struct{ label, value string }{
+	fields := []struct{ label, value string }{
 		{"", finding.Failure}, {"evidence: ", finding.Evidence}, {"fix: ", finding.Fix}, {"test: ", finding.Test},
-	} {
+	}
+	if finding.Verdict != nil {
+		fields = append(fields, struct{ label, value string }{string(finding.Verdict.Value) + ": ", finding.Verdict.Reason})
+	}
+	for _, field := range fields {
 		if field.value != "" {
 			output.write("%s%s%s\n", indent, field.label, strings.ReplaceAll(strings.TrimRight(field.value, "\n"), "\n", "\n"+indent))
 		}
