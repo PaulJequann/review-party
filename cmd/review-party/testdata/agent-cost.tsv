@@ -1,0 +1,15 @@
+# est_tokens is an estimate: ceil((in_bytes+out_bytes)/4)
+surface	exit	in_bytes	out_bytes	est_tokens
+report.inspect.human.findings-0	0	69	276	87
+report.inspect.json.findings-0	0	68	708	194
+report.inspect.human.findings-3	0	69	969	260
+report.inspect.json.findings-3	0	68	1878	487
+report.inspect.human.findings-8	0	69	2119	547
+report.inspect.json.findings-8	0	68	3813	971
+report.wait.human.findings-3	0	66	969	259
+report.wait.json.findings-3	0	65	1878	486
+report.inspect.human.bundle-3	0	54	1863	480
+report.inspect.json.bundle-3	0	68	4035	1026
+help.root	0	19	1573	398
+error.inspect.missing-review	1	54	68	31
+error.inspect.no-argument	2	20	43	16
