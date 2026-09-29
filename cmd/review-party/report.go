@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 
@@ -41,7 +42,10 @@ type reviewEntry struct {
 	Subject         *subjectSummary           `json:"subject,omitempty"`
 	ReplaysReviewID *model.ReviewID           `json:"replays_review_id,omitempty"`
 	Record          *model.ReviewRecord       `json:"record,omitempty"`
+	ReadError       string                    `json:"read_error,omitempty"`
 }
+
+const lifecycleUnreadable model.Lifecycle = "unreadable"
 
 type profileSummary struct {
 	Name                   string `json:"name"`
@@ -74,23 +78,28 @@ func recordReport(record model.ReviewRecord, full bool) reviewReport {
 	return reviewReport{Reviews: []reviewEntry{recordEntry(record, full)}}
 }
 
-func bundleReport(ctx context.Context, loader reviewLoader, bundle model.ReviewBundle, full bool) (reviewReport, error) {
+func bundleReport(ctx context.Context, loader reviewLoader, bundle model.ReviewBundle, full bool) reviewReport {
 	entries := make([]reviewEntry, 0, len(bundle.Members))
 	for _, member := range bundle.Members {
-		if member.ReviewID == "" {
-			entries = append(entries, unstartedEntry(member))
-			continue
-		}
-		record, err := loader.Inspect(ctx, member.ReviewID)
-		if err != nil {
-			return reviewReport{}, fmt.Errorf("load bundle member %s:%s review %s: %w", member.Scope, member.Profile, member.ReviewID, err)
-		}
-		entry := recordEntry(record, full)
-		entry.Profile.Scope = member.Scope
-		entry.Origin = member.Origin
-		entries = append(entries, entry)
+		entries = append(entries, memberEntry(ctx, loader, member, full))
 	}
-	return reviewReport{Bundle: summarizeBundle(bundle), Reviews: entries}, nil
+	return reviewReport{Bundle: summarizeBundle(bundle), Reviews: entries}
+}
+
+func memberEntry(ctx context.Context, loader reviewLoader, member model.BundleMember, full bool) reviewEntry {
+	if member.ReviewID == "" {
+		return unstartedEntry(member)
+	}
+	record, err := loader.Inspect(ctx, member.ReviewID)
+	if err != nil {
+		entry := unstartedEntry(member)
+		entry.ID, entry.Lifecycle, entry.ReadError = member.ReviewID, lifecycleUnreadable, err.Error()
+		return entry
+	}
+	entry := recordEntry(record, full)
+	entry.Profile.Scope = member.Scope
+	entry.Origin = member.Origin
+	return entry
 }
 
 func printReport(output io.Writer, report reviewReport, options reportOptions) error {
@@ -116,6 +125,16 @@ func (report reviewReport) incomplete() bool {
 		}
 	}
 	return false
+}
+
+func (report reviewReport) readFailure() error {
+	var failures []error
+	for _, entry := range report.Reviews {
+		if entry.Lifecycle == lifecycleUnreadable {
+			failures = append(failures, fmt.Errorf("read bundle member %s:%s review %s: %s", entry.Profile.Scope, entry.Profile.Name, entry.ID, entry.ReadError))
+		}
+	}
+	return errors.Join(failures...)
 }
 
 func recordEntry(record model.ReviewRecord, full bool) reviewEntry {

@@ -93,6 +93,9 @@ func executeRunWithConductor(ctx context.Context, conductor runConductor, option
 	if err := printReport(streams.output, report, reportOptions{format: options.format, configuration: options.configuration}); err != nil {
 		return printFailure(streams.errors, err)
 	}
+	if err := report.readFailure(); err != nil {
+		return printFailure(streams.errors, err)
+	}
 	if report.incomplete() {
 		return usageExitCode
 	}
@@ -117,5 +120,5 @@ func runReport(ctx context.Context, conductor runConductor, options runOptions) 
 	if err != nil {
 		return reviewReport{}, err
 	}
-	return bundleReport(ctx, conductor, bundle, options.full)
+	return bundleReport(ctx, conductor, bundle, options.full), nil
 }

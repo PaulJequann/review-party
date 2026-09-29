@@ -81,3 +81,23 @@ func TestExecuteRunFailsWhenHumanOutputCannotBeWritten(t *testing.T) {
 		t.Fatalf("stderr = %q, want write diagnostic", stderr.String())
 	}
 }
+
+func TestExecuteRunBundlePrintsReadableMembersAndFailsOnAnUnreadableOne(t *testing.T) {
+	conductor := &fakeRunConductor{
+		records: fakeReviewLoader{"rp_bugs": largePatchRecord("rp_bugs", "bugs", 1)},
+		runBundle: model.ReviewBundle{ID: "rb_run", Lifecycle: model.LifecycleCompleted, Members: []model.BundleMember{
+			{Scope: "global", Profile: "bugs", ReviewID: "rp_bugs", Lifecycle: model.LifecycleCompleted},
+			{Scope: "global", Profile: "security", ReviewID: "rp_torn", Lifecycle: model.LifecycleCompleted},
+		}},
+	}
+	var stdout, stderr bytes.Buffer
+	exit := executeRunWithConductor(context.Background(), conductor, runOptions{
+		format: "json", configuration: defaultUserConfigurationPath(), subject: model.WorkingChanges(),
+	}, commandIO{output: &stdout, errors: &stderr})
+	if exit != 1 || !strings.Contains(stderr.String(), "rp_torn") {
+		t.Fatalf("exit = %d, stderr = %q; want exit 1 naming rp_torn", exit, stderr.String())
+	}
+	if got := findingCounts(decodeReport(t, stdout.String())); !reflect.DeepEqual(got, []int{1, 0}) {
+		t.Fatalf("finding counts = %v, want the readable member's finding beside the unreadable member", got)
+	}
+}

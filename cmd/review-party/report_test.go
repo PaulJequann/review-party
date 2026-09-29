@@ -145,10 +145,7 @@ func TestBundleReportInlinesEveryMembersFindings(t *testing.T) {
 			{Scope: "global", Profile: "security", Lifecycle: model.LifecyclePending},
 		},
 	}
-	report, err := bundleReport(context.Background(), loader, bundle, false)
-	if err != nil {
-		t.Fatal(err)
-	}
+	report := bundleReport(context.Background(), loader, bundle, false)
 	requireBundleSummary(t, report, "rb_report", model.LifecycleIncomplete)
 	if !report.incomplete() {
 		t.Fatal("an incomplete bundle report is not incomplete")
@@ -176,13 +173,6 @@ func TestBundleReportInlinesEveryMembersFindings(t *testing.T) {
 	}
 	if encoded := marshalReport(t, report); strings.Contains(encoded, reportPatchSentinel) {
 		t.Fatal("compact bundle report carries a member patch")
-	}
-}
-
-func TestBundleReportFailsWhenAMemberCannotBeLoaded(t *testing.T) {
-	bundle := model.ReviewBundle{ID: "rb_missing", Members: []model.BundleMember{{Scope: "global", Profile: "bugs", ReviewID: "rp_missing"}}}
-	if _, err := bundleReport(context.Background(), fakeReviewLoader{}, bundle, false); err == nil || !strings.Contains(err.Error(), "rp_missing") {
-		t.Fatalf("err = %v, want a member load failure naming rp_missing", err)
 	}
 }
 
@@ -217,10 +207,7 @@ func findingsBundleReport(t *testing.T) reviewReport {
 			{Scope: "repository", Profile: "security", ReviewID: "rp_security", Lifecycle: model.LifecycleCompleted},
 		},
 	}
-	report, err := bundleReport(context.Background(), loader, bundle, false)
-	if err != nil {
-		t.Fatal(err)
-	}
+	report := bundleReport(context.Background(), loader, bundle, false)
 	return report
 }
 
@@ -263,7 +250,7 @@ func TestInspectBundleCommandInlinesMemberFindings(t *testing.T) {
 		largePatchRecord("rp_1723200000000_aaaaaaaaaaaaaaaa", "bugs", 1),
 		largePatchRecord("rp_1723200000000_bbbbbbbbbbbbbbbb", "security", 2),
 	}
-	saveInspectBundleFixture(t, stateHome, "rb_1723200000000_cccccccccccccccc", members)
+	saveInspectBundleFixture(t, stateHome, model.ReviewBundle{ID: "rb_1723200000000_cccccccccccccccc"}, members...)
 
 	compact := inspectBundleJSON(t, "rb_1723200000000_cccccccccccccccc")
 	full := inspectBundleJSON(t, "rb_1723200000000_cccccccccccccccc", "--full")
@@ -283,7 +270,7 @@ func TestInspectBundleCommandInlinesMemberFindings(t *testing.T) {
 	}
 }
 
-func saveInspectBundleFixture(t *testing.T, stateHome string, id model.ReviewBundleID, members []model.ReviewRecord) {
+func saveInspectBundleFixture(t *testing.T, stateHome string, bundle model.ReviewBundle, members ...model.ReviewRecord) {
 	t.Helper()
 	ledger, err := store.NewLedgerRecordStore(filepath.Join(stateHome, "review-party"))
 	if err != nil {
@@ -295,7 +282,9 @@ func saveInspectBundleFixture(t *testing.T, stateHome string, id model.ReviewBun
 		}
 	}()
 	now := time.Date(2026, 8, 11, 12, 0, 0, 0, time.UTC)
-	bundle := model.ReviewBundle{ID: id, Lifecycle: model.LifecycleCompleted, Warnings: []model.BundleWarning{}, Deduplicated: []model.SkippedDuplicate{}}
+	dangling := bundle.Members
+	bundle.Members = nil
+	bundle.Lifecycle, bundle.Warnings, bundle.Deduplicated = model.LifecycleCompleted, []model.BundleWarning{}, []model.SkippedDuplicate{}
 	for _, record := range members {
 		record.SchemaVersion = model.CurrentReviewRecordSchemaVersion
 		record.CreatedAt, record.UpdatedAt = now, now
@@ -304,6 +293,7 @@ func saveInspectBundleFixture(t *testing.T, stateHome string, id model.ReviewBun
 		}
 		bundle.Members = append(bundle.Members, model.BundleMember{Scope: "global", Profile: record.ProfileRevision.Name, ReviewID: record.ID, Lifecycle: record.Lifecycle})
 	}
+	bundle.Members = append(bundle.Members, dangling...)
 	if err := ledger.CreateReviewBundle(bundle); err != nil {
 		t.Fatal(err)
 	}
@@ -314,4 +304,41 @@ func inspectBundleJSON(t *testing.T, id model.ReviewBundleID, flags ...string) r
 	report := decodeReport(t, runMainCommand(t, append([]string{"inspect", string(id), "--format", "json"}, flags...)))
 	requireBundleSummary(t, report, id, model.LifecycleCompleted)
 	return report
+}
+
+func TestInspectBundleReportsAnUnreadableMemberBesideTheOthers(t *testing.T) {
+	stateHome := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", stateHome)
+	const missing = model.ReviewID("rp_1723200000000_ffffffffffffffff")
+	bundle := model.ReviewBundle{ID: "rb_1723200000000_dddddddddddddddd", Members: []model.BundleMember{
+		{Scope: "global", Profile: "security", ReviewID: missing, Lifecycle: model.LifecycleCompleted, Status: "clean"},
+	}}
+	saveInspectBundleFixture(t, stateHome, bundle, largePatchRecord("rp_1723200000000_eeeeeeeeeeeeeeee", "bugs", 2))
+
+	report := decodeReport(t, inspectWithReadFailure(t, bundle.ID, missing, "json"))
+	if got := findingCounts(report); !reflect.DeepEqual(got, []int{2, 0}) {
+		t.Fatalf("finding counts = %v, want the healthy member's 2 findings beside the unreadable member", got)
+	}
+	unreadable := report.Reviews[1]
+	if got, want := []any{unreadable.ID, unreadable.Lifecycle, unreadable.Status}, []any{missing, lifecycleUnreadable, model.ResultStatus("")}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("unreadable member id, lifecycle, status = %v, want %v", got, want)
+	}
+	if !strings.Contains(unreadable.ReadError, string(missing)) {
+		t.Fatalf("read error = %q, want the cause naming %s", unreadable.ReadError, missing)
+	}
+	human := inspectWithReadFailure(t, bundle.ID, missing, "human")
+	for _, line := range []string{"global:bugs · rp_1723200000000_eeeeeeeeeeeeeeee · completed", "internal/file02.go:2", "global:security · " + string(missing) + " · unreadable\n"} {
+		if !strings.Contains(human, line) {
+			t.Fatalf("human output = %q, missing %q", human, line)
+		}
+	}
+}
+
+func inspectWithReadFailure(t *testing.T, id model.ReviewBundleID, missing model.ReviewID, format string) string {
+	t.Helper()
+	var stdout, stderr bytes.Buffer
+	if exit := run(context.Background(), []string{"inspect", string(id), "--format", format}, &stdout, &stderr); exit != 1 || !strings.Contains(stderr.String(), string(missing)) {
+		t.Fatalf("%s inspect exit = %d, stderr = %q; want exit 1 naming %s", format, exit, stderr.String(), missing)
+	}
+	return stdout.String()
 }

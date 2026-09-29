@@ -64,6 +64,9 @@ func executeInspect(ctx context.Context, options inspectOptions, stdout, stderr 
 	if err := printReport(stdout, report, reportOptions{format: options.format, configuration: options.configuration}); err != nil {
 		return printFailure(stderr, err)
 	}
+	if err := report.readFailure(); err != nil {
+		return printFailure(stderr, err)
+	}
 	return 0
 }
 
@@ -85,5 +88,5 @@ func inspectBundleReport(ctx context.Context, conductor *engine.Conductor, optio
 	if err != nil {
 		return reviewReport{}, err
 	}
-	return bundleReport(ctx, conductor, bundle, options.full)
+	return bundleReport(ctx, conductor, bundle, options.full), nil
 }

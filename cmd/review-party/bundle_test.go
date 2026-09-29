@@ -20,10 +20,7 @@ func TestPrintBundleReportPreservesHumanPresentation(t *testing.T) {
 		Members:     []model.BundleMember{{Scope: "global", Profile: "bugs", Lifecycle: model.LifecycleCompleted, ReviewID: "rp_test", Status: "clean"}},
 		Termination: &model.BundleTermination{Category: model.TerminationCancelled, Message: "context canceled"},
 	}
-	report, err := bundleReport(context.Background(), fakeReviewLoader{"rp_test": largePatchRecord("rp_test", "bugs", 0)}, bundle, false)
-	if err != nil {
-		t.Fatal(err)
-	}
+	report := bundleReport(context.Background(), fakeReviewLoader{"rp_test": largePatchRecord("rp_test", "bugs", 0)}, bundle, false)
 	text := renderReport(t, report, "human")
 	for _, want := range []string{
 		"bundle rb_test · incomplete · 1/1 review(s) completed\n", "global:bugs · rp_test · completed · clean · 0 finding(s)\n",
@@ -37,10 +34,7 @@ func TestPrintBundleReportPreservesHumanPresentation(t *testing.T) {
 }
 
 func TestPrintReportJSONCarriesTheBundleSummary(t *testing.T) {
-	report, err := bundleReport(context.Background(), fakeReviewLoader{}, model.ReviewBundle{ID: "rb_json", Lifecycle: model.LifecycleCompleted}, false)
-	if err != nil {
-		t.Fatal(err)
-	}
+	report := bundleReport(context.Background(), fakeReviewLoader{}, model.ReviewBundle{ID: "rb_json", Lifecycle: model.LifecycleCompleted}, false)
 	requireBundleSummary(t, decodeReport(t, renderReport(t, report, "json")), "rb_json", model.LifecycleCompleted)
 }
 

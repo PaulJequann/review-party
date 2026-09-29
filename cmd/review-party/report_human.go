@@ -25,6 +25,10 @@ func writeHumanEntry(output *commandOutput, label string, entry reviewEntry) {
 		output.write("%s · not started\n", label)
 		return
 	}
+	if entry.Lifecycle == lifecycleUnreadable {
+		output.write("%s · unreadable\nread error: %s\n", label, entry.ReadError)
+		return
+	}
 	output.write("%s · %s", label, entry.Lifecycle)
 	if entry.Status != "" {
 		output.write(" · %s", entry.Status)
