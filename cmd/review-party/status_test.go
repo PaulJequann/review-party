@@ -44,7 +44,7 @@ func newStatusLedger(t *testing.T) statusLedger {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fixture := statusLedger{t: t, directory: filepath.Join(stateHome, "review-party"), repository: repository, root: root, base: time.Now().UTC().Add(-time.Hour).Truncate(time.Second)}
+	fixture := statusLedger{t: t, directory: filepath.Join(stateHome, "review-party"), repository: repository, root: root, base: time.Now().UTC().Add(-5 * time.Minute).Truncate(time.Second)}
 	fixture.write(func(ledger *store.LedgerRecordStore) error {
 		bundles := []struct {
 			id          model.ReviewBundleID
@@ -61,12 +61,14 @@ func newStatusLedger(t *testing.T) statusLedger {
 			{stoppedBundleID, model.LifecycleIncomplete, &model.BundleTermination{Category: model.TerminationCancelled, Message: "context canceled"}, []model.ReviewRecord{fixture.record("rp_1725192000000_00000000000000c5", model.LifecycleIncomplete, 4)}},
 		}
 		for index, bundle := range bundles {
-			if err := ledger.CreateReviewBundle(fixture.bundle(bundle.id, bundle.lifecycle, bundle.termination, index, bundle.members), bundle.members); err != nil {
+			recorded := fixture.bundle(bundle.id, bundle.lifecycle, index, bundle.members)
+			recorded.Termination = bundle.termination
+			if err := ledger.CreateReviewBundle(recorded, bundle.members); err != nil {
 				return err
 			}
 		}
 		readable := fixture.record("rp_1725192000000_00000000000000c6", model.LifecycleCompleted, 4)
-		unreadable := fixture.bundle(unreadableBundleID, model.LifecycleCompleted, nil, 4, []model.ReviewRecord{readable, fixture.record(unreadableReviewID, model.LifecycleCompleted, 4)})
+		unreadable := fixture.bundle(unreadableBundleID, model.LifecycleCompleted, 4, []model.ReviewRecord{readable, fixture.record(unreadableReviewID, model.LifecycleCompleted, 4)})
 		if err := ledger.CreateReviewBundle(unreadable, []model.ReviewRecord{readable}); err != nil {
 			return err
 		}
@@ -103,7 +105,7 @@ func (fixture statusLedger) record(id model.ReviewID, lifecycle model.Lifecycle,
 	record := model.ReviewRecord{
 		SchemaVersion: model.CurrentReviewRecordSchemaVersion, ID: id, Lifecycle: lifecycle,
 		Subject:         model.ReviewSubject{Kind: model.SubjectWorkingChanges, Repository: fixture.root, Identity: "subject", ChangedPaths: []string{"a.go"}, Patch: "diff"},
-		ProfileRevision: model.ProfileRevision{Name: "bugs", ReviewerID: "grok", Model: "grok-4.5"},
+		ProfileRevision: model.ProfileRevision{Name: "bugs", ReviewerID: "grok", Model: "grok-4.5", ExecutionDeadline: "8m0s"},
 		ProfileSnapshot: model.ProfileSnapshot{Name: "bugs"},
 		Passes:          []model.PassRecord{{Name: "review", Required: true, Attempts: []model.AttemptRecord{}}},
 		CreatedAt:       created, UpdatedAt: created,
@@ -122,11 +124,11 @@ func (fixture statusLedger) record(id model.ReviewID, lifecycle model.Lifecycle,
 	return record
 }
 
-func (fixture statusLedger) bundle(id model.ReviewBundleID, lifecycle model.Lifecycle, termination *model.BundleTermination, minute int, records []model.ReviewRecord) model.ReviewBundle {
+func (fixture statusLedger) bundle(id model.ReviewBundleID, lifecycle model.Lifecycle, minute int, records []model.ReviewRecord) model.ReviewBundle {
 	created := fixture.base.Add(time.Duration(minute) * time.Minute)
 	bundle := model.ReviewBundle{
 		ID: id, Revision: "revision", Repository: fixture.root, SubjectKind: model.SubjectWorkingChanges, SubjectIdentity: "subject",
-		Lifecycle: lifecycle, Termination: termination, Members: []model.BundleMember{},
+		Lifecycle: lifecycle, Members: []model.BundleMember{},
 		Warnings: []model.BundleWarning{}, Deduplicated: []model.SkippedDuplicate{},
 		ConcurrencyLimit: 1, CreatedAt: created, UpdatedAt: created,
 	}

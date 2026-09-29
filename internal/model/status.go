@@ -21,6 +21,17 @@ type ReviewStatus struct {
 	CreatedAt   time.Time            `json:"created_at"`
 	UpdatedAt   time.Time            `json:"updated_at"`
 	Reviews     []ReviewStatusMember `json:"reviews"`
+	Stale       *StaleRun            `json:"stale,omitempty"`
+}
+
+// StaleRun marks a non-terminal run whose ledger rows have not advanced for
+// longer than its longest execution deadline plus slack. Every attempt
+// transition saves, so a run this quiet has most likely lost its process and
+// will never finish on its own.
+type StaleRun struct {
+	LastProgressAt time.Time `json:"last_progress_at"`
+	QuietMS        int64     `json:"quiet_ms"`
+	LimitMS        int64     `json:"limit_ms"`
 }
 
 type ReviewStatusMember struct {

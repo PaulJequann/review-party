@@ -21,7 +21,9 @@ incomplete, checking the ledger once a second, then print the result exactly
 as run would have and exit with run's exit code.
 
 Use it to reattach to a run started elsewhere. --timeout bounds the wait; when
-it passes first, wait exits 1 and the run keeps going.`,
+it passes first, wait exits 1 and the run keeps going. When status would mark
+the run stale, wait exits 1 at once rather than waiting on a run that may have
+died.`,
 		Example: "  review-party wait rb_...\n  review-party wait rp_... --format json\n  review-party wait rb_... --timeout 10m",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -63,12 +65,8 @@ type waitConductor interface {
 }
 
 func executeWait(ctx context.Context, conductor waitConductor, options waitOptions, streams commandIO) int {
-	var deadline <-chan time.Time
-	if options.timeout > 0 {
-		timer := time.NewTimer(options.timeout)
-		defer timer.Stop()
-		deadline = timer.C
-	}
+	deadline, stop := waitTimeout(options.timeout)
+	defer stop()
 	for {
 		status, err := conductor.Status(ctx, options.id)
 		if err != nil {
@@ -78,6 +76,9 @@ func executeWait(ctx context.Context, conductor waitConductor, options waitOptio
 			report, err := finishedReport(ctx, conductor, status, options.full)
 			return printRunOutcome(streams, report, err, reportOptions{format: options.format, configuration: options.configuration})
 		}
+		if err := staleRunError(status); err != nil {
+			return printFailure(streams.errors, err)
+		}
 		select {
 		case <-ctx.Done():
 			return printFailure(streams.errors, ctx.Err())
@@ -86,6 +87,15 @@ func executeWait(ctx context.Context, conductor waitConductor, options waitOptio
 		case <-time.After(options.interval):
 		}
 	}
+}
+
+// waitTimeout fires once timeout passes; a zero timeout never fires.
+func waitTimeout(timeout time.Duration) (<-chan time.Time, func() bool) {
+	if timeout <= 0 {
+		return nil, func() bool { return false }
+	}
+	timer := time.NewTimer(timeout)
+	return timer.C, timer.Stop
 }
 
 func finishedReport(ctx context.Context, conductor waitConductor, status model.ReviewStatus, full bool) (reviewReport, error) {

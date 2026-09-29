@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"reviewparty/internal/model"
 	"reviewparty/internal/store"
@@ -15,16 +16,17 @@ var ErrUnsupportedStatusID = errors.New("want a Review Bundle id (rb_…) or a R
 
 const LifecycleUnreadable model.Lifecycle = "unreadable"
 
+// staleSlack covers the work around a deadline-bounded attempt that no
+// deadline bounds: the availability check, checkout preparation, process
+// teardown, and the final save.
+const staleSlack = 2 * time.Minute
+
 func (conductor *Conductor) Status(ctx context.Context, id string) (model.ReviewStatus, error) {
 	switch {
 	case strings.HasPrefix(id, "rb_"):
 		return conductor.bundleStatus(ctx, model.ReviewBundleID(id))
 	case strings.HasPrefix(id, "rp_"):
-		record, err := conductor.Inspect(ctx, model.ReviewID(id))
-		if err != nil {
-			return model.ReviewStatus{}, err
-		}
-		return reviewStatus(record), nil
+		return conductor.reviewStatus(ctx, model.ReviewID(id))
 	default:
 		return model.ReviewStatus{}, fmt.Errorf("%w; got %q", ErrUnsupportedStatusID, id)
 	}
@@ -74,6 +76,7 @@ func (conductor *Conductor) bundleStatus(ctx context.Context, id model.ReviewBun
 		CreatedAt: bundle.CreatedAt, UpdatedAt: bundle.UpdatedAt,
 		Reviews: make([]model.ReviewStatusMember, 0, len(bundle.Members)),
 	}
+	var longest time.Duration
 	for _, member := range bundle.Members {
 		record, err := conductor.Inspect(ctx, member.ReviewID)
 		if err != nil {
@@ -84,16 +87,70 @@ func (conductor *Conductor) bundleStatus(ctx context.Context, id model.ReviewBun
 			continue
 		}
 		status.Reviews = append(status.Reviews, reviewStatusMember(record, member.Scope))
+		longest = max(longest, executionDeadline(record))
 	}
+	markStale(&status, longest, conductor.now())
 	return status, nil
 }
 
-func reviewStatus(record model.ReviewRecord) model.ReviewStatus {
-	return model.ReviewStatus{
+// reviewStatus judges a pending Review through the Review Bundle that owns
+// it: a queued member legitimately waits on the members ahead of it.
+func (conductor *Conductor) reviewStatus(ctx context.Context, id model.ReviewID) (model.ReviewStatus, error) {
+	record, err := conductor.Inspect(ctx, id)
+	if err != nil {
+		return model.ReviewStatus{}, err
+	}
+	status := model.ReviewStatus{
 		ID: string(record.ID), Kind: model.ReviewStatusReview, Lifecycle: record.Lifecycle,
 		Repository: record.Subject.Repository, CreatedAt: record.CreatedAt, UpdatedAt: record.UpdatedAt,
 		Reviews: []model.ReviewStatusMember{reviewStatusMember(record, "")},
 	}
+	owner, err := conductor.owningBundle(record)
+	if err != nil || owner == "" {
+		markStale(&status, executionDeadline(record), conductor.now())
+		return status, err
+	}
+	bundle, err := conductor.bundleStatus(ctx, owner)
+	status.Stale = bundle.Stale
+	return status, err
+}
+
+func (conductor *Conductor) owningBundle(record model.ReviewRecord) (model.ReviewBundleID, error) {
+	ledger, ok := conductor.store.(interface {
+		ReviewBundleOwning(model.ReviewID) (model.ReviewBundleID, error)
+	})
+	if !ok || record.Lifecycle != model.LifecyclePending {
+		return "", nil
+	}
+	return ledger.ReviewBundleOwning(record.ID)
+}
+
+// markStale flags a non-terminal run whose newest ledger write is older than
+// its longest execution deadline plus staleSlack.
+func markStale(status *model.ReviewStatus, deadline time.Duration, now time.Time) {
+	if status.Lifecycle.Terminal() {
+		return
+	}
+	last := status.UpdatedAt
+	for _, member := range status.Reviews {
+		if member.UpdatedAt.After(last) {
+			last = member.UpdatedAt
+		}
+	}
+	quiet, limit := now.Sub(last), deadline+staleSlack
+	if quiet > limit {
+		status.Stale = &model.StaleRun{LastProgressAt: last, QuietMS: quiet.Milliseconds(), LimitMS: limit.Milliseconds()}
+	}
+}
+
+// executionDeadline reads the deadline snapshotted with the Review; a
+// deadline that does not parse adds nothing beyond staleSlack.
+func executionDeadline(record model.ReviewRecord) time.Duration {
+	deadline, err := time.ParseDuration(record.ProfileRevision.ExecutionDeadline)
+	if err != nil {
+		return 0
+	}
+	return deadline
 }
 
 func reviewStatusMember(record model.ReviewRecord, scope string) model.ReviewStatusMember {

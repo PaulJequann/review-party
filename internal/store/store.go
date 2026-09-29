@@ -714,6 +714,17 @@ func (s *LedgerRecordStore) InFlight(repository string) (InFlight, error) {
 	return InFlight{Bundles: bundles, Reviews: reviews}, nil
 }
 
+// ReviewBundleOwning returns the Review Bundle that lists the Review as a
+// member, or "" when the Review ran on its own.
+func (s *LedgerRecordStore) ReviewBundleOwning(id model.ReviewID) (model.ReviewBundleID, error) {
+	var owner model.ReviewBundleID
+	err := s.db.QueryRow(`SELECT review_bundles.id FROM review_bundles, json_each(review_bundles.members) AS member WHERE json_extract(member.value,'$.review_id') = ? LIMIT 1`, id).Scan(&owner)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return owner, err
+}
+
 func queryInFlightIDs[ID ~string](db *sql.DB, statement, repository string) (ids []ID, returnErr error) {
 	rows, err := db.Query(statement, repository)
 	if err != nil {
@@ -729,6 +740,14 @@ func queryInFlightIDs[ID ~string](db *sql.DB, statement, repository string) (ids
 		ids = append(ids, id)
 	}
 	return ids, rows.Err()
+}
+
+func (s *DeferredLedgerRecordStore) ReviewBundleOwning(id model.ReviewID) (model.ReviewBundleID, error) {
+	ledger, err := s.openExisting()
+	if err != nil {
+		return "", err
+	}
+	return ledger.ReviewBundleOwning(id)
 }
 
 func (s *DeferredLedgerRecordStore) InFlight(repository string) (InFlight, error) {

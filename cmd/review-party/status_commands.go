@@ -22,8 +22,10 @@ func newStatusCommand(streams commandIO) *cobra.Command {
 each Review it contains, read from the ledger without waiting for it to finish.
 
 Without an ID, lists the Review Bundles and Reviews still pending or running
-for the repository. Exits 0 whenever the lookup succeeds, whatever the
-lifecycle, and 1 after printing when a member's Review Record cannot be read.
+for the repository. A run is stale when the ledger shows no progress for longer
+than its longest execution deadline plus two minutes: its process has most
+likely died. Exits 0 whenever the lookup succeeds, whatever the lifecycle, and
+1 after printing when a run is stale or a member's Review Record cannot be read.
 Use wait to block until a run finishes.`,
 		Example: "  review-party status rb_...\n  review-party status rp_... --format json\n  review-party status --repo .",
 		Args:    cobra.MaximumNArgs(1),
@@ -106,16 +108,29 @@ func statusOutcome(stderr io.Writer, exit int, statuses ...model.ReviewStatus) i
 	}
 	var failures []error
 	for _, status := range statuses {
+		failures = append(failures, staleRunError(status))
 		for _, member := range status.Reviews {
 			if member.ReadError != "" {
 				failures = append(failures, fmt.Errorf("read bundle member %s review %s: %s", statusMemberLabel(member), member.ReviewID, member.ReadError))
 			}
 		}
 	}
-	if len(failures) > 0 {
-		return printFailure(stderr, errors.Join(failures...))
+	if err := errors.Join(failures...); err != nil {
+		return printFailure(stderr, err)
 	}
 	return 0
+}
+
+// staleRunError names a run the ledger shows as having lost its process.
+func staleRunError(status model.ReviewStatus) error {
+	if status.Stale == nil {
+		return nil
+	}
+	return fmt.Errorf("%s: %s", status.ID, staleDiagnosis(*status.Stale))
+}
+
+func staleDiagnosis(stale model.StaleRun) string {
+	return "no progress for " + formatProgressElapsed(stale.QuietMS) + "; the run may have died"
 }
 
 func printStatusFailure(stderr io.Writer, err error) int {
@@ -137,7 +152,10 @@ func printHumanStatus(output *commandOutput, status model.ReviewStatus, options 
 	if status.Termination != nil {
 		output.write("stopped: %s: %s\n", status.Termination.Category, boundedProgressMessage(status.Termination.Message))
 	}
-	if status.Lifecycle.Terminal() {
+	if status.Stale != nil {
+		output.write("stale: %s\n", staleDiagnosis(*status.Stale))
+	}
+	if status.Lifecycle.Terminal() || status.Stale != nil {
 		output.write("inspect: review-party inspect %s%s\n", status.ID, configurationArgument(options.configuration))
 		return
 	}

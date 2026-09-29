@@ -230,6 +230,12 @@ and exits with the same code. `status` exits 0 whatever the lifecycle, and 1
 after printing when a member's Review Record cannot be read. When `--timeout`
 passes first, `wait` exits 1 and the run keeps going.
 
+Every Attempt transition writes the ledger, so a run that shows no progress
+for longer than its longest Attempt deadline plus two minutes has most likely
+lost its process. `status` marks such a run stale ("no progress for 12m0s; the
+run may have died") and exits 1 after printing, and `wait` exits 1 with the
+same message instead of waiting on it.
+
 Each saved Profile fixes its Reviewer, model, reasoning effort, Attempt
 deadline, and instructions. Ordinary `run`, explain, replay, and Party
 commands do not accept execution overrides. A different cost or quality choice is a
