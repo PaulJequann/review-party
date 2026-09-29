@@ -122,3 +122,64 @@ func TestExplainRejectsMalformedScopedNames(t *testing.T) {
 		t.Fatalf("exit = %d, stderr = %q", result.exitCode, result.stderr)
 	}
 }
+
+func TestRunRejectsMalformedProfileNamesWithTheNameFormatError(t *testing.T) {
+	repository := isolatedProfilesRepository(t)
+	requireConfigSuccess(t, []string{"init", "--repo", repository})
+	createGlobalBugsProfile(t)
+	for _, name := range []string{"global:Bad_Name", "bogus:bugs"} {
+		result := runConfigCommand(t, []string{"run", "--profile", name, "--repo", repository})
+		if result.exitCode == 0 {
+			t.Fatalf("run --profile %s succeeded", name)
+		}
+		if !strings.Contains(result.stderr, "must match") || strings.Contains(result.stderr, "was not found") {
+			t.Fatalf("run --profile %s stderr = %q, want the name-format error", name, result.stderr)
+		}
+	}
+}
+
+func TestHistoryRejectsScopePrefixedProfileFilter(t *testing.T) {
+	repository := isolatedProfilesRepository(t)
+	requireConfigSuccess(t, []string{"init", "--repo", repository})
+	for _, name := range []string{"global:bugs", "repository:bugs"} {
+		result := runConfigCommand(t, []string{"history", "--profile", name, "--repo", repository})
+		if result.exitCode == 0 {
+			t.Fatalf("history --profile %s succeeded with stdout %q", name, result.stdout)
+		}
+		if !strings.Contains(result.stderr, "does not record") {
+			t.Fatalf("history --profile %s stderr = %q", name, result.stderr)
+		}
+	}
+}
+
+func TestConfigProfileMutationsAcceptScopePrefixMatchingScope(t *testing.T) {
+	isolatedProfilesRepository(t)
+	createGlobalBugsProfile(t)
+	edit := runConfigCommand(t, []string{"config", "profile", "edit", "global:bugs", "--scope", "global", "--model", "grok-4.6", "--yes", "--format", "json"})
+	requireCommandSuccess(t, edit)
+	if !strings.Contains(edit.stdout, "profiles.bugs.model") {
+		t.Fatalf("edit output = %q", edit.stdout)
+	}
+	update := runConfigCommand(t, []string{"config", "profile", "update-template", "global:bugs", "--scope", "global", "--yes", "--format", "json"})
+	if strings.Contains(update.stdout+update.stderr, "must match") {
+		t.Fatalf("update-template rejected the prefix: %q %q", update.stdout, update.stderr)
+	}
+}
+
+func TestConfigProfileMutationsRejectScopePrefixConflictingWithScope(t *testing.T) {
+	isolatedProfilesRepository(t)
+	createGlobalBugsProfile(t)
+	commands := [][]string{
+		{"config", "profile", "edit", "repository:bugs", "--scope", "global", "--model", "grok-4.6"},
+		{"config", "profile", "update-template", "repository:bugs", "--scope", "global"},
+	}
+	for _, command := range commands {
+		result := runConfigCommand(t, append(command, "--yes", "--format", "json"))
+		if result.exitCode == 0 {
+			t.Fatalf("%v succeeded", command)
+		}
+		if !strings.Contains(result.stdout+result.stderr, "conflicts with --scope global") {
+			t.Fatalf("%v output = %q %q", command, result.stdout, result.stderr)
+		}
+	}
+}

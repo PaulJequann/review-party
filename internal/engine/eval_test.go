@@ -390,7 +390,6 @@ func TestCodeQualityEvalSuiteAcceptsScopedCodeQualityProfile(t *testing.T) {
 	}{
 		{"code-quality", false},
 		{"global:code-quality", false},
-		{"repository:code-quality", false},
 		{"global:bugs", true},
 		{"bugs", true},
 	}
@@ -599,5 +598,19 @@ func goModuleRoot(t *testing.T) string {
 			t.Fatal("could not find go.mod")
 		}
 		directory = parent
+	}
+}
+
+func TestEvalRejectsRepositoryScopedProfileBecauseEvalResolvesGlobalOnly(t *testing.T) {
+	executor := successfulExecutor(cleanReview)
+	conductor := testEvalConductor(t, executor)
+	selection := evalSelection("global:code-quality")
+	selection.Experiment.Profile = "repository:code-quality"
+	_, err := conductor.RunEvalSuite(context.Background(), selection)
+	if err == nil || !strings.Contains(err.Error(), "resolve from global Configuration") {
+		t.Fatalf("error = %v, want the global-only eval Profile error", err)
+	}
+	if executor.attemptCount() != 0 {
+		t.Fatalf("attempts = %d, want 0", executor.attemptCount())
 	}
 }
