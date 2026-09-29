@@ -83,10 +83,15 @@ code_quality_pid=$!
 wait "$bugs_pid" "$code_quality_pid" ${documentation_pid:+"$documentation_pid"}
 ```
 
-A cycle ends when every selected Profile has a terminal Review Record. Inspect
-each persisted record with the same `dogfood_binary`, `XDG_STATE_HOME`, and
-`XDG_CONFIG_HOME`, using `--format json`. Verify the recorded Reviewer, model,
-reasoning effort, and result contract revision.
+A cycle ends when every selected Profile has a terminal Review Record. Each
+output file holds one entry in its `reviews` array. Read the Review ID from
+`.reviews[0].id`, then inspect each persisted record with the same
+`dogfood_binary`, `XDG_STATE_HOME`, and `XDG_CONFIG_HOME`, using
+`--format json`. Verify the recorded Reviewer (`.reviews[0].reviewer.reviewer_id`),
+model (`.reviews[0].reviewer.model`), reasoning effort
+(`.reviews[0].reviewer.effort`), and result contract revision
+(`.reviews[0].profile.result_contract_revision`). Read the findings from
+`.reviews[0].findings` and the lifecycle from `.reviews[0].lifecycle`.
 
 Treat an unavailable, malformed, or timed-out Codex run as Incomplete. Retry
 only an incomplete Profile, at most once, against the exact unchanged Subject.
