@@ -112,7 +112,7 @@ func memberEntry(ctx context.Context, loader reviewLoader, member model.BundleMe
 
 func (report reviewReport) attachMisses(ctx context.Context, loader missLoader) error {
 	for index, entry := range report.Reviews {
-		misses, err := loader.Misses(ctx, store.MissQuery{ReviewID: entry.ID})
+		misses, err := loader.Misses(ctx, store.MissQuery{ReviewIDs: []model.ReviewID{entry.ID}})
 		if err != nil && entry.Lifecycle == engine.LifecycleUnreadable {
 			report.Reviews[index].ReadError += "; load misses: " + err.Error()
 			continue

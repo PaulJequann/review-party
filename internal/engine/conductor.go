@@ -252,6 +252,14 @@ func (conductor *Conductor) History(_ context.Context, query store.HistoryQuery)
 	return page, err
 }
 
+// ledgerStateError tells the Caller to initialize when the ledger does not exist yet.
+func ledgerStateError(err error) error {
+	if errors.Is(err, store.ErrReviewRecordStateNotInitialized) {
+		return InitializationRequiredError{Repository: "."}
+	}
+	return err
+}
+
 // lifecycle delegation — the deep Review module owns these seams.
 // getRunner provides the single Review seam; runner is eagerly constructed
 // and immutable after New, so concurrent Party/Eval callers share it without

@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"reviewparty/internal/model"
-	"strings"
 	"sync"
 	"time"
 
@@ -639,27 +638,10 @@ func buildHistoryQuery(query HistoryQuery) (string, []any, int, error) {
 		COALESCE(json_extract(profile_revision,'$.model'),''),COALESCE(result_status,''),
 		COALESCE(json_extract(timings,'$.total_ms'),0),COALESCE(result_finding_count,0),
 		COALESCE(json_extract(termination,'$.category'),''),created_at,replays_review_id FROM reviews`
-	var predicates []string
-	var arguments []any
-	filters := historyFilters(query)
-	for _, filter := range filters {
-		if filter.enabled {
-			predicates = append(predicates, filter.predicate)
-			arguments = append(arguments, filter.value)
-		}
-	}
-	if len(predicates) > 0 {
-		statement += " WHERE " + strings.Join(predicates, " AND ")
-	}
-	statement += " ORDER BY created_at DESC,id DESC LIMIT ?"
+	where, arguments := whereClause(historyFilters(query))
+	statement += where + " ORDER BY created_at DESC,id DESC LIMIT ?"
 	arguments = append(arguments, limit+1)
 	return statement, arguments, limit, nil
-}
-
-type queryFilter struct {
-	predicate string
-	value     any
-	enabled   bool
 }
 
 func historyFilters(query HistoryQuery) []queryFilter {

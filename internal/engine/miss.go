@@ -58,7 +58,7 @@ func (conductor *Conductor) RecordMiss(_ context.Context, request MissRequest) (
 	}
 	reviews, err := conductor.missReviews(request.Target)
 	if err != nil {
-		return nil, missStateError(err)
+		return nil, ledgerStateError(err)
 	}
 	now := conductor.now()
 	records := make([]store.MissRecord, 0, len(reviews))
@@ -70,7 +70,7 @@ func (conductor *Conductor) RecordMiss(_ context.Context, request MissRequest) (
 		records = append(records, store.MissRecord{ID: model.MissID(id), ReviewID: review, Report: request.Report, RecordedAt: now})
 	}
 	misses, err := ledger.RecordMisses(records)
-	return misses, missStateError(err)
+	return misses, ledgerStateError(err)
 }
 
 func (conductor *Conductor) Misses(_ context.Context, query store.MissQuery) ([]model.Miss, error) {
@@ -79,7 +79,7 @@ func (conductor *Conductor) Misses(_ context.Context, query store.MissQuery) ([]
 		return nil, err
 	}
 	misses, err := ledger.ListMisses(query)
-	return misses, missStateError(err)
+	return misses, ledgerStateError(err)
 }
 
 func (conductor *Conductor) RemoveMisses(_ context.Context, request MissRemovalRequest) ([]store.MissRemovalOutcome, error) {
@@ -89,7 +89,7 @@ func (conductor *Conductor) RemoveMisses(_ context.Context, request MissRemovalR
 	}
 	removal := model.MissRemoval{Reason: request.Reason, RemovedBy: request.RemovedBy, RemovedAt: conductor.now()}
 	outcomes, err := ledger.RemoveMisses(request.IDs, removal)
-	return outcomes, missStateError(err)
+	return outcomes, ledgerStateError(err)
 }
 
 func (conductor *Conductor) missStore() (store.MissStore, error) {
@@ -98,13 +98,6 @@ func (conductor *Conductor) missStore() (store.MissStore, error) {
 		return nil, errors.New("misses require the SQLite ledger")
 	}
 	return ledger, nil
-}
-
-func missStateError(err error) error {
-	if errors.Is(err, store.ErrReviewRecordStateNotInitialized) {
-		return InitializationRequiredError{Repository: "."}
-	}
-	return err
 }
 
 func (conductor *Conductor) missReviews(target MissTarget) ([]model.ReviewID, error) {
