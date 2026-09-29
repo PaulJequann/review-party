@@ -87,8 +87,8 @@ rm -rf "$skill"
 Require, from each transcript's `.stdout` and `.stderr`:
 
 1. `create.txt` exits 0, its plan shows
-   `template=skill:verify-audit@sha256-`, and stderr carries exactly one
-   warning naming `references/rubric.md` and not `.cache/state.json`.
+   `template=skill:verify-audit@sha256-`, and stdout carries exactly one
+   `warning:` line naming `references/rubric.md` and not `.cache/state.json`.
 2. `readback.json.txt` `instructions` starts with
    ``This Profile was imported from the `verify-audit` skill.``, ends with
    `Flag tests that assert nothing.`, and omits `frontmatter must not reach`.
