@@ -309,7 +309,7 @@ func (conductor *Conductor) finishStoppedMembers(bundle *model.ReviewBundle, cat
 			continue
 		}
 		if record.Lifecycle == model.LifecyclePending || record.Lifecycle == model.LifecycleRunning {
-			record, err = conductor.finishStoppedMember(record, category, cause)
+			record, err = conductor.finishStoppedReview(record, category, "the Review Bundle stopped before this Review finished: "+cause.Error())
 			failures = errors.Join(failures, err)
 			conductor.emitRunProgress(bundleMemberProgress(*bundle, index, record).finished(record, err, record.Timings.TotalMS))
 		}
@@ -318,8 +318,10 @@ func (conductor *Conductor) finishStoppedMembers(bundle *model.ReviewBundle, cat
 	return failures
 }
 
-func (conductor *Conductor) finishStoppedMember(record model.ReviewRecord, category model.TerminationCategory, cause error) (model.ReviewRecord, error) {
-	termination := model.ReviewTermination{Category: category, Phase: model.PhaseAvailabilityCheck, Message: "the Review Bundle stopped before this Review finished: " + cause.Error()}
+// finishStoppedReview persists a terminal incomplete record for a Review whose
+// run stopped on a hard error before the runner saved a final state.
+func (conductor *Conductor) finishStoppedReview(record model.ReviewRecord, category model.TerminationCategory, message string) (model.ReviewRecord, error) {
+	termination := model.ReviewTermination{Category: category, Phase: model.PhaseAvailabilityCheck, Message: message}
 	started := conductor.now().UTC()
 	if record.Lifecycle == model.LifecycleRunning {
 		termination.Phase = model.PhaseReviewerExecution
