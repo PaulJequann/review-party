@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -69,30 +68,51 @@ func TestAccessibleProfileSelectsCachedModelAndReportedEffort(t *testing.T) {
 	}
 }
 
-// secondDiscoveryAdapter reports no models until its second observation, so
-// only a manual refresh can surface them.
-type secondDiscoveryAdapter struct {
-	calls  *atomic.Int32
-	models []discovery.Model
+// refreshGatedAdapter reports models only once the script's Refresh answer
+// has been read. The opening discovery runs concurrently with the manual
+// refresh, so counting calls cannot tell the two apart.
+type refreshGatedAdapter struct {
+	answered <-chan struct{}
+	models   []discovery.Model
 }
 
-func (secondDiscoveryAdapter) Reviewer() string { return "codex" }
-func (adapter secondDiscoveryAdapter) Discover(context.Context) discovery.Observation {
+func (refreshGatedAdapter) Reviewer() string { return "codex" }
+func (adapter refreshGatedAdapter) Discover(context.Context) discovery.Observation {
 	observation := discovery.Observation{
 		Status: discovery.StatusSupported, Authentication: discovery.Authentication{Status: discovery.AuthAvailable},
 	}
-	if adapter.calls.Add(1) >= 2 {
+	select {
+	case <-adapter.answered:
 		observation.Models = adapter.models
+	default:
 	}
 	return observation
 }
 
+// signalAfterLines closes answered once the given number of script lines has
+// been read. holdingInput returns one line per Read.
+type signalAfterLines struct {
+	*holdingInput
+	remaining int
+	answered  chan struct{}
+}
+
+func (input *signalAfterLines) Read(p []byte) (int, error) {
+	n, err := input.holdingInput.Read(p)
+	input.remaining--
+	if input.remaining == 0 {
+		close(input.answered)
+	}
+	return n, err
+}
+
 func TestAccessibleProfileRefreshSelectsFreshModelAndEffort(t *testing.T) {
+	answered := make(chan struct{})
 	manager := configuration.NewManager(configuration.Options{
 		GlobalRoot: t.TempDir(), Reviewers: []string{"codex"}, ValidateName: func(string) error { return nil },
 	})
 	service := discovery.NewService(discovery.Options{
-		Adapters: []discovery.Adapter{secondDiscoveryAdapter{calls: &atomic.Int32{}, models: []discovery.Model{{
+		Adapters: []discovery.Adapter{refreshGatedAdapter{answered: answered, models: []discovery.Model{{
 			ID: "fresh-model", ReasoningEfforts: []string{"medium", "max"},
 		}}}},
 		Cache: profileChoiceCache{result: discovery.Result{Reviewer: "codex", Status: discovery.StatusSupported, ObservedAt: time.Now(), Models: []discovery.Model{{
@@ -112,7 +132,8 @@ func TestAccessibleProfileRefreshSelectsFreshModelAndEffort(t *testing.T) {
 	}, "\n")
 	var output bytes.Buffer
 	editor := editor{manager: manager, RunOptions: RunOptions{
-		Context: ctx, Input: newHoldingInput(input), Output: &output, Accessible: true, Discovery: service,
+		Context: ctx, Input: &signalAfterLines{holdingInput: newHoldingInput(input), remaining: 4, answered: answered},
+		Output: &output, Accessible: true, Discovery: service,
 	}}
 	if err := editor.createProfile(); err != nil {
 		t.Fatalf("create profile: %v\n%s", err, output.String())
