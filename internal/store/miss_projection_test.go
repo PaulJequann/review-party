@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -267,21 +268,27 @@ func TestLedgerMissRemovalWithAnUnknownIDChangesNothing(t *testing.T) {
 	}
 }
 
-func writeSchemaTenLedger(t *testing.T, directory string) model.ReviewRecord {
+// writeLedgerAtSchema writes a ledger migrated only up to version, as an older
+// release left it, holding one completed review.
+func writeLedgerAtSchema(t *testing.T, directory string, version int) model.ReviewRecord {
 	t.Helper()
 	db, err := sql.Open("sqlite", filepath.Join(directory, ledgerFilename))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer closeTestResource(t, db.Close)
-	initial, err := migrationFiles.ReadFile("migrations/initial.sql")
-	if err != nil {
-		t.Fatal(err)
+	script := "CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY);"
+	for _, migration := range ledgerMigrations {
+		if migration.version > version {
+			break
+		}
+		statements, err := migrationFiles.ReadFile(migration.path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		script += fmt.Sprintf("%s;INSERT INTO schema_migrations(version) VALUES(%d);", statements, migration.version)
 	}
-	if _, err := db.Exec("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY); INSERT INTO schema_migrations(version) VALUES(10)"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec(string(initial)); err != nil {
+	if _, err := db.Exec(script); err != nil {
 		t.Fatal(err)
 	}
 	review := ledgerFixture(model.LifecycleCompleted)
@@ -293,7 +300,7 @@ func writeSchemaTenLedger(t *testing.T, directory string) model.ReviewRecord {
 
 func TestPrepareUpgradesSchemaTenLedgerPreservingReviews(t *testing.T) {
 	directory := t.TempDir()
-	review := writeSchemaTenLedger(t, directory)
+	review := writeLedgerAtSchema(t, directory, 10)
 
 	if err := PrepareReviewRecordState(directory); err != nil {
 		t.Fatalf("prepare = %v", err)
@@ -321,7 +328,7 @@ func TestPrepareUpgradesSchemaTenLedgerPreservingReviews(t *testing.T) {
 
 func TestSchemaTenLedgerRequiresPreparationWithoutUpgrading(t *testing.T) {
 	directory := t.TempDir()
-	writeSchemaTenLedger(t, directory)
+	writeLedgerAtSchema(t, directory, 10)
 
 	deferred, err := NewDeferredLedgerRecordStore(directory)
 	if err != nil {

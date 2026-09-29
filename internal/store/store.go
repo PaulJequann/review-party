@@ -21,7 +21,7 @@ const ledgerFilename = "ledger.sqlite"
 // preparation upgrades a ledger at schema 10 or later additively, preserving its
 // records, and replaces anything older without preserving it. The numbering
 // continued past the last released migration so no obsolete ledger can collide.
-const currentLedgerSchemaVersion = 11
+const currentLedgerSchemaVersion = 12
 
 var ledgerMigrations = []struct {
 	version int
@@ -29,6 +29,7 @@ var ledgerMigrations = []struct {
 }{
 	{10, "migrations/initial.sql"},
 	{11, "migrations/misses.sql"},
+	{12, "migrations/finding_verdicts.sql"},
 }
 
 var ErrReviewRecordStateNotInitialized = errors.New("Review Party is not initialized")
@@ -127,6 +128,7 @@ type LedgerRecordStore struct {
 	bundleProjection       bundleProjection
 	adjudicationProjection adjudicationProjection
 	missProjection         missProjection
+	verdictProjection      verdictProjection
 }
 
 // DeferredLedgerRecordStore preserves read-only commands: their construction
@@ -309,6 +311,22 @@ func (s *DeferredLedgerRecordStore) RemoveMisses(ids []model.MissID, removal mod
 	return ledger.RemoveMisses(ids, removal)
 }
 
+func (s *DeferredLedgerRecordStore) RecordVerdicts(batch VerdictBatch) (VerdictTally, error) {
+	ledger, err := s.openExisting()
+	if err != nil {
+		return VerdictTally{}, err
+	}
+	return ledger.RecordVerdicts(batch)
+}
+
+func (s *DeferredLedgerRecordStore) ListVerdicts(query VerdictQuery) ([]model.FindingVerdict, error) {
+	ledger, err := s.openExisting()
+	if err != nil {
+		return nil, err
+	}
+	return ledger.ListVerdicts(query)
+}
+
 func (s *DeferredLedgerRecordStore) openExisting() (*LedgerRecordStore, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -360,6 +378,7 @@ func openLedgerRecordStore(directory string, prepare bool) (*LedgerRecordStore, 
 		bundleProjection:       bundleProjection{db: db},
 		adjudicationProjection: adjudicationProjection{db: db},
 		missProjection:         missProjection{db: db},
+		verdictProjection:      verdictProjection{db: db},
 	}
 	if err := store.initialize(prepare); err != nil {
 		return nil, errors.Join(err, db.Close())
@@ -436,7 +455,7 @@ func (s *LedgerRecordStore) configure() error {
 // obsoleteLedgerTables lists every table a replaced pre-release ledger could own,
 // ordered so foreign-key children are dropped before their parents.
 var obsoleteLedgerTables = []string{
-	"misses", "artifacts", "findings", "attempts", "passes",
+	"finding_verdicts", "misses", "artifacts", "findings", "attempts", "passes",
 	"eval_runs", "adjudication_revisions", "review_bundles",
 	"eval_suite_runs", "reviews", "schema_migrations",
 }
@@ -600,6 +619,14 @@ func (s *LedgerRecordStore) ListMisses(query MissQuery) ([]model.Miss, error) {
 
 func (s *LedgerRecordStore) RemoveMisses(ids []model.MissID, removal model.MissRemoval) ([]MissRemovalOutcome, error) {
 	return s.missProjection.remove(ids, removal)
+}
+
+func (s *LedgerRecordStore) RecordVerdicts(batch VerdictBatch) (VerdictTally, error) {
+	return s.verdictProjection.record(batch)
+}
+
+func (s *LedgerRecordStore) ListVerdicts(query VerdictQuery) ([]model.FindingVerdict, error) {
+	return s.verdictProjection.list(query)
 }
 
 func (s *LedgerRecordStore) History(query HistoryQuery) (page HistoryPage, returnErr error) {

@@ -103,7 +103,7 @@ func TestFreshPreparationCompletesInterruptedState(t *testing.T) {
 
 func TestIncompatibleStateBackupRefusesUpgradableLedger(t *testing.T) {
 	directory := t.TempDir()
-	writeSchemaTenLedger(t, directory)
+	writeLedgerAtSchema(t, directory, 10)
 
 	_, err := BackupIncompatibleReviewRecordState(directory)
 	if err == nil {
