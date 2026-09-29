@@ -383,6 +383,25 @@ func TestCodeQualityEvalRejectsMismatchedProfileBeforeLaunch(t *testing.T) {
 	}
 }
 
+func TestCodeQualityEvalSuiteAcceptsScopedCodeQualityProfile(t *testing.T) {
+	tests := []struct {
+		profile string
+		wantErr bool
+	}{
+		{"code-quality", false},
+		{"global:code-quality", false},
+		{"repository:code-quality", false},
+		{"global:bugs", true},
+		{"bugs", true},
+	}
+	for _, test := range tests {
+		err := validateEvalSuiteProfile("global:code-quality", test.profile)
+		if (err != nil) != test.wantErr {
+			t.Fatalf("profile %q error = %v, want error %t", test.profile, err, test.wantErr)
+		}
+	}
+}
+
 func TestGeneralEvalReviewerReceivesMultiFileRepositoryWithoutAuthority(t *testing.T) {
 	executor := &evalSequenceExecutor{outputs: []string{cleanReview, cleanReview, cleanReview, cleanReview, cleanReview, cleanReview}}
 	conductor := testEvalConductor(t, executor)
