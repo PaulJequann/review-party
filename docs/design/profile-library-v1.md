@@ -53,6 +53,20 @@ Global and Repository Profiles may share a name. An unqualified lookup checks Re
 
 A Template never participates in Profile lookup. Profile Creation copies Template instructions into `instructions.md`; later Template changes do not alter the saved Profile.
 
+## Skill Templates
+
+An Agent Skills directory on the Caller's machine is also a Template source. Review Party reads `$HOME/.agents/skills` and then `$HOME/.claude/skills`. The first root wins on a duplicate skill name. Missing roots are skipped, and symlinked skill directories are followed.
+
+Each directory with a regular `SKILL.md` becomes Template `skill:<directory name>`. Directories whose name starts with `.` are skipped. So is a `SKILL.md` that is unreadable, larger than the document limit, or empty after its frontmatter. Discovery never blocks opening configuration.
+
+Instructions are a fixed preamble followed by the `SKILL.md` body with its leading YAML frontmatter removed. The preamble tells the Reviewer it is read-only, confined to the repository, and must report through the result block. It also says to mark evidence the skill requires but the Reviewer could not gather as unverified. Instructions never contain the skill's filesystem path, because repository-scoped Profiles may be committed.
+
+The revision is `sha256-` plus the first 12 hex characters of the instructions digest. Editing a skill therefore surfaces as Template drift, and `config profile update-template` refreshes the Profile. Deleting a skill surfaces as an unavailable Template source; the Profile keeps running its saved instructions.
+
+Reviewers cannot read files bundled beside `SKILL.md`. Creation and Template update plans warn with the count and the first five paths. Files under `agents/` are Codex UI metadata, and dot entries are tooling state. Neither is counted.
+
+Skills are never read from the reviewed repository. A Subject author must not be able to write their own Reviewer's instructions.
+
 ## Publication
 
 Profile Creation and copy produce reviewed, snapshot-bound plans. The agent-facing commands are `config profile create` and `config profile copy`. Publication writes `profile.json` and `instructions.md` as one rollback-protected unit. A failure cannot leave new metadata paired with absent or stale instructions. Existing Profiles are never overwritten by creation or copy.

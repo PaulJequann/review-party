@@ -97,7 +97,7 @@ func newConfigProfileCreateCommand(streams commandIO, dependencies configuration
 		}
 		return commandResult(executeConfigProfileCreate(args[0], cmd, options, streams, dependencies.discoveryService))
 	})
-	cmd.Flags().String("template", "", "Seed instructions from a packaged Review Profile Template")
+	cmd.Flags().String("template", "", "Seed instructions from a Review Profile Template, packaged or skill:<name>")
 	cmd.Flags().Bool("blank", false, "Create from supplied instructions without a Template")
 	cmd.Flags().String("reviewer", "", "Reviewer identifier")
 	cmd.Flags().String("model", "", "Model identifier")

@@ -56,22 +56,20 @@ type Profile struct {
 	SourceDigest               string `json:"-"`
 }
 
-// Template is immutable packaged judgment content. It has no execution fields
-// and cannot be returned as an executable Profile.
 type Template struct {
-	ID           string `json:"id"`
-	Revision     string `json:"revision"`
-	Instructions string `json:"instructions"`
+	ID           string   `json:"id"`
+	Revision     string   `json:"revision"`
+	Instructions string   `json:"instructions"`
+	BundledFiles []string `json:"bundled_files,omitempty"`
 }
 
-// TemplateDrift describes a Profile whose recorded Template revision differs
-// from the immutable Template packaged with this binary.
 type TemplateDrift struct {
 	Scope             Scope  `json:"scope"`
 	Profile           string `json:"profile"`
 	TemplateID        string `json:"template_id"`
 	TemplateRevision  string `json:"template_revision"`
-	AvailableRevision string `json:"available_revision"`
+	AvailableRevision string `json:"available_revision,omitempty"`
+	SourceUnavailable bool   `json:"source_unavailable,omitempty"`
 	Customized        bool   `json:"customized"`
 }
 

@@ -57,8 +57,7 @@ type Options struct {
 	PackagedReviewerModels map[string]string
 	// PackagedDefaultReviewer is the effective default reviewer when nothing is authored.
 	PackagedDefaultReviewer string
-	// Templates supplies immutable packaged Review Profile Templates.
-	Templates []Template
+	Templates               []Template
 	// ValidateName validates authored Profile and Party references; nil skips the check.
 	ValidateName func(string) error
 }
