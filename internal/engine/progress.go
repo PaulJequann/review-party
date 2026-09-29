@@ -48,33 +48,43 @@ func (member memberProgress) finished(record model.ReviewRecord, err error, elap
 		event.Status = string(record.Result.Status)
 		event.FindingCount = record.Result.FindingCount()
 	}
-	switch {
-	case err != nil:
-		event.Error = err.Error()
-	case record.Termination != nil:
+	if record.Termination != nil {
 		event.Category = record.Termination.Category
 		event.Message = record.Termination.Message
+	}
+	if err != nil {
+		event.Error = err.Error()
 	}
 	return event
 }
 
+// runReviewWithProgress runs one Review and reports it finished with the
+// record the ledger holds, so the heartbeat never contradicts status and wait.
 func (conductor *Conductor) runReviewWithProgress(ctx context.Context, member pendingReview, progress memberProgress, started time.Time) (model.ReviewRecord, error) {
+	record, err := conductor.runAdmittedReview(ctx, member, progress, started)
+	if err != nil {
+		record, err = conductor.settleStoppedReview(member.record.ID, err)
+	}
+	conductor.emitRunProgress(progress.finished(record, err, elapsedMilliseconds(started, conductor.now().UTC())))
+	return record, err
+}
+
+// runAdmittedReview reports the start and each Attempt once the concurrency
+// limit admits the member. A member never admitted still runs, so the runner
+// records why it stopped.
+func (conductor *Conductor) runAdmittedReview(ctx context.Context, member pendingReview, progress memberProgress, started time.Time) (model.ReviewRecord, error) {
 	runner := conductor.getRunner()
 	release, admitted := acquireProgressGate(ctx)
 	if !admitted {
-		record, err := runner.runPendingReview(ctx, member, started, nil)
-		conductor.emitRunProgress(progress.finished(record, err, elapsedMilliseconds(started, conductor.now().UTC())))
-		return record, err
+		return runner.runPendingReview(ctx, member, started, nil)
 	}
 	defer release()
 	conductor.emitRunProgress(progress.event(model.RunProgressStarted))
-	record, err := runner.runPendingReview(ctx, member, started, func(number int) {
+	return runner.runPendingReview(ctx, member, started, func(number int) {
 		event := progress.event(model.RunProgressAttempt)
 		event.Attempt = number
 		conductor.emitRunProgress(event)
 	})
-	conductor.emitRunProgress(progress.finished(record, err, elapsedMilliseconds(started, conductor.now().UTC())))
-	return record, err
 }
 
 // progressGateContextKey marks the progress admission gate on a run context.

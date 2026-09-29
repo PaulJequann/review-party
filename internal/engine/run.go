@@ -64,26 +64,7 @@ func (conductor *Conductor) ReviewExplicitProfile(ctx context.Context, selection
 	}
 	progress := memberProgress{reviewID: record.ID, scope: "explicit", total: 1, revision: record.ProfileRevision}
 	conductor.emitRunProgress(progress.event(model.RunProgressPending))
-	finished, err := conductor.runReviewWithProgress(ctx, pendingReview{prepared: prepared, record: record}, progress, reviewStarted)
-	if err != nil {
-		return conductor.stopExplicitReview(record.ID, err)
-	}
-	return finished, nil
-}
-
-// stopExplicitReview settles the ledger after a hard error, as a stopped
-// Review Bundle does for its members, so status and wait never report a run
-// that no process owns. A record already terminal keeps its saved result.
-func (conductor *Conductor) stopExplicitReview(id model.ReviewID, cause error) (model.ReviewRecord, error) {
-	record, err := conductor.store.Load(id)
-	if err != nil {
-		return record, errors.Join(cause, err)
-	}
-	if record.Lifecycle.Terminal() {
-		return record, cause
-	}
-	record, err = conductor.finishStoppedReview(record, evalFailureCategory(cause), "the Review stopped before it finished: "+cause.Error())
-	return record, errors.Join(cause, err)
+	return conductor.runReviewWithProgress(ctx, pendingReview{prepared: prepared, record: record}, progress, reviewStarted)
 }
 
 type plannedSelection struct {

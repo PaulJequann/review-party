@@ -318,8 +318,24 @@ func (conductor *Conductor) finishStoppedMembers(bundle *model.ReviewBundle, cat
 	return failures
 }
 
+// settleStoppedReview settles the ledger after a hard error stopped a Review,
+// so status and wait never report a run that no process owns. A record the
+// runner already saved as terminal keeps its result.
+func (conductor *Conductor) settleStoppedReview(id model.ReviewID, cause error) (model.ReviewRecord, error) {
+	record, err := conductor.store.Load(id)
+	if err != nil {
+		return record, errors.Join(cause, err)
+	}
+	if record.Lifecycle.Terminal() {
+		return record, cause
+	}
+	record, err = conductor.finishStoppedReview(record, evalFailureCategory(cause), "the Review stopped before it finished: "+cause.Error())
+	return record, errors.Join(cause, err)
+}
+
 // finishStoppedReview persists a terminal incomplete record for a Review whose
-// run stopped on a hard error before the runner saved a final state.
+// run stopped on a hard error before the runner saved a final state. When that
+// save fails it returns the record the ledger still holds.
 func (conductor *Conductor) finishStoppedReview(record model.ReviewRecord, category model.TerminationCategory, message string) (model.ReviewRecord, error) {
 	termination := model.ReviewTermination{Category: category, Phase: model.PhaseAvailabilityCheck, Message: message}
 	started := conductor.now().UTC()
@@ -327,7 +343,11 @@ func (conductor *Conductor) finishStoppedReview(record model.ReviewRecord, categ
 		termination.Phase = model.PhaseReviewerExecution
 		started = record.UpdatedAt
 	}
-	return conductor.getRunner().finishIncomplete(record, termination, started)
+	finished, err := conductor.getRunner().finishIncomplete(record, termination, started)
+	if err != nil {
+		return record, err
+	}
+	return finished, nil
 }
 
 func (conductor *Conductor) InspectBundle(_ context.Context, id model.ReviewBundleID) (model.ReviewBundle, error) {

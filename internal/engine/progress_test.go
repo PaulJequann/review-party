@@ -250,15 +250,16 @@ var _ func(model.RunProgressEvent) = (*runProgressRecorder)(nil).record
 // ensure time import stays meaningful for future timing assertions in this file.
 var _ = time.Now
 
-func TestFinishedProgressReportsAHardErrorApartFromTheTermination(t *testing.T) {
+func TestFinishedProgressReportsAHardErrorBesideTheTermination(t *testing.T) {
 	record := model.ReviewRecord{
-		ID: "rp_A", Lifecycle: model.LifecycleRunning,
+		ID: "rp_A", Lifecycle: model.LifecycleIncomplete,
 		Termination: &model.ReviewTermination{Category: model.TerminationCancelled, Message: "cancelled"},
 	}
 
 	event := memberProgress{reviewID: record.ID, total: 1}.finished(record, errors.New("save review: disk full"), 0)
 
-	if event.Error != "save review: disk full" || event.Category != "" || event.Message != "" {
-		t.Fatalf("finish event = %#v, want only the hard error", event)
+	want := model.RunProgressEvent{Kind: model.RunProgressFinished, ReviewID: "rp_A", Total: 1, Lifecycle: model.LifecycleIncomplete, Category: model.TerminationCancelled, Message: "cancelled", Error: "save review: disk full"}
+	if event != want {
+		t.Fatalf("finish event = %#v, want the record's termination and the hard error apart", event)
 	}
 }
