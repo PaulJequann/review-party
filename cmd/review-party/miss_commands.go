@@ -233,11 +233,7 @@ func (execution missExecution) printMisses(misses []model.Miss, listed bool) int
 }
 
 func formatMiss(miss model.Miss, listed bool) string {
-	location := miss.Location.Path
-	if miss.Location.Line > 0 {
-		location += fmt.Sprintf(":%d", miss.Location.Line)
-	}
-	parts := []string{string(miss.ID), string(miss.ReviewID), miss.Profile, location, string(miss.Source), miss.Description}
+	parts := []string{string(miss.ID), string(miss.ReviewID), miss.Profile, miss.Location.String(), string(miss.Source), miss.Description}
 	if listed {
 		parts = append(parts, miss.RecordedAt.UTC().Format(time.RFC3339))
 	}
@@ -245,4 +241,18 @@ func formatMiss(miss model.Miss, listed bool) string {
 		parts = append(parts, "removed: "+miss.Removal.Reason)
 	}
 	return strings.Join(parts, " · ")
+}
+
+func attachReviewMisses(ctx context.Context, conductor *engine.Conductor, report reviewReport) error {
+	for index, entry := range report.Reviews {
+		if entry.ID == "" {
+			continue
+		}
+		misses, err := conductor.Misses(ctx, store.MissQuery{ReviewID: entry.ID})
+		if err != nil {
+			return fmt.Errorf("load misses for review %s: %w", entry.ID, err)
+		}
+		report.Reviews[index].Misses = append(report.Reviews[index].Misses, misses...)
+	}
+	return nil
 }

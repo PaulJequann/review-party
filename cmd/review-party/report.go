@@ -36,6 +36,7 @@ type reviewEntry struct {
 	Termination     *model.ReviewTermination  `json:"termination,omitempty"`
 	Summary         string                    `json:"summary,omitempty"`
 	Findings        []model.Finding           `json:"findings"`
+	Misses          []model.Miss              `json:"misses"`
 	Profile         profileSummary            `json:"profile"`
 	Origin          string                    `json:"origin,omitempty"`
 	Reviewer        *model.ReviewerProvenance `json:"reviewer,omitempty"`
@@ -144,6 +145,7 @@ func recordEntry(record model.ReviewRecord, full bool) reviewEntry {
 		Lifecycle:   record.Lifecycle,
 		Termination: record.Termination,
 		Findings:    []model.Finding{},
+		Misses:      []model.Miss{},
 		Profile: profileSummary{
 			Name:                   record.ProfileRevision.Name,
 			Revision:               record.ProfileRevision.Revision,
@@ -179,6 +181,7 @@ func unstartedEntry(member model.BundleMember) reviewEntry {
 	return reviewEntry{
 		Lifecycle: member.Lifecycle,
 		Findings:  []model.Finding{},
+		Misses:    []model.Miss{},
 		Profile:   profileSummary{Name: member.Profile, Scope: member.Scope, Revision: member.ProfileRevision},
 		Origin:    member.Origin,
 	}

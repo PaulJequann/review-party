@@ -5,7 +5,6 @@ import (
 	"time"
 )
 
-// MissID identifies one recorded miss: a bug a completed review should have caught.
 type MissID string
 
 type MissSource string
@@ -19,7 +18,6 @@ const (
 
 var missSources = []MissSource{MissSourceCodexPR, MissSourceHuman, MissSourceIncident, MissSourceOther}
 
-// ParseMissSource accepts only the closed set of miss sources.
 func ParseMissSource(text string) (MissSource, error) {
 	for _, source := range missSources {
 		if string(source) == text {
@@ -29,10 +27,16 @@ func ParseMissSource(text string) (MissSource, error) {
 	return "", fmt.Errorf("unsupported miss source %q; expected codex-pr, human, incident, or other", text)
 }
 
-// MissLocation names where the missed bug lives. A zero Line means the whole file.
 type MissLocation struct {
 	Path string `json:"path"`
 	Line int    `json:"line,omitempty"`
+}
+
+func (location MissLocation) String() string {
+	if location.Line > 0 {
+		return fmt.Sprintf("%s:%d", location.Path, location.Line)
+	}
+	return location.Path
 }
 
 type MissRemoval struct {
@@ -41,9 +45,6 @@ type MissRemoval struct {
 	RemovedAt time.Time `json:"removed_at"`
 }
 
-// MissReport is what a caller says about a miss. Review-derived facts such as
-// repository, subject, and profile are deliberately absent: they come from the
-// review record, never from the caller.
 type MissReport struct {
 	Location    MissLocation
 	Source      MissSource

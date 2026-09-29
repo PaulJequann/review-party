@@ -40,6 +40,9 @@ func writeHumanEntry(output *commandOutput, label string, entry reviewEntry) {
 	for _, finding := range entry.Findings {
 		writeHumanFinding(output, finding)
 	}
+	for _, miss := range entry.Misses {
+		output.write("  miss: %s · %s · %s (%s, recorded by %s)\n", miss.Location, miss.Source, miss.Description, miss.ID, miss.RecordedBy)
+	}
 	writeEntryProvenance(output, entry)
 	if entry.Record != nil {
 		writeFullRecord(output, *entry.Record)

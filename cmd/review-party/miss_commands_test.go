@@ -140,14 +140,9 @@ func missReviewIDs(misses []model.Miss) []model.ReviewID {
 	return ids
 }
 
-// requireMissReviews compares review ids as a multiset because misses recorded
-// in one request share recorded_at and then order by their random id suffix.
 func requireMissReviews(t *testing.T, misses []model.Miss, want ...model.ReviewID) {
 	t.Helper()
-	got := missReviewIDs(misses)
-	slices.Sort(got)
-	slices.Sort(want)
-	if !slices.Equal(got, want) {
+	if got := missReviewIDs(misses); !slices.Equal(got, want) {
 		t.Fatalf("miss reviews = %v, want %v", got, want)
 	}
 }
@@ -274,4 +269,56 @@ func TestMissRemoveKeepsTombstone(t *testing.T) {
 		t.Fatalf("removal = %#v, want %#v", *removed[0].Removal, want)
 	}
 	requireMissOutput(t, fixture, " · removed: not a bug\n", "miss", "list", "--include-removed")
+}
+
+type inspectedMisses struct {
+	Reviews []struct {
+		ID     model.ReviewID `json:"id"`
+		Misses *[]model.Miss  `json:"misses"`
+	} `json:"reviews"`
+}
+
+func (fixture missLedger) inspectMisses(t *testing.T, id string) map[model.ReviewID][]model.Miss {
+	t.Helper()
+	report := decodeMissOutput[inspectedMisses](t, fixture, "inspect", id, "--format", "json")
+	misses := make(map[model.ReviewID][]model.Miss, len(report.Reviews))
+	for _, entry := range report.Reviews {
+		if entry.Misses == nil {
+			t.Fatalf("inspect %s review %s has no misses array", id, entry.ID)
+		}
+		misses[entry.ID] = *entry.Misses
+	}
+	return misses
+}
+
+func TestInspectShowsActiveMisses(t *testing.T) {
+	fixture := newMissLedger(t)
+	kept := fixture.add(t, "--review", string(missReviewBugs), "--line", "12")[0]
+	removed := string(fixture.add(t, "--review", string(missReviewBugs), "--description", "false alarm")[0].ID)
+	requireMissOutput(t, fixture, removed+" removed\n", "miss", "remove", removed, "--reason", "not a bug")
+
+	misses := fixture.inspectMisses(t, string(missReviewBugs))[missReviewBugs]
+	if len(misses) != 1 || misses[0] != kept {
+		t.Fatalf("inspected misses = %#v, want only %#v", misses, kept)
+	}
+	exit, stdout, stderr := fixture.run("inspect", string(missReviewBugs))
+	if exit != 0 {
+		t.Fatalf("inspect exit = %d, stderr = %q", exit, stderr)
+	}
+	want := "  miss: internal/a.go:12 · codex-pr · nil map write (" + string(kept.ID) + ", recorded by pj)\n"
+	if !strings.Contains(stdout, want) {
+		t.Fatalf("inspect stdout = %q, want line %q", stdout, want)
+	}
+	if strings.Contains(stdout, "false alarm") {
+		t.Fatalf("inspect stdout = %q shows a removed miss", stdout)
+	}
+}
+
+func TestInspectBundleShowsEachMembersMisses(t *testing.T) {
+	fixture := newMissLedger(t)
+	requireMissReviews(t, fixture.add(t, "--review", string(missBundle), "--profile", "security"), missReviewSecurity)
+
+	misses := fixture.inspectMisses(t, string(missBundle))
+	requireMissReviews(t, misses[missReviewSecurity], missReviewSecurity)
+	requireMissReviews(t, misses[missReviewBugs])
 }

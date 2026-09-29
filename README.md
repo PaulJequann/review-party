@@ -267,7 +267,10 @@ rather than copying them. `--recorded-by` and `--removed-by` default to the OS
 username. Removal keeps the miss as a tombstone with its reason, remover, and
 time; removing it again keeps the first tombstone. `miss list` hides removed
 misses unless `--include-removed` is given, resolves `--repo` like `history`,
-and orders by recording time and then miss ID.
+and orders by recording time and then recording order. `inspect` prints each Review's
+active misses beneath its findings, and its JSON `reviews` entries carry them as
+`misses`. That array is always present and is empty for Reviews that `run` and
+`replay` just created.
 
 ## Global and Repository Configuration
 
