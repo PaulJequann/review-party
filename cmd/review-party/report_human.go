@@ -27,6 +27,7 @@ func writeHumanEntry(output *commandOutput, label string, entry reviewEntry) {
 	}
 	if entry.Lifecycle == lifecycleUnreadable {
 		output.write("%s · unreadable\nread error: %s\n", label, entry.ReadError)
+		writeHumanMisses(output, entry.Misses)
 		return
 	}
 	output.write("%s · %s", label, entry.Lifecycle)
@@ -40,9 +41,16 @@ func writeHumanEntry(output *commandOutput, label string, entry reviewEntry) {
 	for _, finding := range entry.Findings {
 		writeHumanFinding(output, finding)
 	}
+	writeHumanMisses(output, entry.Misses)
 	writeEntryProvenance(output, entry)
 	if entry.Record != nil {
 		writeFullRecord(output, *entry.Record)
+	}
+}
+
+func writeHumanMisses(output *commandOutput, misses []model.Miss) {
+	for _, miss := range misses {
+		output.write("  miss: %s · %s · %s (%s, recorded by %s)\n", miss.Location, miss.Source, miss.Description, miss.ID, miss.RecordedBy)
 	}
 }
 

@@ -58,6 +58,9 @@ func executeInspect(ctx context.Context, options inspectOptions, stdout, stderr 
 	} else {
 		report, err = inspectRecordReport(ctx, conductor, options)
 	}
+	if err == nil {
+		err = report.attachMisses(ctx, conductor)
+	}
 	if err != nil {
 		return printFailure(stderr, err)
 	}

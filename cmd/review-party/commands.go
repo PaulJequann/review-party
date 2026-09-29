@@ -116,6 +116,7 @@ func newRootCommand(streams commandIO) *cobra.Command {
 		newReplayCommand(streams),
 		newInspectCommand(streams),
 		newHistoryCommand(streams),
+		newMissCommand(streams),
 		newProfilesCommand(streams),
 		newExplainCommand("explain", streams),
 		newProfileCommand(streams),

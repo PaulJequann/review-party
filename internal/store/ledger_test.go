@@ -425,7 +425,7 @@ func TestLedgerRejectsObsoleteSchema(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec("UPDATE schema_migrations SET version=8"); err != nil {
+	if _, err := db.Exec("DELETE FROM schema_migrations; INSERT INTO schema_migrations(version) VALUES(8)"); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Close(); err != nil {
@@ -456,43 +456,13 @@ func TestLedgerRejectsLegacyFirstSchemaCollision(t *testing.T) {
 }
 
 func TestPrepareReplacesObsoleteLedgersInPlace(t *testing.T) {
-	for name, seed := range map[string]func(*sql.Tx) error{
-		"obsolete-chain-schema": func(tx *sql.Tx) error {
-			_, err := tx.Exec("UPDATE schema_migrations SET version=8")
-			return err
-		},
-		"legacy-first-version": func(tx *sql.Tx) error {
-			_, err := tx.Exec("DROP TABLE reviews; UPDATE schema_migrations SET version=1; CREATE TABLE reviews (id TEXT PRIMARY KEY)")
-			return err
-		},
+	for name, seed := range map[string]string{
+		"obsolete-chain-schema": "DELETE FROM schema_migrations; INSERT INTO schema_migrations(version) VALUES(8)",
+		"legacy-first-version":  "DROP TABLE reviews; DELETE FROM schema_migrations; INSERT INTO schema_migrations(version) VALUES(1); CREATE TABLE reviews (id TEXT PRIMARY KEY)",
 	} {
 		t.Run(name, func(t *testing.T) {
 			directory := t.TempDir()
-			ledger := newTestLedger(t, directory)
-			review := ledgerFixture(model.LifecycleCompleted)
-			if err := ledger.Save(review); err != nil {
-				t.Fatal(err)
-			}
-			if err := ledger.Close(); err != nil {
-				t.Fatal(err)
-			}
-			db, err := sql.Open("sqlite", filepath.Join(directory, ledgerFilename))
-			if err != nil {
-				t.Fatal(err)
-			}
-			tx, err := db.Begin()
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := seed(tx); err != nil {
-				t.Fatal(err)
-			}
-			if err := tx.Commit(); err != nil {
-				t.Fatal(err)
-			}
-			if err := db.Close(); err != nil {
-				t.Fatal(err)
-			}
+			review := writeObsoleteLedger(t, directory, seed)
 
 			if err := PrepareReviewRecordState(directory); err != nil {
 				t.Fatalf("prepare = %v", err)
@@ -515,6 +485,25 @@ func TestPrepareReplacesObsoleteLedgersInPlace(t *testing.T) {
 			}
 		})
 	}
+}
+
+func writeObsoleteLedger(t *testing.T, directory string, seed string) model.ReviewRecord {
+	t.Helper()
+	ledger := newTestLedger(t, directory)
+	review := ledgerFixture(model.LifecycleCompleted)
+	saveTestReviews(t, ledger, review)
+	if err := ledger.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", filepath.Join(directory, ledgerFilename))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeTestResource(t, db.Close)
+	if _, err := db.Exec(seed); err != nil {
+		t.Fatal(err)
+	}
+	return review
 }
 
 func TestAdjudicationCorrectionsPreserveImmutableRevisions(t *testing.T) {

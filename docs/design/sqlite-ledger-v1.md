@@ -87,17 +87,24 @@ Review Party never deletes, silently repairs, or downgrades state.
 ## State preparation and schema
 
 PR #11 replaced the eight-step pre-release migration chain with one embedded
-`initial.sql` schema. New ledgers contain the complete Review, history, replay,
-Eval, adjudication, retry-delay, and Review Bundle tables and indexes. Review
-Party does not import or upgrade retired local schemas.
+`initial.sql` schema, recorded as schema 10. New ledgers contain the complete
+Review, history, replay, Eval, adjudication, retry-delay, and Review Bundle
+tables and indexes. Later schemas extend that base through an additive
+migration registry: schema 11 (`misses.sql`) adds the `misses` table, whose
+rows reference `reviews`. The registry is the only upgrade path. A ledger
+whose version is in the registry upgrades in place and keeps every recorded
+Review, because replacing it would discard the Reviews that misses attach to.
+Review Party does not import or upgrade the retired pre-10 schemas.
 
-Initialization creates the schema transactionally. It is idempotent for a
-ledger that already matches the current schema. A collision with an unrelated
-or retired table fails before Review Party claims the state is prepared. The
-caller must select a fresh state root and run `review-party init`; Review Party
-does not rename, delete, repair, or reinterpret the old database.
+Initialization applies the missing registry migrations in one transaction.
+It is idempotent for a ledger that already matches the current schema. A
+ledger outside the registry is a retired schema: initialization replaces its
+tables rather than preserving them.
 
-Review and read-only operations require prepared state and never create a
-missing ledger. Corrupt, inaccessible, or incompatible state produces a
-specific error without a JSON fallback. This direct replacement is deliberate
-while Review Party remains pre-release.
+Review and read-only operations require the exact current schema, never
+migrate, and never create a missing ledger. An upgradable ledger produces an
+error that names `review-party init`; `init --backup-incompatible` refuses it
+for the same reason, so the in-place upgrade cannot be lost to a fresh ledger.
+Corrupt, inaccessible, newer, or retired state produces a specific error
+without a JSON fallback. Replacing retired schemas rather than importing them
+is deliberate while Review Party remains pre-release.

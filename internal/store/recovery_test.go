@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -97,5 +98,30 @@ func TestFreshPreparationCompletesInterruptedState(t *testing.T) {
 	ready, err := ReviewRecordStatePrepared(directory)
 	if err != nil || !ready {
 		t.Fatalf("state prepared after completed fresh init = %t, %v", ready, err)
+	}
+}
+
+func TestIncompatibleStateBackupRefusesUpgradableLedger(t *testing.T) {
+	directory := t.TempDir()
+	writeSchemaTenLedger(t, directory)
+
+	_, err := BackupIncompatibleReviewRecordState(directory)
+	if err == nil {
+		t.Fatal("backup of an upgradable ledger succeeded")
+	}
+	if message := err.Error(); !strings.Contains(message, "compatible") {
+		t.Fatalf("backup error = %v, want it to call the ledger compatible", err)
+	}
+	if message := err.Error(); !strings.Contains(message, "run review-party init") {
+		t.Fatalf("backup error = %v, want it to name review-party init", err)
+	}
+	if pending, err := ReviewRecordStateRecoveryPending(directory); err != nil || pending {
+		t.Fatalf("recovery pending after refused backup = %t, %v", pending, err)
+	}
+	if err := PrepareReviewRecordState(directory); err != nil {
+		t.Fatalf("prepare after refused backup = %v", err)
+	}
+	if version := readSchemaVersion(t, directory); version != currentLedgerSchemaVersion {
+		t.Fatalf("schema version after prepare = %d, want %d", version, currentLedgerSchemaVersion)
 	}
 }

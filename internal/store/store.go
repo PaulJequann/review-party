@@ -18,14 +18,23 @@ import (
 
 const ledgerFilename = "ledger.sqlite"
 
-// currentLedgerSchemaVersion identifies the single schema used by this pre-release
-// product. State preparation replaces any other recognized version without
-// upgrading or preserving it. The numbering continues past the last released
-// migration so no obsolete ledger can collide with a replacement.
-const currentLedgerSchemaVersion = 10
+// currentLedgerSchemaVersion is the newest step in ledgerMigrations. State
+// preparation upgrades a ledger at schema 10 or later additively, preserving its
+// records, and replaces anything older without preserving it. The numbering
+// continued past the last released migration so no obsolete ledger can collide.
+const currentLedgerSchemaVersion = 11
+
+var ledgerMigrations = []struct {
+	version int
+	path    string
+}{
+	{10, "migrations/initial.sql"},
+	{11, "migrations/misses.sql"},
+}
 
 var ErrReviewRecordStateNotInitialized = errors.New("Review Party is not initialized")
 var ErrReviewRecordStateRequiresPreparation = errors.New("Review Party state requires preparation")
+var errLedgerUpgradesInPlace = fmt.Errorf("%w", ErrReviewRecordStateRequiresPreparation)
 
 //go:embed migrations/*.sql
 var migrationFiles embed.FS
@@ -99,6 +108,7 @@ type LedgerRecordStore struct {
 	evalProjection         evalProjection
 	bundleProjection       bundleProjection
 	adjudicationProjection adjudicationProjection
+	missProjection         missProjection
 }
 
 // DeferredLedgerRecordStore preserves read-only commands: their construction
@@ -130,8 +140,9 @@ func (s *DeferredLedgerRecordStore) RequirePrepared() error {
 	return err
 }
 
-// PrepareReviewRecordState creates or upgrades the managed ledger explicitly.
-// Ordinary Review, inspect, and history paths never call this operation.
+// PrepareReviewRecordState creates the managed ledger, upgrades one at schema 10
+// or later in place, or replaces an older one. Ordinary Review, inspect, and
+// history paths never call this operation.
 func PrepareReviewRecordState(directory string) error {
 	ledger, err := NewLedgerRecordStore(directory)
 	if err != nil {
@@ -256,6 +267,30 @@ func (s *DeferredLedgerRecordStore) LoadAdjudication(id model.AdjudicationRevisi
 	return ledger.LoadAdjudication(id)
 }
 
+func (s *DeferredLedgerRecordStore) RecordMisses(records []MissRecord) ([]model.Miss, error) {
+	ledger, err := s.openExisting()
+	if err != nil {
+		return nil, err
+	}
+	return ledger.RecordMisses(records)
+}
+
+func (s *DeferredLedgerRecordStore) ListMisses(query MissQuery) ([]model.Miss, error) {
+	ledger, err := s.openExisting()
+	if err != nil {
+		return nil, err
+	}
+	return ledger.ListMisses(query)
+}
+
+func (s *DeferredLedgerRecordStore) RemoveMisses(ids []model.MissID, removal model.MissRemoval) ([]MissRemovalOutcome, error) {
+	ledger, err := s.openExisting()
+	if err != nil {
+		return nil, err
+	}
+	return ledger.RemoveMisses(ids, removal)
+}
+
 func (s *DeferredLedgerRecordStore) openExisting() (*LedgerRecordStore, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -306,6 +341,7 @@ func openLedgerRecordStore(directory string, prepare bool) (*LedgerRecordStore, 
 		evalProjection:         evalProjection{db: db},
 		bundleProjection:       bundleProjection{db: db},
 		adjudicationProjection: adjudicationProjection{db: db},
+		missProjection:         missProjection{db: db},
 	}
 	if err := store.initialize(prepare); err != nil {
 		return nil, errors.Join(err, db.Close())
@@ -346,6 +382,9 @@ func (s *LedgerRecordStore) requirePreparedSchema() error {
 	if version > currentLedgerSchemaVersion {
 		return fmt.Errorf("review ledger schema %d is newer than supported schema %d", version, currentLedgerSchemaVersion)
 	}
+	if version != currentLedgerSchemaVersion && upgradableLedgerVersion(version) {
+		return fmt.Errorf("%w: review ledger schema %d is compatible and upgrades in place to schema %d; run review-party init", errLedgerUpgradesInPlace, version, currentLedgerSchemaVersion)
+	}
 	if version != currentLedgerSchemaVersion {
 		return fmt.Errorf("%w: review ledger schema %d requires state preparation for schema %d", ErrReviewRecordStateRequiresPreparation, version, currentLedgerSchemaVersion)
 	}
@@ -379,7 +418,7 @@ func (s *LedgerRecordStore) configure() error {
 // obsoleteLedgerTables lists every table a replaced pre-release ledger could own,
 // ordered so foreign-key children are dropped before their parents.
 var obsoleteLedgerTables = []string{
-	"artifacts", "findings", "attempts", "passes",
+	"misses", "artifacts", "findings", "attempts", "passes",
 	"eval_runs", "adjudication_revisions", "review_bundles",
 	"eval_suite_runs", "reviews", "schema_migrations",
 }
@@ -399,21 +438,25 @@ func (s *LedgerRecordStore) migrate() (returnErr error) {
 	if err != nil {
 		return err
 	}
+	if err := upgradeLedgerSchema(tx, version); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func upgradeLedgerSchema(tx *sql.Tx, version int) error {
 	if version > currentLedgerSchemaVersion {
 		return fmt.Errorf("review ledger schema %d is newer than supported schema %d", version, currentLedgerSchemaVersion)
 	}
-	if version != currentLedgerSchemaVersion {
-		// Explicit preparation replaces a recognized pre-release ledger in place
-		// (a zero version means a fresh database); it never upgrades or preserves
-		// obsolete state.
+	if !upgradableLedgerVersion(version) {
+		// A version outside the additive chain (zero for a fresh database) is an
+		// obsolete pre-release ledger: replace it rather than preserve it.
 		if err := dropObsoleteLedgerTables(tx, version); err != nil {
 			return err
 		}
-		if err := applyKnownMigration(tx, currentLedgerSchemaVersion); err != nil {
-			return err
-		}
+		version = 0
 	}
-	return tx.Commit()
+	return applyLedgerMigrationsAfter(tx, version)
 }
 
 // dropObsoleteLedgerTables clears every table a replaced pre-release ledger
@@ -430,13 +473,25 @@ func dropObsoleteLedgerTables(tx *sql.Tx, replaced int) error {
 	return nil
 }
 
-func applyKnownMigration(tx *sql.Tx, version int) error {
-	paths := map[int]string{currentLedgerSchemaVersion: "migrations/initial.sql"}
-	path, exists := paths[version]
-	if !exists {
-		return fmt.Errorf("no migration for review ledger schema %d", version)
+func upgradableLedgerVersion(version int) bool {
+	for _, migration := range ledgerMigrations {
+		if migration.version == version {
+			return true
+		}
 	}
-	return applyMigration(tx, version, path)
+	return false
+}
+
+func applyLedgerMigrationsAfter(tx *sql.Tx, version int) error {
+	for _, migration := range ledgerMigrations {
+		if migration.version <= version {
+			continue
+		}
+		if err := applyMigration(tx, migration.version, migration.path); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func currentMigrationVersion(tx *sql.Tx) (int, error) {
@@ -517,6 +572,18 @@ func (s *LedgerRecordStore) LoadAdjudication(id model.AdjudicationRevisionID) (m
 	return s.adjudicationProjection.load(id)
 }
 
+func (s *LedgerRecordStore) RecordMisses(records []MissRecord) ([]model.Miss, error) {
+	return s.missProjection.record(records)
+}
+
+func (s *LedgerRecordStore) ListMisses(query MissQuery) ([]model.Miss, error) {
+	return s.missProjection.list(query)
+}
+
+func (s *LedgerRecordStore) RemoveMisses(ids []model.MissID, removal model.MissRemoval) ([]MissRemovalOutcome, error) {
+	return s.missProjection.remove(ids, removal)
+}
+
 func (s *LedgerRecordStore) History(query HistoryQuery) (page HistoryPage, returnErr error) {
 	statement, arguments, limit, err := buildHistoryQuery(query)
 	if err != nil {
@@ -570,18 +637,18 @@ func buildHistoryQuery(query HistoryQuery) (string, []any, int, error) {
 	return statement, arguments, limit, nil
 }
 
-type historyFilter struct {
+type queryFilter struct {
 	predicate string
 	value     any
 	enabled   bool
 }
 
-func historyFilters(query HistoryQuery) []historyFilter {
+func historyFilters(query HistoryQuery) []queryFilter {
 	var since any
 	if query.Since != nil {
 		since = query.Since.UTC()
 	}
-	return []historyFilter{
+	return []queryFilter{
 		{"json_extract(subject,'$.repository') = ?", query.Repository, query.Repository != ""},
 		{"json_extract(profile_revision,'$.reviewer_id') = ?", query.Reviewer, query.Reviewer != ""},
 		{"json_extract(profile_revision,'$.name') = ?", query.Profile, query.Profile != ""},

@@ -8,6 +8,7 @@ import (
 	"io"
 
 	"reviewparty/internal/model"
+	"reviewparty/internal/store"
 )
 
 type reviewReport struct {
@@ -36,6 +37,7 @@ type reviewEntry struct {
 	Termination     *model.ReviewTermination  `json:"termination,omitempty"`
 	Summary         string                    `json:"summary,omitempty"`
 	Findings        []model.Finding           `json:"findings"`
+	Misses          []model.Miss              `json:"misses"`
 	Profile         profileSummary            `json:"profile"`
 	Origin          string                    `json:"origin,omitempty"`
 	Reviewer        *model.ReviewerProvenance `json:"reviewer,omitempty"`
@@ -69,6 +71,10 @@ type reviewLoader interface {
 	Inspect(context.Context, model.ReviewID) (model.ReviewRecord, error)
 }
 
+type missLoader interface {
+	Misses(context.Context, store.MissQuery) ([]model.Miss, error)
+}
+
 type reportOptions struct {
 	format        string
 	configuration string
@@ -100,6 +106,24 @@ func memberEntry(ctx context.Context, loader reviewLoader, member model.BundleMe
 	entry.Profile.Scope = member.Scope
 	entry.Origin = member.Origin
 	return entry
+}
+
+func (report reviewReport) attachMisses(ctx context.Context, loader missLoader) error {
+	for index, entry := range report.Reviews {
+		if entry.ID == "" {
+			continue
+		}
+		misses, err := loader.Misses(ctx, store.MissQuery{ReviewID: entry.ID})
+		if err != nil && entry.Lifecycle == lifecycleUnreadable {
+			report.Reviews[index].ReadError += "; load misses: " + err.Error()
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("load misses for review %s: %w", entry.ID, err)
+		}
+		report.Reviews[index].Misses = append(report.Reviews[index].Misses, misses...)
+	}
+	return nil
 }
 
 func printReport(output io.Writer, report reviewReport, options reportOptions) error {
@@ -144,6 +168,7 @@ func recordEntry(record model.ReviewRecord, full bool) reviewEntry {
 		Lifecycle:   record.Lifecycle,
 		Termination: record.Termination,
 		Findings:    []model.Finding{},
+		Misses:      []model.Miss{},
 		Profile: profileSummary{
 			Name:                   record.ProfileRevision.Name,
 			Revision:               record.ProfileRevision.Revision,
@@ -179,6 +204,7 @@ func unstartedEntry(member model.BundleMember) reviewEntry {
 	return reviewEntry{
 		Lifecycle: member.Lifecycle,
 		Findings:  []model.Finding{},
+		Misses:    []model.Miss{},
 		Profile:   profileSummary{Name: member.Profile, Scope: member.Scope, Revision: member.ProfileRevision},
 		Origin:    member.Origin,
 	}
