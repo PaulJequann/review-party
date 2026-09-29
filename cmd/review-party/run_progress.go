@@ -56,10 +56,7 @@ func (renderer *runProgressRenderer) handle(event model.RunProgressEvent) {
 }
 
 func (renderer *runProgressRenderer) header(event model.RunProgressEvent) string {
-	suffix := ""
-	if renderer.configuration != "" && renderer.configuration != defaultUserConfigurationPath() {
-		suffix = " --config " + shellQuoteArgument(renderer.configuration)
-	}
+	suffix := configurationArgument(renderer.configuration)
 	id := string(event.ReviewID)
 	subject := "review " + id
 	if event.BundleID != "" {

@@ -698,3 +698,47 @@ func scanHistoryPage(rows *sql.Rows, limit int) (HistoryPage, error) {
 	}
 	return page, nil
 }
+
+// InFlight names the pending and running Review Bundles and Reviews recorded
+// for one repository, newest first.
+type InFlight struct {
+	Bundles []model.ReviewBundleID
+	Reviews []model.ReviewID
+}
+
+func (s *LedgerRecordStore) InFlight(repository string) (InFlight, error) {
+	bundles, err := queryInFlightIDs[model.ReviewBundleID](s.db, `SELECT id FROM review_bundles WHERE repository = ? AND lifecycle IN ('pending','running') ORDER BY created_at DESC, id DESC`, repository)
+	if err != nil {
+		return InFlight{}, err
+	}
+	reviews, err := queryInFlightIDs[model.ReviewID](s.db, `SELECT id FROM reviews WHERE json_extract(subject,'$.repository') = ? AND lifecycle IN ('pending','running') ORDER BY created_at DESC, id DESC`, repository)
+	if err != nil {
+		return InFlight{}, err
+	}
+	return InFlight{Bundles: bundles, Reviews: reviews}, nil
+}
+
+func queryInFlightIDs[ID ~string](db *sql.DB, statement, repository string) (ids []ID, returnErr error) {
+	rows, err := db.Query(statement, repository)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { returnErr = errors.Join(returnErr, rows.Close()) }()
+	ids = []ID{}
+	for rows.Next() {
+		var id ID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+func (s *DeferredLedgerRecordStore) InFlight(repository string) (InFlight, error) {
+	ledger, err := s.openExisting()
+	if err != nil {
+		return InFlight{}, err
+	}
+	return ledger.InFlight(repository)
+}

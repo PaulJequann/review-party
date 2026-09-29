@@ -102,11 +102,16 @@ func writeFullRecord(output *commandOutput, record model.ReviewRecord) {
 }
 
 func writeInspectHint(output *commandOutput, id, configuration string) {
-	output.write("inspect: review-party inspect %s", id)
-	if configuration != defaultUserConfigurationPath() {
-		output.write(" --config %s", shellQuoteArgument(configuration))
+	output.write("inspect: review-party inspect %s%s\n", id, configurationArgument(configuration))
+}
+
+// configurationArgument is the --config suffix a printed follow-up command
+// needs to reach the same Global Configuration, or "" for the default.
+func configurationArgument(configuration string) string {
+	if configuration == "" || configuration == defaultUserConfigurationPath() {
+		return ""
 	}
-	output.write("\n")
+	return " --config " + shellQuoteArgument(configuration)
 }
 
 func shortIdentity(identity string) string {

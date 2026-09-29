@@ -1,0 +1,121 @@
+package engine
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"sort"
+	"strings"
+
+	"reviewparty/internal/model"
+	"reviewparty/internal/store"
+)
+
+// ErrUnsupportedStatusID reports an id that names neither a Review Bundle nor
+// a Review.
+var ErrUnsupportedStatusID = errors.New("status accepts a Review Bundle id (rb_…) or a Review id (rp_…)")
+
+// Status reads the current lifecycle of one Review Bundle or Review without
+// waiting for it.
+func (conductor *Conductor) Status(ctx context.Context, id string) (model.ReviewStatus, error) {
+	switch {
+	case strings.HasPrefix(id, "rb_"):
+		return conductor.bundleStatus(ctx, model.ReviewBundleID(id))
+	case strings.HasPrefix(id, "rp_"):
+		record, err := conductor.Inspect(ctx, model.ReviewID(id))
+		if err != nil {
+			return model.ReviewStatus{}, err
+		}
+		return reviewStatus(record), nil
+	default:
+		return model.ReviewStatus{}, fmt.Errorf("%w; got %q", ErrUnsupportedStatusID, id)
+	}
+}
+
+// InFlight lists the pending and running Review Bundles for a repository and
+// the pending and running Reviews that belong to none of them, newest first.
+func (conductor *Conductor) InFlight(ctx context.Context, repository string) ([]model.ReviewStatus, error) {
+	ledger, ok := conductor.store.(interface {
+		InFlight(string) (store.InFlight, error)
+	})
+	if !ok {
+		return nil, errors.New("review status requires the SQLite ledger")
+	}
+	ids, err := ledger.InFlight(repository)
+	if errors.Is(err, store.ErrReviewRecordStateNotInitialized) {
+		return nil, InitializationRequiredError{Repository: repository}
+	}
+	if err != nil {
+		return nil, err
+	}
+	statuses := make([]model.ReviewStatus, 0, len(ids.Bundles)+len(ids.Reviews))
+	members := map[model.ReviewID]bool{}
+	for _, id := range ids.Bundles {
+		status, err := conductor.bundleStatus(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		for _, member := range status.Reviews {
+			members[member.ReviewID] = true
+		}
+		statuses = append(statuses, status)
+	}
+	for _, id := range ids.Reviews {
+		if members[id] {
+			continue
+		}
+		status, err := conductor.Status(ctx, string(id))
+		if err != nil {
+			return nil, err
+		}
+		statuses = append(statuses, status)
+	}
+	sort.SliceStable(statuses, func(i, j int) bool { return statuses[i].CreatedAt.After(statuses[j].CreatedAt) })
+	return statuses, nil
+}
+
+func (conductor *Conductor) bundleStatus(ctx context.Context, id model.ReviewBundleID) (model.ReviewStatus, error) {
+	bundle, err := conductor.InspectBundle(ctx, id)
+	if err != nil {
+		return model.ReviewStatus{}, err
+	}
+	status := model.ReviewStatus{
+		ID: string(bundle.ID), Kind: model.ReviewStatusBundle, Lifecycle: bundle.Lifecycle,
+		Repository: bundle.Repository, Termination: bundle.Termination,
+		CreatedAt: bundle.CreatedAt, UpdatedAt: bundle.UpdatedAt,
+		Reviews: make([]model.ReviewStatusMember, 0, len(bundle.Members)),
+	}
+	for _, member := range bundle.Members {
+		record, err := conductor.Inspect(ctx, member.ReviewID)
+		if err != nil {
+			return model.ReviewStatus{}, fmt.Errorf("read Review %s of Review Bundle %s: %w", member.ReviewID, bundle.ID, err)
+		}
+		status.Reviews = append(status.Reviews, reviewStatusMember(record, member.Scope))
+	}
+	return status, nil
+}
+
+func reviewStatus(record model.ReviewRecord) model.ReviewStatus {
+	return model.ReviewStatus{
+		ID: string(record.ID), Kind: model.ReviewStatusReview, Lifecycle: record.Lifecycle,
+		Repository: record.Subject.Repository, CreatedAt: record.CreatedAt, UpdatedAt: record.UpdatedAt,
+		Reviews: []model.ReviewStatusMember{reviewStatusMember(record, "")},
+	}
+}
+
+func reviewStatusMember(record model.ReviewRecord, scope string) model.ReviewStatusMember {
+	member := model.ReviewStatusMember{
+		ReviewID: record.ID, Scope: scope, Profile: record.ProfileRevision.Name,
+		Reviewer: record.ProfileRevision.ReviewerID, Model: record.ProfileRevision.Model,
+		Lifecycle: record.Lifecycle, Attempts: record.AttemptCount(), Termination: record.Termination,
+		UpdatedAt: record.UpdatedAt,
+	}
+	if record.Result != nil {
+		member.Status = string(record.Result.Status)
+		member.FindingCount = record.Result.FindingCount()
+	}
+	if record.Lifecycle.Terminal() && record.Timings != nil {
+		member.DurationMS = record.Timings.TotalMS
+	}
+	return member
+}
