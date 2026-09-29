@@ -62,9 +62,10 @@ launch() {
   binary_dir="$runtime/bin"
   config_root="$runtime/config"
   state_root="$runtime/state"
+  home="$runtime/home"
   target_repository="$runtime/repository"
   evidence="$run_dir/evidence"
-  mkdir -p "$binary_dir" "$config_root" "$state_root" "$target_repository" "$evidence"
+  mkdir -p "$binary_dir" "$config_root" "$state_root" "$home" "$target_repository" "$evidence"
 
   tree_before_build=$(source_tree "$repository")
   PATH="$binary_dir:$PATH" "$repository/scripts/install-local.sh" "$binary_dir" >/dev/null
@@ -100,13 +101,14 @@ launch() {
     printf 'config_file\t%s\n' "$config_file"
     printf 'state_root\t%s\n' "$state_root"
     printf 'state_directory\t%s\n' "$state_directory"
+    printf 'home\t%s\n' "$home"
     printf 'target_repository\t%s\n' "$target_repository"
     printf 'evidence_directory\t%s\n' "$evidence"
     printf 'terminal_session\tverify-review-party-%s\n' "$(printf '%s' "$run_id" | tr '.' '_')"
   } > "$run_dir/ownership.tsv"
   printf '%s\n' "$run_id" > "$config_root/verify-review-party.owner"
 
-  XDG_CONFIG_HOME="$config_root" XDG_STATE_HOME="$state_root" \
+  HOME="$home" XDG_CONFIG_HOME="$config_root" XDG_STATE_HOME="$state_root" \
     "$binary" init --repo "$target_repository" --state-dir "$state_directory" --config "$config_file" >/dev/null
   doctor "$run_dir" >/dev/null
   printf '%s\n' "$run_dir"
@@ -139,6 +141,8 @@ doctor() {
   [ -d "$state_root" ] || fail "owned state root is missing at $state_root"
   state_directory=$(manifest_value state_directory "$manifest")
   [ -f "$state_directory/ledger.sqlite" ] || fail "owned state database is missing at $state_directory/ledger.sqlite"
+  home=$(manifest_value home "$manifest")
+  [ -d "$home" ] || fail "owned home is missing at $home"
   target_repository=$(manifest_value target_repository "$manifest")
   git -C "$target_repository" rev-parse --show-toplevel >/dev/null 2>&1 || fail "owned target is not a Git repository at $target_repository"
 
@@ -177,8 +181,9 @@ capture() {
   fi
   config_root=$(manifest_value config_root "$manifest")
   state_root=$(manifest_value state_root "$manifest")
+  home=$(manifest_value home "$manifest")
   set +e
-  XDG_CONFIG_HOME="$config_root" XDG_STATE_HOME="$state_root" "$@" >"$stdout" 2>"$stderr"
+  HOME="$home" XDG_CONFIG_HOME="$config_root" XDG_STATE_HOME="$state_root" "$@" >"$stdout" 2>"$stderr"
   status=$?
   set -e
   printf '%s\n' "$status" > "$status_file"

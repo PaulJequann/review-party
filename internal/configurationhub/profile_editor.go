@@ -193,7 +193,7 @@ func (e *editor) chooseProfileSource(draft *configuration.ProfileDraft) error {
 func (e *editor) chooseProfileTemplate(draft *configuration.ProfileDraft) error {
 	templates := profileTemplateOptions(e.manager.Templates())
 	if len(templates) == 0 {
-		return fmt.Errorf("no packaged Review Profile Templates are available; choose blank instructions")
+		return fmt.Errorf("no Review Profile Templates are available; choose blank instructions")
 	}
 	var templateID string
 	if err := e.form(huh.NewSelect[string]().Title("Template").Options(templates...).Value(&templateID)); err != nil {

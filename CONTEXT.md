@@ -21,7 +21,7 @@ A named, versioned, executable definition of a repeatable kind of review. It pac
 _Avoid_: Review Profile Template, prompt alone, temporary model override, untracked configuration bundle
 
 **Review Profile Template**:
-A packaged, non-executable starting point for Review Profile judgment instructions. A Caller creates a Review Profile by copying or authoring instructions and selecting the complete execution configuration. Template updates never mutate saved Profiles automatically.
+A non-executable starting point for Review Profile judgment instructions. Templates are packaged with Review Party or imported as `skill:<name>` from Agent Skills on the Caller's machine, never from the reviewed repository. A Caller creates a Review Profile by copying or authoring instructions and selecting the complete execution configuration. Template updates never mutate saved Profiles automatically.
 _Avoid_: Review Profile, executable built-in, inherited prompt fragment
 
 **Review Pass**:

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+
 	"reviewparty/internal/configuration"
 
 	"github.com/spf13/cobra"
@@ -56,8 +58,15 @@ func executeDoctor(options doctorOptions, streams commandIO) int {
 		return printConfigOutput(streams, func(output *commandOutput) {
 			output.write("configuration is valid\n")
 			for _, item := range drift {
-				output.write("Template update: %s:%s %s → %s\n", item.Scope, item.Profile, item.TemplateRevision, item.AvailableRevision)
+				output.write("%s\n", doctorTemplateDriftLine(item))
 			}
 		}), nil
 	})
+}
+
+func doctorTemplateDriftLine(item configuration.TemplateDrift) string {
+	if item.SourceUnavailable {
+		return fmt.Sprintf("Template source unavailable: %s:%s %s@%s; saved instructions still run", item.Scope, item.Profile, item.TemplateID, item.TemplateRevision)
+	}
+	return fmt.Sprintf("Template update: %s:%s %s → %s", item.Scope, item.Profile, item.TemplateRevision, item.AvailableRevision)
 }

@@ -25,7 +25,6 @@ type ProfileDraft struct {
 	TemplateRevision string
 }
 
-// Templates returns immutable packaged Templates in stable ID order.
 func (manager *Manager) Templates() []Template {
 	result := append([]Template(nil), manager.templates...)
 	sort.Slice(result, func(left, right int) bool { return result[left].ID < result[right].ID })
@@ -51,14 +50,18 @@ func (manager *Manager) TemplateDriftForProfiles(profiles []Definition[Profile])
 			continue
 		}
 		template, found := manager.Template(profile.TemplateID)
-		if !found || template.Revision == profile.TemplateRevision {
+		if found && template.Revision == profile.TemplateRevision {
 			continue
 		}
-		result = append(result, TemplateDrift{
+		drift := TemplateDrift{
 			Scope: definition.Scope, Profile: profile.Name, TemplateID: profile.TemplateID,
-			TemplateRevision: profile.TemplateRevision, AvailableRevision: template.Revision,
-			Customized: templateInstructionsCustomized(profile, template),
-		})
+			TemplateRevision: profile.TemplateRevision, SourceUnavailable: !found,
+		}
+		if found {
+			drift.AvailableRevision = template.Revision
+			drift.Customized = templateInstructionsCustomized(profile, template)
+		}
+		result = append(result, drift)
 	}
 	return result
 }
@@ -123,6 +126,10 @@ func (manager *Manager) stageTemplateUpdate(request templateUpdateRequest) (Plan
 		plan.state.reason = fmt.Sprintf("Profile %q already uses Template %s@%s", request.name, template.ID, template.Revision)
 		return plan, nil
 	}
+	if err := profileInstructionsPayload.validate([]byte(template.Instructions)); err != nil {
+		plan.state.reason = err.Error()
+		return plan, nil
+	}
 	entry, anchor, err := manager.profileEntry(request.scope, request.repository, request.name)
 	if err != nil {
 		return Plan{}, err
@@ -149,7 +156,7 @@ func (manager *Manager) stageTemplateUpdate(request templateUpdateRequest) (Plan
 	// instructions, invisible to drift.
 	change := Change{Field: "profiles." + request.name + ".template_revision", Scope: request.scope, Path: filepath.Dir(entry.Path), Before: profile.TemplateRevision, After: template.Revision, HadBefore: true, HadAfter: true}
 	plan = newFilePlan(manager, request.scope, change, writes)
-	plan = plan.WithWarnings(request.instructionReplacementWarning())
+	plan = plan.WithWarnings(request.instructionReplacementWarning(), template.bundledFilesWarning())
 	if templateInstructionsCustomized(profile, template) {
 		plan = plan.WithWarnings("replaces customized instructions.md; execution settings are kept")
 	}
@@ -169,7 +176,12 @@ func (manager *Manager) PlanProfileCreation(repository Repository, draft Profile
 	if err != nil {
 		return Plan{}, err
 	}
-	return manager.planProfile(repository, draft.Target, profile, instructions)
+	plan, err := manager.planProfile(repository, draft.Target, profile, instructions)
+	if err != nil {
+		return Plan{}, err
+	}
+	template, _ := manager.Template(profile.TemplateID)
+	return plan.WithWarnings(template.bundledFilesWarning()), nil
 }
 
 func (manager *Manager) planProfile(repository Repository, target Scope, profile Profile, instructions string) (Plan, error) {

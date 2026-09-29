@@ -222,7 +222,7 @@ func (model Model) overviewDescription() string {
 
 func (model *Model) openProfileSourceForm() tea.Cmd {
 	return model.openForm(formProfileSource, []huh.Field{
-		huh.NewNote().Title("Instruction source").Description("Use a packaged template or start with blank instructions."),
+		huh.NewNote().Title("Instruction source").Description("Start from a packaged or skill Review Profile Template, or from blank instructions."),
 		huh.NewSelect[string]().Title("Instruction source").Options(
 			huh.NewOption("Template", "template"), huh.NewOption("Blank", "blank"),
 		).Value(&model.session.source),
@@ -240,7 +240,7 @@ func (model Model) profileTemplateOptions() []huh.Option[string] {
 func (model *Model) openProfileTemplateForm() tea.Cmd {
 	options := model.profileTemplateOptions()
 	if len(options) == 0 {
-		model.status = "No packaged Review Profile Templates are available. Choose blank instructions."
+		model.status = "No Review Profile Templates are available. Choose blank instructions."
 		return model.openProfileSourceForm()
 	}
 	return model.openForm(formProfileTemplate, []huh.Field{

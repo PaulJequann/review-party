@@ -3,6 +3,7 @@ package engine
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 
 	"reviewparty/internal/configuration"
@@ -32,9 +33,17 @@ func reviewPartyConfigurationOptions() configuration.Options {
 		Reviewers:               supportedReviewerIDs(),
 		PackagedReviewerModels:  packagedReviewerModels(),
 		PackagedDefaultReviewer: defaultReviewer,
-		Templates:               packagedReviewProfileTemplates(),
+		Templates:               append(packagedReviewProfileTemplates(), configuration.SkillTemplates(callerHomeSkillRoots())...),
 		ValidateName:            validateAuthoredName,
 	}
+}
+
+func callerHomeSkillRoots() []string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	return []string{filepath.Join(home, ".agents", "skills"), filepath.Join(home, ".claude", "skills")}
 }
 
 func packagedReviewProfileTemplates() []configuration.Template {
