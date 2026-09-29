@@ -82,10 +82,12 @@ Advanced callers may select a state location during initialization with
 `--state-dir PATH`; Review Party remembers that choice in the selected user
 configuration. Pass `--config PATH` consistently to init, Review, inspect, and
 history when using a non-default configuration. Initialization is idempotent
-for current state. Review, inspect, and history refuse to create state. Review
-Party is pre-release and does not upgrade retired ledger schemas. Back up an
-incompatible ledger and its SQLite sidecars first, then authorize fresh state
-in a separate command:
+for current state. Review, inspect, and history refuse to create state. A
+schema 10 ledger requires one `review-party init` run, which adds the misses
+table and keeps every recorded Review; other commands refuse that ledger until
+then. Review Party is pre-release and does not upgrade other retired ledger
+schemas. Back up an incompatible ledger and its SQLite sidecars first, then
+authorize fresh state in a separate command:
 
 ```sh
 review-party init --repo . --backup-incompatible --yes
@@ -243,6 +245,29 @@ root, timestamps use RFC3339, and results are ordered newest-first by creation
 time and then Review ID. The default limit is 20 and the maximum is 200. JSON
 output contains `entries`, the applied `limit`, and `has_more`. History selects
 existing Reviews; it does not rerun or replay them.
+
+Record a bug that a completed Review missed, so later work can measure what each
+Profile fails to catch:
+
+```sh
+review-party miss add --review rp_... --path internal/store/store.go --line 42 \
+  --source codex-pr --description "nil map write on first save"
+review-party miss add --review rb_... --profile bugs --path main.go \
+  --source human --description "leaked file handle"
+review-party miss list --repo . --profile bugs
+review-party miss remove ms_... --reason "intended behavior"
+```
+
+`--source` is one of `codex-pr`, `human`, `incident`, or `other`. A miss
+attaches only to a completed Review. A Review Bundle id attaches one miss to
+every member Review, or only to the member named by `--profile`; the whole
+request fails without writes when a targeted member has no completed Review.
+Each miss reads its repository, Subject, and Profile from the Review record
+rather than copying them. `--recorded-by` and `--removed-by` default to the OS
+username. Removal keeps the miss as a tombstone with its reason, remover, and
+time; removing it again keeps the first tombstone. `miss list` hides removed
+misses unless `--include-removed` is given, resolves `--repo` like `history`,
+and orders by recording time and then miss ID.
 
 ## Global and Repository Configuration
 
@@ -487,8 +512,9 @@ validation failures, and unknown failures without requiring callers to parse a
 diagnostic string. Review Records are persisted in the managed SQLite ledger at
 `$XDG_STATE_HOME/review-party/ledger.sqlite` (or the corresponding
 `$HOME/.local/state` fallback). The CLI intentionally exposes no storage-path
-selector; isolate tests and experiments with `XDG_STATE_HOME`. The ledger uses
-one pre-release initial schema. Review Party fails on retired or colliding state
+selector; isolate tests and experiments with `XDG_STATE_HOME`. The ledger
+schema is the pre-release initial schema plus additive migrations that
+`review-party init` applies. Review Party fails on retired or colliding state
 instead of importing or rewriting it.
 
 ## Artifact evidence
