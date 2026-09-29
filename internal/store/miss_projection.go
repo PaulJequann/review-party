@@ -15,8 +15,6 @@ type MissStore interface {
 	RemoveMisses(ids []model.MissID, removal model.MissRemoval) ([]MissRemovalOutcome, error)
 }
 
-// MissRecord carries only what a caller may say about a miss. Repository,
-// subject, and profile are read from the review so they cannot disagree with it.
 type MissRecord struct {
 	ID         model.MissID
 	ReviewID   model.ReviewID
@@ -38,8 +36,6 @@ const (
 	MissAlreadyRemoved MissRemovalStatus = "already-removed"
 )
 
-// MissRemovalOutcome reports the tombstone a miss carries after removal. For an
-// already removed miss it is the original tombstone, left untouched.
 type MissRemovalOutcome struct {
 	ID      model.MissID      `json:"id"`
 	Status  MissRemovalStatus `json:"status"`
@@ -75,8 +71,6 @@ func (p missProjection) record(records []MissRecord) (misses []model.Miss, retur
 	return misses, nil
 }
 
-// insertMiss selects from reviews so an unknown review inserts nothing and is
-// reported by name instead of surfacing as a foreign-key failure.
 func insertMiss(tx *sql.Tx, record MissRecord) (model.Miss, error) {
 	var line any
 	if record.Report.Location.Line > 0 {
@@ -141,7 +135,7 @@ func buildMissListQuery(query MissQuery) (string, []any) {
 	if len(predicates) > 0 {
 		statement += " WHERE " + strings.Join(predicates, " AND ")
 	}
-	return statement + " ORDER BY m.recorded_at,m.id", arguments
+	return statement + " ORDER BY m.recorded_at,m.rowid", arguments
 }
 
 func (p missProjection) remove(ids []model.MissID, removal model.MissRemoval) (outcomes []MissRemovalOutcome, returnErr error) {

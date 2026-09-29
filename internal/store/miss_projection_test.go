@@ -176,7 +176,7 @@ func TestLedgerListsMissesByRepositoryProfileAndReview(t *testing.T) {
 		query MissQuery
 		want  []model.MissID
 	}{
-		"all in recorded order": {MissQuery{}, []model.MissID{"ms_1725192000000_0000000000000002", "ms_1725192000000_0000000000000001", "ms_1725192000000_0000000000000003"}},
+		"all in recorded order": {MissQuery{}, []model.MissID{"ms_1725192000000_0000000000000002", "ms_1725192000000_0000000000000003", "ms_1725192000000_0000000000000001"}},
 		"repository":            {MissQuery{Repository: "/other"}, []model.MissID{"ms_1725192000000_0000000000000003"}},
 		"profile":               {MissQuery{Profile: "bugs"}, []model.MissID{"ms_1725192000000_0000000000000002", "ms_1725192000000_0000000000000001"}},
 		"review":                {MissQuery{ReviewID: second.ID}, []model.MissID{"ms_1725192000000_0000000000000003"}},
