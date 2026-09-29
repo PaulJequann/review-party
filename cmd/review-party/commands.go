@@ -194,6 +194,10 @@ func addFormatFlag(cmd *cobra.Command) {
 	cmd.Flags().String("format", "human", "Output format: human or json")
 }
 
+func addFullFlag(cmd *cobra.Command) {
+	cmd.Flags().Bool("full", false, "Include the complete review record: patch, changed paths, passes, attempts, and artifacts")
+}
+
 func addSubjectFlags(cmd *cobra.Command) {
 	cmd.Flags().String("base", "", "Committed-range base revision")
 	cmd.Flags().String("head", "", "Committed-range head revision")
@@ -202,6 +206,7 @@ func addSubjectFlags(cmd *cobra.Command) {
 func addReviewFlags(cmd *cobra.Command) {
 	addRepositoryFlag(cmd, "Git repository to review")
 	addFormatFlag(cmd)
+	addFullFlag(cmd)
 	addConfigurationFlag(cmd)
 	addSubjectFlags(cmd)
 }

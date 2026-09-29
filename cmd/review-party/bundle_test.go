@@ -3,8 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -12,7 +12,7 @@ import (
 	"reviewparty/internal/store"
 )
 
-func TestPrintBundlePreservesHumanPresentation(t *testing.T) {
+func TestPrintBundleReportPreservesHumanPresentation(t *testing.T) {
 	bundle := model.ReviewBundle{
 		ID: "rb_test", Lifecycle: model.LifecycleIncomplete, Revision: "revision",
 		SubjectKind: "working_changes", SubjectIdentity: "0123456789abcdef0123",
@@ -20,43 +20,45 @@ func TestPrintBundlePreservesHumanPresentation(t *testing.T) {
 		Members:     []model.BundleMember{{Scope: "global", Profile: "bugs", Lifecycle: model.LifecycleCompleted, ReviewID: "rp_test", Status: "clean"}},
 		Termination: &model.BundleTermination{Category: model.TerminationCancelled, Message: "context canceled"},
 	}
-	var output bytes.Buffer
-	if err := printBundle(&output, bundle, "human"); err != nil {
+	report, err := bundleReport(context.Background(), fakeReviewLoader{"rp_test": largePatchRecord("rp_test", "bugs", 0)}, bundle, false)
+	if err != nil {
 		t.Fatal(err)
 	}
-	text := output.String()
-	for _, want := range []string{"bundle rb_test", "incomplete", "global:bugs", "inspect: review-party inspect rb_test"} {
+	text := renderReport(t, report, "human")
+	for _, want := range []string{
+		"bundle rb_test · incomplete · 1/1 review(s) completed\n", "global:bugs · rp_test · completed · clean · 0 finding(s)\n",
+		"selection: repository_default · limit 2 (party)\n", "subject: working_changes 0123456789abcdef…\n",
+		"incomplete: cancelled: context canceled\n", "inspect: review-party inspect rb_test\n",
+	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("output = %q, want %q", text, want)
 		}
 	}
 }
 
-func TestPrintBundleJSONIsTheBundleDocument(t *testing.T) {
-	bundle := model.ReviewBundle{ID: "rb_json", Lifecycle: model.LifecycleCompleted}
-	var output bytes.Buffer
-	if err := printBundle(&output, bundle, "json"); err != nil {
+func TestPrintReportJSONCarriesTheBundleSummary(t *testing.T) {
+	report, err := bundleReport(context.Background(), fakeReviewLoader{}, model.ReviewBundle{ID: "rb_json", Lifecycle: model.LifecycleCompleted}, false)
+	if err != nil {
 		t.Fatal(err)
 	}
-	var decoded model.ReviewBundle
-	if err := json.Unmarshal(output.Bytes(), &decoded); err != nil {
-		t.Fatal(err)
-	}
-	if decoded.ID != bundle.ID || decoded.Lifecycle != bundle.Lifecycle {
-		t.Fatalf("decoded = %#v, want %#v", decoded, bundle)
-	}
+	requireBundleSummary(t, decodeReport(t, renderReport(t, report, "json")), "rb_json", model.LifecycleCompleted)
 }
 
 func TestExecuteRunReturnsUsageExitForIncompleteBundle(t *testing.T) {
-	conductor := &fakeRunConductor{}
-	conductor.runBundle = model.ReviewBundle{ID: "rb_incomplete", Lifecycle: model.LifecycleIncomplete}
+	conductor := &fakeRunConductor{records: fakeReviewLoader{"rp_member": largePatchRecord("rp_member", "bugs", 1)}}
+	conductor.runBundle = model.ReviewBundle{ID: "rb_incomplete", Lifecycle: model.LifecycleIncomplete, Members: []model.BundleMember{
+		{Scope: "global", Profile: "bugs", ReviewID: "rp_member", Lifecycle: model.LifecycleCompleted},
+		{Scope: "global", Profile: "security", Lifecycle: model.LifecyclePending},
+	}}
 	var stdout, stderr bytes.Buffer
 	exit := executeRunWithConductor(context.Background(), conductor, runOptions{format: "json", subject: model.WorkingChanges()}, commandIO{output: &stdout, errors: &stderr})
 	if exit != usageExitCode {
 		t.Fatalf("exit = %d, want %d; stderr = %q", exit, usageExitCode, stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "rb_incomplete") {
-		t.Fatalf("stdout = %q", stdout.String())
+	report := decodeReport(t, stdout.String())
+	requireBundleSummary(t, report, "rb_incomplete", model.LifecycleIncomplete)
+	if got := findingCounts(report); !reflect.DeepEqual(got, []int{1, 0}) {
+		t.Fatalf("finding counts = %v, want the member's finding inline and none for the unstarted member", got)
 	}
 }
 
@@ -87,11 +89,5 @@ func TestInspectDispatchesBundleIDsToBundleInspection(t *testing.T) {
 	if exit != 0 {
 		t.Fatalf("Bundle inspection exit = %d, stderr = %q", exit, stderr.String())
 	}
-	var inspected model.ReviewBundle
-	if err := json.Unmarshal(stdout.Bytes(), &inspected); err != nil {
-		t.Fatal(err)
-	}
-	if inspected.ID != bundle.ID || inspected.Lifecycle != bundle.Lifecycle {
-		t.Fatalf("inspected = %#v, want %#v", inspected, bundle)
-	}
+	requireBundleSummary(t, decodeReport(t, stdout.String()), bundle.ID, bundle.Lifecycle)
 }

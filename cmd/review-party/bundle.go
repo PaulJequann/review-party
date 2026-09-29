@@ -1,66 +1,39 @@
 package main
 
 import (
-	"encoding/json"
-	"errors"
-	"fmt"
-	"io"
-
 	"reviewparty/internal/model"
 )
 
-func printBundle(output io.Writer, bundle model.ReviewBundle, format string) error {
-	if format == "json" {
-		encoder := json.NewEncoder(output)
-		encoder.SetIndent("", "  ")
-		return encoder.Encode(bundle)
+func writeHumanBundle(output *commandOutput, bundle bundleSummary, entries []reviewEntry, configuration string) {
+	output.write("bundle %s · %s · %d/%d review(s) completed\n", bundle.ID, bundle.Lifecycle, completedEntries(entries), len(entries))
+	for _, entry := range entries {
+		label := entry.Profile.Scope + ":" + entry.Profile.Name
+		if entry.ID != "" {
+			label += " · " + string(entry.ID)
+		}
+		output.write("\n")
+		writeHumanEntry(output, label, entry)
 	}
-	if format != "human" {
-		return errors.New("unknown output format " + format)
-	}
-	return writeCommandOutput(output, func(output *commandOutput) {
-		printHumanBundle(output, bundle)
-	})
-}
-
-func printHumanBundle(output *commandOutput, bundle model.ReviewBundle) {
-	output.write("bundle %s\n", bundle.ID)
-	output.write("%s · %d/%d review(s) completed\n", bundle.Lifecycle, completedBundleMembers(bundle), len(bundle.Members))
-	if partyName := explicitPartyName(bundle); partyName != "" {
+	output.write("\n")
+	if partyName := explicitPartyName(bundle.Selection); partyName != "" {
 		output.write("party: %s\n", partyName)
 	}
 	output.write("revision: %s\n", bundle.Revision)
-	printBundleSelection(output, bundle.Selection)
-	printBundleWarnings(output, bundle.Warnings)
-	printBundleDeduplication(output, bundle.Deduplicated)
-	output.write("subject: %s %s\n", bundle.SubjectKind, shortIdentity(bundle.SubjectIdentity))
-	for _, member := range bundle.Members {
-		line := fmt.Sprintf("  %-16s %s", scopedMemberName(member), memberStatus(member))
-		if member.Status != "" && member.ReviewID != "" {
-			line += fmt.Sprintf(" (%d finding(s))", member.FindingCount)
-		}
-		output.write("%s\n", line)
+	writeBundleSelection(output, bundle.Selection)
+	for _, warning := range bundle.Warnings {
+		output.write("warning: %s\n", warning.Message)
 	}
+	for _, duplicate := range bundle.Deduplicated {
+		output.write("deduplicated: %s:%s selected again by %s; first run kept at %s\n", duplicate.Scope, duplicate.Profile, duplicate.Origin, duplicate.KeptOrigin)
+	}
+	output.write("subject: %s %s\n", bundle.SubjectKind, shortIdentity(bundle.SubjectIdentity))
 	if bundle.Termination != nil {
 		output.write("incomplete: %s: %s\n", bundle.Termination.Category, bundle.Termination.Message)
 	}
-	output.write("inspect: review-party inspect %s\n", bundle.ID)
+	writeInspectHint(output, string(bundle.ID), configuration)
 }
 
-// explicitPartyName names the Party behind an explicit-party selection.
-func explicitPartyName(bundle model.ReviewBundle) string {
-	selection := bundle.Selection
-	if selection == nil || selection.Kind != "explicit_party" {
-		return ""
-	}
-	if len(selection.Authored) == 0 {
-		return ""
-	}
-	return selection.Authored[0].Name
-}
-
-// printBundleSelection reports which authored choice produced this run.
-func printBundleSelection(output *commandOutput, selection *model.BundleSelection) {
+func writeBundleSelection(output *commandOutput, selection *model.BundleSelection) {
 	if selection == nil || selection.Source == "" {
 		return
 	}
@@ -71,48 +44,22 @@ func printBundleSelection(output *commandOutput, selection *model.BundleSelectio
 	output.write("\n")
 }
 
-func printBundleWarnings(output *commandOutput, warnings []model.BundleWarning) {
-	for _, warning := range warnings {
-		output.write("warning: %s\n", warning.Message)
+func explicitPartyName(selection *model.BundleSelection) string {
+	if selection == nil || selection.Kind != "explicit_party" {
+		return ""
 	}
-}
-
-// printBundleDeduplication explains every occurrence removed by exact-identity
-// deduplication and where its first execution remains.
-func printBundleDeduplication(output *commandOutput, duplicates []model.SkippedDuplicate) {
-	for _, duplicate := range duplicates {
-		output.write("deduplicated: %s:%s selected again by %s; first run kept at %s\n", duplicate.Scope, duplicate.Profile, duplicate.Origin, duplicate.KeptOrigin)
+	if len(selection.Authored) == 0 {
+		return ""
 	}
+	return selection.Authored[0].Name
 }
 
-func scopedMemberName(member model.BundleMember) string {
-	return member.Scope + ":" + member.Profile
-}
-
-func completedBundleMembers(bundle model.ReviewBundle) int {
+func completedEntries(entries []reviewEntry) int {
 	completed := 0
-	for _, member := range bundle.Members {
-		if member.Lifecycle == model.LifecycleCompleted {
+	for _, entry := range entries {
+		if entry.Lifecycle == model.LifecycleCompleted {
 			completed++
 		}
 	}
 	return completed
-}
-
-func memberStatus(member model.BundleMember) string {
-	if member.ReviewID == "" {
-		return "not started"
-	}
-	status := string(member.Lifecycle)
-	if member.Status != "" && member.Lifecycle == model.LifecycleCompleted {
-		status += " " + member.Status
-	}
-	return status + " " + string(member.ReviewID)
-}
-
-func shortIdentity(identity string) string {
-	if len(identity) <= 16 {
-		return identity
-	}
-	return identity[:16] + "…"
 }

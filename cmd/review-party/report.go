@@ -2,14 +2,13 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 
 	"reviewparty/internal/model"
 )
 
-// reviewReport is the one result shape run, inspect, and replay print: every
-// review the command produced, with its findings inline, plus the bundle that
-// grouped them when there was one.
 type reviewReport struct {
 	Bundle  *bundleSummary `json:"bundle,omitempty"`
 	Reviews []reviewEntry  `json:"reviews"`
@@ -29,9 +28,6 @@ type bundleSummary struct {
 	ConcurrencyLimit int                      `json:"concurrency_limit"`
 }
 
-// reviewEntry is one review. A bundle member that never started has no ID,
-// reviewer, or subject. Record is the complete ledger record, present only
-// when the caller asked for --full.
 type reviewEntry struct {
 	ID              model.ReviewID            `json:"id,omitempty"`
 	Lifecycle       model.Lifecycle           `json:"lifecycle"`
@@ -95,6 +91,19 @@ func bundleReport(ctx context.Context, loader reviewLoader, bundle model.ReviewB
 		entries = append(entries, entry)
 	}
 	return reviewReport{Bundle: summarizeBundle(bundle), Reviews: entries}, nil
+}
+
+func printReport(output io.Writer, report reviewReport, options reportOptions) error {
+	switch options.format {
+	case "json":
+		encoder := json.NewEncoder(output)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(report)
+	case "human":
+		return printHumanReport(output, report, options.configuration)
+	default:
+		return fmt.Errorf("unknown output format %q", options.format)
+	}
 }
 
 func (report reviewReport) incomplete() bool {
@@ -170,4 +179,18 @@ func summarizeBundle(bundle model.ReviewBundle) *bundleSummary {
 		Deduplicated:     bundle.Deduplicated,
 		ConcurrencyLimit: bundle.ConcurrencyLimit,
 	}
+}
+
+func latestProvenance(record model.ReviewRecord) model.ReviewerProvenance {
+	provenance := model.ReviewerProvenance{
+		ReviewerID: record.ProfileRevision.ReviewerID,
+		Model:      record.ProfileRevision.Model,
+		Effort:     record.ProfileRevision.Effort,
+	}
+	for _, pass := range record.Passes {
+		if len(pass.Attempts) > 0 {
+			provenance = pass.Attempts[len(pass.Attempts)-1].Provenance
+		}
+	}
+	return provenance
 }

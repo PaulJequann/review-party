@@ -17,18 +17,14 @@ import (
 
 func TestPrintRecordUsesActualAttemptProvenance(t *testing.T) {
 	record := model.ReviewRecord{
-		Lifecycle:       model.LifecycleCompleted,
+		ID: "rp_provenance", Lifecycle: model.LifecycleCompleted,
 		ProfileRevision: model.ProfileRevision{ReviewerID: "copilot", Model: "auto", Effort: "auto"},
 		Passes: []model.PassRecord{{Attempts: []model.AttemptRecord{{
 			Provenance: model.ReviewerProvenance{ReviewerID: "copilot", Model: "gpt-5-mini", Effort: "high"},
 		}}}},
 	}
-	var output bytes.Buffer
-	if err := printRecord(&output, record, "human"); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(output.String(), "copilot/gpt-5-mini (high)") {
-		t.Fatalf("output = %q", output.String())
+	if output := renderReport(t, recordReport(record, false), "human"); !strings.Contains(output, "reviewer: copilot/gpt-5-mini (high)") {
+		t.Fatalf("output = %q", output)
 	}
 }
 
@@ -456,7 +452,7 @@ func writeAdjudicationForTest(t *testing.T, document model.AdjudicationDocument)
 	return path
 }
 
-func TestPrintRecordJSONIncludesStructuredFindings(t *testing.T) {
+func TestPrintReportJSONIncludesStructuredFindings(t *testing.T) {
 	record := model.ReviewRecord{Result: &model.ReviewResult{
 		Status: model.ResultFindings,
 		Findings: []model.Finding{{
@@ -470,34 +466,24 @@ func TestPrintRecordJSONIncludesStructuredFindings(t *testing.T) {
 			Test:     "Exercise the caller with the changed state.",
 		}},
 	}}
-	var output bytes.Buffer
-	if err := printRecord(&output, record, "json"); err != nil {
+	var inspected reviewReport
+	if err := json.Unmarshal([]byte(renderReport(t, recordReport(record, false), "json")), &inspected); err != nil {
 		t.Fatal(err)
 	}
-	var inspected model.ReviewRecord
-	if err := json.Unmarshal(output.Bytes(), &inspected); err != nil {
-		t.Fatal(err)
+	if len(inspected.Reviews) != 1 || len(inspected.Reviews[0].Findings) != 1 {
+		t.Fatalf("reviews = %#v, want one review with one structured finding", inspected.Reviews)
 	}
-	if inspected.Result == nil {
-		t.Fatal("JSON omitted the structured result")
-	}
-	if len(inspected.Result.Findings) != 1 {
-		t.Fatalf("findings = %#v, want one structured finding", inspected.Result.Findings)
-	}
-	if inspected.Result.Findings[0].Evidence != record.Result.Findings[0].Evidence {
-		t.Fatalf("finding = %#v, want evidence %q", inspected.Result.Findings[0], record.Result.Findings[0].Evidence)
+	if inspected.Reviews[0].Findings[0] != record.Result.Findings[0] {
+		t.Fatalf("finding = %#v, want %#v", inspected.Reviews[0].Findings[0], record.Result.Findings[0])
 	}
 }
 
-func TestPrintRecordListsArtifactReferencesWithoutContents(t *testing.T) {
-	record := model.ReviewRecord{Passes: []model.PassRecord{{Attempts: []model.AttemptRecord{{Artifacts: []model.ArtifactReference{{
+func TestPrintFullReportListsArtifactReferencesWithoutContents(t *testing.T) {
+	record := model.ReviewRecord{ID: "rp_artifacts", Passes: []model.PassRecord{{Attempts: []model.AttemptRecord{{Artifacts: []model.ArtifactReference{{
 		Kind: "assistant-text", Path: "artifacts/rp_1/1/assistant-text.txt", Size: 12, Digest: "digest",
 	}}}}}}}
-	var output bytes.Buffer
-	if err := printRecord(&output, record, "human"); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(output.String(), "artifact: assistant-text · artifacts/rp_1/1/assistant-text.txt · 12 bytes · sha256:digest") {
-		t.Fatalf("output = %q, want artifact reference", output.String())
+	output := renderReport(t, recordReport(record, true), "human")
+	if !strings.Contains(output, "artifact: assistant-text · artifacts/rp_1/1/assistant-text.txt · 12 bytes · sha256:digest\n") {
+		t.Fatalf("output = %q, want artifact reference", output)
 	}
 }

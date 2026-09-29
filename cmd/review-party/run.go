@@ -43,7 +43,7 @@ the saved selection for this one run and never changes configuration.`,
 			options := runOptions{
 				profile: stringFlag(cmd, "profile"), party: stringFlag(cmd, "party"),
 				repository: stringFlag(cmd, "repo"), subject: subjectReference,
-				format: stringFlag(cmd, "format"), configuration: stringFlag(cmd, "config"),
+				format: stringFlag(cmd, "format"), configuration: stringFlag(cmd, "config"), full: boolFlag(cmd, "full"),
 			}
 			renderer, sink := newRunProgressSink(options.format, streams.errors)
 			defer renderer.stop()
@@ -67,6 +67,7 @@ type runOptions struct {
 	subject       model.SubjectReference
 	format        string
 	configuration string
+	full          bool
 	progress      func(model.RunProgressEvent)
 }
 
@@ -81,9 +82,24 @@ func executeRun(ctx context.Context, options runOptions, stdout, stderr io.Write
 type runConductor interface {
 	ReviewExplicitProfile(context.Context, model.RunSelection) (model.ReviewRecord, error)
 	Run(context.Context, model.RunSelection) (model.ReviewBundle, error)
+	Inspect(context.Context, model.ReviewID) (model.ReviewRecord, error)
 }
 
 func executeRunWithConductor(ctx context.Context, conductor runConductor, options runOptions, streams commandIO) int {
+	report, err := runReport(ctx, conductor, options)
+	if err != nil {
+		return printFailure(streams.errors, err)
+	}
+	if err := printReport(streams.output, report, reportOptions{format: options.format, configuration: options.configuration}); err != nil {
+		return printFailure(streams.errors, err)
+	}
+	if report.incomplete() {
+		return usageExitCode
+	}
+	return 0
+}
+
+func runReport(ctx context.Context, conductor runConductor, options runOptions) (reviewReport, error) {
 	selection := model.RunSelection{
 		Repository: options.repository,
 		Subject:    options.subject,
@@ -93,25 +109,13 @@ func executeRunWithConductor(ctx context.Context, conductor runConductor, option
 	if options.profile != "" {
 		record, err := conductor.ReviewExplicitProfile(ctx, selection)
 		if err != nil {
-			return printFailure(streams.errors, err)
+			return reviewReport{}, err
 		}
-		if err := printRecordWithConfiguration(streams.output, record, options.format, options.configuration); err != nil {
-			return printFailure(streams.errors, err)
-		}
-		if record.Lifecycle == model.LifecycleIncomplete {
-			return usageExitCode
-		}
-		return 0
+		return recordReport(record, options.full), nil
 	}
 	bundle, err := conductor.Run(ctx, selection)
 	if err != nil {
-		return printFailure(streams.errors, err)
+		return reviewReport{}, err
 	}
-	if err := printBundle(streams.output, bundle, options.format); err != nil {
-		return printFailure(streams.errors, err)
-	}
-	if bundle.Lifecycle == model.LifecycleIncomplete {
-		return usageExitCode
-	}
-	return 0
+	return bundleReport(ctx, conductor, bundle, options.full)
 }
