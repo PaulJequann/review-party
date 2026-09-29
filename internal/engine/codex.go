@@ -70,13 +70,24 @@ type decodedCodexOutput struct {
 }
 
 func (decoded *decodedCodexOutput) report(message string) {
-	if message == "" {
+	if message == "" || message == decoded.diagnostic {
+		return
+	}
+	if isCodexTransportNoise(message) {
+		decoded.noise = append(decoded.noise, message)
 		return
 	}
 	if decoded.diagnostic != "" {
 		decoded.noise = append(decoded.noise, decoded.diagnostic)
 	}
 	decoded.diagnostic = message
+}
+
+func isCodexTransportNoise(message string) bool {
+	normalized := strings.ToLower(message)
+	return strings.HasPrefix(normalized, "reconnecting...") ||
+		strings.HasPrefix(normalized, "falling back from websockets") ||
+		strings.Contains(normalized, "failed to connect to websocket")
 }
 
 type codexEvent struct {

@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"reviewparty/internal/model"
+	"slices"
 	"strings"
 	"time"
 )
@@ -318,16 +319,47 @@ func classifyHarnessRun(run commandRun, decoded decodedHarnessOutput, harness st
 	return attemptExecution{
 		AssistantText:  decoded.assistantText,
 		Outcome:        model.AttemptCompleted,
+		Diagnostic:     compactDiagnostic(decoded.diagnostic),
 		ResolvedModel:  decoded.model,
 		ResolvedEffort: decoded.effort,
 	}
 }
 
 func reviewerNoise(execution attemptExecution, decoded decodedHarnessOutput) string {
-	if execution.Outcome == model.AttemptCompleted {
-		return joinReport(decoded.diagnostic, decoded.noise)
+	lines := reportLines(joinReport(decoded.diagnostic, decoded.noise))
+	consumed := reportLines(decoded.diagnostic)
+	if len(consumed) == 0 || execution.Diagnostic != compactDiagnostic(strings.Join(consumed, "\n")) {
+		consumed = nil
+		for _, line := range lines {
+			if compactDiagnostic(line) == execution.Diagnostic {
+				consumed = []string{line}
+				break
+			}
+		}
 	}
-	return decoded.noise
+	return strings.Join(withoutFirstRun(lines, consumed), "\n")
+}
+
+func reportLines(report string) []string {
+	var lines []string
+	for line := range strings.Lines(report) {
+		if trimmed := strings.TrimSpace(line); trimmed != "" {
+			lines = append(lines, trimmed)
+		}
+	}
+	return lines
+}
+
+func withoutFirstRun(lines, run []string) []string {
+	if len(run) == 0 {
+		return lines
+	}
+	for start := 0; start+len(run) <= len(lines); start++ {
+		if slices.Equal(lines[start:start+len(run)], run) {
+			return append(slices.Clone(lines[:start]), lines[start+len(run):]...)
+		}
+	}
+	return lines
 }
 
 func joinReport(parts ...string) string {
