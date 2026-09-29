@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"time"
 
+	"reviewparty/internal/configuration"
 	"reviewparty/internal/model"
 	"reviewparty/internal/store"
 )
@@ -81,7 +82,8 @@ func (conductor *Conductor) newEvalSuiteRun(suite loadedEvalSuite, experiment mo
 }
 
 func validateEvalSuiteProfile(suite, profile string) error {
-	if suite == "global:code-quality" && profile != "code-quality" {
+	_, name := configuration.ParseScopedReference(profile)
+	if suite == "global:code-quality" && name != "code-quality" {
 		return fmt.Errorf("eval suite %q requires the code-quality Profile, got %q", suite, profile)
 	}
 	return nil
