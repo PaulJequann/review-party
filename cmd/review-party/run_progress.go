@@ -89,11 +89,8 @@ func renderRunProgressFinished(member string, event model.RunProgressEvent) stri
 		symbol = "✔"
 	}
 	parts := []string{fmt.Sprintf("%s %s %s", symbol, member, event.Lifecycle)}
-	switch {
-	case event.Lifecycle == model.LifecycleCompleted && event.Status == string(model.ResultClean):
-		parts = append(parts, "clean")
-	case event.Lifecycle == model.LifecycleCompleted:
-		parts = append(parts, fmt.Sprintf("%d finding(s)", event.FindingCount))
+	if result := completedResultLabel(event.Lifecycle, event.Status, event.FindingCount); result != "" {
+		parts = append(parts, result)
 	}
 	if event.Category != "" {
 		parts = append(parts, string(event.Category))
@@ -105,6 +102,17 @@ func renderRunProgressFinished(member string, event model.RunProgressEvent) stri
 		parts = append(parts, formatProgressElapsed(event.ElapsedMS))
 	}
 	return strings.Join(parts, " · ")
+}
+
+func completedResultLabel(lifecycle model.Lifecycle, status string, findingCount int) string {
+	switch {
+	case lifecycle != model.LifecycleCompleted:
+		return ""
+	case status == string(model.ResultClean):
+		return "clean"
+	default:
+		return fmt.Sprintf("%d finding(s)", findingCount)
+	}
 }
 
 func boundedProgressMessage(message string) string {

@@ -62,13 +62,13 @@ func (conductor *Conductor) runReviewWithProgress(ctx context.Context, member pe
 	runner := conductor.getRunner()
 	release, admitted := acquireProgressGate(ctx)
 	if !admitted {
-		record, err := runner.runPendingReview(ctx, member.record, member.prepared, started, nil)
+		record, err := runner.runPendingReview(ctx, member, started, nil)
 		conductor.emitRunProgress(progress.finished(record, err, elapsedMilliseconds(started, conductor.now().UTC())))
 		return record, err
 	}
 	defer release()
 	conductor.emitRunProgress(progress.event(model.RunProgressStarted))
-	record, err := runner.runPendingReview(ctx, member.record, member.prepared, started, func(number int) {
+	record, err := runner.runPendingReview(ctx, member, started, func(number int) {
 		event := progress.event(model.RunProgressAttempt)
 		event.Attempt = number
 		conductor.emitRunProgress(event)

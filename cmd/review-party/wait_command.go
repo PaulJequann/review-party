@@ -75,7 +75,8 @@ func executeWait(ctx context.Context, conductor waitConductor, options waitOptio
 			return printStatusFailure(streams.errors, err)
 		}
 		if status.Lifecycle.Terminal() {
-			return reportFinishedRun(ctx, conductor, status, options, streams)
+			report, err := finishedReport(ctx, conductor, status, options.full)
+			return printRunOutcome(streams, report, err, reportOptions{format: options.format, configuration: options.configuration})
 		}
 		select {
 		case <-ctx.Done():
@@ -87,21 +88,20 @@ func executeWait(ctx context.Context, conductor waitConductor, options waitOptio
 	}
 }
 
-func reportFinishedRun(ctx context.Context, conductor waitConductor, status model.ReviewStatus, options waitOptions, streams commandIO) int {
-	printing := reportOptions{format: options.format, configuration: options.configuration}
+func finishedReport(ctx context.Context, conductor waitConductor, status model.ReviewStatus, full bool) (reviewReport, error) {
 	if status.Kind == model.ReviewStatusReview {
 		record, err := conductor.Inspect(ctx, model.ReviewID(status.ID))
 		if err != nil {
-			return printFailure(streams.errors, err)
+			return reviewReport{}, err
 		}
-		return printRunOutcome(streams, recordReport(record, options.full), nil, printing)
+		return recordReport(record, full), nil
 	}
 	bundle, err := conductor.InspectBundle(ctx, model.ReviewBundleID(status.ID))
 	if err != nil {
-		return printFailure(streams.errors, err)
+		return reviewReport{}, err
 	}
 	if bundle.Termination != nil {
-		return printFailure(streams.errors, errors.New(bundle.Termination.Message))
+		return reviewReport{}, errors.New(bundle.Termination.Message)
 	}
-	return printRunOutcome(streams, bundleReport(ctx, conductor, bundle, options.full), nil, printing)
+	return bundleReport(ctx, conductor, bundle, full), nil
 }

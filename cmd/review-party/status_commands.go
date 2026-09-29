@@ -63,14 +63,22 @@ func executeStatus(ctx context.Context, options statusOptions, streams commandIO
 		return printFailure(streams.errors, err)
 	}
 	if options.id != "" {
-		status, err := conductor.Status(ctx, options.id)
-		if err != nil {
-			return printStatusFailure(streams.errors, err)
-		}
-		return statusOutcome(streams.errors, renderLedgerOutput(options.format, streams.output, streams.errors, status, func(output *commandOutput) {
-			printHumanStatus(output, status, options)
-		}), status)
+		return executeRunStatus(ctx, conductor, options, streams)
 	}
+	return executeInFlightStatus(ctx, conductor, options, streams)
+}
+
+func executeRunStatus(ctx context.Context, conductor *engine.Conductor, options statusOptions, streams commandIO) int {
+	status, err := conductor.Status(ctx, options.id)
+	if err != nil {
+		return printStatusFailure(streams.errors, err)
+	}
+	return statusOutcome(streams.errors, renderLedgerOutput(options.format, streams.output, streams.errors, status, func(output *commandOutput) {
+		printHumanStatus(output, status, options)
+	}), status)
+}
+
+func executeInFlightStatus(ctx context.Context, conductor *engine.Conductor, options statusOptions, streams commandIO) int {
 	root, err := subject.ResolveRepositoryRoot(options.repository)
 	if err != nil {
 		return printFailure(streams.errors, err)
@@ -158,10 +166,8 @@ func statusMemberDetail(member model.ReviewStatusMember, now time.Time) string {
 	switch {
 	case member.ReadError != "":
 		return detail + " · " + boundedProgressMessage(member.ReadError)
-	case member.Lifecycle == model.LifecycleCompleted && member.Status == string(model.ResultClean):
-		detail += " · clean"
 	case member.Lifecycle == model.LifecycleCompleted:
-		detail += fmt.Sprintf(" · %d finding(s)", member.FindingCount)
+		detail += " · " + completedResultLabel(member.Lifecycle, member.Status, member.FindingCount)
 	case member.Termination != nil:
 		detail += " · " + string(member.Termination.Category)
 	case member.Attempts > 0:

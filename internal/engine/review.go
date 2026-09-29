@@ -78,10 +78,11 @@ func (runner *reviewRunner) runPreparedReview(ctx context.Context, prepared prep
 	if err != nil {
 		return model.ReviewRecord{}, err
 	}
-	return runner.runPendingReview(ctx, record, prepared, reviewStarted, nil)
+	return runner.runPendingReview(ctx, pendingReview{prepared: prepared, record: record}, reviewStarted, nil)
 }
 
-func (runner *reviewRunner) runPendingReview(ctx context.Context, record model.ReviewRecord, prepared preparedReview, reviewStarted time.Time, onAttempt func(int)) (model.ReviewRecord, error) {
+func (runner *reviewRunner) runPendingReview(ctx context.Context, member pendingReview, reviewStarted time.Time, onAttempt func(int)) (model.ReviewRecord, error) {
+	record, prepared := member.record, member.prepared
 	record.Lifecycle = model.LifecycleRunning
 	record.UpdatedAt = runner.now().UTC()
 	if err := runner.store.Save(record); err != nil {
