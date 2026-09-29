@@ -84,9 +84,8 @@ func renderRunProgressEvent(event model.RunProgressEvent) string {
 }
 
 func renderRunProgressFinished(member string, event model.RunProgressEvent) string {
-	hardError := event.Message != "" && event.Category == ""
 	symbol := "✖"
-	if event.Lifecycle == model.LifecycleCompleted && !hardError {
+	if event.Lifecycle == model.LifecycleCompleted && event.Error == "" {
 		symbol = "✔"
 	}
 	parts := []string{fmt.Sprintf("%s %s %s", symbol, member, event.Lifecycle)}
@@ -99,8 +98,8 @@ func renderRunProgressFinished(member string, event model.RunProgressEvent) stri
 	if event.Category != "" {
 		parts = append(parts, string(event.Category))
 	}
-	if hardError {
-		parts = append(parts, boundedProgressMessage(event.Message))
+	if event.Error != "" {
+		parts = append(parts, boundedProgressMessage(event.Error))
 	}
 	if event.ElapsedMS > 0 {
 		parts = append(parts, formatProgressElapsed(event.ElapsedMS))

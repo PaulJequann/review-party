@@ -50,7 +50,7 @@ func (member memberProgress) finished(record model.ReviewRecord, err error, elap
 	}
 	switch {
 	case err != nil:
-		event.Message = err.Error()
+		event.Error = err.Error()
 	case record.Termination != nil:
 		event.Category = record.Termination.Category
 		event.Message = record.Termination.Message

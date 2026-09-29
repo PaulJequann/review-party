@@ -261,6 +261,7 @@ type RunProgressEvent struct {
 	Category     TerminationCategory `json:"category,omitempty"`
 	ElapsedMS    int64               `json:"elapsed_ms,omitempty"`
 	Message      string              `json:"message,omitempty"`
+	Error        string              `json:"error,omitempty"`
 }
 
 // ReviewBundle records the executed selection behind one run.

@@ -27,7 +27,7 @@ func TestRenderRunProgressEventLines(t *testing.T) {
 	deadline := bugsMemberEvent(model.RunProgressFinished)
 	deadline.Lifecycle, deadline.Category, deadline.Message, deadline.ElapsedMS = model.LifecycleIncomplete, model.TerminationDeadlineExceeded, "attempt exceeded 8m0s", 480000
 	hardError := bugsMemberEvent(model.RunProgressFinished)
-	hardError.Lifecycle, hardError.Message, hardError.ElapsedMS = model.LifecycleRunning, "save review: disk full\nsecond line", 1200
+	hardError.Lifecycle, hardError.Error, hardError.ElapsedMS = model.LifecycleRunning, "save review: disk full\nsecond line", 1200
 	for _, test := range []struct {
 		event model.RunProgressEvent
 		want  string
@@ -48,7 +48,7 @@ func TestRenderRunProgressEventLines(t *testing.T) {
 
 func TestRenderRunProgressEventBoundsHardErrorMessages(t *testing.T) {
 	event := bugsMemberEvent(model.RunProgressFinished)
-	event.Lifecycle, event.Message = model.LifecycleRunning, strings.Repeat("x", 500)
+	event.Lifecycle, event.Error = model.LifecycleRunning, strings.Repeat("x", 500)
 	line := renderRunProgressEvent(event)
 	if !strings.Contains(line, strings.Repeat("x", progressMessageLimit)+"…") || strings.Contains(line, strings.Repeat("x", progressMessageLimit+1)) {
 		t.Fatalf("line = %q, want the message cut at %d runes", line, progressMessageLimit)

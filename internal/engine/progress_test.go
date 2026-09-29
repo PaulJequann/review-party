@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -248,3 +249,16 @@ var _ func(model.RunProgressEvent) = (*runProgressRecorder)(nil).record
 
 // ensure time import stays meaningful for future timing assertions in this file.
 var _ = time.Now
+
+func TestFinishedProgressReportsAHardErrorApartFromTheTermination(t *testing.T) {
+	record := model.ReviewRecord{
+		ID: "rp_A", Lifecycle: model.LifecycleRunning,
+		Termination: &model.ReviewTermination{Category: model.TerminationCancelled, Message: "cancelled"},
+	}
+
+	event := memberProgress{reviewID: record.ID, total: 1}.finished(record, errors.New("save review: disk full"), 0)
+
+	if event.Error != "save review: disk full" || event.Category != "" || event.Message != "" {
+		t.Fatalf("finish event = %#v, want only the hard error", event)
+	}
+}
