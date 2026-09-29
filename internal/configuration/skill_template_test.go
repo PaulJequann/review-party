@@ -105,6 +105,27 @@ func TestEditedSkillSurfacesAsTemplateDriftAndUpdates(t *testing.T) {
 	}
 }
 
+func TestTemplateUpdateRejectsSkillThatOutgrowsProfileLimit(t *testing.T) {
+	skills, root := t.TempDir(), t.TempDir()
+	skillPath := filepath.Join(skills, "audit", "SKILL.md")
+	writeDocument(t, skillPath, "First rubric.\n")
+	original := NewManager(Options{GlobalRoot: root, Reviewers: []string{"codex"}, Templates: SkillTemplates([]string{skills})})
+	requirePublishedPlan(t, original, requireProfilePlan(t, original, skillProfileDraft("audit")), nil)
+
+	writeDocument(t, skillPath, strings.Repeat("x", MaximumDocumentBytes-16)+"\n")
+	manager := NewManager(Options{GlobalRoot: root, Reviewers: []string{"codex"}, Templates: SkillTemplates([]string{skills})})
+	plan, err := manager.PlanProfileTemplateUpdate("", ScopeGlobal, "audit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Valid() || !strings.Contains(plan.Reason(), "Profile instructions exceeds") {
+		t.Fatalf("valid = %v, reason = %q", plan.Valid(), plan.Reason())
+	}
+	if profile := requireProfile(t, manager, ScopeGlobal, "audit"); !strings.HasSuffix(profile.Instructions, "\nFirst rubric.\n") {
+		t.Fatalf("instructions = %q", profile.Instructions)
+	}
+}
+
 func TestDeletedSkillSurfacesAsUnavailableTemplateSource(t *testing.T) {
 	skills, root := t.TempDir(), t.TempDir()
 	writeDocument(t, filepath.Join(skills, "audit", "SKILL.md"), "Audit the tests.")

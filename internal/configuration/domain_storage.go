@@ -126,6 +126,10 @@ func (manager *Manager) stageTemplateUpdate(request templateUpdateRequest) (Plan
 		plan.state.reason = fmt.Sprintf("Profile %q already uses Template %s@%s", request.name, template.ID, template.Revision)
 		return plan, nil
 	}
+	if err := profileInstructionsPayload.validate([]byte(template.Instructions)); err != nil {
+		plan.state.reason = err.Error()
+		return plan, nil
+	}
 	entry, anchor, err := manager.profileEntry(request.scope, request.repository, request.name)
 	if err != nil {
 		return Plan{}, err
