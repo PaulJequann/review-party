@@ -103,7 +103,17 @@ func (e *editor) form(fields ...huh.Field) error {
 
 func runAccessibleForm(ctx context.Context, form *huh.Form, input io.ReadCloser) error {
 	result := make(chan error, 1)
-	go func() { result <- form.RunWithContext(ctx) }()
+	go func() {
+		// huh's accessible prompts index the chosen option without checking
+		// it, so a rejected answer followed by EOF panics inside this goroutine
+		// and would take the whole process down (DEV-115).
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				result <- fmt.Errorf("accessible prompt ended before a valid answer was chosen: %v", recovered)
+			}
+		}()
+		result <- form.RunWithContext(ctx)
+	}()
 	select {
 	case err := <-result:
 		return err
