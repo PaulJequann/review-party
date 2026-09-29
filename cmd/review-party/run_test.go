@@ -101,3 +101,30 @@ func TestExecuteRunBundlePrintsReadableMembersAndFailsOnAnUnreadableOne(t *testi
 		t.Fatalf("finding counts = %v, want the readable member's finding beside the unreadable member", got)
 	}
 }
+
+func TestExecuteRunJSONReportsTheInputTooLargeTermination(t *testing.T) {
+	termination := &model.ReviewTermination{Category: model.TerminationInputTooLarge, Phase: model.PhaseInputPreflight, Message: "reviewer input is 1063438 characters and the limit is 1048576"}
+	conductor := &fakeRunConductor{record: model.ReviewRecord{ID: "rp_too_large", Lifecycle: model.LifecycleIncomplete, Termination: termination}}
+	var stdout, stderr bytes.Buffer
+	exit := executeRunWithConductor(context.Background(), conductor, runOptions{
+		profile: "bugs", format: "json", configuration: defaultUserConfigurationPath(), subject: model.WorkingChanges(),
+	}, commandIO{output: &stdout, errors: &stderr})
+	if exit != usageExitCode {
+		t.Fatalf("exit = %d, want %d", exit, usageExitCode)
+	}
+	report := decodeReport(t, stdout.String())
+	if len(report.Reviews) != 1 || report.Reviews[0].Termination == nil || report.Reviews[0].Termination.Category != model.TerminationInputTooLarge {
+		t.Fatalf("report = %#v", report)
+	}
+}
+
+func TestRunWarningSinkWritesOneLinePerWarningToStderrForEveryFormat(t *testing.T) {
+	var stderr bytes.Buffer
+	warn := newRunWarningSink(&stderr)
+	warn("warning: codex input is 700000 characters, 66% of its 1048576 character limit")
+	warn("warning: second")
+	want := "warning: codex input is 700000 characters, 66% of its 1048576 character limit\nwarning: second\n"
+	if stderr.String() != want {
+		t.Fatalf("stderr = %q, want %q", stderr.String(), want)
+	}
+}

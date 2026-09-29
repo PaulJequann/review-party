@@ -404,7 +404,7 @@ func decisiveDiagnostic(decoded decodedHarnessOutput, category model.Termination
 	if category != model.TerminationUnknownFailure {
 		for line := range strings.Lines(joinReport(decoded.diagnostic, decoded.noise)) {
 			if diagnosticFailureCategory(line) == category {
-				return compactDiagnostic(line)
+				return categoryMessage(category, line)
 			}
 		}
 	}
@@ -417,6 +417,8 @@ func decisiveDiagnostic(decoded decodedHarnessOutput, category model.Termination
 func diagnosticFailureCategory(diagnostic string) model.TerminationCategory {
 	normalized := strings.ToLower(diagnostic)
 	switch {
+	case isInputTooLargeDiagnostic(normalized):
+		return model.TerminationInputTooLarge
 	case strings.Contains(normalized, "unauthorized"),
 		strings.Contains(normalized, "unauthenticated"),
 		strings.Contains(normalized, "not logged in"),
@@ -451,7 +453,7 @@ func isTransportDiagnostic(normalized string) bool {
 
 func attemptOutcomeForTermination(category model.TerminationCategory) model.AttemptOutcome {
 	switch category {
-	case model.TerminationAuthenticationFailure, model.TerminationReviewerUnavailable:
+	case model.TerminationAuthenticationFailure, model.TerminationReviewerUnavailable, model.TerminationInputTooLarge:
 		return model.AttemptReviewerUnavailable
 	case model.TerminationTransportFailure, model.TerminationDeadlineExceeded:
 		return model.AttemptTransientFailure

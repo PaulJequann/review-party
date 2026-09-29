@@ -121,7 +121,7 @@ func retryableTermination(termination *model.ReviewTermination) bool {
 	switch termination.Category {
 	case model.TerminationReviewerUnavailable, model.TerminationDeadlineExceeded, model.TerminationTransportFailure, model.TerminationMalformedOutput, model.TerminationResultValidationFailure:
 		return true
-	case model.TerminationAuthenticationFailure, model.TerminationCancelled, model.TerminationUnknownFailure:
+	case model.TerminationAuthenticationFailure, model.TerminationCancelled, model.TerminationInputTooLarge, model.TerminationUnknownFailure:
 		return false
 	default:
 		return false

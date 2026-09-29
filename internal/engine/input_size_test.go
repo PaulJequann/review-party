@@ -172,63 +172,51 @@ func TestOversizedSubjectRecordIsFoundByHistoryTerminationFilter(t *testing.T) {
 	}
 }
 
-func TestSubjectAtTheLimitLaunchesAndWarns(t *testing.T) {
+func TestSubjectWithinTheLimitLaunchesAndWarnsFromSixtyPercent(t *testing.T) {
 	repository := unicodeChangedRepository(t)
 	characters := measuredPrompt(t, repository)
-	harness := newSizeHarness(t, characters)
-
-	record, err := harness.conductor.Review(context.Background(), testSelection(repository))
-	if err != nil {
-		t.Fatal(err)
+	tests := []struct {
+		name        string
+		limit       int
+		wantWarning string
+	}{
+		{name: "exactly at the limit", limit: characters, wantWarning: "100%"},
+		{name: "above sixty percent", limit: characters * 3 / 2, wantWarning: "66%"},
+		{name: "below sixty percent", limit: characters * 2},
+		{name: "no declared limit", limit: 0},
 	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			harness := newSizeHarness(t, test.limit)
 
-	if record.Lifecycle != model.LifecycleCompleted || harness.executor.attemptCount() != 1 {
-		t.Fatalf("lifecycle = %q, launches = %d; a subject exactly at the limit must run", record.Lifecycle, harness.executor.attemptCount())
-	}
-	warnings := harness.warnings.all()
-	if len(warnings) != 1 || !strings.Contains(warnings[0], "100%") || !strings.Contains(warnings[0], strconv.Itoa(characters)) {
-		t.Fatalf("warnings = %q, want one size warning at 100%%", warnings)
+			record, err := harness.conductor.Review(context.Background(), testSelection(repository))
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if record.Lifecycle != model.LifecycleCompleted {
+				t.Fatalf("lifecycle = %q, want completed", record.Lifecycle)
+			}
+			if harness.executor.attemptCount() != 1 {
+				t.Fatalf("launches = %d, want 1", harness.executor.attemptCount())
+			}
+			assertSizeWarnings(t, harness.warnings.all(), test.wantWarning)
+		})
 	}
 }
 
-func TestSubjectBelowSixtyPercentLaunchesWithoutWarning(t *testing.T) {
-	repository := unicodeChangedRepository(t)
-	characters := measuredPrompt(t, repository)
-	harness := newSizeHarness(t, characters*2)
-
-	if _, err := harness.conductor.Review(context.Background(), testSelection(repository)); err != nil {
-		t.Fatal(err)
+func assertSizeWarnings(t *testing.T, warnings []string, want string) {
+	t.Helper()
+	if want == "" {
+		if len(warnings) != 0 {
+			t.Fatalf("warnings = %q, want none", warnings)
+		}
+		return
 	}
-
-	if harness.executor.attemptCount() != 1 || len(harness.warnings.all()) != 0 {
-		t.Fatalf("launches = %d, warnings = %q", harness.executor.attemptCount(), harness.warnings.all())
+	if len(warnings) != 1 {
+		t.Fatalf("warnings = %q, want exactly one", warnings)
 	}
-}
-
-func TestSubjectAboveSixtyPercentWarnsWithoutBlocking(t *testing.T) {
-	repository := unicodeChangedRepository(t)
-	characters := measuredPrompt(t, repository)
-	harness := newSizeHarness(t, characters*3/2)
-
-	if _, err := harness.conductor.Review(context.Background(), testSelection(repository)); err != nil {
-		t.Fatal(err)
-	}
-
-	warnings := harness.warnings.all()
-	if harness.executor.attemptCount() != 1 || len(warnings) != 1 || !strings.Contains(warnings[0], "66%") {
-		t.Fatalf("launches = %d, warnings = %q, want one warning at 66%%", harness.executor.attemptCount(), warnings)
-	}
-}
-
-func TestReviewerWithoutDeclaredLimitIsNeverPreflighted(t *testing.T) {
-	repository := unicodeChangedRepository(t)
-	harness := newSizeHarness(t, 0)
-
-	if _, err := harness.conductor.Review(context.Background(), testSelection(repository)); err != nil {
-		t.Fatal(err)
-	}
-
-	if harness.executor.attemptCount() != 1 || len(harness.warnings.all()) != 0 {
-		t.Fatalf("launches = %d, warnings = %q", harness.executor.attemptCount(), harness.warnings.all())
+	if !strings.Contains(warnings[0], want) {
+		t.Fatalf("warning = %q, want %q", warnings[0], want)
 	}
 }

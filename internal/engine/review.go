@@ -90,6 +90,11 @@ func (runner *reviewRunner) runPendingReview(ctx context.Context, member pending
 		return record, err
 	}
 
+	prompt := prepared.profile.prompt(record.Subject)
+	if termination := runner.preflightInput(prepared.profile.reviewer, prompt); termination != nil {
+		return runner.finishIncomplete(record, *termination, reviewStarted)
+	}
+
 	executor := prepared.profile.reviewer.executor
 	availabilityStarted := runner.now().UTC()
 	check := executor.Check(ctx, prepared.profile.reviewer.candidate)
@@ -102,6 +107,7 @@ func (runner *reviewRunner) runPendingReview(ctx context.Context, member pending
 		record:        record,
 		subject:       prepared.subject,
 		profile:       prepared.profile,
+		prompt:        prompt,
 		executor:      executor,
 		reviewStarted: reviewStarted,
 		deadline:      prepared.deadline,
@@ -118,7 +124,7 @@ func (runner *reviewRunner) resumePreparedReview(ctx context.Context, record mod
 	if !check.Available {
 		return runner.finishIncomplete(record, terminationForAvailability(check.Diagnostic), reviewStarted)
 	}
-	return runner.executePass(ctx, passExecution{record: record, subject: prepared.subject, profile: prepared.profile, executor: executor, reviewStarted: reviewStarted, deadline: prepared.deadline})
+	return runner.executePass(ctx, passExecution{record: record, subject: prepared.subject, profile: prepared.profile, prompt: prepared.profile.prompt(record.Subject), executor: executor, reviewStarted: reviewStarted, deadline: prepared.deadline})
 }
 
 func (runner *reviewRunner) finishIncomplete(record model.ReviewRecord, termination model.ReviewTermination, reviewStarted time.Time) (model.ReviewRecord, error) {
@@ -141,6 +147,7 @@ type passExecution struct {
 	record        model.ReviewRecord
 	subject       subject.Subject
 	profile       compiledProfile
+	prompt        string
 	executor      attemptExecutor
 	reviewStarted time.Time
 	deadline      time.Duration
@@ -152,7 +159,7 @@ func (runner *reviewRunner) executePass(ctx context.Context, pass passExecution)
 	started := runner.now().UTC()
 	attemptContext, cancel := context.WithTimeout(ctx, pass.deadline)
 	defer cancel()
-	prompt := pass.profile.prompt(record.Subject)
+	prompt := pass.prompt
 	execution, cleanupErr := runner.executeAttempt(attemptContext, record, pass, prompt)
 	completed := runner.now().UTC()
 	record.Timings.AttemptExecutionMS = elapsedMilliseconds(started, completed)

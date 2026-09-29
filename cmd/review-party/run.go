@@ -53,6 +53,7 @@ check a run from another shell and review-party wait to block until it ends.`,
 			renderer, sink := newRunProgressSink(boolFlag(cmd, "quiet"), streams.errors, options.configuration)
 			defer renderer.stop()
 			options.progress = sink
+			options.warn = newRunWarningSink(streams.errors)
 			return commandResult(executeRun(cmd.Context(), options, streams.output, streams.errors))
 		},
 	}
@@ -75,10 +76,11 @@ type runOptions struct {
 	configuration string
 	full          bool
 	progress      func(model.RunProgressEvent)
+	warn          func(string)
 }
 
 func executeRun(ctx context.Context, options runOptions, stdout, stderr io.Writer) int {
-	conductor, err := engine.New(engine.Config{UserConfigurationPath: options.configuration, Progress: options.progress})
+	conductor, err := engine.New(engine.Config{UserConfigurationPath: options.configuration, Progress: options.progress, Warn: options.warn})
 	if err != nil {
 		return printFailure(stderr, err)
 	}
