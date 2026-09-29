@@ -26,13 +26,15 @@ func (model Model) updateProfileChoiceMessage(message tea.Msg) (tea.Model, tea.C
 
 func (model *Model) openProfileModelForm() tea.Cmd {
 	state := &model.session.profile
-	state.selected = state.draft.Model
+	state.selected = initialProfileModel(state.draft.Model, state.choices)
 	// huh hashes bindings with hashstructure, which ignores unexported
 	// fields, so bind the fields themselves rather than the state struct.
+	// huh loads options only once the hash differs from zero, and an empty
+	// choices slice alone hashes to zero, so bind a list that never does.
 	return model.openForm(formProfileModel, []huh.Field{
 		huh.NewNote().Title("Model availability").DescriptionFunc(func() string { return profileChoiceDiagnostic(state) }, &state.diagnostic),
 		huh.NewSelect[string]().Title("Model").Description("Press / to filter.").
-			OptionsFunc(func() []huh.Option[string] { return profileModelOptions(state.choices, state.draft.Model) }, &state.choices).
+			OptionsFunc(func() []huh.Option[string] { return profileModelOptions(state.choices, state.draft.Model) }, []any{&state.choices, &state.draft.Model}).
 			Value(&state.selected).Filtering(true).WithHeight(7),
 	})
 }
@@ -92,6 +94,19 @@ func profileModelOptions(choices []discovery.ModelChoice, current string) []huh.
 		options = append(options, huh.NewOption(current+" [current]", current))
 	}
 	return append(options, huh.NewOption("Enter a model ID manually", manualProfileChoice))
+}
+
+// initialProfileModel picks the option the Model select starts on: the
+// Profile's current model, else the first discovered model, else Refresh.
+// The result is always one of profileModelOptions(choices, current).
+func initialProfileModel(current string, choices []discovery.ModelChoice) string {
+	if current != "" {
+		return current
+	}
+	if len(choices) > 0 {
+		return choices[0].Model.ID
+	}
+	return refreshProfileChoice
 }
 
 func profileChoiceDiagnostic(state *profileFormState) string {
@@ -360,10 +375,7 @@ func (e *editor) refreshAccessibleChoices(reviewer string) ([]discovery.ModelCho
 // editAccessibleModel returns the choices in effect after any manual
 // refresh so effort prompts read the same observation.
 func (e *editor) editAccessibleModel(draft *configuration.ProfileDraft, choices []discovery.ModelChoice) ([]discovery.ModelChoice, error) {
-	selected := draft.Model
-	if selected == "" && len(choices) > 0 {
-		selected = choices[0].Model.ID
-	}
+	selected := initialProfileModel(draft.Model, choices)
 	if err := e.form(huh.NewSelect[string]().Title("Model").Options(profileModelOptions(choices, draft.Model)...).Value(&selected)); err != nil {
 		return choices, err
 	}

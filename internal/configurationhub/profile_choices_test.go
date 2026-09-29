@@ -338,3 +338,73 @@ func TestProfileModelRefreshReopensDiscovery(t *testing.T) {
 		t.Fatalf("refreshed model form:\n%s", view)
 	}
 }
+
+func TestProfileModelFormStartsOnCurrentThenFirstModelThenRefresh(t *testing.T) {
+	choices := []discovery.ModelChoice{{Model: discovery.Model{ID: "luna"}}, {Model: discovery.Model{ID: "sol"}}}
+	for _, test := range []struct {
+		name    string
+		current string
+		choices []discovery.ModelChoice
+		want    string
+		cursor  string
+	}{
+		{"new Profile", "", choices, "luna", "> luna"},
+		{"edit keeps current", "sol", choices, "sol", "> sol [current]"},
+		{"no discovered models", "", nil, refreshProfileChoice, "> ↻ Refresh available models"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			model := hubModelAtSize(t, 120, 40)
+			state := &model.session.profile
+			state.draft = configuration.ProfileDraft{Name: "bugs", Reviewer: "codex", Model: test.current}
+			state.choices = test.choices
+			// Pump until the lazily loaded options arrive and settle the cursor.
+			command := model.openProfileModelForm()
+			model = pumpHubMessages(t, model, command)
+			if got := model.session.profile.selected; got != test.want {
+				t.Fatalf("selected = %q, want %q", got, test.want)
+			}
+			if view := stripANSI(model.form.View()); !strings.Contains(view, test.cursor) {
+				t.Fatalf("cursor is not on %q:\n%s", test.cursor, view)
+			}
+		})
+	}
+}
+
+func TestAccessibleModelDefaultsToCurrentThenFirstModelThenRefresh(t *testing.T) {
+	choices := []discovery.ModelChoice{{Model: discovery.Model{ID: "luna"}}, {Model: discovery.Model{ID: "sol"}}}
+	for _, test := range []struct {
+		name    string
+		current string
+		choices []discovery.ModelChoice
+		want    string
+	}{
+		{"new Profile", "", choices, "luna"},
+		{"edit keeps current", "sol", choices, "sol"},
+		// Refresh is the default, and the refreshed prompt then defaults
+		// to the model it discovered.
+		{"no discovered models", "", nil, "fresh-model"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			// Bounded context: a default that keeps choosing Refresh aborts instead of looping.
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			var output bytes.Buffer
+			editor := editor{
+				manager: configuration.NewManager(configuration.Options{GlobalRoot: t.TempDir(), Reviewers: []string{"codex"}}),
+				RunOptions: RunOptions{
+					Context: ctx, Input: newLineInput("\n\n"), Output: &output, Accessible: true,
+					Discovery: discovery.NewService(discovery.Options{Adapters: []discovery.Adapter{
+						profileChoiceAdapter{reviewer: "codex", models: []discovery.Model{{ID: "fresh-model"}}},
+					}}),
+				},
+			}
+			draft := configuration.ProfileDraft{Name: "bugs", Reviewer: "codex", Model: test.current}
+			if _, err := editor.editAccessibleModel(&draft, test.choices); err != nil {
+				t.Fatalf("edit model: %v\n%s", err, output.String())
+			}
+			if draft.Model != test.want {
+				t.Fatalf("model = %q, want %q\n%s", draft.Model, test.want, output.String())
+			}
+		})
+	}
+}

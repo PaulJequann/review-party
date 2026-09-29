@@ -28,7 +28,9 @@ same configuration operations.
   `internal/configurationhub/interactive_forms.go` handle plan receipt,
   publication, refreshed snapshots, and the success outcome.
 - `profileModelOptions` in `internal/configurationhub/profile_choices.go`
-  lists Refresh first and marks the current model; `completeProfileModelForm`
+  lists Refresh first and marks the current model; `initialProfileModel`
+  starts both adapters on the current model, else the first discovered model,
+  else Refresh; `completeProfileModelForm`
   reopens discovery on Refresh and `editAccessibleModel` does the same for
   the accessible adapter.
 - `runAccessibleForm`, `chooseAction`, `confirmExit`, and
@@ -87,12 +89,12 @@ procedure in `features/README.md`. Every capture below goes to
    `profile-fields.txt` with the name and Reviewer inside the box, then send
    Enter; Tab alone does not submit the form.
 5. **Model.** Wait for `Model availability` and capture `profile-model.txt`.
-   The Model select must list `↻ Refresh available models` first, with the
-   cursor on it for a new Profile, then `gpt-5.6-luna`, then
-   `Enter a model ID manually`. Send Enter on Refresh, wait for the Model
-   select to return, and capture `profile-model-refreshed.txt`; the owned
-   HOME reports `codex` unavailable, so the list is unchanged. Send `Down`,
-   then Enter to choose `gpt-5.6-luna`.
+   The Model select must list `↻ Refresh available models` first, then
+   `gpt-5.6-luna` with the cursor on it for a new Profile, then
+   `Enter a model ID manually`. Send `Up`, then Enter on Refresh, wait for
+   the Model select to return, and capture `profile-model-refreshed.txt`; the
+   owned HOME reports `codex` unavailable, so the list is unchanged and the
+   cursor is back on `gpt-5.6-luna`. Send Enter to choose it.
 6. **Effort and deadline.** The unavailable Reviewer reports no effort
    choices, so `Reasoning effort` is a text input. Type `high` and send Enter.
    At `Attempt deadline`, type `8m` and send Enter.
