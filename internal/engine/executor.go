@@ -71,6 +71,7 @@ type attemptExecution struct {
 	ArtifactTruncated bool
 	Outcome           model.AttemptOutcome
 	Diagnostic        string
+	ReviewerNoise     string
 	ResolvedModel     string
 	ResolvedEffort    string
 	FailureCategory   model.TerminationCategory
