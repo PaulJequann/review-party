@@ -36,6 +36,41 @@ func TestCodexInputRejectionIsClassifiedAsInputTooLarge(t *testing.T) {
 	}
 }
 
+func TestCodexInBandInputRejectionIsClassifiedAsInputTooLarge(t *testing.T) {
+	stdout := codexEventStream(
+		`{"type":"thread.started","thread_id":"t"}`,
+		`{"type":"turn.failed","error":{"message":"`+strings.ReplaceAll(strings.TrimSpace(codexInputTooLargeRejection), `"`, `\"`)+`"}}`,
+	)
+
+	execution := executeWithStub(t, codexAdapter{}, commandRun{Stdout: stdout, WaitErr: errors.New("exit status 1")})
+
+	assertFailureLocation(t, execution, model.TerminationInputTooLarge, model.PhaseReviewerExecution)
+	if !strings.Contains(execution.Diagnostic, "1063438") || !strings.Contains(execution.Diagnostic, "1048576") {
+		t.Fatalf("diagnostic = %q", execution.Diagnostic)
+	}
+	if !strings.Contains(execution.ReviewerNoise, "Input exceeds the maximum length") {
+		t.Fatalf("reviewer noise = %q, want the raw rejection kept", execution.ReviewerNoise)
+	}
+}
+
+func TestCodexStderrMentioningTheCodeIsNotAnInputRejection(t *testing.T) {
+	stderr := "warning: skipped fixtures/input_too_large.txt\n"
+
+	execution := executeWithStub(t, codexAdapter{}, commandRun{Stdout: codexEventStream(`{"type":"thread.started","thread_id":"t"}`), Stderr: stderr, WaitErr: errors.New("exit status 1")})
+
+	assertFailureLocation(t, execution, model.TerminationUnknownFailure, model.PhaseReviewerExecution)
+}
+
+func TestOtherAdaptersDoNotClassifyTheCodexRejection(t *testing.T) {
+	adapter := stubHarnessAdapter{decode: func([]byte) (decodedHarnessOutput, error) {
+		return decodedHarnessOutput{diagnostic: codexInputTooLargeRejection}, nil
+	}}
+
+	execution := executeWithStub(t, adapter, commandRun{Stderr: codexInputTooLargeRejection, WaitErr: errors.New("exit status 1")})
+
+	assertFailureLocation(t, execution, model.TerminationUnknownFailure, model.PhaseReviewerExecution)
+}
+
 func TestInputTooLargeIsNeverRetried(t *testing.T) {
 	termination := &model.ReviewTermination{Category: model.TerminationInputTooLarge, Phase: model.PhaseInputPreflight}
 	if retryableTermination(termination) {
