@@ -11,7 +11,7 @@ import (
 	"reviewparty/internal/store"
 )
 
-var ErrUnsupportedStatusID = errors.New("status accepts a Review Bundle id (rb_…) or a Review id (rp_…)")
+var ErrUnsupportedStatusID = errors.New("want a Review Bundle id (rb_…) or a Review id (rp_…)")
 
 const LifecycleUnreadable model.Lifecycle = "unreadable"
 
