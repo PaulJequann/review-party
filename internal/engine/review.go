@@ -23,6 +23,7 @@ type reviewRunner struct {
 	now             func() time.Time
 	buildProvenance func() model.RuntimeProvenance
 	publisher       *artifactPublisher
+	warn            func(string)
 }
 
 func newReviewRunner(store store.RecordStore, now func() time.Time, buildProvenance func() model.RuntimeProvenance, publisher *artifactPublisher) *reviewRunner {

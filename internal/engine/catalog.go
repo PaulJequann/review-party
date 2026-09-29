@@ -19,6 +19,7 @@ type reviewerRegistration struct {
 	allowedModels            []string
 	modelAllowlistConfigured bool
 	executor                 attemptExecutor
+	inputCharacterLimit      int
 }
 
 type reviewerCatalog struct {

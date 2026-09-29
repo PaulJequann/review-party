@@ -526,6 +526,7 @@ const (
 	TerminationCancelled               TerminationCategory = "cancelled"
 	TerminationTransportFailure        TerminationCategory = "transport_failure"
 	TerminationMalformedOutput         TerminationCategory = "malformed_output"
+	TerminationInputTooLarge           TerminationCategory = "input_too_large"
 	TerminationResultValidationFailure TerminationCategory = "result_validation_failure"
 	TerminationUnknownFailure          TerminationCategory = "unknown_failure"
 )
@@ -534,6 +535,7 @@ type ExecutionPhase string
 
 const (
 	PhaseAvailabilityCheck ExecutionPhase = "availability_check"
+	PhaseInputPreflight    ExecutionPhase = "input_preflight"
 	PhaseHarnessLaunch     ExecutionPhase = "harness_launch"
 	PhaseReviewerExecution ExecutionPhase = "reviewer_execution"
 	PhaseOutputCapture     ExecutionPhase = "output_capture"
