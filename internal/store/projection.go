@@ -16,8 +16,8 @@ type reviewRecordProjection struct {
 }
 
 func (p reviewRecordProjection) save(record model.ReviewRecord) (returnErr error) {
-	if record.SchemaVersion != model.CurrentReviewRecordSchemaVersion {
-		return fmt.Errorf("save review record schema %d: current schema is %d", record.SchemaVersion, model.CurrentReviewRecordSchemaVersion)
+	if err := requireCurrentReviewSchema(record); err != nil {
+		return err
 	}
 	tx, err := p.db.Begin()
 	if err != nil {
@@ -31,6 +31,13 @@ func (p reviewRecordProjection) save(record model.ReviewRecord) (returnErr error
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit review ledger write: %w", err)
+	}
+	return nil
+}
+
+func requireCurrentReviewSchema(record model.ReviewRecord) error {
+	if record.SchemaVersion != model.CurrentReviewRecordSchemaVersion {
+		return fmt.Errorf("save review record schema %d: current schema is %d", record.SchemaVersion, model.CurrentReviewRecordSchemaVersion)
 	}
 	return nil
 }

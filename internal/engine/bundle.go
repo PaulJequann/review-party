@@ -19,7 +19,14 @@ import (
 
 type preparedBundle struct {
 	bundle  model.ReviewBundle
-	members []preparedReview
+	members []pendingReview
+}
+
+// pendingReview pairs a prepared member with its persisted pending Review
+// Record, so the member's Review ID exists before any member launches.
+type pendingReview struct {
+	prepared preparedReview
+	record   model.ReviewRecord
 }
 
 func (conductor *Conductor) prepareRun(selection model.RunSelection) (preparedBundle, store.BundleStore, error) {
@@ -35,12 +42,20 @@ func (conductor *Conductor) prepareRun(selection model.RunSelection) (preparedBu
 	if err != nil {
 		return preparedBundle{}, nil, err
 	}
-	if err := ledger.CreateReviewBundle(bundle); err != nil {
-		return preparedBundle{}, nil, err
+	members := make([]pendingReview, 0, len(planned.members))
+	records := make([]model.ReviewRecord, 0, len(planned.members))
+	for index, slot := range planned.members {
+		prepared := planned.preparedSubject.review(slot.profile, slot.timings)
+		record, err := conductor.getRunner().pendingRecord(prepared, nil)
+		if err != nil {
+			return preparedBundle{}, nil, err
+		}
+		bundle.Members[index].ReviewID = record.ID
+		members = append(members, pendingReview{prepared: prepared, record: record})
+		records = append(records, record)
 	}
-	members := make([]preparedReview, 0, len(planned.members))
-	for _, slot := range planned.members {
-		members = append(members, planned.preparedSubject.review(slot.profile, slot.timings))
+	if err := ledger.CreateReviewBundle(bundle, records); err != nil {
+		return preparedBundle{}, nil, err
 	}
 	return preparedBundle{bundle: bundle, members: members}, ledger, nil
 }
@@ -145,17 +160,17 @@ func (conductor *Conductor) executeBundleSequential(ctx context.Context, ledger 
 	bundle.Lifecycle = model.LifecycleRunning
 	bundle.UpdatedAt = conductor.now().UTC()
 	if err := ledger.SaveReviewBundle(bundle); err != nil {
-		return conductor.stopBundle(ledger, &bundle, evalFailureCategory(err), err)
+		return conductor.stopBundle(ledger, &bundle, err)
 	}
 	for index := range prepared.members {
 		if err := ctx.Err(); err != nil {
-			return conductor.stopBundle(ledger, &bundle, evalFailureCategory(err), err)
+			return conductor.stopBundle(ledger, &bundle, err)
 		}
 		record, err := conductor.runReviewWithProgress(ctx, prepared.members[index], bundleMemberScope(bundle, index), index, len(prepared.members), conductor.now().UTC())
 		var hardErr error
 		bundle, hardErr = conductor.absorbBundleMember(ledger, bundle, concurrentMemberResult{index: index, record: record, err: err})
 		if hardErr != nil {
-			return conductor.stopBundle(ledger, &bundle, evalFailureCategory(hardErr), hardErr)
+			return conductor.stopBundle(ledger, &bundle, hardErr)
 		}
 	}
 	return conductor.finalizeBundle(ledger, bundle)
@@ -172,7 +187,7 @@ func (conductor *Conductor) executeBundleConcurrent(ctx context.Context, ledger 
 	bundle.Lifecycle = model.LifecycleRunning
 	bundle.UpdatedAt = conductor.now().UTC()
 	if err := ledger.SaveReviewBundle(bundle); err != nil {
-		return conductor.stopBundle(ledger, &bundle, evalFailureCategory(err), err)
+		return conductor.stopBundle(ledger, &bundle, err)
 	}
 	results := make(chan concurrentMemberResult, len(prepared.members))
 	launched, launchErr := conductor.launchBundleMembers(runContext, prepared, results)
@@ -181,7 +196,7 @@ func (conductor *Conductor) executeBundleConcurrent(ctx context.Context, ledger 
 		var absorbErr error
 		bundle, absorbErr = conductor.absorbPendingBundleResults(ledger, bundle, results, launched)
 		cause := errors.Join(launchErr, absorbErr)
-		return conductor.stopBundle(ledger, &bundle, evalFailureCategory(cause), cause)
+		return conductor.stopBundle(ledger, &bundle, cause)
 	}
 	consumed := 0
 	for consumed < launched {
@@ -194,7 +209,7 @@ func (conductor *Conductor) executeBundleConcurrent(ctx context.Context, ledger 
 			var absorbErr error
 			bundle, absorbErr = conductor.absorbPendingBundleResults(ledger, bundle, results, launched-consumed)
 			cause := errors.Join(hardErr, absorbErr)
-			return conductor.stopBundle(ledger, &bundle, evalFailureCategory(cause), cause)
+			return conductor.stopBundle(ledger, &bundle, cause)
 		}
 	}
 	return conductor.finalizeBundle(ledger, bundle)
@@ -207,7 +222,7 @@ func (conductor *Conductor) launchBundleMembers(ctx context.Context, prepared pr
 			return started, err
 		}
 		started++
-		go func(index int, member preparedReview) {
+		go func(index int, member pendingReview) {
 			record, err := conductor.runReviewWithProgress(ctx, member, bundleMemberScope(prepared.bundle, index), index, len(prepared.members), conductor.now().UTC())
 			results <- concurrentMemberResult{index: index, record: record, err: err}
 		}(index, prepared.members[index])
@@ -241,14 +256,7 @@ func (conductor *Conductor) absorbPendingBundleResults(ledger store.BundleStore,
 }
 
 func (conductor *Conductor) absorbBundleMember(ledger store.BundleStore, bundle model.ReviewBundle, result concurrentMemberResult) (model.ReviewBundle, error) {
-	member := bundle.Members[result.index]
-	member.ReviewID = result.record.ID
-	member.Lifecycle = result.record.Lifecycle
-	if result.record.Result != nil {
-		member.Status = string(result.record.Result.Status)
-		member.FindingCount = result.record.Result.FindingCount()
-	}
-	bundle.Members[result.index] = member
+	mirrorBundleMember(&bundle.Members[result.index], result.record)
 	bundle.UpdatedAt = conductor.now().UTC()
 	if saveErr := ledger.SaveReviewBundle(bundle); saveErr != nil {
 		return bundle, errors.Join(result.err, saveErr)
@@ -256,12 +264,20 @@ func (conductor *Conductor) absorbBundleMember(ledger store.BundleStore, bundle 
 	return bundle, result.err
 }
 
+func mirrorBundleMember(member *model.BundleMember, record model.ReviewRecord) {
+	member.Lifecycle = record.Lifecycle
+	if record.Result != nil {
+		member.Status = string(record.Result.Status)
+		member.FindingCount = record.Result.FindingCount()
+	}
+}
+
 func (conductor *Conductor) finalizeBundle(ledger store.BundleStore, bundle model.ReviewBundle) (model.ReviewBundle, error) {
 	bundle.CompletedAt = conductor.now().UTC()
 	bundle.UpdatedAt = bundle.CompletedAt
 	bundle.Lifecycle = model.LifecycleCompleted
 	for _, member := range bundle.Members {
-		if member.ReviewID == "" || member.Lifecycle != model.LifecycleCompleted {
+		if member.Lifecycle != model.LifecycleCompleted {
 			bundle.Lifecycle = model.LifecycleIncomplete
 			break
 		}
@@ -272,15 +288,52 @@ func (conductor *Conductor) finalizeBundle(ledger store.BundleStore, bundle mode
 	return bundle, nil
 }
 
-func (conductor *Conductor) stopBundle(ledger store.BundleStore, bundle *model.ReviewBundle, category model.TerminationCategory, cause error) (model.ReviewBundle, error) {
+// stopBundle ends the bundle as incomplete. Callers invoke it only after every
+// launched member has returned, so no member Review is still executing.
+func (conductor *Conductor) stopBundle(ledger store.BundleStore, bundle *model.ReviewBundle, cause error) (model.ReviewBundle, error) {
+	category := evalFailureCategory(cause)
+	memberErr := conductor.finishStoppedMembers(bundle, category, cause)
 	bundle.Lifecycle = model.LifecycleIncomplete
 	bundle.Termination = &model.BundleTermination{Category: category, Message: cause.Error()}
 	bundle.CompletedAt = conductor.now().UTC()
 	bundle.UpdatedAt = bundle.CompletedAt
 	if err := ledger.SaveReviewBundle(*bundle); err != nil {
-		return *bundle, errors.Join(cause, err)
+		return *bundle, errors.Join(cause, memberErr, err)
 	}
-	return *bundle, cause
+	return *bundle, errors.Join(cause, memberErr)
+}
+
+// finishStoppedMembers moves every member Review the stop left pending or
+// running to incomplete, so each member ID reaches a terminal lifecycle that
+// inspect, status, and wait can report. It mirrors the ledger into the bundle.
+func (conductor *Conductor) finishStoppedMembers(bundle *model.ReviewBundle, category model.TerminationCategory, cause error) error {
+	var failures error
+	for index := range bundle.Members {
+		record, err := conductor.store.Load(bundle.Members[index].ReviewID)
+		if err != nil {
+			failures = errors.Join(failures, err)
+			continue
+		}
+		if record.Lifecycle == model.LifecyclePending || record.Lifecycle == model.LifecycleRunning {
+			record, err = conductor.finishStoppedMember(record, category, cause)
+			failures = errors.Join(failures, err)
+		}
+		mirrorBundleMember(&bundle.Members[index], record)
+	}
+	return failures
+}
+
+// finishStoppedMember records why a member never finished. A pending member
+// never reached its availability check, so it ends there with no elapsed time;
+// a running member was stopped during execution.
+func (conductor *Conductor) finishStoppedMember(record model.ReviewRecord, category model.TerminationCategory, cause error) (model.ReviewRecord, error) {
+	termination := model.ReviewTermination{Category: category, Phase: model.PhaseAvailabilityCheck, Message: "the Review Bundle stopped before this Review finished: " + cause.Error()}
+	started := conductor.now().UTC()
+	if record.Lifecycle == model.LifecycleRunning {
+		termination.Phase = model.PhaseReviewerExecution
+		started = record.UpdatedAt
+	}
+	return conductor.getRunner().finishIncomplete(record, termination, started)
 }
 
 func (conductor *Conductor) InspectBundle(_ context.Context, id model.ReviewBundleID) (model.ReviewBundle, error) {

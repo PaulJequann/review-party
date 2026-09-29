@@ -31,17 +31,18 @@ func (conductor *Conductor) emitRunProgress(event model.RunProgressEvent) {
 // so the reported elapsed time matches the persisted Review Record. When the
 // context carries a progress gate, the start event waits for admission so
 // queued members stay silent until the concurrency limit starts them.
-func (conductor *Conductor) runReviewWithProgress(ctx context.Context, member preparedReview, scope string, index, total int, started time.Time) (model.ReviewRecord, error) {
+func (conductor *Conductor) runReviewWithProgress(ctx context.Context, member pendingReview, scope string, index, total int, started time.Time) (model.ReviewRecord, error) {
+	runner := conductor.getRunner()
 	release, admitted := acquireProgressGate(ctx)
 	if !admitted {
 		// The run was cancelled while this member waited for admission; the
 		// execution path below records the cancellation without a running line.
-		return conductor.runPreparedReview(ctx, member, nil, started)
+		return runner.runPendingReview(ctx, member.record, member.prepared, started)
 	}
 	defer release()
-	conductor.emitRunProgress(reviewProgressStarted(member, scope, index, total))
-	record, err := conductor.runPreparedReview(ctx, member, nil, started)
-	conductor.emitRunProgress(conductor.reviewProgressFinished(member, record, err, scope, index, total, started))
+	conductor.emitRunProgress(reviewProgressStarted(member.prepared, scope, index, total))
+	record, err := runner.runPendingReview(ctx, member.record, member.prepared, started)
+	conductor.emitRunProgress(conductor.reviewProgressFinished(member.prepared, record, err, scope, index, total, started))
 	return record, err
 }
 

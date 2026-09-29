@@ -72,7 +72,7 @@ func TestInspectDispatchesBundleIDsToBundleInspection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := ledger.CreateReviewBundle(bundle); err != nil {
+	if err := ledger.CreateReviewBundle(bundle, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := ledger.Close(); err != nil {

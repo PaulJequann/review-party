@@ -294,7 +294,7 @@ func saveInspectBundleFixture(t *testing.T, stateHome string, bundle model.Revie
 		bundle.Members = append(bundle.Members, model.BundleMember{Scope: "global", Profile: record.ProfileRevision.Name, ReviewID: record.ID, Lifecycle: record.Lifecycle})
 	}
 	bundle.Members = append(bundle.Members, dangling...)
-	if err := ledger.CreateReviewBundle(bundle); err != nil {
+	if err := ledger.CreateReviewBundle(bundle, nil); err != nil {
 		t.Fatal(err)
 	}
 }

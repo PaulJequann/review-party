@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"reflect"
 	"testing"
 	"time"
@@ -52,7 +53,7 @@ func TestLedgerRoundTripsReviewBundle(t *testing.T) {
 		},
 	}
 
-	if err := store.CreateReviewBundle(bundle); err != nil {
+	if err := store.CreateReviewBundle(bundle, nil); err != nil {
 		t.Fatal(err)
 	}
 	loaded, err := store.LoadReviewBundle(bundle.ID)
@@ -98,7 +99,7 @@ func TestLedgerPersistsBundleWithoutSelectionFacts(t *testing.T) {
 		CreatedAt:        now,
 		UpdatedAt:        now,
 	}
-	if err := store.CreateReviewBundle(bundle); err != nil {
+	if err := store.CreateReviewBundle(bundle, nil); err != nil {
 		t.Fatal(err)
 	}
 	loaded, err := store.LoadReviewBundle(bundle.ID)
@@ -148,4 +149,58 @@ func deduplicationTexts(duplicates []model.SkippedDuplicate) []string {
 		texts = append(texts, duplicate.Origin+"→"+duplicate.KeptOrigin)
 	}
 	return texts
+}
+
+func TestLedgerCreatesReviewBundleWithPendingMemberRecords(t *testing.T) {
+	ledger := newTestLedger(t, t.TempDir())
+	defer closeTestResource(t, ledger.Close)
+	bundle, members := pendingBundleFixture()
+	if err := ledger.CreateReviewBundle(bundle, members); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ledger.LoadReviewBundle(bundle.ID); err != nil {
+		t.Fatal(err)
+	}
+	for _, member := range members {
+		loaded, err := ledger.Load(member.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if loaded.Lifecycle != model.LifecyclePending {
+			t.Fatalf("member %s lifecycle = %q, want pending", member.ID, loaded.Lifecycle)
+		}
+	}
+}
+
+func TestLedgerBundleCreationWritesNothingWhenAMemberFails(t *testing.T) {
+	ledger := newTestLedger(t, t.TempDir())
+	defer closeTestResource(t, ledger.Close)
+	bundle, members := pendingBundleFixture()
+	members[1].SchemaVersion = model.CurrentReviewRecordSchemaVersion + 1
+	if err := ledger.CreateReviewBundle(bundle, members); err == nil {
+		t.Fatal("expected the unsupported member schema to fail bundle creation")
+	}
+	if _, err := ledger.LoadReviewBundle(bundle.ID); !errors.Is(err, ErrReviewNotFound) {
+		t.Fatalf("bundle load error = %v, want ErrReviewNotFound", err)
+	}
+	if _, err := ledger.Load(members[0].ID); !errors.Is(err, ErrReviewNotFound) {
+		t.Fatalf("first member load error = %v, want ErrReviewNotFound", err)
+	}
+}
+
+func pendingBundleFixture() (model.ReviewBundle, []model.ReviewRecord) {
+	first := ledgerFixture(model.LifecyclePending)
+	first.Termination = nil
+	first.Passes = []model.PassRecord{{Name: "review", Required: true, Attempts: []model.AttemptRecord{}}}
+	second := first
+	second.ID = "rp_1723200000000_fedcba9876543210"
+	bundle := model.ReviewBundle{
+		ID: "rb_1723200000000_0123456789abcdef", Repository: "/repo", Lifecycle: model.LifecyclePending,
+		Members: []model.BundleMember{
+			{Scope: "global", Profile: "bugs", ReviewID: first.ID, Lifecycle: model.LifecyclePending},
+			{Scope: "global", Profile: "bugs", ReviewID: second.ID, Lifecycle: model.LifecyclePending},
+		},
+		ConcurrencyLimit: 1, CreatedAt: first.CreatedAt, UpdatedAt: first.CreatedAt,
+	}
+	return bundle, []model.ReviewRecord{first, second}
 }

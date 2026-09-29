@@ -34,15 +34,16 @@ func newReviewRunner(store store.RecordStore, now func() time.Time, buildProvena
 	}
 }
 
-func (runner *reviewRunner) pendingRecord(subject model.ReviewSubject, profile compiledProfile, timings model.ReviewTimings, replaysReviewID *model.ReviewID) (model.ReviewRecord, error) {
+func (runner *reviewRunner) pendingRecord(prepared preparedReview, replaysReviewID *model.ReviewID) (model.ReviewRecord, error) {
 	id, err := newReviewID(runner.now())
 	if err != nil {
 		return model.ReviewRecord{}, err
 	}
 	now := runner.now().UTC()
 	runtime := runner.buildProvenance()
-	passes := make([]model.PassRecord, 0, len(profile.revision.Passes))
-	for _, planned := range profile.revision.Passes {
+	timings := prepared.timings
+	passes := make([]model.PassRecord, 0, len(prepared.profile.revision.Passes))
+	for _, planned := range prepared.profile.revision.Passes {
 		passes = append(passes, model.PassRecord{Name: planned.Name, Required: planned.Required, Attempts: []model.AttemptRecord{}})
 	}
 	return model.ReviewRecord{
@@ -50,9 +51,9 @@ func (runner *reviewRunner) pendingRecord(subject model.ReviewSubject, profile c
 		ID:              id,
 		ReplaysReviewID: replaysReviewID,
 		Lifecycle:       model.LifecyclePending,
-		Subject:         subject,
-		ProfileRevision: profile.revision,
-		ProfileSnapshot: profile.snapshot,
+		Subject:         prepared.subject.ReviewSubject,
+		ProfileRevision: prepared.profile.revision,
+		ProfileSnapshot: prepared.profile.snapshot,
 		Passes:          passes,
 		Runtime:         &runtime,
 		Timings:         &timings,
@@ -61,15 +62,30 @@ func (runner *reviewRunner) pendingRecord(subject model.ReviewSubject, profile c
 	}, nil
 }
 
-func (runner *reviewRunner) runPreparedReview(ctx context.Context, prepared preparedReview, replaysReviewID *model.ReviewID, reviewStarted time.Time) (model.ReviewRecord, error) {
-	record, err := runner.pendingRecord(prepared.subject.ReviewSubject, prepared.profile, prepared.timings, replaysReviewID)
+// startReview persists the pending Review Record so its ID is inspectable
+// before any execution begins.
+func (runner *reviewRunner) startReview(prepared preparedReview, replaysReviewID *model.ReviewID) (model.ReviewRecord, error) {
+	record, err := runner.pendingRecord(prepared, replaysReviewID)
 	if err != nil {
 		return model.ReviewRecord{}, err
 	}
 	if err := runner.store.Save(record); err != nil {
 		return model.ReviewRecord{}, err
 	}
+	return record, nil
+}
 
+func (runner *reviewRunner) runPreparedReview(ctx context.Context, prepared preparedReview, replaysReviewID *model.ReviewID, reviewStarted time.Time) (model.ReviewRecord, error) {
+	record, err := runner.startReview(prepared, replaysReviewID)
+	if err != nil {
+		return model.ReviewRecord{}, err
+	}
+	return runner.runPendingReview(ctx, record, prepared, reviewStarted)
+}
+
+// runPendingReview drives an already persisted pending Review Record through
+// availability, execution, validation, and persistence.
+func (runner *reviewRunner) runPendingReview(ctx context.Context, record model.ReviewRecord, prepared preparedReview, reviewStarted time.Time) (model.ReviewRecord, error) {
 	record.Lifecycle = model.LifecycleRunning
 	record.UpdatedAt = runner.now().UTC()
 	if err := runner.store.Save(record); err != nil {

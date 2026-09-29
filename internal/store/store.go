@@ -79,7 +79,7 @@ type AdjudicationStore interface {
 }
 
 type BundleStore interface {
-	CreateReviewBundle(bundle model.ReviewBundle) error
+	CreateReviewBundle(bundle model.ReviewBundle, members []model.ReviewRecord) error
 	SaveReviewBundle(bundle model.ReviewBundle) error
 	LoadReviewBundle(id model.ReviewBundleID) (model.ReviewBundle, error)
 }
@@ -248,12 +248,12 @@ func (s *DeferredLedgerRecordStore) LoadEvalSuiteRun(id model.EvalSuiteRunID) (m
 	return ledger.LoadEvalSuiteRun(id)
 }
 
-func (s *DeferredLedgerRecordStore) CreateReviewBundle(bundle model.ReviewBundle) error {
+func (s *DeferredLedgerRecordStore) CreateReviewBundle(bundle model.ReviewBundle, members []model.ReviewRecord) error {
 	ledger, err := s.openExisting()
 	if err != nil {
 		return err
 	}
-	return ledger.CreateReviewBundle(bundle)
+	return ledger.CreateReviewBundle(bundle, members)
 }
 
 func (s *DeferredLedgerRecordStore) SaveReviewBundle(bundle model.ReviewBundle) error {
@@ -573,8 +573,8 @@ func (s *LedgerRecordStore) LoadEvalSuiteRun(id model.EvalSuiteRunID) (model.Eva
 	return s.evalProjection.loadSuiteRun(id)
 }
 
-func (s *LedgerRecordStore) CreateReviewBundle(bundle model.ReviewBundle) error {
-	return s.bundleProjection.create(bundle)
+func (s *LedgerRecordStore) CreateReviewBundle(bundle model.ReviewBundle, members []model.ReviewRecord) error {
+	return s.bundleProjection.create(bundle, members)
 }
 
 func (s *LedgerRecordStore) SaveReviewBundle(bundle model.ReviewBundle) error {

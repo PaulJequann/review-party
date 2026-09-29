@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reviewparty/internal/model"
 	"time"
@@ -21,13 +22,33 @@ func nullableTime(value time.Time) any {
 	return value.UTC()
 }
 
-func (p bundleProjection) create(bundle model.ReviewBundle) error {
+// create writes the bundle row and every member's pending Review Record in one
+// transaction, so a caller never observes a bundle whose members are missing.
+func (p bundleProjection) create(bundle model.ReviewBundle, members []model.ReviewRecord) (returnErr error) {
 	payloads, err := renderBundlePayload(bundle)
 	if err != nil {
 		return err
 	}
-	_, err = p.db.Exec(`INSERT INTO review_bundles(id,description,revision,repository,subject_kind,subject_identity,lifecycle,termination,selection,warnings,deduplicated,members,concurrency_limit,created_at,updated_at,completed_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, bundle.ID, bundle.Description, bundle.Revision, bundle.Repository, bundle.SubjectKind, bundle.SubjectIdentity, bundle.Lifecycle, payloads.termination, payloads.selection, payloads.warnings, payloads.deduplicated, payloads.members, bundle.ConcurrencyLimit, bundle.CreatedAt.UTC(), bundle.UpdatedAt.UTC(), nullableTime(bundle.CompletedAt))
-	return err
+	tx, err := p.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin Review Bundle write: %w", err)
+	}
+	defer func() { returnErr = errors.Join(returnErr, rollbackTransaction(tx)) }()
+	if _, err := tx.Exec(`INSERT INTO review_bundles(id,description,revision,repository,subject_kind,subject_identity,lifecycle,termination,selection,warnings,deduplicated,members,concurrency_limit,created_at,updated_at,completed_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, bundle.ID, bundle.Description, bundle.Revision, bundle.Repository, bundle.SubjectKind, bundle.SubjectIdentity, bundle.Lifecycle, payloads.termination, payloads.selection, payloads.warnings, payloads.deduplicated, payloads.members, bundle.ConcurrencyLimit, bundle.CreatedAt.UTC(), bundle.UpdatedAt.UTC(), nullableTime(bundle.CompletedAt)); err != nil {
+		return err
+	}
+	for _, record := range members {
+		if err := requireCurrentReviewSchema(record); err != nil {
+			return err
+		}
+		if err := writeReviewAggregate(tx, record); err != nil {
+			return err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit Review Bundle write: %w", err)
+	}
+	return nil
 }
 
 func (p bundleProjection) save(bundle model.ReviewBundle) error {
