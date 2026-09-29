@@ -226,7 +226,9 @@ review-party wait rb_... --timeout 10m
 without waiting. With no id it lists the repository's pending and running
 Bundles and Reviews, newest first. `wait` blocks until the run finishes, then
 prints it as `run` would have, with the same `--format` and `--full` options,
-and exits with the same code.
+and exits with the same code. `status` exits 0 whatever the lifecycle, and 1
+after printing when a member's Review Record cannot be read. When `--timeout`
+passes first, `wait` exits 1 and the run keeps going.
 
 Each saved Profile fixes its Reviewer, model, reasoning effort, Attempt
 deadline, and instructions. Ordinary `run`, explain, replay, and Party

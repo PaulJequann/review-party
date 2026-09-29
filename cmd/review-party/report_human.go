@@ -4,6 +4,7 @@ import (
 	"io"
 	"strings"
 
+	"reviewparty/internal/engine"
 	"reviewparty/internal/model"
 )
 
@@ -21,7 +22,7 @@ func printHumanReport(output io.Writer, report reviewReport, configuration strin
 }
 
 func writeHumanEntry(output *commandOutput, label string, entry reviewEntry) {
-	if entry.Lifecycle == lifecycleUnreadable {
+	if entry.Lifecycle == engine.LifecycleUnreadable {
 		output.write("%s · unreadable\nread error: %s\n", label, entry.ReadError)
 		writeHumanMisses(output, entry.Misses)
 		return

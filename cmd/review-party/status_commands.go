@@ -23,7 +23,8 @@ each Review it contains, read from the ledger without waiting for it to finish.
 
 Without an ID, lists the Review Bundles and Reviews still pending or running
 for the repository. Exits 0 whenever the lookup succeeds, whatever the
-lifecycle; use wait to block until a run finishes.`,
+lifecycle, and 1 after printing when a member's Review Record cannot be read.
+Use wait to block until a run finishes.`,
 		Example: "  review-party status rb_...\n  review-party status rp_... --format json\n  review-party status --repo .",
 		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -67,9 +68,9 @@ func executeStatus(ctx context.Context, options statusOptions, streams commandIO
 		if err != nil {
 			return printStatusFailure(streams.errors, err)
 		}
-		return renderLedgerOutput(options.format, streams.output, streams.errors, status, func(output *commandOutput) {
+		return statusOutcome(streams.errors, renderLedgerOutput(options.format, streams.output, streams.errors, status, func(output *commandOutput) {
 			printHumanStatus(output, status, options)
-		})
+		}), status)
 	}
 	root, err := subject.ResolveRepositoryRoot(options.repository)
 	if err != nil {
@@ -79,7 +80,7 @@ func executeStatus(ctx context.Context, options statusOptions, streams commandIO
 	if err != nil {
 		return printFailure(streams.errors, err)
 	}
-	return renderLedgerOutput(options.format, streams.output, streams.errors, inFlightReport{Repository: root, InFlight: statuses}, func(output *commandOutput) {
+	return statusOutcome(streams.errors, renderLedgerOutput(options.format, streams.output, streams.errors, inFlightReport{Repository: root, InFlight: statuses}, func(output *commandOutput) {
 		if len(statuses) == 0 {
 			output.write("no reviews in flight for %s\n", root)
 		}
@@ -89,7 +90,27 @@ func executeStatus(ctx context.Context, options statusOptions, streams commandIO
 			}
 			printHumanStatus(output, status, options)
 		}
-	})
+	}), statuses...)
+}
+
+// statusOutcome fails a printed status that names a Review it could not read,
+// as inspect and run do for an unreadable Review Bundle member.
+func statusOutcome(stderr io.Writer, exit int, statuses ...model.ReviewStatus) int {
+	if exit != 0 {
+		return exit
+	}
+	var failures []error
+	for _, status := range statuses {
+		for _, member := range status.Reviews {
+			if member.ReadError != "" {
+				failures = append(failures, fmt.Errorf("read bundle member %s review %s: %s", statusMemberLabel(member), member.ReviewID, member.ReadError))
+			}
+		}
+	}
+	if len(failures) > 0 {
+		return printFailure(stderr, errors.Join(failures...))
+	}
+	return 0
 }
 
 // printStatusFailure reports an id that names neither a Review Bundle nor a
@@ -140,6 +161,8 @@ func statusMemberLabel(member model.ReviewStatusMember) string {
 func statusMemberDetail(member model.ReviewStatusMember, now time.Time) string {
 	detail := fmt.Sprintf("%s %s", member.Lifecycle, member.ReviewID)
 	switch {
+	case member.ReadError != "":
+		return detail + " · " + boundedProgressMessage(member.ReadError)
 	case member.Lifecycle == model.LifecycleCompleted && member.Status == string(model.ResultClean):
 		detail += " · clean"
 	case member.Lifecycle == model.LifecycleCompleted:

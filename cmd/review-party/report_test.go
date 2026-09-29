@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"reviewparty/internal/engine"
 	"reviewparty/internal/model"
 	"reviewparty/internal/store"
 )
@@ -330,7 +331,7 @@ func TestInspectBundleReportsAnUnreadableMemberBesideTheOthers(t *testing.T) {
 		t.Fatalf("finding counts = %v, want the healthy member's 2 findings beside the unreadable member", got)
 	}
 	unreadable := report.Reviews[1]
-	if got, want := []any{unreadable.ID, unreadable.Lifecycle, unreadable.Status}, []any{missing, lifecycleUnreadable, model.ResultStatus("")}; !reflect.DeepEqual(got, want) {
+	if got, want := []any{unreadable.ID, unreadable.Lifecycle, unreadable.Status}, []any{missing, engine.LifecycleUnreadable, model.ResultStatus("")}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("unreadable member id, lifecycle, status = %v, want %v", got, want)
 	}
 	if !strings.Contains(unreadable.ReadError, string(missing)) {

@@ -116,3 +116,25 @@ func TestWaitReturnsOnceAnInFlightReviewFinishes(t *testing.T) {
 		t.Fatalf("exit = %d after %d checks, stdout = %q, stderr = %q", exit, conductor.checks, stdout.String(), stderr.String())
 	}
 }
+
+func TestWaitPrintsABundleWithAnUnreadableMemberAndFailsAsRunDoes(t *testing.T) {
+	fixture := newStatusLedger(t)
+	conductor, err := engine.New(engine.Config{UserConfigurationPath: defaultUserConfigurationPath()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var bundle model.ReviewBundle
+	fixture.write(func(ledger *store.LedgerRecordStore) error {
+		bundle, err = ledger.LoadReviewBundle(unreadableBundleID)
+		return err
+	})
+	report := bundleReport(context.Background(), conductor, bundle, false)
+	var want bytes.Buffer
+	if err := printReport(&want, report, reportOptions{format: "json"}); err != nil {
+		t.Fatal(err)
+	}
+	exit, stdout, stderr := runCLI("wait", unreadableBundleID, "--format", "json")
+	if exit != 1 || stdout != want.String() || stderr != "review-party: "+report.readFailure().Error()+"\n" {
+		t.Fatalf("exit = %d, stderr = %q, stdout =\n%s\nwant =\n%s", exit, stderr, stdout, want.String())
+	}
+}

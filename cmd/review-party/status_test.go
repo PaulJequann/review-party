@@ -19,6 +19,8 @@ const (
 	completedBundleID  = "rb_1725192000000_00000000000000b2"
 	incompleteBundleID = "rb_1725192000000_00000000000000b3"
 	stoppedBundleID    = "rb_1725192000000_00000000000000b4"
+	unreadableBundleID = "rb_1725192000000_00000000000000b5"
+	unreadableReviewID = "rp_1725192000000_00000000000000c7"
 	pendingReviewID    = "rp_1725192000000_00000000000000a1"
 	incompleteReviewID = "rp_1725192000000_00000000000000a2"
 	completedReviewID  = "rp_1725192000000_00000000000000a3"
@@ -64,6 +66,11 @@ func newStatusLedger(t *testing.T) statusLedger {
 			if err := ledger.CreateReviewBundle(fixture.bundle(bundle.id, bundle.lifecycle, bundle.termination, index, bundle.members), bundle.members); err != nil {
 				return err
 			}
+		}
+		readable := fixture.record("rp_1725192000000_00000000000000c6", model.LifecycleCompleted, 4)
+		unreadable := fixture.bundle(unreadableBundleID, model.LifecycleCompleted, nil, 4, []model.ReviewRecord{readable, fixture.record(unreadableReviewID, model.LifecycleCompleted, 4)})
+		if err := ledger.CreateReviewBundle(unreadable, []model.ReviewRecord{readable}); err != nil {
+			return err
 		}
 		for _, record := range []model.ReviewRecord{
 			fixture.record(pendingReviewID, model.LifecyclePending, 5),
@@ -211,5 +218,24 @@ func TestStatusWithoutIDListsInFlightRunsNewestFirst(t *testing.T) {
 	}
 	if exit, stdout, _ := runCLI("status", "--repo", empty, "--format", "json"); exit != 0 || stdout != `{"repository":"`+emptyRoot+`","in_flight":[]}`+"\n" {
 		t.Fatalf("empty json exit = %d, stdout = %q", exit, stdout)
+	}
+}
+
+func TestStatusPrintsAnUnreadableMemberAndFails(t *testing.T) {
+	newStatusLedger(t)
+	exit, stdout, stderr := runCLI("status", unreadableBundleID)
+	readError := `no review with id "` + unreadableReviewID + `"`
+	if exit != 1 || !strings.HasPrefix(stdout, "bundle "+unreadableBundleID+" · completed · 1/2 review(s) finished\n") ||
+		!strings.Contains(stdout, "unreadable "+unreadableReviewID+" · "+readError+"\n") ||
+		stderr != "review-party: read bundle member global:bugs review "+unreadableReviewID+": "+readError+"\n" {
+		t.Fatalf("exit = %d, stdout =\n%s\nstderr = %q", exit, stdout, stderr)
+	}
+	exit, stdout, _ = runCLI("status", unreadableBundleID, "--format", "json")
+	var status model.ReviewStatus
+	if err := json.Unmarshal([]byte(stdout), &status); err != nil || exit != 1 || len(status.Reviews) != 2 {
+		t.Fatalf("exit = %d, stdout = %q, decode error = %v", exit, stdout, err)
+	}
+	if member := status.Reviews[1]; member.ReviewID != unreadableReviewID || member.Lifecycle != "unreadable" || member.ReadError != readError {
+		t.Fatalf("unreadable member = %#v", member)
 	}
 }

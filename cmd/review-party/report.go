@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 
+	"reviewparty/internal/engine"
 	"reviewparty/internal/model"
 	"reviewparty/internal/store"
 )
@@ -46,8 +47,6 @@ type reviewEntry struct {
 	Record          *model.ReviewRecord       `json:"record,omitempty"`
 	ReadError       string                    `json:"read_error,omitempty"`
 }
-
-const lifecycleUnreadable model.Lifecycle = "unreadable"
 
 type profileSummary struct {
 	Name                   string `json:"name"`
@@ -97,7 +96,7 @@ func memberEntry(ctx context.Context, loader reviewLoader, member model.BundleMe
 	if err != nil {
 		return reviewEntry{
 			ID:        member.ReviewID,
-			Lifecycle: lifecycleUnreadable,
+			Lifecycle: engine.LifecycleUnreadable,
 			Findings:  []model.Finding{},
 			Profile:   profileSummary{Name: member.Profile, Scope: member.Scope, Revision: member.ProfileRevision},
 			Origin:    member.Origin,
@@ -156,7 +155,7 @@ func (report reviewReport) incomplete() bool {
 func (report reviewReport) readFailure() error {
 	var failures []error
 	for _, entry := range report.Reviews {
-		if entry.Lifecycle == lifecycleUnreadable {
+		if entry.Lifecycle == engine.LifecycleUnreadable {
 			failures = append(failures, fmt.Errorf("read bundle member %s:%s review %s: %s", entry.Profile.Scope, entry.Profile.Name, entry.ID, entry.ReadError))
 		}
 	}

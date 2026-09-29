@@ -15,6 +15,11 @@ import (
 // a Review.
 var ErrUnsupportedStatusID = errors.New("status accepts a Review Bundle id (rb_…) or a Review id (rp_…)")
 
+// LifecycleUnreadable marks a Review whose record cannot be read. Status and
+// reports use it; the ledger never stores it, so it stays out of the model's
+// Lifecycle enum.
+const LifecycleUnreadable model.Lifecycle = "unreadable"
+
 // Status reads the current lifecycle of one Review Bundle or Review without
 // waiting for it.
 func (conductor *Conductor) Status(ctx context.Context, id string) (model.ReviewStatus, error) {
@@ -88,7 +93,11 @@ func (conductor *Conductor) bundleStatus(ctx context.Context, id model.ReviewBun
 	for _, member := range bundle.Members {
 		record, err := conductor.Inspect(ctx, member.ReviewID)
 		if err != nil {
-			return model.ReviewStatus{}, fmt.Errorf("read Review %s of Review Bundle %s: %w", member.ReviewID, bundle.ID, err)
+			status.Reviews = append(status.Reviews, model.ReviewStatusMember{
+				ReviewID: member.ReviewID, Scope: member.Scope, Profile: member.Profile,
+				Lifecycle: LifecycleUnreadable, ReadError: err.Error(),
+			})
+			continue
 		}
 		status.Reviews = append(status.Reviews, reviewStatusMember(record, member.Scope))
 	}

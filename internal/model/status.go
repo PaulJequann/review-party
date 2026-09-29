@@ -40,6 +40,7 @@ type ReviewStatusMember struct {
 	Termination  *ReviewTermination `json:"termination,omitempty"`
 	DurationMS   int64              `json:"duration_ms,omitempty"`
 	UpdatedAt    time.Time          `json:"updated_at"`
+	ReadError    string             `json:"read_error,omitempty"`
 }
 
 // Terminal reports whether the lifecycle can no longer change.
