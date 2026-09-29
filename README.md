@@ -196,9 +196,10 @@ Reviewer, and Subject. A Review Bundle prints one block per member, labelled
 `<scope>:<profile>`, before its selection, warnings, and Subject. A member that
 never started reads `not started`. JSON output always has a top-level `reviews`
 array, so `jq '.reviews[].findings'` works for a single Review and for a Bundle.
-Bundle output adds a `bundle` object. Add `--full` to include each complete
-Review Record, which carries the raw result, patch, changed paths, passes,
-attempts, and artifact references. `run` and `replay` exit with status 2 when
+Bundle output adds a `bundle` object. With `--format json`, `--full` includes
+each complete Review Record under `record`: the raw result, patch, changed
+paths, passes, attempts, and artifact references. Human `--full` output adds
+the raw result, artifact references, changed paths, and patch. `run` and `replay` exit with status 2 when
 the Review or Bundle is incomplete.
 
 Each saved Profile fixes its Reviewer, model, reasoning effort, Attempt
