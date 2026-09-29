@@ -24,6 +24,9 @@ type Config struct {
 	// Progress optionally receives live per-reviewer events while a run
 	// executes. A nil sink keeps execution fully silent.
 	Progress func(model.RunProgressEvent)
+	// Warn optionally receives one-line warnings that do not stop a run, such
+	// as a Subject close to a reviewer's input limit. A nil sink drops them.
+	Warn func(string)
 }
 
 type Conductor struct {
@@ -66,6 +69,7 @@ func New(config Config) (*Conductor, error) {
 		return nil, err
 	}
 	conductor.runner.publisher = newArtifactPublisher(conductor.artifacts)
+	conductor.runner.warn = config.Warn
 	return conductor, nil
 }
 

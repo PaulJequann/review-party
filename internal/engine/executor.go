@@ -91,11 +91,12 @@ type preparedAttempt struct {
 }
 
 type decodedHarnessOutput struct {
-	assistantText string
-	diagnostic    string
-	noise         string
-	model         string
-	effort        string
+	assistantText  string
+	diagnostic     string
+	noise          string
+	inputRejection *inputRejection
+	model          string
+	effort         string
 	// incomplete marks a run the harness itself reported as unfinished, so a
 	// clean process exit cannot turn it into a completed attempt.
 	incomplete bool
@@ -105,7 +106,7 @@ type harnessAdapter interface {
 	Name() string
 	Check(context.Context, reviewerCandidate) availability
 	Prepare(attemptSpec) (preparedAttempt, error)
-	Decode([]byte) (decodedHarnessOutput, error)
+	Decode(stdout []byte, stderr string) (decodedHarnessOutput, error)
 }
 
 type directExecutor struct {
@@ -158,9 +159,9 @@ func (executor directExecutor) executePrepared(ctx context.Context, spec attempt
 	if run.OutputOverflow {
 		return overflowExecution(run, executor.adapter.Name())
 	}
-	decoded, decodeErr := executor.adapter.Decode(run.Stdout)
+	decoded, decodeErr := executor.adapter.Decode(run.Stdout, run.Stderr)
 	if decodeErr != nil {
-		return decodedRunFailure(run, decodeErr, executor.adapter.Name())
+		return decodedRunFailure(run, decoded, decodeErr, executor.adapter.Name())
 	}
 	model := decoded.model
 	if model == "" {
@@ -379,8 +380,8 @@ func overflowExecution(run commandRun, harness string) attemptExecution {
 	return execution
 }
 
-func decodedRunFailure(run commandRun, decodeErr error, harness string) attemptExecution {
-	decoded := decodedHarnessOutput{assistantText: string(run.Stdout), diagnostic: decodeErr.Error(), noise: run.Stderr}
+func decodedRunFailure(run commandRun, partial decodedHarnessOutput, decodeErr error, harness string) attemptExecution {
+	decoded := decodedHarnessOutput{assistantText: string(run.Stdout), diagnostic: decodeErr.Error(), noise: run.Stderr, inputRejection: partial.inputRejection}
 	if run.WaitErr != nil || run.ContextErr != nil {
 		return finalizeHarnessRun(run, decoded, harness)
 	}
@@ -391,6 +392,9 @@ func decodedRunFailure(run commandRun, decodeErr error, harness string) attemptE
 }
 
 func classifyHarnessFailure(decoded decodedHarnessOutput, waitErr error) attemptExecution {
+	if decoded.inputRejection != nil {
+		return failedExecution(attemptOutcomeForTermination(model.TerminationInputTooLarge), model.TerminationInputTooLarge, model.PhaseReviewerExecution, decoded.inputRejection.message())
+	}
 	category := diagnosticFailureCategory(joinReport(decoded.diagnostic, decoded.noise))
 	outcome := attemptOutcomeForTermination(category)
 	message := decisiveDiagnostic(decoded, category)
@@ -451,7 +455,7 @@ func isTransportDiagnostic(normalized string) bool {
 
 func attemptOutcomeForTermination(category model.TerminationCategory) model.AttemptOutcome {
 	switch category {
-	case model.TerminationAuthenticationFailure, model.TerminationReviewerUnavailable:
+	case model.TerminationAuthenticationFailure, model.TerminationReviewerUnavailable, model.TerminationInputTooLarge:
 		return model.AttemptReviewerUnavailable
 	case model.TerminationTransportFailure, model.TerminationDeadlineExceeded:
 		return model.AttemptTransientFailure

@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -33,9 +35,15 @@ func (codexAdapter) Prepare(spec attemptSpec) (preparedAttempt, error) {
 	return preparedAttempt{command: command}, nil
 }
 
-func (codexAdapter) Decode(output []byte) (decodedHarnessOutput, error) {
+func (codexAdapter) Decode(output []byte, stderr string) (decodedHarnessOutput, error) {
 	decoded, err := decodeCodexOutput(output)
-	return decodedHarnessOutput{assistantText: decoded.assistantText, diagnostic: decoded.diagnostic, noise: strings.Join(decoded.noise, "\n")}, err
+	noise := strings.Join(decoded.noise, "\n")
+	return decodedHarnessOutput{
+		assistantText:  decoded.assistantText,
+		diagnostic:     decoded.diagnostic,
+		noise:          noise,
+		inputRejection: codexInputRejection(joinReport(decoded.diagnostic, noise, stderr)),
+	}, err
 }
 
 func codexCommand(candidate reviewerCandidate, repository string) []string {
@@ -81,6 +89,37 @@ func (decoded *decodedCodexOutput) report(message string) {
 		decoded.noise = append(decoded.noise, decoded.diagnostic)
 	}
 	decoded.diagnostic = message
+}
+
+const codexInputCharacterLimit = 1048576
+
+var (
+	codexInputRejectionCode = regexp.MustCompile(`"input_error_code"\s*:\s*"input_too_large"`)
+	codexRejectedCharacters = regexp.MustCompile(`"actual_chars"\s*:\s*(\d+)`)
+	codexRejectedLimit      = regexp.MustCompile(`"max_chars"\s*:\s*(\d+)`)
+	codexRejectionPhrase    = "input exceeds the maximum length of"
+)
+
+func codexInputRejection(report string) *inputRejection {
+	for _, line := range reportLines(report) {
+		if !codexInputRejectionCode.MatchString(line) && !strings.Contains(strings.ToLower(line), codexRejectionPhrase) {
+			continue
+		}
+		return &inputRejection{characters: capturedNumber(codexRejectedCharacters, line), limit: capturedNumber(codexRejectedLimit, line), line: line}
+	}
+	return nil
+}
+
+func capturedNumber(pattern *regexp.Regexp, line string) int {
+	match := pattern.FindStringSubmatch(line)
+	if match == nil {
+		return 0
+	}
+	number, err := strconv.Atoi(match[1])
+	if err != nil {
+		return 0
+	}
+	return number
 }
 
 func isCodexTransportNoise(message string) bool {

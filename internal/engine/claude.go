@@ -48,7 +48,7 @@ func (claudeAdapter) Prepare(spec attemptSpec) (preparedAttempt, error) {
 	return preparedAttempt{command: command}, nil
 }
 
-func (claudeAdapter) Decode(output []byte) (decodedHarnessOutput, error) {
+func (claudeAdapter) Decode(output []byte, _ string) (decodedHarnessOutput, error) {
 	decoded, err := decodeClaudeOutput(output)
 	return decodedHarnessOutput{
 		assistantText: decoded.assistantText,
