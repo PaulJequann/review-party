@@ -4,7 +4,9 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"reviewparty/internal/model"
 )
@@ -85,6 +87,53 @@ func TestStoppedBundleHeartbeatReportsTheSavedRecords(t *testing.T) {
 		stored := requireFinishedMatchesSaved(t, conductor, recorder.collected(), member.ReviewID)
 		if stored.Lifecycle != model.LifecycleIncomplete {
 			t.Fatalf("member %s stored %q, want incomplete", member.ReviewID, stored.Lifecycle)
+		}
+	}
+}
+
+// blockCheckoutCleanup makes the checkout's owner metadata a non-empty
+// directory, so removing the checkout fails after the Reviewer exits.
+func blockCheckoutCleanup(t *testing.T, checkout string) {
+	t.Helper()
+	metadata := checkout + ".owner.json"
+	if err := os.Remove(metadata); err != nil {
+		t.Error(err)
+	}
+	if err := os.MkdirAll(filepath.Join(metadata, "held"), 0o700); err != nil {
+		t.Error(err)
+	}
+}
+
+// A checkout that cannot be cleaned after the Review was saved completed is an
+// operational error of that process: the saved result and its findings stand.
+func TestCheckoutCleanupFailureKeepsTheCompletedRecord(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	repository, base, head := committedReviewFixture(t)
+	executor := &scriptedExecutor{availability: availability{Available: true}, execute: func(_ context.Context, spec attemptSpec) attemptExecution {
+		blockCheckoutCleanup(t, spec.Repository)
+		return attemptExecution{AssistantText: findingsReview, Outcome: model.AttemptCompleted}
+	}}
+	conductor := testConductor(t, executor, time.Second)
+
+	returned, err := conductor.Review(context.Background(), model.RunSelection{Repository: repository, Subject: model.CommittedRange(base, head), Profile: "bugs"})
+	if err == nil || !strings.Contains(err.Error(), "could not be cleaned") {
+		t.Fatalf("review error = %v, want the checkout cleanup failure", err)
+	}
+	stored, loadErr := conductor.store.Load(returned.ID)
+	if loadErr != nil {
+		t.Fatal(loadErr)
+	}
+	type verdict struct {
+		lifecycle model.Lifecycle
+		findings  int
+	}
+	for name, record := range map[string]model.ReviewRecord{"stored": stored, "returned": returned} {
+		got := verdict{lifecycle: record.Lifecycle}
+		if record.Result != nil {
+			got.findings = record.Result.FindingCount()
+		}
+		if got.lifecycle != model.LifecycleCompleted || got.findings == 0 {
+			t.Fatalf("%s record = %+v, want completed with its findings", name, got)
 		}
 	}
 }
