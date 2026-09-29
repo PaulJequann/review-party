@@ -19,16 +19,10 @@ func TestRepositoryProfileShadowsGlobalAsCompleteDefinition(t *testing.T) {
 		Target: configuration.ScopeGlobal, Name: "bugs", Reviewer: "grok", Model: "grok-4.5",
 		ReasoningEffort: "high", AttemptDeadline: "1m", Instructions: "GLOBAL GUIDANCE\n",
 	})
-	plan, err := manager.PlanProfileCreation(configuration.Repository(repository), configuration.ProfileDraft{
+	publishRepositoryTestProfile(t, manager, repository, configuration.ProfileDraft{
 		Target: configuration.ScopeRepository, Name: "bugs", Reviewer: "grok", Model: "grok-4.5",
 		ReasoningEffort: "high", AttemptDeadline: "2m", Instructions: "REPOSITORY GUIDANCE\n",
 	})
-	if err != nil || !plan.Valid() {
-		t.Fatalf("plan error = %v, reason = %q", err, plan.Reason())
-	}
-	if err := manager.Publish(plan); err != nil {
-		t.Fatal(err)
-	}
 	profile, err := compileTestProfile(manager, "bugs", model.ReviewSubject{Repository: repository})
 	if err != nil {
 		t.Fatal(err)
@@ -97,6 +91,35 @@ func TestInvalidProfileMetadataFailsWithoutFallback(t *testing.T) {
 	}
 	if _, err := compileTestProfile(manager, "security", model.ReviewSubject{Repository: repository}); err == nil {
 		t.Fatal("invalid Repository Profile fell back to Global")
+	}
+}
+
+func TestScopedProfileMissListsOnlyThatScopesProfiles(t *testing.T) {
+	repository := changedTestRepository(t)
+	manager := configuration.NewManager(configuration.Options{GlobalRoot: t.TempDir(), Reviewers: []string{"grok"}})
+	publishTestProfile(t, manager, configuration.ProfileDraft{
+		Target: configuration.ScopeGlobal, Name: "bugs", Reviewer: "grok", Model: "grok-4.5",
+		ReasoningEffort: "high", AttemptDeadline: "1m", Instructions: "GLOBAL\n",
+	})
+	publishRepositoryTestProfile(t, manager, repository, configuration.ProfileDraft{
+		Target: configuration.ScopeRepository, Name: "local", Reviewer: "grok", Model: "grok-4.5",
+		ReasoningEffort: "high", AttemptDeadline: "1m", Instructions: "LOCAL\n",
+	})
+	_, err := compileTestProfile(manager, "repository:bugs", model.ReviewSubject{Repository: repository})
+	want := `unknown review profile "bugs" in repository Configuration; expected local`
+	if err == nil || err.Error() != want {
+		t.Fatalf("error = %v, want %q", err, want)
+	}
+}
+
+func publishRepositoryTestProfile(t *testing.T, manager *configuration.Manager, repository string, draft configuration.ProfileDraft) {
+	t.Helper()
+	plan, err := manager.PlanProfileCreation(configuration.Repository(repository), draft)
+	if err != nil || !plan.Valid() {
+		t.Fatalf("plan error = %v, reason = %q", err, plan.Reason())
+	}
+	if err := manager.Publish(plan); err != nil {
+		t.Fatal(err)
 	}
 }
 

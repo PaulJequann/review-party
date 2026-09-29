@@ -383,6 +383,24 @@ func TestCodeQualityEvalRejectsMismatchedProfileBeforeLaunch(t *testing.T) {
 	}
 }
 
+func TestCodeQualityEvalSuiteAcceptsScopedCodeQualityProfile(t *testing.T) {
+	tests := []struct {
+		profile string
+		wantErr bool
+	}{
+		{"code-quality", false},
+		{"global:code-quality", false},
+		{"global:bugs", true},
+		{"bugs", true},
+	}
+	for _, test := range tests {
+		err := validateEvalSuiteProfile("global:code-quality", test.profile)
+		if (err != nil) != test.wantErr {
+			t.Fatalf("profile %q error = %v, want error %t", test.profile, err, test.wantErr)
+		}
+	}
+}
+
 func TestGeneralEvalReviewerReceivesMultiFileRepositoryWithoutAuthority(t *testing.T) {
 	executor := &evalSequenceExecutor{outputs: []string{cleanReview, cleanReview, cleanReview, cleanReview, cleanReview, cleanReview}}
 	conductor := testEvalConductor(t, executor)
@@ -580,5 +598,19 @@ func goModuleRoot(t *testing.T) string {
 			t.Fatal("could not find go.mod")
 		}
 		directory = parent
+	}
+}
+
+func TestEvalRejectsRepositoryScopedProfileBecauseEvalResolvesGlobalOnly(t *testing.T) {
+	executor := successfulExecutor(cleanReview)
+	conductor := testEvalConductor(t, executor)
+	selection := evalSelection("global:code-quality")
+	selection.Experiment.Profile = "repository:code-quality"
+	_, err := conductor.RunEvalSuite(context.Background(), selection)
+	if err == nil || !strings.Contains(err.Error(), "resolve from global Configuration") {
+		t.Fatalf("error = %v, want the global-only eval Profile error", err)
+	}
+	if executor.attemptCount() != 0 {
+		t.Fatalf("attempts = %d, want 0", executor.attemptCount())
 	}
 }

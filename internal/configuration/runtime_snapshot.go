@@ -77,7 +77,7 @@ func (manager *Manager) ResolveRuntime(request RunRequest) (RuntimeSnapshot, err
 	if err != nil {
 		return nil, err
 	}
-	if err := validateRuntimeRequest(request); err != nil {
+	if err := manager.validateRuntimeRequest(request); err != nil {
 		return nil, err
 	}
 
@@ -108,11 +108,15 @@ func (manager *Manager) ResolveRuntime(request RunRequest) (RuntimeSnapshot, err
 	return snapshot, nil
 }
 
-func validateRuntimeRequest(request RunRequest) error {
+func (manager *Manager) validateRuntimeRequest(request RunRequest) error {
 	if request.Profile != "" && request.Party != "" {
 		return errors.New("an explicit Profile and an explicit Party cannot be selected together")
 	}
-	return nil
+	if request.Profile == "" {
+		return nil
+	}
+	_, _, err := manager.ParseProfileReference(request.Profile)
+	return err
 }
 
 func (manager *Manager) noSelectionError(request RunRequest, loaded Loaded) (bool, error) {

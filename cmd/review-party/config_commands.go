@@ -83,7 +83,7 @@ func newConfigProfileCommand(streams commandIO, dependencies configurationDepend
 func newConfigProfileTemplateUpdateCommand(streams commandIO) *cobra.Command {
 	cmd := newConfigLeafCommand("update-template NAME", "Replace Profile instructions from its newer Template", cobra.ExactArgs(1), func(cmd *cobra.Command, args []string) error {
 		options := configurationMutationOptions{repository: stringFlag(cmd, "repo"), format: stringFlag(cmd, "format"), configuration: stringFlag(cmd, "config"), yes: boolFlag(cmd, "yes")}
-		return commandResult(executeConfigProfileTemplateUpdate(args[0], stringFlag(cmd, "scope"), options, streams))
+		return commandResult(executeConfigProfileTemplateUpdate(args[0], cmd, options, streams))
 	})
 	addConfigMutationFlags(cmd, true, false, string(configuration.ScopeGlobal))
 	return cmd

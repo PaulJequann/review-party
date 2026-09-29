@@ -41,14 +41,19 @@ type profileDefinition struct {
 
 type UnknownProfileError struct {
 	Name      string
+	Scope     configuration.Scope
 	Available []string
 }
 
 func (failure UnknownProfileError) Error() string {
-	if len(failure.Available) == 0 {
-		return fmt.Sprintf("unknown review profile %q; no Profiles are configured", failure.Name)
+	subject := fmt.Sprintf("unknown review profile %q", failure.Name)
+	if failure.Scope != "" {
+		subject += fmt.Sprintf(" in %s Configuration", failure.Scope)
 	}
-	return fmt.Sprintf("unknown review profile %q; expected %s", failure.Name, strings.Join(failure.Available, ", "))
+	if len(failure.Available) == 0 {
+		return subject + "; no Profiles are configured"
+	}
+	return subject + "; expected " + strings.Join(failure.Available, ", ")
 }
 
 type UnsupportedCapabilitiesError struct {
