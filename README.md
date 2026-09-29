@@ -551,9 +551,13 @@ limited to Pending, Running, Completed, and Incomplete; execution phases are
 diagnostic facts rather than additional states.
 
 Review Party distinguishes unavailable Reviewers, authentication failures,
-deadlines, cancellation, transport failures, malformed harness output, result
-validation failures, and unknown failures without requiring callers to parse a
-diagnostic string. Review Records are persisted in the managed SQLite ledger at
+deadlines, cancellation, transport failures, reviewer input that exceeds the
+Reviewer's size limit, malformed harness output, result validation failures, and
+unknown failures without requiring callers to parse a
+diagnostic string. Before launch, `run` measures the prepared input against a
+Reviewer's declared size limit, ends the Review as incomplete without spawning
+the Reviewer when the input is over it, and warns on stderr from 60 percent of
+the limit. Review Records are persisted in the managed SQLite ledger at
 `$XDG_STATE_HOME/review-party/ledger.sqlite` (or the corresponding
 `$HOME/.local/state` fallback). The CLI intentionally exposes no storage-path
 selector; isolate tests and experiments with `XDG_STATE_HOME`. The ledger
