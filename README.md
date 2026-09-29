@@ -270,7 +270,9 @@ misses unless `--include-removed` is given, resolves `--repo` like `history`,
 and orders by recording time and then recording order. `inspect` prints each Review's
 active misses beneath its findings, and its JSON `reviews` entries carry them as
 `misses`. That array is always present and is empty for Reviews that `run` and
-`replay` just created.
+`replay` just created. An unreadable Bundle member still shows its misses; if
+they cannot be loaded either, its `read_error` says so and the other members
+still print.
 
 ## Global and Repository Configuration
 

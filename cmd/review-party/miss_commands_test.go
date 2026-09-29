@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -27,6 +28,7 @@ const (
 )
 
 type missLedger struct {
+	state         string
 	configuration string
 	repository    string
 	other         string
@@ -36,6 +38,7 @@ func newMissLedger(t *testing.T) missLedger {
 	t.Helper()
 	state := t.TempDir()
 	fixture := missLedger{
+		state:         state,
 		configuration: filepath.Join(t.TempDir(), "config.json"),
 		repository:    resolvedTestRepository(t),
 		other:         resolvedTestRepository(t),
@@ -272,10 +275,14 @@ func TestMissRemoveKeepsTombstone(t *testing.T) {
 }
 
 type inspectedMisses struct {
-	Reviews []struct {
-		ID     model.ReviewID `json:"id"`
-		Misses *[]model.Miss  `json:"misses"`
-	} `json:"reviews"`
+	Reviews []inspectedEntry `json:"reviews"`
+}
+
+type inspectedEntry struct {
+	ID        model.ReviewID  `json:"id"`
+	Lifecycle model.Lifecycle `json:"lifecycle"`
+	ReadError string          `json:"read_error"`
+	Misses    *[]model.Miss   `json:"misses"`
 }
 
 func (fixture missLedger) inspectMisses(t *testing.T, id string) map[model.ReviewID][]model.Miss {
@@ -321,4 +328,70 @@ func TestInspectBundleShowsEachMembersMisses(t *testing.T) {
 	misses := fixture.inspectMisses(t, string(missBundle))
 	requireMissReviews(t, misses[missReviewSecurity], missReviewSecurity)
 	requireMissReviews(t, misses[missReviewBugs])
+}
+
+func (fixture missLedger) corruptReview(t *testing.T, id model.ReviewID, column, value string) {
+	t.Helper()
+	db, err := sql.Open("sqlite", filepath.Join(fixture.state, "ledger.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	if _, err := db.Exec("UPDATE reviews SET "+column+"=? WHERE id=?", value, id); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func (fixture missLedger) inspectUnreadableBundle(t *testing.T) map[model.ReviewID]inspectedEntry {
+	t.Helper()
+	exit, stdout, stderr := fixture.run("inspect", string(missBundle), "--format", "json")
+	if exit != 1 {
+		t.Fatalf("inspect exit = %d, want 1 for an unreadable member; stderr = %q", exit, stderr)
+	}
+	var report inspectedMisses
+	if err := json.Unmarshal([]byte(stdout), &report); err != nil {
+		t.Fatalf("decode %q: %v", stdout, err)
+	}
+	entries := make(map[model.ReviewID]inspectedEntry, len(report.Reviews))
+	for _, entry := range report.Reviews {
+		entries[entry.ID] = entry
+	}
+	return entries
+}
+
+func TestInspectBundleShowsMissesOfAnUnreadableMember(t *testing.T) {
+	fixture := newMissLedger(t)
+	fixture.add(t, "--review", string(missReviewSecurity))
+	fixture.corruptReview(t, missReviewSecurity, "timings", "[]")
+
+	unreadable := fixture.inspectUnreadableBundle(t)[missReviewSecurity]
+	if unreadable.Lifecycle != lifecycleUnreadable {
+		t.Fatalf("security lifecycle = %q, want %q", unreadable.Lifecycle, lifecycleUnreadable)
+	}
+	requireMissReviews(t, *unreadable.Misses, missReviewSecurity)
+	_, stdout, _ := fixture.run("inspect", string(missBundle))
+	if !strings.Contains(stdout, "unreadable\nread error: ") {
+		t.Fatalf("human inspect = %q, want the unreadable member", stdout)
+	}
+	if !strings.Contains(stdout, "miss: internal/a.go · codex-pr · nil map write") {
+		t.Fatalf("human inspect = %q, want the unreadable member's miss", stdout)
+	}
+}
+
+func TestInspectBundleKeepsOtherMembersWhenAnUnreadableMembersMissesCannotLoad(t *testing.T) {
+	fixture := newMissLedger(t)
+	fixture.add(t, "--review", string(missBundle))
+	fixture.corruptReview(t, missReviewSecurity, "subject", "{")
+
+	entries := fixture.inspectUnreadableBundle(t)
+	requireMissReviews(t, *entries[missReviewBugs].Misses, missReviewBugs)
+	unreadable := entries[missReviewSecurity]
+	requireMissReviews(t, *unreadable.Misses)
+	if !strings.Contains(unreadable.ReadError, "load misses") {
+		t.Fatalf("read error = %q, want it to report the misses that could not load", unreadable.ReadError)
+	}
 }

@@ -114,6 +114,10 @@ func (report reviewReport) attachMisses(ctx context.Context, loader missLoader) 
 			continue
 		}
 		misses, err := loader.Misses(ctx, store.MissQuery{ReviewID: entry.ID})
+		if err != nil && entry.Lifecycle == lifecycleUnreadable {
+			report.Reviews[index].ReadError += "; load misses: " + err.Error()
+			continue
+		}
 		if err != nil {
 			return fmt.Errorf("load misses for review %s: %w", entry.ID, err)
 		}
