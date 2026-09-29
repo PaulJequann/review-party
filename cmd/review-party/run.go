@@ -31,7 +31,12 @@ func newRunCommand(streams commandIO) *cobra.Command {
 
 Without --profile or --party, runs the repository's complete saved selection
 from .reviewparty/config.json reviews. An explicit Profile or Party replaces
-the saved selection for this one run and never changes configuration.`,
+the saved selection for this one run and never changes configuration.
+
+While the run is in progress, stderr carries a lifecycle heartbeat that names
+the Review Bundle or Review and each member's transitions. Stdout carries only
+the final result. --quiet suppresses the heartbeat. Use review-party status to
+check a run from another shell and review-party wait to block until it ends.`,
 		Example:           "  review-party run --repo .\n  review-party run --profile code-quality\n  review-party run --party baseline --base main --head HEAD",
 		Args:              cobra.NoArgs,
 		ValidArgsFunction: cobra.NoFileCompletions,

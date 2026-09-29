@@ -80,9 +80,10 @@ review-party init --repo .
 
 Advanced callers may select a state location during initialization with
 `--state-dir PATH`; Review Party remembers that choice in the selected user
-configuration. Pass `--config PATH` consistently to init, Review, inspect, and
-history when using a non-default configuration. Initialization is idempotent
-for current state. Review, inspect, and history refuse to create state. A
+configuration. Pass `--config PATH` consistently to init, Review, inspect,
+history, status, and wait when using a non-default configuration.
+Initialization is idempotent for current state. Review, inspect, history,
+status, and wait refuse to create state. A
 schema 10 ledger requires one `review-party init` run, which adds the misses
 table and keeps every recorded Review; other commands refuse that ledger until
 then, and `--backup-incompatible` refuses it because it is compatible. Review Party is pre-release and does not upgrade other retired ledger
@@ -195,8 +196,7 @@ launches.
 `run`, `inspect`, and `replay` print findings first. Human output leads with
 each Review's status, summary, and numbered findings, then its Profile,
 Reviewer, and Subject. A Review Bundle prints one block per member, labelled
-`<scope>:<profile>`, before its selection, warnings, and Subject. A member that
-never started reads `not started`. JSON output always has a top-level `reviews`
+`<scope>:<profile>`, before its selection, warnings, and Subject. JSON output always has a top-level `reviews`
 array, so `jq '.reviews[].findings'` works for a single Review and for a Bundle.
 Bundle output adds a `bundle` object. A member that never started has lifecycle
 `pending` and no `id`. A member whose Review Record cannot be read keeps its
@@ -207,6 +207,25 @@ the raw result, patch, changed paths, passes, attempts, and artifact
 references. Human `--full` output adds the raw result, artifact references,
 changed paths, and patch. `run` and `replay` exit with status 2 when the Review
 or Bundle is incomplete.
+
+While it runs, `run` prints a lifecycle heartbeat on stderr. The first line
+names the Review Bundle or Review and the `status` and `wait` commands that
+follow it. Later lines report each member's transitions: pending, started,
+each Attempt, and finished. Stdout carries only the final result, so `--format json` stays
+parseable. Pass `--quiet` to suppress the heartbeat. A caller whose own tool
+call times out before the run finishes can check or resume it from the ledger:
+
+```sh
+review-party status rb_...
+review-party status --repo .
+review-party wait rb_... --timeout 10m
+```
+
+`status` reports the lifecycle of a Review Bundle or Review and its members
+without waiting. With no id it lists the repository's pending and running
+Bundles and Reviews, newest first. `wait` blocks until the run finishes, then
+prints it as `run` would have, with the same `--format` and `--full` options,
+and exits with the same code.
 
 Each saved Profile fixes its Reviewer, model, reasoning effort, Attempt
 deadline, and instructions. Ordinary `run`, explain, replay, and Party
