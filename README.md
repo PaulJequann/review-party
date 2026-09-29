@@ -227,8 +227,10 @@ without waiting. With no id it lists the repository's pending and running
 Bundles and Reviews, newest first. `wait` blocks until the run finishes, then
 prints it as `run` would have, with the same `--format` and `--full` options,
 and exits with the same code. `status` exits 0 whatever the lifecycle, and 1
-after printing when a member's Review Record cannot be read. When `--timeout`
-passes first, `wait` exits 1 and the run keeps going.
+after printing when a member's Review Record cannot be read. `--timeout`
+bounds how long `wait` blocks: once it passes with the run still pending or
+running, `wait` exits 1 and the run keeps going. A run `wait` finds finished is
+always reported, even if the timeout passed during that check.
 
 Every Attempt transition writes the ledger, so a run that shows no progress
 for longer than its longest Attempt deadline plus two minutes has most likely

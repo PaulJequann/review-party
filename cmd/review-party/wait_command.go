@@ -20,8 +20,10 @@ func newWaitCommand(streams commandIO) *cobra.Command {
 incomplete, checking the ledger once a second, then print the result exactly
 as run would have and exit with run's exit code.
 
-Use it to reattach to a run started elsewhere. --timeout bounds the wait; when
-it passes first, wait exits 1 and the run keeps going. When status would mark
+Use it to reattach to a run started elsewhere. --timeout bounds how long wait
+blocks: once it passes with the run still pending or running, wait exits 1 and
+the run keeps going. A run wait finds finished is always reported, even if the
+timeout passed during that check. When status would mark
 the run stale, wait exits 1 at once rather than waiting on a run that may have
 died.`,
 		Example: "  review-party wait rb_...\n  review-party wait rp_... --format json\n  review-party wait rb_... --timeout 10m",
