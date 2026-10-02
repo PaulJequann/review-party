@@ -411,7 +411,7 @@ func preCommitFrameworkSnippet(name configuration.CheckpointName) []string {
 		"    - id: review-party-checkpoint-" + string(name),
 		"      name: review-party " + string(name) + " Checkpoint",
 		"      entry: " + entry,
-		"      language: unsupported",
+		"      language: system",
 		"      pass_filenames: false",
 		"      always_run: true",
 		"      stages: [" + string(name) + "]",

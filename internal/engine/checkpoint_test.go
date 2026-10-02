@@ -249,6 +249,33 @@ func TestWaivingACoveredCheckpointRecordsNothingUnderAnyPolicy(t *testing.T) {
 	}
 }
 
+func TestARecordedWaiverPassesOnlyWhileThePolicyWouldAllowIt(t *testing.T) {
+	content := CoverageSubject{Changes: coverageFirst}
+	for _, test := range []struct {
+		name  string
+		by    model.WaivedBy
+		now   configuration.WaiverPolicy
+		state CheckpointState
+	}{
+		{"anyone still accepts a script", model.WaivedByNonInteractive, configuration.WaiversAnyone, CheckpointWaived},
+		{"human rejects a script", model.WaivedByNonInteractive, configuration.WaiversHuman, CheckpointMissing},
+		{"human accepts a terminal", model.WaivedByTerminal, configuration.WaiversHuman, CheckpointWaived},
+		{"none rejects a terminal", model.WaivedByTerminal, configuration.WaiversNone, CheckpointMissing},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			fake := &coverageStore{}
+			recording, repository := newCheckpointConductor(t, fake, waivable(configuration.WaiversAnyone))
+			if _, err := waive(recording, repository, content, test.by); err != nil {
+				t.Fatal(err)
+			}
+			checking, repository := newCheckpointConductor(t, fake, waivable(test.now))
+			if report := checkPrePush(t, checking, repository, content); report.State != test.state {
+				t.Fatalf("state = %s, want %s", report.State, test.state)
+			}
+		})
+	}
+}
+
 func TestWaiverPolicy(t *testing.T) {
 	content := CoverageSubject{Changes: coverageFirst}
 	for _, test := range []struct {

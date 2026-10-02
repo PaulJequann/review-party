@@ -121,7 +121,7 @@ func (conductor *Conductor) applyWaiver(report CheckpointReport) (CheckpointRepo
 	if err != nil {
 		return CheckpointReport{}, ledgerStateError(err)
 	}
-	if found {
+	if found && WaiverPermission(report.Declaration.Waivers, waiver.WaivedBy) == nil {
 		report.State = CheckpointWaived
 		report.Waiver = &waiver
 	}

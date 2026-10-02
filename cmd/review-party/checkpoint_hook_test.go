@@ -275,7 +275,7 @@ func TestCheckpointInstallPrintsThePreCommitFrameworkSteps(t *testing.T) {
 	fixture.provideStandIn()
 	fixture.writeFile(".pre-commit-config.yaml", "repos: []\n")
 	result := fixture.install("--yes")
-	for _, line := range []string{"stages: [pre-push]", "language: unsupported", "then run: pre-commit install --hook-type pre-push", `review-party checkpoint hook git pre-push "$PRE_COMMIT_REMOTE_NAME"`} {
+	for _, line := range []string{"stages: [pre-push]", "language: system", "then run: pre-commit install --hook-type pre-push", `review-party checkpoint hook git pre-push "$PRE_COMMIT_REMOTE_NAME"`} {
 		if !strings.Contains(result.stdout, line) {
 			t.Fatalf("snippet lacks %q: %+v", line, result)
 		}

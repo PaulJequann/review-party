@@ -49,7 +49,9 @@ A **Checkpoint Exemption** treats a change as needing no Coverage:
 A **Checkpoint Waiver** records that one exact content change passed without
 Coverage, with a required reason. It is keyed like Coverage, so it never
 carries over to another change. `waivers` declares who may waive: `anyone`,
-`human` (terminal confirmation), or `none`. The default is `human`.
+`human` (terminal confirmation), or `none`. The default is `human`. A
+recorded waiver counts only while the current policy would allow recording
+it, so tightening the policy retires waivers it no longer permits.
 
 ## Declaration
 
