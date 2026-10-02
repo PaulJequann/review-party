@@ -382,7 +382,7 @@ func (plan *hookInstallPlan) planHookScript(name configuration.CheckpointName) (
 		}
 	case hookManual:
 		step.manual = hookScriptCall(name)
-	case hookCreated, hookNotExecutable:
+	case hookCreated, hookNotExecutable, hookEntryAdded, hookEntryShared, hookEntryEdited:
 	}
 	return step, nil
 }
