@@ -265,9 +265,11 @@ segment is relevant when, after `VAR=value` words and wrappers such as `env`,
 `command`, and `time`, its first word is `git` and its first word after git's
 global options is `push` or `commit`. `-C` moves the repository the hook
 decides. `--git-dir`, `--work-tree`, a `GIT_DIR`, `GIT_WORK_TREE`, or
-`GIT_INDEX_FILE` assignment, a `-c` key under `push.`, `remote.`, or `branch.`,
-or a global option the hook does not know leaves the Checkpoint undecided, with
-a warning. A command whose last `--dry-run` or `--no-dry-run` is `--dry-run`
+`GIT_INDEX_FILE` assignment, a `-c` or `--config-env` key under `push.`,
+`remote.`, or `branch.`, options to a wrapper such as `env -u NAME`, an
+abbreviation of a long option the hook reads, such as `--mir`, or a global
+option the hook does not know leaves the Checkpoint undecided, with a
+warning. A command whose last `--dry-run` or `--no-dry-run` is `--dry-run`
 sends nothing, so it is not relevant.
 
 **Push.** The hook rebuilds the ref lines git would pass to pre-push and

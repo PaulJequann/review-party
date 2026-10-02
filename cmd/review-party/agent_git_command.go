@@ -130,6 +130,7 @@ var gitVerbCheckpoints = map[string]configuration.CheckpointName{
 
 func classifyGitSegment(words shellWords) (agentGitCommand, bool) {
 	prefixes, words := words.splitCommandPrefixes()
+	words, wrapped := words.skipWrapperOptions()
 	if len(words) == 0 || filepath.Base(words[0]) != "git" {
 		return agentGitCommand{}, false
 	}
@@ -144,6 +145,9 @@ func classifyGitSegment(words shellWords) (agentGitCommand, bool) {
 		return command, true
 	case prefixes.assignRepository():
 		command.form, command.reason = formUndecidable, "a GIT_DIR, GIT_WORK_TREE, or GIT_INDEX_FILE assignment names a repository the hook does not resolve"
+		return command, true
+	case wrapped:
+		command.form, command.reason = formUndecidable, "options to a command wrapper such as env are not ones the hook reads"
 		return command, true
 	case checkpoint == configuration.CheckpointPrePush:
 		return readPushArguments(command, pushOptions.read(reader))
@@ -170,6 +174,19 @@ func (words shellWords) splitCommandPrefixes() (shellWords, shellWords) {
 		return words, nil
 	}
 	return words[:start], words[start:]
+}
+
+// skipWrapperOptions drops the options a wrapper such as env takes before
+// the command, as in env -u NAME git push, and reports whether there were any.
+func (words shellWords) skipWrapperOptions() (shellWords, bool) {
+	if len(words) == 0 || !strings.HasPrefix(words[0], "-") {
+		return words, false
+	}
+	at := slices.IndexFunc(words, func(word string) bool { return filepath.Base(word) == "git" })
+	if at < 0 {
+		return nil, true
+	}
+	return words[at:], true
 }
 
 func (words shellWords) assignRepository() bool {
@@ -251,8 +268,8 @@ func readGitGlobalOptions(reader *segmentReader) (command agentGitCommand, verb 
 }
 
 // readGitGlobalOption reads one global option. -C moves the directory git
-// runs in. --git-dir, --work-tree, -c with a key that changes where git
-// pushes, or an option this reader does not know makes the command
+// runs in. --git-dir, --work-tree, -c or --config-env with a key that
+// changes where git pushes, or an option this reader does not know makes the command
 // undecidable.
 func (command *agentGitCommand) readGitGlobalOption(option optionWord, reader *segmentReader) {
 	switch {
@@ -261,9 +278,9 @@ func (command *agentGitCommand) readGitGlobalOption(option optionWord, reader *s
 		command.directory = within(command.directory, reader.takeValue(option))
 	case slices.Contains(gitRepositoryOptions, option.name):
 		command.form, command.reason = formUndecidable, fmt.Sprintf("git %s names a repository the hook does not resolve", option.name)
-	case option.name == "-c":
+	case option.name == "-c" || option.name == "--config-env":
 		if key, _, _ := strings.Cut(strings.ToLower(reader.takeValue(option)), "="); slices.ContainsFunc(gitPushConfig, func(prefix string) bool { return strings.HasPrefix(key, prefix) }) {
-			command.form, command.reason = formUndecidable, fmt.Sprintf("git -c %s changes where git pushes, which the hook does not resolve", key)
+			command.form, command.reason = formUndecidable, fmt.Sprintf("git %s %s changes where git pushes, which the hook does not resolve", option.name, key)
 		}
 	case slices.Contains(gitValueOptions, option.name):
 		reader.takeValue(option)
@@ -357,12 +374,27 @@ func (options commandOptions) read(reader *segmentReader) commandArguments {
 			if slices.Contains(options.valued, option.name) {
 				arguments.values[option.name] = reader.takeValue(option)
 			}
-			arguments.meanings = append(arguments.meanings, options.meanings[option.name])
+			arguments.meanings = append(arguments.meanings, options.longMeaning(option.name))
 		default:
 			arguments.meanings = append(arguments.meanings, options.readCluster(word[1:], reader)...)
 		}
 	}
 	return arguments
+}
+
+// longMeaning is what a long option means. git accepts any unambiguous
+// prefix of a long option, so a name that only abbreviates an option with a
+// meaning is undecidable.
+func (options commandOptions) longMeaning(name string) optionMeaning {
+	if meaning, known := options.meanings[name]; known || slices.Contains(options.valued, name) {
+		return meaning
+	}
+	for full := range options.meanings {
+		if strings.HasPrefix(full, name) {
+			return meaningUndecidable
+		}
+	}
+	return 0
 }
 
 // readCluster reads short options such as -am, where a letter that takes a
@@ -404,6 +436,8 @@ func readCommitArguments(command agentGitCommand, arguments commandArguments) (a
 	switch {
 	case arguments.dryRun():
 		return agentGitCommand{}, false
+	case arguments.means(meaningUndecidable):
+		command.form, command.reason = formUndecidable, "git commit names an option the hook does not resolve"
 	case arguments.means(meaningPaths) || len(arguments.positional) > 0:
 		command.form = formCommitPaths
 	case arguments.means(meaningTracked):
