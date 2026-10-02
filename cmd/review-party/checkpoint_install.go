@@ -251,13 +251,13 @@ func (target hookInstallTarget) configArgument() (string, error) {
 }
 
 // committed reports whether the hooks live in files the team shares: a hook
-// tool's configuration, or a core.hooksPath inside the work tree.
+// tool's configuration or a core.hooksPath that resolves inside the work tree.
 func (target hookInstallTarget) committed(tool hookTool, location string) bool {
 	if tool == hookToolPlain {
 		return false
 	}
 	relative, err := filepath.Rel(resolvedPath(target.root), resolvedPath(location))
-	return tool != hookToolHooksPath || err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
+	return err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
 }
 
 // resolvedPath resolves symlinks in the longest existing prefix of path, so a

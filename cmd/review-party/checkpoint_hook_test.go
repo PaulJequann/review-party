@@ -322,44 +322,52 @@ func TestCheckpointInstallPrintsThePreCommitFrameworkSteps(t *testing.T) {
 }
 
 func TestCheckpointInstallCarriesTheCallersConfigurationOnlyIntoPerCloneHooks(t *testing.T) {
-	fixture := newHookInstallFixture(t, configuration.CheckpointPreCommit)
-	fixture.provideStandIn()
 	config := filepath.Join(t.TempDir(), "my config.json")
-	assertRunContains(t, fixture.install("--yes", "--config", config), commandRun{stdout: "Wrote 1 hook file(s)."})
-	if content, want := fixture.read(".git/hooks/pre-commit"), "#!/bin/sh\n"+checkpointHookBlock(configuration.CheckpointPreCommit, " --config '"+config+"'"); content != want {
-		t.Fatalf("plain hook = %q, want %q", content, want)
-	}
-
-	relative := newHookInstallFixture(t, configuration.CheckpointPreCommit)
-	relative.provideStandIn()
 	absolute, err := filepath.Abs("relative.json")
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertRunContains(t, relative.install("--yes", "--config", "relative.json"), commandRun{stdout: "Wrote 1 hook file(s)."})
-	if content, want := relative.read(".git/hooks/pre-commit"), "#!/bin/sh\n"+checkpointHookBlock(configuration.CheckpointPreCommit, " --config "+shellQuoteArgument(absolute)); content != want {
-		t.Fatalf("relative --config hook = %q, want %q", content, want)
+	carried := " --config '" + config + "'"
+	wrote := "Wrote 1 hook file(s)."
+	cases := []struct {
+		name, config, hook, carried, stdout string
+		setup                               func(hookInstallFixture)
+	}{
+		{name: "plain hook", config: config, hook: ".git/hooks/pre-commit", carried: carried, stdout: wrote},
+		{name: "relative --config", config: "relative.json", hook: ".git/hooks/pre-commit", carried: " --config " + shellQuoteArgument(absolute), stdout: wrote},
+		{name: "hooksPath symlinked outside the work tree", config: config, hook: ".githooks/pre-commit", carried: carried, stdout: wrote, setup: func(fixture hookInstallFixture) {
+			fixture.linkOutside(".githooks")
+			fixture.git("config", "core.hooksPath", ".githooks")
+		}},
+		{name: "husky symlinked outside the work tree", config: config, hook: ".husky/pre-commit", carried: carried, stdout: wrote, setup: func(fixture hookInstallFixture) {
+			fixture.linkOutside(".husky")
+			fixture.writeFile(".husky/_/h", "")
+		}},
+		{name: "husky", config: config, hook: ".husky/pre-commit", stdout: "warning: husky hooks are shared with the team, so they load each Caller's default configuration, not" + carried + "\n", setup: func(fixture hookInstallFixture) {
+			fixture.writeFile(".husky/_/h", "")
+		}},
 	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newHookInstallFixture(t, configuration.CheckpointPreCommit)
+			fixture.provideStandIn()
+			if test.setup != nil {
+				test.setup(fixture)
+			}
+			assertRunContains(t, fixture.install("--yes", "--config", test.config), commandRun{stdout: test.stdout})
+			if content, want := fixture.read(test.hook), "#!/bin/sh\n"+checkpointHookBlock(configuration.CheckpointPreCommit, test.carried); content != want {
+				t.Fatalf("hook = %q, want %q", content, want)
+			}
+		})
+	}
+}
 
-	linked := newHookInstallFixture(t, configuration.CheckpointPreCommit)
-	linked.provideStandIn()
-	outside := t.TempDir()
-	if err := os.Symlink(outside, filepath.Join(linked.repository, ".githooks")); err != nil {
-		t.Fatal(err)
-	}
-	linked.git("config", "core.hooksPath", ".githooks")
-	assertRunContains(t, linked.install("--yes", "--config", config), commandRun{stdout: "Wrote 1 hook file(s)."})
-	if content, want := linked.read(".githooks/pre-commit"), "#!/bin/sh\n"+checkpointHookBlock(configuration.CheckpointPreCommit, " --config '"+config+"'"); content != want {
-		t.Fatalf("hooksPath symlinked outside the work tree = %q, want %q", content, want)
-	}
-
-	shared := newHookInstallFixture(t, configuration.CheckpointPreCommit)
-	shared.provideStandIn()
-	shared.writeFile(".husky/_/h", "")
-	result := shared.install("--yes", "--config", config)
-	assertRunContains(t, result, commandRun{stdout: "warning: husky hooks are shared with the team, so they load each Caller's default configuration, not --config '" + config + "'\n"})
-	if content, want := shared.read(".husky/pre-commit"), "#!/bin/sh\n"+checkpointHookBlock(configuration.CheckpointPreCommit, ""); content != want {
-		t.Fatalf("husky hook = %q, want %q", content, want)
+// linkOutside makes name in the work tree a symlink to a new directory
+// outside it.
+func (fixture hookInstallFixture) linkOutside(name string) {
+	fixture.t.Helper()
+	if err := os.Symlink(fixture.t.TempDir(), filepath.Join(fixture.repository, name)); err != nil {
+		fixture.t.Fatal(err)
 	}
 }
 

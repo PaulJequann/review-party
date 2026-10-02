@@ -79,9 +79,9 @@ func ResolveHookLocations(repository string) (HookLocations, error) {
 	if err != nil {
 		return HookLocations{}, fmt.Errorf("read core.hooksPath: %w", err)
 	}
-	location := strings.TrimSpace(string(directory))
+	location := strings.TrimSuffix(string(directory), "\n")
 	if !filepath.IsAbs(location) {
 		location = filepath.Join(repository, location)
 	}
-	return HookLocations{Directory: location, HooksPath: strings.TrimSpace(string(hooksPath))}, nil
+	return HookLocations{Directory: location, HooksPath: strings.TrimSuffix(string(hooksPath), "\n")}, nil
 }

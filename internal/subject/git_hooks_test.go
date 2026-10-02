@@ -77,10 +77,12 @@ func TestResolveHookLocations(t *testing.T) {
 		t.Fatalf("plain hooks = %#v, %v", locations, err)
 	}
 
-	runTestCommand(t, repository, "git", "config", "core.hooksPath", ".githooks")
-	locations, err = ResolveHookLocations(repository)
-	if err != nil || locations != (HookLocations{Directory: filepath.Join(repository, ".githooks"), HooksPath: ".githooks"}) {
-		t.Fatalf("core.hooksPath = %#v, %v", locations, err)
+	for _, hooksPath := range []string{".githooks", " spaced hooks "} {
+		runTestCommand(t, repository, "git", "config", "core.hooksPath", hooksPath)
+		locations, err = ResolveHookLocations(repository)
+		if err != nil || locations != (HookLocations{Directory: filepath.Join(repository, hooksPath), HooksPath: hooksPath}) {
+			t.Fatalf("core.hooksPath %q = %#v, %v", hooksPath, locations, err)
+		}
 	}
 
 	worktree := filepath.Join(t.TempDir(), "linked")
