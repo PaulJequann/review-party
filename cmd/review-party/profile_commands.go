@@ -153,7 +153,12 @@ func applyInitSetup(manager *configuration.Manager, repository configuration.Rep
 func runFirstUseJourney(parent context.Context, manager *configuration.Manager, hub configurationHubOptions, streams commandIO) error {
 	ctx, stop := configurationHubContext(parent)
 	defer stop()
-	if err := configurationhub.RunFirstUse(manager, hub.runOptions(ctx, manager, streams)); err != nil {
+	options := hub.runOptions(ctx, manager, streams)
+	options.InstallCheckpointHooks = func(confirm func() (bool, error)) error {
+		target := hookInstallTarget{root: hub.repository, configuration: hub.configuration}
+		return installCheckpointHooks(target, manager, streams.output, confirm)
+	}
+	if err := configurationhub.RunFirstUse(manager, options); err != nil {
 		return fmt.Errorf("run first-use journey: %w", err)
 	}
 	return nil

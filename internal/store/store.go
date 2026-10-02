@@ -21,7 +21,7 @@ const ledgerFilename = "ledger.sqlite"
 // preparation upgrades a ledger at schema 10 or later additively, preserving its
 // records, and replaces anything older without preserving it. The numbering
 // continued past the last released migration so no obsolete ledger can collide.
-const currentLedgerSchemaVersion = 13
+const currentLedgerSchemaVersion = 14
 
 var ledgerMigrations = []struct {
 	version int
@@ -31,6 +31,7 @@ var ledgerMigrations = []struct {
 	{11, "migrations/misses.sql"},
 	{12, "migrations/finding_verdicts.sql"},
 	{13, "migrations/content_changes.sql"},
+	{14, "migrations/checkpoint_waivers.sql"},
 }
 
 var ErrReviewRecordStateNotInitialized = errors.New("Review Party is not initialized")
@@ -456,7 +457,7 @@ func (s *LedgerRecordStore) configure() error {
 // obsoleteLedgerTables lists every table a replaced pre-release ledger could own,
 // ordered so foreign-key children are dropped before their parents.
 var obsoleteLedgerTables = []string{
-	"finding_verdicts", "misses", "artifacts", "findings", "attempts", "passes",
+	"checkpoint_waivers", "finding_verdicts", "misses", "artifacts", "findings", "attempts", "passes",
 	"eval_runs", "adjudication_revisions", "review_bundles",
 	"eval_suite_runs", "review_content_changes", "reviews", "schema_migrations",
 }

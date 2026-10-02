@@ -97,16 +97,17 @@ func (policy *EvalPolicy) UnmarshalJSON(payload []byte) error {
 // Document is the unified configuration document shared by Global and
 // Repository scopes. Scope validation decides which fields each scope permits.
 type Document struct {
-	SchemaVersion  int                       `json:"schema_version"`
-	StateDirectory string                    `json:"state_directory,omitempty"`
-	Defaults       Defaults                  `json:"defaults,omitempty"`
-	Reviewers      map[string]ReviewerPolicy `json:"reviewers,omitempty"`
-	Eval           *EvalPolicy               `json:"eval,omitempty"`
-	Reviews        *ReviewSelection          `json:"reviews,omitempty"`
+	SchemaVersion  int                           `json:"schema_version"`
+	StateDirectory string                        `json:"state_directory,omitempty"`
+	Defaults       Defaults                      `json:"defaults,omitempty"`
+	Reviewers      map[string]ReviewerPolicy     `json:"reviewers,omitempty"`
+	Eval           *EvalPolicy                   `json:"eval,omitempty"`
+	Reviews        *ReviewSelection              `json:"reviews,omitempty"`
+	Checkpoints    map[CheckpointName]Checkpoint `json:"checkpoints,omitempty"`
 }
 
 func (document *Document) UnmarshalJSON(payload []byte) error {
-	if _, err := decodeObjectFields(payload, "configuration", "schema_version", "state_directory", "defaults", "reviewers", "eval", "reviews"); err != nil {
+	if _, err := decodeObjectFields(payload, "configuration", "schema_version", "state_directory", "defaults", "reviewers", "eval", "reviews", "checkpoints"); err != nil {
 		return err
 	}
 	type plainDocument Document
@@ -188,6 +189,9 @@ func validateDocument(document Document, scope Scope, manager *Manager) error {
 	if err := validateDocumentEval(document.Eval); err != nil {
 		return err
 	}
+	if err := validateCheckpoints(document.Checkpoints); err != nil {
+		return err
+	}
 	return validateReviewSelection(document.Reviews, scope, manager)
 }
 
@@ -197,6 +201,9 @@ func validateScopeFields(document Document, scope Scope) error {
 	}
 	if document.Reviews != nil {
 		return errors.New("reviews is a Repository Configuration field")
+	}
+	if document.Checkpoints != nil {
+		return errors.New("checkpoints is a Repository Configuration field; personal Checkpoints are not supported")
 	}
 	if document.StateDirectory != "" && !filepath.IsAbs(document.StateDirectory) {
 		return errors.New("state_directory must be an absolute path")
@@ -267,12 +274,13 @@ func containsModel(models []string, model string) bool {
 // formattedDocument mirrors Document with explicit optional objects so the
 // rendered JSON has semantic field order and omits redundant defaults.
 type formattedDocument struct {
-	SchemaVersion  int                       `json:"schema_version"`
-	StateDirectory string                    `json:"state_directory,omitempty"`
-	Defaults       *Defaults                 `json:"defaults,omitempty"`
-	Reviewers      map[string]ReviewerPolicy `json:"reviewers,omitempty"`
-	Eval           *formattedEval            `json:"eval,omitempty"`
-	Reviews        *ReviewSelection          `json:"reviews,omitempty"`
+	SchemaVersion  int                           `json:"schema_version"`
+	StateDirectory string                        `json:"state_directory,omitempty"`
+	Defaults       *Defaults                     `json:"defaults,omitempty"`
+	Reviewers      map[string]ReviewerPolicy     `json:"reviewers,omitempty"`
+	Eval           *formattedEval                `json:"eval,omitempty"`
+	Reviews        *ReviewSelection              `json:"reviews,omitempty"`
+	Checkpoints    map[CheckpointName]Checkpoint `json:"checkpoints,omitempty"`
 }
 
 // formattedEval renders evaluation defaults without a redundant empty
@@ -300,6 +308,7 @@ func renderDocument(document Document) ([]byte, error) {
 		Reviewers:      document.Reviewers,
 		Eval:           eval,
 		Reviews:        document.Reviews,
+		Checkpoints:    document.Checkpoints,
 	}
 	if !document.Defaults.empty() {
 		defaults := document.Defaults

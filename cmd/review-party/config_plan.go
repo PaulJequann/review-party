@@ -50,7 +50,7 @@ func confirmConfigurationPlanIfNeeded(options configurationMutationOptions, plan
 	if err := printHumanWarnings(streams.output, warningsForPlan(plan)); err != nil {
 		return err
 	}
-	confirmed, err := confirmConfigurationPlan(streams.input, streams.output)
+	confirmed, err := confirmPrompt(streams.input, streams.output, "Apply this configuration plan?")
 	if err != nil {
 		return err
 	}
@@ -126,8 +126,9 @@ func printHumanWarnings(output io.Writer, warnings []string) error {
 	return configuration.RenderPlanWarningsHuman(output, warnings)
 }
 
-func confirmConfigurationPlan(input io.Reader, output io.Writer) (bool, error) {
-	if _, err := io.WriteString(output, "Apply this configuration plan? [y/N] "); err != nil {
+// confirmPrompt asks a yes-or-no question that defaults to no.
+func confirmPrompt(input io.Reader, output io.Writer, question string) (bool, error) {
+	if _, err := io.WriteString(output, question+" [y/N] "); err != nil {
 		return false, err
 	}
 	scanner := bufio.NewScanner(input)

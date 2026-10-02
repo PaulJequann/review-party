@@ -87,12 +87,15 @@ Profile Creation. A chosen Global Party is offered as a Repository Party whose
 members stay Global Profile references, so teammates bind Profiles rather than
 invent the Party's members. Each step publishes through its own reviewed Plan,
 so a cancelled `init` loses nothing a rerun cannot finish. Pass `--accessible`
-for non-redrawing prompts. The journey ends with one line for each piece still
-missing.
+for non-redrawing prompts. After the selection, the journey shows each declared
+Review Checkpoint, or offers to declare one, and then offers to install its git
+hook. The journey ends with one line for each piece still missing.
 
 Without a terminal, `init` writes no configuration. It prints each missing
 piece on one line with the command that adds it, or
-`Repository is ready: review-party run --repo PATH`.
+`Repository is ready: review-party run --repo PATH`. A declared Checkpoint
+without its git hook gets its own line naming `review-party checkpoint install
+git`, or the snippet to add by hand when the hook tool needs one.
 
 `--profile NAME` and `--party NAME` add names to the Review selection without
 the journey. Each is repeatable. An unqualified name resolves Repository before
@@ -592,6 +595,64 @@ a member's Reviewer, model, effort, deadline, or instructions. Strict decoding
 rejects those retired fields. Repository Configuration performs composition by
 selecting Global and Repository Profiles or Parties in its `reviews` arrays.
 See [`docs/design/party-v1.md`](docs/design/party-v1.md).
+
+## Review Checkpoints
+
+A Review Checkpoint is a point in the workflow, before push or before commit,
+at which the repository expects its Review selection to have covered the
+change. A Checkpoint checks for completed Reviews. It never starts one. Declare
+Checkpoints in Repository Configuration, so the whole team shares them. Global
+Configuration rejects them.
+
+```sh
+review-party config checkpoint set pre-push --exempt '*.md' --exempt 'docs/**' --waivers human
+review-party config checkpoint remove pre-push
+```
+
+Both commands show the configuration Plan and confirm it in a terminal or with
+`--yes`. `--small-change-lines N` passes a change of at most N added and
+deleted lines, measured over the whole change, so splitting a push into small
+commits does not pass each one. A binary file never counts as small.
+`--waivers` is `human` (the default), `anyone`, or `none`.
+
+An exempt path pattern is relative to the repository root and separated by
+`/`. Each segment is a Go `path.Match` pattern, and a `**` segment matches any
+number of directories. A pattern without `/`, such as `*.md`, matches the file
+name at any depth. Exempt paths leave both the change and each Review's
+recorded change before they are compared. A change whose every path is exempt
+passes.
+
+`review-party checkpoint check pre-push` reports whether the change is
+covered, exempt, waived, or still needs a Review, with the next command.
+`--format json` adds the exemption and waiver details. When a change should
+pass without its Reviews, record a waiver with a reason:
+
+```sh
+review-party checkpoint waive pre-push --reason "revert of a reviewed change"
+```
+
+A waiver applies to that exact content change only. Under `human`, a person
+confirms it in a terminal, and `--yes` does not stand in for that person.
+Under `none`, only Reviews pass the Checkpoint.
+
+`review-party checkpoint install git` adds the git hook through the hook tool
+the repository already uses. It checks for lefthook, husky, the pre-commit
+framework, `core.hooksPath`, and plain `.git/hooks`, in that order. For hook
+scripts, it inserts a marked block after the shebang and never changes the
+existing lines. A pre-push hook that reads git's ref lines still receives them
+unchanged. For lefthook and the pre-commit framework, it prints the snippet to
+add to their configuration by hand. lefthook skips a pre-push command when
+`HEAD` has no file changes against `@{push}`, so it does not check a push of
+another branch from an up-to-date `HEAD`. Installed hooks load each Caller's
+default Global Configuration, not `--config`. Rerunning the installer changes
+nothing, and a block someone edited is left alone.
+
+The hook refuses an uncovered change with one line that names the Checkpoint
+and the next command. It mentions waivers only under `anyone`. When the hook
+cannot decide, because `review-party` is not on `PATH`, the configuration does
+not load, or git cannot name a base, it warns on one line and allows the push
+or commit. See
+[`docs/design/review-checkpoints-v1.md`](docs/design/review-checkpoints-v1.md).
 
 ## Operational Review Records
 

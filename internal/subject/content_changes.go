@@ -15,13 +15,15 @@ import (
 	"reviewparty/internal/model"
 )
 
-// RangeContentChanges is a committed range's whole content change set plus
-// the set each commit in the range introduces over its first parent.
+// RangeContentChanges is a committed range's whole content change set, the
+// set each commit in the range introduces over its first parent, and the
+// whole range's line counts per path.
 type RangeContentChanges struct {
 	Base    string
 	Head    string
 	Changes []model.ContentChange
 	Commits []CommitContentChanges
+	Lines   LineCounts
 }
 
 type CommitContentChanges struct {
@@ -45,7 +47,11 @@ func CommittedRangeContentChanges(repository string, reference model.SubjectRefe
 	if err != nil {
 		return RangeContentChanges{}, err
 	}
-	return RangeContentChanges{Base: string(baseObject), Head: string(headObject), Changes: changes, Commits: commits}, nil
+	lines, err := root.rangeLineCounts(baseObject, headObject)
+	if err != nil {
+		return RangeContentChanges{}, err
+	}
+	return RangeContentChanges{Base: string(baseObject), Head: string(headObject), Changes: changes, Commits: commits, Lines: lines}, nil
 }
 
 // Push range sources name where DefaultPushBase found the base of the range

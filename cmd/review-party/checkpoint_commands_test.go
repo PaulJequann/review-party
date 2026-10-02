@@ -136,7 +136,7 @@ func TestCheckpointPrePushCoveredByOneRangeReview(t *testing.T) {
 	if exit != 0 {
 		t.Fatalf("exit = %d, stdout = %q, stderr = %q", exit, stdout, stderr)
 	}
-	want := `{"checkpoint": "pre-push", "base": "` + fixture.base + `", "head": "` + head + `", "range_source": "flags", "covered": true, "profiles": [
+	want := `{"checkpoint": "pre-push", "base": "` + fixture.base + `", "head": "` + head + `", "range_source": "flags", "state": "covered", "covered": true, "profiles": [
 		{"scope": "repository", "name": "bugs", "state": "covered", "review_ids": ["rp_1725192000000_00000000000000a1"]},
 		{"scope": "repository", "name": "docs", "state": "covered", "review_ids": ["rp_1725192000000_00000000000000a2"]}]}`
 	var got, wanted any
@@ -188,7 +188,7 @@ func TestCheckpointPrePushMissingPrintsRunCommand(t *testing.T) {
 	for _, line := range []string{
 		"bugs (repository): covered by rp_1725192000000_00000000000000c1\n",
 		"docs (repository): missing\n",
-		"next: review-party run --base " + fixture.base + " --head " + head + "\n",
+		"next: review-party run --base " + fixture.base + " --head " + head + " --repo " + shellQuoteArgument(fixture.repository) + "\n",
 	} {
 		if !strings.Contains(stdout, line) {
 			t.Fatalf("stdout lacks %q:\n%s", line, stdout)
@@ -196,6 +196,15 @@ func TestCheckpointPrePushMissingPrintsRunCommand(t *testing.T) {
 	}
 	if strings.Contains(stdout, "wait:") {
 		t.Fatalf("missing coverage should not suggest waiting:\n%s", stdout)
+	}
+
+	absolute, err := filepath.Abs("relative.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, stdout, _ = fixture.check("pre-push", "--base", fixture.base, "--config", "relative.json")
+	if line := " --repo " + shellQuoteArgument(fixture.repository) + " --config " + shellQuoteArgument(absolute) + "\n"; !strings.Contains(stdout, line) {
+		t.Fatalf("a relative --config should be suggested as %q:\n%s", line, stdout)
 	}
 }
 
@@ -238,7 +247,7 @@ func TestCheckpointPreCommitWithPartialStagingIsUncovered(t *testing.T) {
 		"bugs (repository): covered by rp_1725192000000_00000000000000e1\n" +
 		"docs (repository): missing\n" +
 		"The Review must match the staged content, so stash or stage the rest of your changes first.\n" +
-		"next: review-party run\n"
+		"next: review-party run --repo " + shellQuoteArgument(fixture.repository) + "\n"
 	if stdout != want {
 		t.Fatalf("stdout = %q, want %q", stdout, want)
 	}

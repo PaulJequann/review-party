@@ -16,7 +16,8 @@ import (
 // or, without a selection, helps the Caller choose one. Every step publishes
 // through its own Plan and is skipped when its outcome already holds, so a
 // cancelled journey loses nothing a rerun cannot finish. Unlike Run, the
-// journey's forms may run standalone outside accessible mode.
+// journey's forms may run standalone outside accessible mode. After the
+// selection it shows or declares a Review Checkpoint and offers its git hooks.
 func RunFirstUse(manager *configuration.Manager, options RunOptions) error {
 	if options.Context == nil {
 		options.Context = context.Background()
@@ -34,15 +35,25 @@ func (e *editor) firstUse() error {
 	if err != nil {
 		return err
 	}
-	if !binding.Declared {
-		return e.firstUseStep(e.chooseFirstReview)
-	}
-	for _, missing := range globalGaps(binding.Unresolved) {
-		if err := e.firstUseStep(func() error { return e.bindMissing(missing) }); err != nil {
+	for _, step := range append(e.selectionSteps(binding), e.checkpointsStep) {
+		if err := e.firstUseStep(step); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// selectionSteps choose a first Review selection, or bind each Global name a
+// declared selection lacks.
+func (e *editor) selectionSteps(binding configuration.SelectionBinding) []func() error {
+	if !binding.Declared {
+		return []func() error{e.chooseFirstReview}
+	}
+	var steps []func() error
+	for _, missing := range globalGaps(binding.Unresolved) {
+		steps = append(steps, func() error { return e.bindMissing(missing) })
+	}
+	return steps
 }
 
 // firstUseStep runs one journey step. A configuration failure is reported

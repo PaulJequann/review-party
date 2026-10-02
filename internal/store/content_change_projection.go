@@ -1,8 +1,8 @@
 package store
 
 // Content change projection indexes each Review by the commit-free content
-// change set its Subject covers, so a Checkpoint can find Reviews of exactly
-// the content it is about to accept.
+// change set its Subject covers, so a Checkpoint can find the Reviews that
+// might cover the content it is about to accept.
 
 import (
 	"database/sql"
@@ -13,15 +13,21 @@ import (
 	"time"
 )
 
+// CoverageQuery names a Profile source and the content change set a
+// Checkpoint must see covered.
 type CoverageQuery struct {
 	ProfileSource string
 	Changes       []model.ContentChange
 }
 
+// CoverageCandidate is a Review that shares at least one content change entry
+// with a CoverageQuery. Changes is the Review's full recorded set, sorted by
+// path, so the caller decides whether it covers.
 type CoverageCandidate struct {
 	ID        model.ReviewID
 	Lifecycle model.Lifecycle
 	CreatedAt time.Time
+	Changes   []model.ContentChange
 }
 
 func replaceContentChanges(tx *sql.Tx, id model.ReviewID, changes []model.ContentChange) error {
@@ -36,25 +42,24 @@ func replaceContentChanges(tx *sql.Tx, id model.ReviewID, changes []model.Conten
 	return nil
 }
 
-// coverageStatement matches Reviews whose stored set equals the query set: as
-// many rows as the query, every one of them in the query. The first change
-// narrows candidates through the entry index before the counts run.
-const coverageStatement = `WITH wanted AS (
+// coverageCandidateStatement finds the Profile's Reviews holding any queried
+// entry through the entry index, and returns each one's complete set.
+const coverageCandidateStatement = `WITH wanted AS (
 		SELECT json_extract(value,'$.path') AS path, json_extract(value,'$.before') AS before_blob, json_extract(value,'$.after') AS after_blob
 		FROM json_each(?))
-	SELECT r.id, r.lifecycle, r.created_at FROM reviews r
+	SELECT r.id, r.lifecycle, r.created_at,
+		(SELECT json_group_array(json_object('path',c.path,'before',c.before_blob,'after',c.after_blob))
+			FROM review_content_changes c WHERE c.review_id = r.id)
+	FROM reviews r
 	WHERE json_extract(r.profile_revision,'$.source') = ?
-	AND r.id IN (SELECT review_id FROM review_content_changes WHERE path = ? AND before_blob = ? AND after_blob = ?)
-	AND (SELECT count(*) FROM review_content_changes c WHERE c.review_id = r.id) = ?
-	AND (SELECT count(*) FROM review_content_changes c JOIN wanted w
-		ON c.path = w.path AND c.before_blob = w.before_blob AND c.after_blob = w.after_blob
-		WHERE c.review_id = r.id) = ?
+	AND r.id IN (SELECT c.review_id FROM wanted w JOIN review_content_changes c
+		ON c.path = w.path AND c.before_blob = w.before_blob AND c.after_blob = w.after_blob)
 	ORDER BY r.created_at DESC, r.id DESC`
 
-// ContentChangeCoverage returns every Review, in any lifecycle and newest
-// first, whose Profile source matches and whose content change set is exactly
-// the queried set.
-func (s *LedgerRecordStore) ContentChangeCoverage(query CoverageQuery) (candidates []CoverageCandidate, returnErr error) {
+// CoverageCandidates returns every Review, in any lifecycle and newest first,
+// whose Profile source matches and whose content change set shares at least
+// one entry with the queried set.
+func (s *LedgerRecordStore) CoverageCandidates(query CoverageQuery) (candidates []CoverageCandidate, returnErr error) {
 	if err := validateCoverageQuery(query); err != nil {
 		return nil, err
 	}
@@ -62,19 +67,22 @@ func (s *LedgerRecordStore) ContentChangeCoverage(query CoverageQuery) (candidat
 	if err != nil {
 		return nil, err
 	}
-	first := query.Changes[0]
-	count := len(query.Changes)
-	rows, err := s.db.Query(coverageStatement, string(wanted), query.ProfileSource, first.Path, first.Before, first.After, count, count)
+	rows, err := s.db.Query(coverageCandidateStatement, string(wanted), query.ProfileSource)
 	if err != nil {
-		return nil, fmt.Errorf("query content change coverage: %w", err)
+		return nil, fmt.Errorf("query coverage candidates: %w", err)
 	}
 	defer func() { returnErr = errors.Join(returnErr, rows.Close()) }()
 	candidates = []CoverageCandidate{}
 	for rows.Next() {
 		var candidate CoverageCandidate
-		if err := rows.Scan(&candidate.ID, &candidate.Lifecycle, &candidate.CreatedAt); err != nil {
+		var changes string
+		if err := rows.Scan(&candidate.ID, &candidate.Lifecycle, &candidate.CreatedAt, &changes); err != nil {
 			return nil, err
 		}
+		if err := json.Unmarshal([]byte(changes), &candidate.Changes); err != nil {
+			return nil, fmt.Errorf("decode content changes of review %q: %w", candidate.ID, err)
+		}
+		model.SortContentChanges(candidate.Changes)
 		candidates = append(candidates, candidate)
 	}
 	return candidates, rows.Err()
@@ -97,10 +105,10 @@ func validateCoverageQuery(query CoverageQuery) error {
 	return nil
 }
 
-func (s *DeferredLedgerRecordStore) ContentChangeCoverage(query CoverageQuery) ([]CoverageCandidate, error) {
+func (s *DeferredLedgerRecordStore) CoverageCandidates(query CoverageQuery) ([]CoverageCandidate, error) {
 	ledger, err := s.openExisting()
 	if err != nil {
 		return nil, err
 	}
-	return ledger.ContentChangeCoverage(query)
+	return ledger.CoverageCandidates(query)
 }

@@ -22,6 +22,6 @@ report.inspect.human.judged-3	0	69	1126	299
 report.inspect.json.judged-3	0	68	2269	585
 report.inspect.human.bundle-3	0	54	1949	501
 report.inspect.json.bundle-3	0	68	4140	1052
-help.root	0	19	1687	427
+help.root	0	19	1690	428
 error.inspect.missing-review	1	54	68	31
 error.inspect.no-argument	2	20	43	16

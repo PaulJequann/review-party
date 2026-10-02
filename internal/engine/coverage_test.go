@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -75,9 +76,25 @@ func TestDecideCoverage(t *testing.T) {
 	}
 }
 
+// coverageStore keeps the ledger contract: a Profile source's Reviews that
+// share an entry with the query, newest first, each with its full set.
 type coverageStore struct {
-	candidates map[string][]store.CoverageCandidate
-	queries    int
+	reviews []recordedCoverage
+	waivers []model.CheckpointWaiver
+	queries int
+}
+
+type recordedCoverage struct {
+	source    string
+	candidate store.CoverageCandidate
+}
+
+func recorded(source, id string, lifecycle model.Lifecycle, changes ...[]model.ContentChange) recordedCoverage {
+	var set []model.ContentChange
+	for _, part := range changes {
+		set = append(set, part...)
+	}
+	return recordedCoverage{source: source, candidate: store.CoverageCandidate{ID: model.ReviewID(id), Lifecycle: lifecycle, Changes: set}}
 }
 
 func (*coverageStore) Save(model.ReviewRecord) error { return nil }
@@ -86,9 +103,29 @@ func (*coverageStore) Load(model.ReviewID) (model.ReviewRecord, error) {
 	return model.ReviewRecord{}, errors.New("not found")
 }
 
-func (fake *coverageStore) ContentChangeCoverage(query store.CoverageQuery) ([]store.CoverageCandidate, error) {
+func (fake *coverageStore) CoverageCandidates(query store.CoverageQuery) ([]store.CoverageCandidate, error) {
 	fake.queries++
-	return fake.candidates[query.ProfileSource+" "+changeSetKey(query.Changes)], nil
+	var candidates []store.CoverageCandidate
+	for _, review := range fake.reviews {
+		if review.source == query.ProfileSource && slices.ContainsFunc(review.candidate.Changes, func(change model.ContentChange) bool { return slices.Contains(query.Changes, change) }) {
+			candidates = append(candidates, review.candidate)
+		}
+	}
+	return candidates, nil
+}
+
+func (fake *coverageStore) CheckpointWaiver(key model.WaiverKey) (model.CheckpointWaiver, bool, error) {
+	for index := len(fake.waivers) - 1; index >= 0; index-- {
+		if fake.waivers[index].Key == key {
+			return fake.waivers[index], true, nil
+		}
+	}
+	return model.CheckpointWaiver{}, false, nil
+}
+
+func (fake *coverageStore) RecordCheckpointWaiver(waiver model.CheckpointWaiver) error {
+	fake.waivers = append(fake.waivers, waiver)
+	return nil
 }
 
 func newCoverageConductor(t *testing.T, recordStore store.RecordStore, selection *configuration.ReviewSelection) (*Conductor, string) {
@@ -105,24 +142,28 @@ func newCoverageConductor(t *testing.T, recordStore store.RecordStore, selection
 }
 
 func TestCheckCoverageReportsSelectedProfilesInOrder(t *testing.T) {
-	fake := &coverageStore{candidates: map[string][]store.CoverageCandidate{
-		"global:profiles/documentation " + changeSetKey(coverageWhole): {candidate("rp_docs", model.LifecycleCompleted)},
-		"global:profiles/bugs " + changeSetKey(coverageWhole):          {candidate("rp_bugs", model.LifecycleRunning)},
+	fake := &coverageStore{reviews: []recordedCoverage{
+		recorded("global:profiles/documentation", "rp_docs", model.LifecycleCompleted, coverageWhole),
+		recorded("global:profiles/bugs", "rp_bugs", model.LifecycleRunning, coverageWhole),
+		recorded("global:profiles/code-quality", "rp_partial", model.LifecycleCompleted, coverageFirst),
 	}}
 	selection := configuration.ReviewSelection{ConcurrencyLimit: 1, Global: []configuration.SelectionItem{{Profile: "documentation"}, {Profile: "bugs"}, {Profile: "code-quality"}}, Repository: []configuration.SelectionItem{}}
 	conductor, repository := newCoverageConductor(t, fake, &selection)
 
-	report, err := conductor.CheckCoverage(context.Background(), repository, CoverageSubject{Changes: coverageWhole})
+	report, err := conductor.CheckCheckpoint(context.Background(), CheckpointRequest{Repository: repository, Name: configuration.CheckpointPrePush, Content: CoverageSubject{Changes: coverageWhole}})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if report.State != CheckpointMissing {
+		t.Fatalf("state = %s, want missing", report.State)
 	}
 	want := CoverageReport{Covered: false, Profiles: []ProfileCoverage{
 		{Scope: configuration.ScopeGlobal, Profile: "documentation", State: CoverageCovered, ReviewIDs: []model.ReviewID{"rp_docs"}},
 		{Scope: configuration.ScopeGlobal, Profile: "bugs", State: CoverageRunning, ReviewIDs: []model.ReviewID{"rp_bugs"}},
 		{Scope: configuration.ScopeGlobal, Profile: "code-quality", State: CoverageMissing},
 	}}
-	if !reflect.DeepEqual(report, want) {
-		t.Fatalf("report = %#v, want %#v", report, want)
+	if !reflect.DeepEqual(report.Coverage, want) {
+		t.Fatalf("coverage = %#v, want %#v", report.Coverage, want)
 	}
 }
 
@@ -131,18 +172,21 @@ func TestCheckCoverageWithoutContentSkipsTheLedger(t *testing.T) {
 	selection := configuration.ReviewSelection{ConcurrencyLimit: 1, Global: []configuration.SelectionItem{{Profile: "bugs"}}, Repository: []configuration.SelectionItem{}}
 	conductor, repository := newCoverageConductor(t, fake, &selection)
 
-	report, err := conductor.CheckCoverage(context.Background(), repository, CoverageSubject{})
+	report, err := conductor.CheckCheckpoint(context.Background(), CheckpointRequest{Repository: repository, Name: configuration.CheckpointPrePush})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !report.Covered || fake.queries != 0 {
-		t.Fatalf("report = %#v after %d ledger queries", report, fake.queries)
+	if report.State != CheckpointCovered {
+		t.Fatalf("state = %s, want covered", report.State)
+	}
+	if fake.queries != 0 {
+		t.Fatalf("empty content made %d ledger queries", fake.queries)
 	}
 }
 
 func TestCheckCoverageWithoutSelectionNamesInit(t *testing.T) {
 	conductor, repository := newCoverageConductor(t, &coverageStore{}, nil)
-	_, err := conductor.CheckCoverage(context.Background(), repository, CoverageSubject{Changes: coverageWhole})
+	_, err := conductor.CheckCheckpoint(context.Background(), CheckpointRequest{Repository: repository, Name: configuration.CheckpointPrePush, Content: CoverageSubject{Changes: coverageWhole}})
 	if !errors.Is(err, configuration.ErrNoRepositorySelection) || !strings.Contains(err.Error(), "review-party init") {
 		t.Fatalf("error = %v", err)
 	}
@@ -151,7 +195,7 @@ func TestCheckCoverageWithoutSelectionNamesInit(t *testing.T) {
 func TestCheckCoverageRequiresTheLedger(t *testing.T) {
 	selection := configuration.ReviewSelection{ConcurrencyLimit: 1, Global: []configuration.SelectionItem{{Profile: "bugs"}}, Repository: []configuration.SelectionItem{}}
 	conductor, repository := newCoverageConductor(t, &failFinalRecordStore{}, &selection)
-	_, err := conductor.CheckCoverage(context.Background(), repository, CoverageSubject{Changes: coverageWhole})
+	_, err := conductor.CheckCheckpoint(context.Background(), CheckpointRequest{Repository: repository, Name: configuration.CheckpointPrePush, Content: CoverageSubject{Changes: coverageWhole}})
 	if err == nil || !strings.Contains(err.Error(), "requires the SQLite ledger") {
 		t.Fatalf("error = %v", err)
 	}
