@@ -33,7 +33,7 @@ func TestClaudeCodeInstallAppendsToExistingSettingsOnce(t *testing.T) {
 	path := filepath.Join(fixture.repository, ".claude", "settings.json")
 
 	added := "pre-push: add a PreToolUse entry to " + path + " (Claude Code)\npre-commit: share the PreToolUse entry added to " + path + " (Claude Code)\n"
-	assertRun(t, fixture.installAgent("claude-code", "--yes"), commandRun{stdout: added + "Wrote 1 hook file(s).\n"})
+	assertRun(t, fixture.installAgent("claude-code", "--yes"), commandRun{stdout: added + "Wrote 1 file(s).\n"})
 	want := `{
   "permissions": {"allow": ["Bash(go test *)"]},
   "hooks": {
@@ -71,7 +71,7 @@ func TestCodexInstallSharesOneEntryAndNamesTheApprovalStep(t *testing.T) {
 
 	missing := "warning: review-party is not on PATH; the Codex hook allows every command silently until it is\n"
 	created := "pre-push: create " + path + " (Codex)\npre-commit: share the PreToolUse entry added to " + path + " (Codex)\n"
-	assertRun(t, fixture.installAgent("codex", "--yes"), commandRun{stdout: created + missing + "Wrote 1 hook file(s).\n" + codexFollowUp})
+	assertRun(t, fixture.installAgent("codex", "--yes"), commandRun{stdout: created + missing + "Wrote 1 file(s).\n" + codexFollowUp})
 	want := `{
   "hooks": {
     "PreToolUse": [
@@ -130,7 +130,7 @@ func TestAgentInstallPersonalTargets(t *testing.T) {
 
 	local := filepath.Join(fixture.repository, ".claude", "settings.local.json")
 	unignored := "warning: git does not ignore " + local + "; commit it only if the team should share these entries\n"
-	assertRun(t, fixture.installAgent("claude-code", "--personal", "--yes"), commandRun{stdout: "pre-push: create " + local + " (Claude Code)\n" + unignored + "Wrote 1 hook file(s).\n"})
+	assertRun(t, fixture.installAgent("claude-code", "--personal", "--yes"), commandRun{stdout: "pre-push: create " + local + " (Claude Code)\n" + unignored + "Wrote 1 file(s).\n"})
 	fixture.writeFile(".gitignore", ".claude/settings.local.json\n")
 	result := fixture.installAgent("claude-code", "--personal")
 	if strings.Contains(result.stdout, "warning:") || !strings.Contains(fixture.read(".claude/settings.local.json"), `"if": "Bash(git *)"`) {

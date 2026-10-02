@@ -13,6 +13,20 @@ func waiverFixture(id model.WaiverID, key model.WaiverKey, minute int) model.Che
 	return model.CheckpointWaiver{ID: id, Key: key, Repository: "/work/repo", Reason: "hotfix " + string(id), WaivedBy: model.WaivedByTerminal, CreatedAt: created}
 }
 
+func withRepository(waiver model.CheckpointWaiver, repository string) model.CheckpointWaiver {
+	waiver.Repository = repository
+	return waiver
+}
+
+func waiversSince(t *testing.T, ledger *LedgerRecordStore, repository string, since time.Time) []model.CheckpointWaiver {
+	t.Helper()
+	waivers, err := ledger.CheckpointWaiversSince(repository, since)
+	if err != nil {
+		t.Fatalf("waivers since %s in %s = %v", since, repository, err)
+	}
+	return waivers
+}
+
 func TestCheckpointWaiverMatchesOnlyItsKey(t *testing.T) {
 	ledger := newTestLedger(t, t.TempDir())
 	defer closeTestResource(t, ledger.Close)
@@ -87,5 +101,29 @@ func TestPrepareUpgradesSchemaThirteenLedgerToRecordWaivers(t *testing.T) {
 	}
 	if _, ok, err := ledger.CheckpointWaiver(key); err != nil || !ok {
 		t.Fatalf("waiver after upgrade = %v, %v", ok, err)
+	}
+}
+
+func TestCheckpointWaiversSinceListsOneRepositoryNewestFirst(t *testing.T) {
+	ledger := newTestLedger(t, t.TempDir())
+	defer closeTestResource(t, ledger.Close)
+	key := model.WaiverKey{Checkpoint: "pre-push", ContentDigest: model.ContentChangesDigest(coveredChanges)}
+	recorded := map[model.WaiverID]model.CheckpointWaiver{}
+	for id, waiver := range map[model.WaiverID]struct {
+		repository string
+		minute     int
+	}{"wv_old": {"/repo", 1}, "wv_edge": {"/repo", 10}, "wv_new": {"/repo", 20}, "wv_other": {"/other", 30}} {
+		recorded[id] = waiverFixture(id, key, waiver.minute)
+		recorded[id] = withRepository(recorded[id], waiver.repository)
+		if err := ledger.RecordCheckpointWaiver(recorded[id]); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if waivers, want := waiversSince(t, ledger, "/repo", recorded["wv_edge"].CreatedAt), []model.CheckpointWaiver{recorded["wv_new"], recorded["wv_edge"]}; !reflect.DeepEqual(waivers, want) {
+		t.Fatalf("waivers = %#v, want %#v", waivers, want)
+	}
+	if none := waiversSince(t, ledger, "/absent", time.Time{}); !reflect.DeepEqual(none, []model.CheckpointWaiver{}) {
+		t.Fatalf("absent repository waivers = %#v, want an empty list", none)
 	}
 }

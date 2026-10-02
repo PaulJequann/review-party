@@ -65,7 +65,7 @@ func (draft checkpointDraft) checkpoint() (configuration.Checkpoint, error) {
 func (e *editor) declareCheckpoint() error {
 	draft := checkpointDraft{
 		name: configuration.CheckpointPrePush, smallChangeLines: "0", waivers: configuration.WaiversHuman,
-		integrations: append([]configuration.IntegrationName{configuration.IntegrationGit}, e.AgentsOnPath...),
+		integrations: slices.Concat([]configuration.IntegrationName{configuration.IntegrationGit}, e.AgentsOnPath, []configuration.IntegrationName{configuration.IntegrationAgentsMD}),
 	}
 	choice := huh.NewSelect[configuration.CheckpointName]().
 		Title("Which Review Checkpoint should this repository declare?").
@@ -124,39 +124,15 @@ func validateLineLimit(value string) error {
 // warnDocumentationExemption warns when Markdown exemptions would keep a
 // selected documentation Profile from ever being required at the Checkpoint.
 func (e *editor) warnDocumentationExemption(checkpoint configuration.Checkpoint) error {
-	if !checkpoint.Exempts("README.md") && !checkpoint.Exempts("docs/README.md") {
+	if len(checkpoint.MarkdownExemptions()) == 0 {
 		return nil
 	}
-	profiles, err := e.selectedDocumentationProfiles()
+	profiles, err := e.manager.SelectedDocumentationProfiles(e.Repository)
 	if err != nil || len(profiles) == 0 {
 		return err
 	}
 	_, err = fmt.Fprintf(e.Output, "warning: exempting *.md means this Checkpoint never requires documentation Profile %s to review Markdown changes.\n", strings.Join(profiles, ", "))
 	return err
-}
-
-// selectedDocumentationProfiles names the selected Profiles whose name or
-// Template marks them as documentation reviews.
-func (e *editor) selectedDocumentationProfiles() ([]string, error) {
-	resolved, err := e.manager.ResolveRun(configuration.RunRequest{Repository: e.Repository})
-	if err != nil {
-		return nil, err
-	}
-	inventory, err := e.manager.ProfileInventory(e.Repository)
-	if err != nil {
-		return nil, err
-	}
-	var names []string
-	for _, definition := range inventory {
-		selected := slices.ContainsFunc(resolved.Expanded, func(profile configuration.ExpandedProfile) bool {
-			return profile.Scope == definition.Scope && profile.Profile == definition.Name
-		})
-		marker := strings.ToLower(definition.Name + " " + definition.Value.TemplateID)
-		if selected && strings.Contains(marker, "doc") {
-			names = append(names, definition.Name)
-		}
-	}
-	return names, nil
 }
 
 // integrationOptions labels Integrations for a multi-select.
@@ -165,6 +141,7 @@ func integrationOptions(integrations []configuration.IntegrationName) []huh.Opti
 		configuration.IntegrationGit:        "git: git hooks",
 		configuration.IntegrationClaudeCode: "claude-code: a Claude Code PreToolUse hook",
 		configuration.IntegrationCodex:      "codex: a Codex PreToolUse hook",
+		configuration.IntegrationAgentsMD:   "agents-md: a block in AGENTS.md, or CLAUDE.md when only that exists",
 	}
 	options := make([]huh.Option[configuration.IntegrationName], 0, len(integrations))
 	for _, integration := range integrations {
@@ -190,7 +167,7 @@ func (e *editor) integrationsStep() error {
 		switch {
 		case configuration.FloorIntegrates(declared, integration):
 			err = e.InstallCheckpointHooks(integration, false, e.confirmHooks(integration))
-		case integration != configuration.IntegrationGit:
+		case slices.Contains(callerAgentIntegrations, integration):
 			personal = append(personal, integration)
 		}
 		if err != nil {
@@ -200,10 +177,18 @@ func (e *editor) integrationsStep() error {
 	return e.personalIntegrations(personal)
 }
 
+// callerAgentIntegrations are the Integrations a Caller may install for
+// themselves alone: the Caller Agent hooks. git hooks and the AGENTS.md block
+// live in files the team shares.
+var callerAgentIntegrations = []configuration.IntegrationName{configuration.IntegrationClaudeCode, configuration.IntegrationCodex}
+
 func (e *editor) confirmHooks(integration configuration.IntegrationName) func() (bool, error) {
 	return func() (bool, error) {
-		install := true
-		err := e.form(huh.NewConfirm().Title("Install these " + string(integration) + " hooks now?").Value(&install))
+		install, title := true, "Install these "+string(integration)+" hooks now?"
+		if integration == configuration.IntegrationAgentsMD {
+			title = "Write this agents-md block now?"
+		}
+		err := e.form(huh.NewConfirm().Title(title).Value(&install))
 		return install, err
 	}
 }

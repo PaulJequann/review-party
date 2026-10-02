@@ -55,11 +55,12 @@ const (
 	IntegrationGit        IntegrationName = "git"
 	IntegrationClaudeCode IntegrationName = "claude-code"
 	IntegrationCodex      IntegrationName = "codex"
+	IntegrationAgentsMD   IntegrationName = "agents-md"
 )
 
 // IntegrationNames lists every supported Integration in install order.
 func IntegrationNames() []IntegrationName {
-	return []IntegrationName{IntegrationGit, IntegrationClaudeCode, IntegrationCodex}
+	return []IntegrationName{IntegrationGit, IntegrationClaudeCode, IntegrationCodex, IntegrationAgentsMD}
 }
 
 // ParseIntegrationName accepts one supported Integration name.
@@ -69,7 +70,7 @@ func ParseIntegrationName(value string) (IntegrationName, error) {
 			return name, nil
 		}
 	}
-	return "", fmt.Errorf("unknown integration %q; expected git, claude-code, or codex", value)
+	return "", fmt.Errorf("unknown integration %q; expected git, claude-code, codex, or agents-md", value)
 }
 
 // Checkpoint is one declared Review Checkpoint.

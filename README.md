@@ -100,7 +100,8 @@ piece on one line with the command that adds it, or
 without a hook its Integrations list gets its own line naming `review-party
 checkpoint install <integration>`, or the snippet to add by hand when the git
 hook tool needs one. When a Checkpoint lists `codex`, a line names the Codex
-`/hooks` approval step.
+`/hooks` approval step. When a Checkpoint lists `agents-md`, a missing or stale
+block gets a line naming `review-party checkpoint install agents-md`.
 
 `--profile NAME` and `--party NAME` add names to the Review selection without
 the journey. Each is repeatable. An unqualified name resolves Repository before
@@ -700,6 +701,47 @@ command, not only git ones, and starts a login shell to do it. On the machine
 measured, every Codex shell command waits about 70 ms more, most of it that
 login shell. Under Claude Code, each git command waits about 19 ms more. See
 [`docs/design/review-checkpoints-v1.md`](docs/design/review-checkpoints-v1.md).
+
+Agents read their instructions before any hook runs, so `agents-md` puts the
+Checkpoints there too:
+
+```sh
+review-party checkpoint install agents-md
+```
+
+It writes a block between `<!-- review-party checkpoints: begin -->` and
+`<!-- review-party checkpoints: end -->` into `AGENTS.md` at the repository
+root, or into `CLAUDE.md` when only that exists. The block has one line per
+declared Checkpoint naming the command that satisfies it, and mentions waivers
+only under `anyone`. A missing block is appended after one blank line, and the
+rest of the file keeps every byte. After a Checkpoint declaration changes, the
+block is stale and the installer replaces only the lines between the markers,
+which a terminal confirms and which needs `--yes` without one. Unbalanced or
+repeated markers are left for you to fix by hand. `--integration agents-md` on
+`config checkpoint set` lists the block in the team floor.
+
+`review-party doctor` reports what the declared Checkpoints still lack in this
+clone, one line per finding, each ending in `; fix: <command>`:
+
+- Profile and Party names the selection uses that no configuration defines.
+- Team-floor Integrations that are missing, edited, not executable, or waiting
+  on a hook tool to be activated.
+- A stale or broken `agents-md` block.
+- A Markdown exemption on a Checkpoint whose repository selects a documentation
+  Profile, since those files would pass the Checkpoint without that Review.
+- Waivers recorded in this repository in the last 30 days, which are records
+  and carry no fix.
+
+```text
+configuration is valid
+Checkpoint pre-push has no claude-code hook; fix: review-party checkpoint install claude-code --repo /src/app
+```
+
+`--format json` returns the same findings in `unresolved_names`,
+`integration_gaps`, `exemption_conflicts`, and `recent_waivers`. Doctor exits 1
+only when the configuration is invalid. Findings exit 0, because whether one
+blocks delivery is for the repository's instructions and the Caller to decide.
+Doctor reads the ledger for Waivers but never creates state.
 
 ## Operational Review Records
 

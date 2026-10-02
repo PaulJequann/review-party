@@ -1,6 +1,6 @@
 # Review Checkpoints v1
 
-Status: accepted on 2026-10-01; slices 1 to 4 implemented. Ownership is recorded in
+Status: accepted on 2026-10-01; slices 1 to 5 implemented. Ownership is recorded in
 [ADR 0001](../adr/0001-project-declared-review-checkpoints.md). Hook facts per
 Caller Agent are in
 [Caller Agent hooks](../research/caller-agent-hooks-2026-10-01.md).
@@ -147,9 +147,9 @@ entries also end in `|| true`, so no exit status from an old or broken
 
 The block is generated from the declared Checkpoints and stays about three
 lines, for example: "Before pushing, review the change with `review-party run
---base <upstream> --head HEAD` and record a verdict for each Finding.
-`review-party checkpoint --help` has details." Its job is to make the agent
-review before the hook would refuse.
+--base <upstream> --head HEAD`; the pre-push Checkpoint refuses a push no
+completed Review covers. `review-party checkpoint --help` has details." Its
+job is to make the agent review before the hook would refuse.
 
 ## Initialization and doctor
 
@@ -168,7 +168,7 @@ remaining manual steps, such as Codex `/hooks` approval.
 - Missing team-floor Integrations.
 - Edited hook blocks.
 - A stale AGENTS.md block.
-- Exemptions that conflict with the selection.
+- Markdown exemptions that conflict with a selected documentation Profile.
 - Waivers recorded in the last 30 days.
 
 ## Delivery
@@ -372,6 +372,91 @@ Of the hook's time, 15 to 16 ms is package initialization in
 It is linked in through the Configuration Hub's terminal libraries. v0.0.30
 fills only the first 0x300 entries at init and builds the rest on first use. Moving to it is a dependency change and is left
 for its own decision.
+
+## Slice 5 decisions
+
+**Markers.** The block sits between two lines that hold only
+`<!-- review-party checkpoints: begin -->` and
+`<!-- review-party checkpoints: end -->`. HTML comments keep the markers out of
+rendered Markdown, and a line that holds only the marker, after trimming
+whitespace, is the only thing the installer treats as one. A marker quoted
+inside other text is prose.
+
+**File choice.** The block goes in `AGENTS.md` at the repository root. A
+repository with `CLAUDE.md` and no `AGENTS.md` gets it in `CLAUDE.md`, since
+that is the file its agents already read. A repository with both uses
+`AGENTS.md`, and one with neither gets a new `AGENTS.md` that holds only the
+block. The installer never writes the block into both files.
+
+**Stale rule.** The body is generated from the declared Checkpoints, one line
+per Checkpoint in name order and one line pointing at `review-party checkpoint
+--help`. A Waiver command is added to a Checkpoint's line only under
+`anyone`, as the refusal does. The block is installed when the lines between
+the markers equal that body byte for byte. Any other content is stale,
+including a hand edit, because the block is generated. Replacing it rewrites
+only the lines between the markers, after a terminal confirms or under
+`--yes`, and a rerun without either exits 2 and writes nothing. A missing
+block is appended after exactly one blank line. Repeated markers, a lone
+marker, or an end marker before the begin marker are malformed. The installer
+refuses them, names the counts, and leaves the file for the Caller to repair,
+because guessing which marker is real could delete the Caller's text. With
+`--config`, the installer warns that the block's commands do not carry it.
+
+**Initialization.** `agents-md` is preselected in the team-floor multi-select
+when `init` offers a Checkpoint, and `init` writes the block after its own
+confirmation. It is never offered as a personal Integration, because the file
+is shared. Without a terminal, `init` prints a missing or stale block with the
+install command, and malformed markers with the lines to fix by hand. `init`
+still treats an edited hook as in place. `doctor` reports it.
+
+**Doctor findings.** Each finding is one line ending in `; fix: <command>`, and
+`--format json` carries the same facts in `unresolved_names`,
+`integration_gaps`, `exemption_conflicts`, and `recent_waivers`. Every fix
+repeats `--config` when the doctor run had it. `init` and `doctor` read
+Integration gaps from one planner, which plans each Integration's install and
+maps its outcome to a gap, so the two commands cannot disagree about what is
+missing. Unresolved names are read even from an invalid configuration,
+because they are often why it is invalid. The other findings need a
+configuration that validates.
+
+**Exit codes.** Doctor exits 1 only when the configuration is invalid, and
+findings exit 0. This follows the AGENTS.md rule "Keep project governance
+outside the review engine." The CLI reports facts, and the repository's
+instructions and the Caller decide whether a missing hook or a recent Waiver blocks delivery. A
+nonzero exit for findings would make that decision for every caller that
+checks the status.
+
+**Documentation-Profile signal.** A Profile is a documentation Review when it
+was created from the packaged `documentation` Template. An exemption is a
+Markdown exemption when its pattern matches `README.md` or `docs/README.md`,
+the files every documentation layout has. Doctor reports a Checkpoint whose
+Markdown exemptions would let changes a selected documentation Profile
+reviews pass without that Review. The fix is the full `config checkpoint set`
+command with those patterns removed and every other setting repeated, since a
+set replaces the declaration.
+
+**Recent Waivers.** Doctor lists the Waivers recorded in this repository in
+the last 30 days, newest first. They are records, not gaps, so their lines
+carry no fix. Ledger schema 15 adds a `repository` column to
+`checkpoint_waivers`, keyed by the repository root the Waiver was recorded
+from, with an index on the repository and the creation time. Doctor never
+creates the state directory or the ledger. A missing ledger lists no Waivers,
+and a ledger that needs preparation is reported with `review-party init` as
+the fix.
+
+**Deviations.**
+
+- The AGENTS.md example above dropped "record a verdict for each Finding".
+  Recording verdicts belongs to the `judged` requirement in slice 6.
+- "Exemptions that conflict with the selection" is narrowed to Markdown
+  exemptions against a documentation Profile. No other exemption has a
+  Profile it is known to defeat.
+- The documentation-Profile signal is the Template ID. The earlier
+  initialization warning also matched any Profile whose name or Template
+  contained "doc", which a Profile named `docker` would have met. Both now use
+  the Template ID.
+- A linked worktree resolves to its own root, so its Waivers are listed there
+  and not in the main checkout.
 
 ## Open questions
 
