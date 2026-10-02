@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -234,24 +235,33 @@ func matchPathPattern(pattern, name string) bool {
 	return matchSegments(segments, strings.Split(name, "/"))
 }
 
+// matchSegments matches greedily and, on a mismatch, retries from the latest
+// "**" with one more segment in it. An earlier "**" never needs a retry, since
+// the later one can absorb whatever it would have, so matching stays linear in
+// the pattern times the path rather than exponential in its "**" segments.
 func matchSegments(pattern, name []string) bool {
-	switch {
-	case len(pattern) == 0:
-		return len(name) == 0
-	case pattern[0] == "**":
-		for skip := range len(name) + 1 {
-			if matchSegments(pattern[1:], name[skip:]) {
-				return true
-			}
+	next, star, resume := 0, -1, 0
+	for position := 0; position < len(name); {
+		switch {
+		case next < len(pattern) && pattern[next] == "**":
+			star, resume = next, position
+			next++
+		case next < len(pattern) && segmentMatches(pattern[next], name[position]):
+			next++
+			position++
+		case star >= 0:
+			resume++
+			next, position = star+1, resume
+		default:
+			return false
 		}
-		return false
-	case len(name) == 0:
-		return false
 	}
-	if matched, err := path.Match(pattern[0], name[0]); err != nil || !matched {
-		return false
-	}
-	return matchSegments(pattern[1:], name[1:])
+	return !slices.ContainsFunc(pattern[next:], func(segment string) bool { return segment != "**" })
+}
+
+func segmentMatches(pattern, name string) bool {
+	matched, err := path.Match(pattern, name)
+	return err == nil && matched
 }
 
 // SetCheckpoint creates or replaces one declared Checkpoint.
