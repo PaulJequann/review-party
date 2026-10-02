@@ -177,11 +177,12 @@ type hookInstallPlan struct {
 	// missingBinary reports that review-party is not on PATH, so installed
 	// hooks will warn and allow until it is.
 	missingBinary bool
-	// config is the --config argument the hooks carry. Committed hooks are
-	// shared with the team, so they carry none, and droppedConfig keeps the
-	// Caller's argument for the warning.
-	config        string
-	droppedConfig string
+	root          string
+	// config is the Caller's --config argument. Only per-clone hook files
+	// carry it. shared lists the committed files that leave it out, because
+	// each teammate loads their own configuration.
+	config string
+	shared []string
 }
 
 func planHookInstall(target hookInstallTarget, manager *configuration.Manager) (hookInstallPlan, error) {
@@ -201,11 +202,7 @@ func planHookInstall(target hookInstallTarget, manager *configuration.Manager) (
 	_, lookErr := exec.LookPath("review-party")
 	plan := hookInstallPlan{
 		tool: tool, location: location, hooks: locations.Directory, writes: map[string][]byte{}, missingBinary: lookErr != nil,
-	}
-	if target.committed(tool, location) {
-		plan.droppedConfig = config
-	} else {
-		plan.config = config
+		root: target.root, config: config,
 	}
 	for _, name := range configuration.SortedCheckpointNames(declared) {
 		step, err := plan.planCheckpoint(name)
@@ -292,24 +289,30 @@ func (target hookInstallTarget) configArgument() (string, error) {
 	return configurationArgument(path), err
 }
 
-// committed reports whether the hooks live in files the team shares: a hook
-// tool's configuration or a core.hooksPath that resolves inside the work tree
-// and that git does not ignore. git matches an ignored directory that does not
-// exist yet only through a path inside it, so a hooks directory is checked by
-// a hook file in it.
-func (target hookInstallTarget) committed(tool hookTool, location string) bool {
-	if tool == hookToolPlain {
+// hookConfig is the --config argument the hook file at path carries.
+func (plan *hookInstallPlan) hookConfig(path string) string {
+	if !plan.committed(path) {
+		return plan.config
+	}
+	if plan.config != "" && !slices.Contains(plan.shared, path) {
+		plan.shared = append(plan.shared, path)
+	}
+	return ""
+}
+
+// committed reports whether the team shares the hook file at path: the file
+// it names after symlinks is in the work tree, outside the git directory, and
+// not ignored by git. A plain hook symlinked to a tracked script is shared;
+// a core.hooksPath outside the work tree or ignored by git is not.
+func (plan *hookInstallPlan) committed(path string) bool {
+	target, err := linkTarget(path)
+	if err != nil {
 		return false
 	}
-	relative, err := filepath.Rel(resolvedPath(target.root), resolvedPath(location))
+	relative, err := filepath.Rel(resolvedPath(plan.root), resolvedPath(target))
 	inside := err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
-	if !inside {
-		return false
-	}
-	if tool == hookToolHusky || tool == hookToolHooksPath {
-		relative = filepath.Join(relative, string(configuration.CheckpointPrePush))
-	}
-	return !subject.IgnoresPath(target.root, relative)
+	gitDirectory := relative == ".git" || strings.HasPrefix(relative, ".git"+string(filepath.Separator))
+	return inside && !gitDirectory && !subject.IgnoresPath(plan.root, relative)
 }
 
 // resolvedPath resolves symlinks in the longest existing prefix of path, so a
@@ -353,14 +356,20 @@ func (plan *hookInstallPlan) pending(path string) ([]byte, bool, error) {
 	return content, true, nil
 }
 
+// hookScript is the hook file git runs, or a hook tool sources, for a
+// Checkpoint.
+func (plan *hookInstallPlan) hookScript(name configuration.CheckpointName) string {
+	return filepath.Join(plan.location, string(name))
+}
+
 func (plan *hookInstallPlan) planHookScript(name configuration.CheckpointName) (hookInstallStep, error) {
-	path := filepath.Join(plan.location, string(name))
+	path := plan.hookScript(name)
 	content, found, err := plan.pending(path)
 	if err != nil {
 		return hookInstallStep{}, err
 	}
 	step := hookInstallStep{checkpoint: name, path: path}
-	block := checkpointHookBlock(name, plan.config)
+	block := checkpointHookBlock(name, plan.hookConfig(path))
 	if !found {
 		step.outcome = hookCreated
 		plan.writes[path] = []byte("#!/bin/sh\n" + block)
@@ -386,7 +395,7 @@ func (plan *hookInstallPlan) planHookScript(name configuration.CheckpointName) (
 // hookScriptCall is what to add by hand to a hook the shell block cannot
 // run in.
 func (plan *hookInstallPlan) hookScriptCall(name configuration.CheckpointName) []string {
-	command := "review-party checkpoint hook git " + string(name) + plan.config
+	command := "review-party checkpoint hook git " + string(name) + plan.hookConfig(plan.hookScript(name))
 	if name == configuration.CheckpointPrePush {
 		command += " -- <remote> <url>"
 	}
@@ -504,12 +513,12 @@ func runsInPosixShell(shebang []string) bool {
 // ending the heredoc early.
 func (plan *hookInstallPlan) lefthookCommand(name configuration.CheckpointName) string {
 	if name == configuration.CheckpointPreCommit {
-		run := hookCommand{name, "review-party checkpoint hook git pre-commit" + plan.config}.guarded()
+		run := hookCommand{name, "review-party checkpoint hook git pre-commit" + plan.hookConfig(plan.location)}.guarded()
 		return "pre-commit:\n  commands:\n    review-party-checkpoint:\n      run: " + yamlSingleQuoted(run) + "\n"
 	}
 	run := []string{
 		"review_party_remote=$(cat <<'REVIEW_PARTY_REMOTE'", ":{1}", "REVIEW_PARTY_REMOTE", ")",
-		hookCommand{name, "review-party checkpoint hook git pre-push" + plan.config + ` -- "${review_party_remote#:}"`}.guarded(),
+		hookCommand{name, "review-party checkpoint hook git pre-push" + plan.hookConfig(plan.location) + ` -- "${review_party_remote#:}"`}.guarded(),
 	}
 	return "pre-push:\n  commands:\n    review-party-checkpoint:\n      run: |\n        " + strings.Join(run, "\n        ") + "\n      use_stdin: true\n"
 }
@@ -606,7 +615,7 @@ func (plan *hookInstallPlan) preCommitFrameworkEntry(name configuration.Checkpoi
 		command = `printf "%s %s %s %s\n" "$PRE_COMMIT_LOCAL_BRANCH" "$PRE_COMMIT_TO_REF" "$PRE_COMMIT_REMOTE_BRANCH" "$PRE_COMMIT_FROM_REF" | review-party checkpoint hook git pre-push`
 		arguments = ` -- "$PRE_COMMIT_REMOTE_NAME"`
 	}
-	return "entry: " + yamlSingleQuoted("sh -c "+shellQuoteArgument(hookCommand{name, command + plan.config + arguments}.guarded()))
+	return "entry: " + yamlSingleQuoted("sh -c "+shellQuoteArgument(hookCommand{name, command + plan.hookConfig(plan.location) + arguments}.guarded()))
 }
 
 func (plan *hookInstallPlan) preCommitFrameworkSnippet(name configuration.CheckpointName) []string {
@@ -653,8 +662,8 @@ func (plan hookInstallPlan) render(output *commandOutput) {
 	if plan.missingBinary {
 		output.write("warning: review-party is not on PATH; the hooks warn and allow until it is\n")
 	}
-	if plan.droppedConfig != "" {
-		output.write("warning: %s hooks are shared with the team, so they load each Caller's default configuration, not%s\n", plan.tool, plan.droppedConfig)
+	for _, path := range plan.shared {
+		output.write("warning: %s is shared with the team, so it loads each Caller's default configuration, not%s\n", path, plan.config)
 	}
 }
 

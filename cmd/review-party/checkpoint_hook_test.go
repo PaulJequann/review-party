@@ -446,6 +446,7 @@ func TestCheckpointInstallCarriesTheCallersConfigurationOnlyIntoPerCloneHooks(t 
 	}
 	carried := " --config '" + config + "'"
 	wrote := "Wrote 1 hook file(s)."
+	shared := "is shared with the team, so it loads each Caller's default configuration, not" + carried + "\n"
 	cases := []struct {
 		name, config, hook, carried, stdout string
 		setup                               func(hookInstallFixture)
@@ -464,7 +465,13 @@ func TestCheckpointInstallCarriesTheCallersConfigurationOnlyIntoPerCloneHooks(t 
 			fixture.linkOutside(".husky")
 			activateHusky(fixture)
 		}},
-		{name: "husky", config: config, hook: ".husky/pre-commit", stdout: "warning: husky hooks are shared with the team, so they load each Caller's default configuration, not" + carried + "\n", setup: activateHusky},
+		{name: "husky", config: config, hook: ".husky/pre-commit", stdout: shared, setup: activateHusky},
+		{name: "plain hook symlinked to a script in the work tree", config: config, hook: "scripts/pre-commit", stdout: shared, setup: func(fixture hookInstallFixture) {
+			fixture.writeFile("scripts/pre-commit", "#!/bin/sh\n")
+			if err := os.Symlink("../../scripts/pre-commit", filepath.Join(fixture.repository, ".git", "hooks", "pre-commit")); err != nil {
+				t.Fatal(err)
+			}
+		}},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {

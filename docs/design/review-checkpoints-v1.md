@@ -239,10 +239,12 @@ go through a configuration Plan, because hook files are not Review Party
 configuration. husky and lefthook files are committed, so their edit reaches
 the team when the Caller commits it. A hook in plain `.git/hooks`, or in a
 `core.hooksPath` that is outside the work tree or ignored by git, belongs to
-one clone. It carries the installing Caller's `--config` as an absolute path,
-because git runs hooks from the work tree root. A committed hook never does,
-because each teammate loads their own configuration, and the installer warns
-when `--config` is dropped. A rerun with another `--config` regenerates a
+one clone. The installer decides this for each file it writes, after
+following symlinks, so a plain hook linked to a script in the work tree counts
+as shared. A per-clone file carries the installing Caller's `--config` as an
+absolute path, because git runs hooks from the work tree root. A shared file
+never does, because each teammate loads their own configuration, and the
+installer warns for each file that drops `--config`. A rerun with another `--config` regenerates a
 block the installer generated, and init reports such a block as loading
 another configuration. A block that differs in any other way counts as edited
 and its text is left alone. Installing into an existing hook script, including
