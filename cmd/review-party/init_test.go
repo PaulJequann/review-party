@@ -278,7 +278,8 @@ func TestInitWithoutATerminalNamesTheHuskyActivationStep(t *testing.T) {
 		t.Fatalf("setup exit = %d, stderr = %q", exit, stderr)
 	}
 	fixture.declareCheckpoints(t, configuration.CheckpointPrePush)
-	if err := os.Mkdir(filepath.Join(fixture.repository, ".husky"), 0o755); err != nil {
+	wrapper := filepath.Join(fixture.repository, ".husky", "_", "pre-push")
+	if err := os.MkdirAll(filepath.Dir(wrapper), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	fixture.installHooks(t)
@@ -288,6 +289,12 @@ func TestInitWithoutATerminalNamesTheHuskyActivationStep(t *testing.T) {
 	}
 	if output, err := exec.Command("git", "-C", fixture.repository, "config", "core.hooksPath", ".husky/_").CombinedOutput(); err != nil {
 		t.Fatalf("activate husky: %v: %s", err, output)
+	}
+	if _, stdout, _ := fixture.run(t, commandIO{}); stdout != ready+"Checkpoint pre-push git hook does not run until husky is active in this clone: npx husky\n" {
+		t.Fatalf("husky without its wrapper stdout = %q", stdout)
+	}
+	if err := os.WriteFile(wrapper, []byte("#!/usr/bin/env sh\n. \"${0%/*}/h\"\n"), 0o755); err != nil {
+		t.Fatal(err)
 	}
 	if _, stdout, _ := fixture.run(t, commandIO{}); stdout != ready {
 		t.Fatalf("active husky stdout = %q, want %q", stdout, ready)

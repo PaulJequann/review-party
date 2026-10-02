@@ -389,16 +389,24 @@ func TestCheckpointInstallNamesTheHuskyActivationStep(t *testing.T) {
 	if got := fixture.install().stdout; got != inserted+"  git does not run it in this clone until you run: npx husky\n" {
 		t.Fatalf("inactive husky stdout = %q", got)
 	}
-	for _, hooksPath := range []string{".husky", ".husky/_"} {
-		fixture.git("config", "core.hooksPath", hooksPath)
-		if got := fixture.install().stdout; got != inserted {
-			t.Fatalf("husky at %s stdout = %q", hooksPath, got)
-		}
+	fixture.git("config", "core.hooksPath", ".husky")
+	if got := fixture.install().stdout; got != inserted {
+		t.Fatalf("husky at .husky stdout = %q", got)
+	}
+	fixture.git("config", "core.hooksPath", ".husky/_")
+	if got := fixture.install().stdout; got != inserted+"  git does not run it in this clone until you run: npx husky\n" {
+		t.Fatalf("husky 9 without its wrapper stdout = %q", got)
+	}
+	activateHusky(fixture)
+	if got := fixture.install().stdout; got != inserted {
+		t.Fatalf("husky 9 stdout = %q", got)
 	}
 }
 
 func activateHusky(fixture hookInstallFixture) {
-	fixture.writeFile(".husky/_/h", "")
+	for _, name := range configuration.CheckpointNames() {
+		fixture.writeExecutable(".husky/_/"+string(name), "#!/usr/bin/env sh\n. \"${0%/*}/h\"\n")
+	}
 	fixture.git("config", "core.hooksPath", ".husky/_")
 }
 

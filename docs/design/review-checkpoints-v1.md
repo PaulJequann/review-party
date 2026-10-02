@@ -230,10 +230,12 @@ the call into a usage error that allows the push. lefthook, husky, and the
 pre-commit framework run only after each clone installs them, so the
 installer and init print `lefthook install` when git's hook is not an
 executable file that calls lefthook, `npx husky` when git's hooks directory is
-not `.husky` or `.husky/_`, and `pre-commit install --hook-type <checkpoint>`
-when git's hook is not an executable file that pre-commit generated. A symlinked hook is written at its target, even a
-target that does not exist yet, so the link survives. These edits go straight to disk after confirmation. They do not go
-through a configuration Plan, because hook files are not Review Party
+neither `.husky` nor a `.husky/_` holding the executable wrapper husky 9
+generates for the hook, and `pre-commit install --hook-type <checkpoint>` when
+git's hook is not an executable file that pre-commit generated. A symlinked
+hook is written at its target, even a target that does not exist yet, so the
+link survives. These edits go straight to disk after confirmation. They do not
+go through a configuration Plan, because hook files are not Review Party
 configuration. husky and lefthook files are committed, so their edit reaches
 the team when the Caller commits it. A hook in plain `.git/hooks`, or in a
 `core.hooksPath` that is outside the work tree or ignored by git, belongs to
