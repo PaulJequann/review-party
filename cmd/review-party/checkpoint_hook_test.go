@@ -179,7 +179,7 @@ func TestCheckpointInstallKeepsAnExistingPrePushHookAndItsInput(t *testing.T) {
 		"Wrote 1 hook file(s).\n"
 	assertRun(t, installed, commandRun{stdout: want})
 	content := fixture.read(".git/hooks/pre-push")
-	if want := "#!/bin/sh\n" + checkpointHookBlock(configuration.CheckpointPrePush, "") + "# team hook\ncat > hook-saw\n"; content != want {
+	if want := "#!/bin/sh\n" + checkpointHookBlock(configuration.CheckpointPrePush) + "# team hook\ncat > hook-saw\n"; content != want {
 		t.Fatalf("hook = %q, want %q", content, want)
 	}
 
@@ -280,7 +280,7 @@ func TestCheckpointInstallCreatesMissingHooksWhereTheToolRunsThem(t *testing.T) 
 			if mode := info.Mode().Perm(); mode != 0o755 {
 				t.Fatalf("created hook mode = %v", mode)
 			}
-			if content, want := fixture.read(test.hook), "#!/bin/sh\n"+checkpointHookBlock(configuration.CheckpointPreCommit, ""); content != want {
+			if content, want := fixture.read(test.hook), "#!/bin/sh\n"+checkpointHookBlock(configuration.CheckpointPreCommit); content != want {
 				t.Fatalf("created hook = %q, want %q", content, want)
 			}
 		})
@@ -301,90 +301,41 @@ func TestCheckpointInstallNeedsConfirmationToWrite(t *testing.T) {
 	}
 }
 
-func TestCheckpointInstallExtendsLefthookOnlyWhereTheHookIsFree(t *testing.T) {
-	fixture := newHookInstallFixture(t, configuration.CheckpointPrePush, configuration.CheckpointPreCommit)
+func TestCheckpointInstallPrintsTheLefthookSnippetWithoutEditingTheFile(t *testing.T) {
+	fixture := newHookInstallFixture(t, configuration.CheckpointPrePush)
 	fixture.provideStandIn()
 	existing := "pre-commit:\n  commands:\n    lint:\n      run: make lint\n"
 	fixture.writeFile("lefthook.yml", existing)
+	fixture.writeExecutable(".git/hooks/pre-push", "#!/bin/sh\ncall_lefthook run \"pre-push\" \"$@\"\n")
 	config := filepath.Join(fixture.repository, "lefthook.yml")
+	manual := "pre-push: add by hand to " + config + " (lefthook)\n  " + strings.ReplaceAll(strings.TrimSuffix(lefthookPrePushEntry(), "\n"), "\n", "\n  ") + "\n"
 
-	result := fixture.install("--yes")
-	activate := "  git does not run it in this clone until you run: lefthook install\n"
-	manual := "pre-commit: add by hand to " + config + " (lefthook)\n" +
-		"  pre-commit:\n    commands:\n      review-party-checkpoint:\n        run: '" + hookCommand{configuration.CheckpointPreCommit, "review-party checkpoint hook git pre-commit"}.guarded() + "'\n"
-	want := "pre-push: add a review-party-checkpoint command to " + config + " (lefthook)\n" + activate + manual + activate +
-		"Wrote 1 hook file(s).\n"
-	assertRun(t, result, commandRun{stdout: want})
-	if appended := existing + "\n" + lefthookPrePushEntry(""); fixture.read("lefthook.yml") != appended {
+	assertRun(t, fixture.install("--yes"), commandRun{stdout: manual})
+	if fixture.read("lefthook.yml") != existing {
 		t.Fatalf("lefthook.yml = %q", fixture.read("lefthook.yml"))
 	}
-	for _, name := range []string{"pre-push", "pre-commit"} {
-		fixture.writeExecutable(".git/hooks/"+name, "#!/bin/sh\ncall_lefthook run \""+name+"\" \"$@\"\n")
-	}
-	assertRun(t, fixture.install("--yes"), commandRun{stdout: "pre-push: already installed in " + config + " (lefthook)\n" + manual})
+	fixture.writeFile("lefthook.yml", existing+"# "+strings.ReplaceAll(lefthookPrePushEntry(), "\n", "\n# "))
+	assertRun(t, fixture.install("--yes"), commandRun{stdout: manual})
+	fixture.writeFile("lefthook.yml", existing+lefthookPrePushEntry())
+	assertRun(t, fixture.install("--yes"), commandRun{stdout: "pre-push: already installed in " + config + " (lefthook)\n"})
 }
 
-func TestCheckpointInstallCountsOnlyARootLefthookEntryAsInstalled(t *testing.T) {
-	for name, existing := range map[string]string{
-		"commented": "# " + lefthookPrePushEntry(""),
-		"other key": "old-" + lefthookPrePushEntry(""),
-	} {
-		t.Run(name, func(t *testing.T) {
-			fixture := newHookInstallFixture(t, configuration.CheckpointPrePush)
-			fixture.provideStandIn()
-			fixture.writeFile("lefthook.yml", existing)
-			fixture.writeExecutable(".git/hooks/pre-push", "#!/bin/sh\ncall_lefthook run \"pre-push\" \"$@\"\n")
-			if result := fixture.install("--yes"); result.exit != 0 || strings.Contains(result.stdout, "already installed") {
-				t.Fatalf("an inactive lefthook entry counted as installed: %+v", result)
-			}
-		})
-	}
-}
-
-// lefthookPrePushEntry is the pre-push entry the installer appends to
-// lefthook.yml, carrying config as the --config argument.
-func lefthookPrePushEntry(config string) string {
+// lefthookPrePushEntry is the pre-push snippet install prints for lefthook.
+func lefthookPrePushEntry() string {
 	return "pre-push:\n  commands:\n    review-party-checkpoint:\n      run: |\n" +
 		"        review_party_remote=$(cat <<'REVIEW_PARTY_REMOTE'\n        :{1}\n        REVIEW_PARTY_REMOTE\n        )\n" +
-		"        " + hookCommand{configuration.CheckpointPrePush, "review-party checkpoint hook git pre-push" + config + ` -- "${review_party_remote#:}"`}.guarded() + "\n" +
+		"        " + hookCommand{configuration.CheckpointPrePush, `review-party checkpoint hook git pre-push -- "${review_party_remote#:}"`}.guarded() + "\n" +
 		"      use_stdin: true\n"
 }
 
-func TestCheckpointInstalledLefthookCommandPassesHookArgumentsLiterally(t *testing.T) {
+func TestCheckpointLefthookSnippetPassesHookArgumentsLiterally(t *testing.T) {
 	fixture := newHookInstallFixture(t, configuration.CheckpointPrePush)
 	fixture.writeFile("lefthook.yml", "")
-	assertRunContains(t, fixture.install("--yes"), commandRun{stdout: "Wrote 1 hook file(s)."})
+	snippet := fixture.install("--yes").stdout
 	for _, remote := range []string{"it's $HOME; `true`", "REVIEW_PARTY_REMOTE", "/tmp/a b/remote.git"} {
-		if got, want := fixture.runManagerCommand(fixture.read("lefthook.yml"), "run: ", remote, "url"), "checkpoint\nhook\ngit\npre-push\n--\n"+remote+"\n"; got != want {
+		if got, want := fixture.runManagerCommand(snippet, "run: ", remote, "url"), "checkpoint\nhook\ngit\npre-push\n--\n"+remote+"\n"; got != want {
 			t.Fatalf("hook arguments = %q, want %q", got, want)
 		}
-	}
-}
-
-func TestCheckpointInstallPrintsTheSnippetForAPreCommitEntryThatLoadsAnotherConfiguration(t *testing.T) {
-	fixture := newHookInstallFixture(t, configuration.CheckpointPreCommit)
-	fixture.provideStandIn()
-	outside := filepath.Join(t.TempDir(), ".pre-commit-config.yaml")
-	if err := os.WriteFile(outside, nil, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(outside, filepath.Join(fixture.repository, ".pre-commit-config.yaml")); err != nil {
-		t.Fatal(err)
-	}
-	first, second := filepath.Join(t.TempDir(), "first.json"), filepath.Join(t.TempDir(), "second.json")
-	snippet, _, _ := strings.Cut(fixture.install("--yes", "--config", first).stdout, "\n  git does not run")
-	_, snippet, _ = strings.Cut(snippet, "\n")
-	fixture.writeFile(".pre-commit-config.yaml", "repos:\n"+strings.ReplaceAll(snippet, "\n  ", "\n")+"\n")
-	fixture.writeExecutable(".git/hooks/pre-commit", "# File generated by pre-commit: https://pre-commit.com\n")
-	if got := fixture.install("--yes", "--config", first).stdout; !strings.Contains(got, "already installed") {
-		t.Fatalf("install with the entry's --config = %q", got)
-	}
-	if got := fixture.install("--yes", "--config", second).stdout; !strings.Contains(got, "add by hand") || !strings.Contains(got, shellQuoteArgument(second)) {
-		t.Fatalf("install with another --config = %q, want the snippet carrying %s", got, second)
-	}
-	fixture.writeFile(".pre-commit-config.yaml", strings.Replace(fixture.read(".pre-commit-config.yaml"), "entry: ", "# entry: ", 1))
-	if got := fixture.install("--yes", "--config", first).stdout; !strings.Contains(got, "add by hand") {
-		t.Fatalf("install with the entry commented out = %q, want the snippet", got)
 	}
 }
 
@@ -455,97 +406,12 @@ func TestCheckpointInstalledHookForwardsARemoteNamedLikeAnOption(t *testing.T) {
 	}
 }
 
-func TestCheckpointInstallCarriesTheCallersConfigurationOnlyIntoPerCloneHooks(t *testing.T) {
-	config := filepath.Join(t.TempDir(), "my config.json")
-	absolute, err := filepath.Abs("relative.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	carried := " --config '" + config + "'"
-	wrote := "Wrote 1 hook file(s)."
-	shared := "is shared with the team, so it loads each Caller's default configuration, not" + carried + "\n"
-	cases := []struct {
-		name, config, hook, carried, stdout string
-		setup                               func(hookInstallFixture)
-	}{
-		{name: "plain hook", config: config, hook: ".git/hooks/pre-commit", carried: carried, stdout: wrote},
-		{name: "relative --config", config: "relative.json", hook: ".git/hooks/pre-commit", carried: " --config " + shellQuoteArgument(absolute), stdout: wrote},
-		{name: "hooksPath symlinked outside the work tree", config: config, hook: ".githooks/pre-commit", carried: carried, stdout: wrote, setup: func(fixture hookInstallFixture) {
-			fixture.linkOutside(".githooks")
-			fixture.git("config", "core.hooksPath", ".githooks")
-		}},
-		{name: "gitignored hooksPath in the work tree", config: config, hook: ".githooks/pre-commit", carried: carried, stdout: wrote, setup: func(fixture hookInstallFixture) {
-			fixture.writeFile(".gitignore", ".githooks/\n")
-			fixture.git("config", "core.hooksPath", ".githooks")
-		}},
-		{name: "husky symlinked outside the work tree", config: config, hook: ".husky/pre-commit", carried: carried, stdout: wrote, setup: func(fixture hookInstallFixture) {
-			fixture.linkOutside(".husky")
-			activateHusky(fixture)
-		}},
-		{name: "husky", config: config, hook: ".husky/pre-commit", stdout: shared, setup: activateHusky},
-		{name: "plain hook symlinked to a script in the work tree", config: config, hook: "scripts/pre-commit", stdout: shared, setup: func(fixture hookInstallFixture) {
-			fixture.writeFile("scripts/pre-commit", "#!/bin/sh\n")
-			if err := os.Symlink("../../scripts/pre-commit", filepath.Join(fixture.repository, ".git", "hooks", "pre-commit")); err != nil {
-				t.Fatal(err)
-			}
-		}},
-	}
-	for _, test := range cases {
-		t.Run(test.name, func(t *testing.T) {
-			fixture := newHookInstallFixture(t, configuration.CheckpointPreCommit)
-			fixture.provideStandIn()
-			if test.setup != nil {
-				test.setup(fixture)
-			}
-			assertRunContains(t, fixture.install("--yes", "--config", test.config), commandRun{stdout: test.stdout})
-			if content, want := fixture.read(test.hook), "#!/bin/sh\n"+checkpointHookBlock(configuration.CheckpointPreCommit, test.carried); content != want {
-				t.Fatalf("hook = %q, want %q", content, want)
-			}
-		})
-	}
-}
-
-func TestCheckpointInstallUpdatesTheConfigurationAGeneratedBlockCarries(t *testing.T) {
-	fixture := newHookInstallFixture(t, configuration.CheckpointPrePush)
+func TestCheckpointInstallWarnsThatHooksLoadTheDefaultConfiguration(t *testing.T) {
+	fixture := newHookInstallFixture(t, configuration.CheckpointPreCommit)
 	fixture.provideStandIn()
-	fixture.writeFile(".git/hooks/pre-push", "#!/bin/sh\n# team hook\n")
-	hookPath := filepath.Join(fixture.repository, ".git", "hooks", "pre-push")
-	first, second := filepath.Join(t.TempDir(), "first.json"), filepath.Join(t.TempDir(), "second.json")
-	assertRunContains(t, fixture.install("--yes", "--config", first), commandRun{stdout: "Wrote 1 hook file(s)."})
-
-	for _, carried := range []string{configurationArgument(second), ""} {
-		arguments := []string{"--yes"}
-		if carried != "" {
-			arguments = append(arguments, "--config", second)
-		}
-		assertRun(t, fixture.install(arguments...), commandRun{stdout: "pre-push: update the --config of the review-party block in " + hookPath + " (git hooks)\nWrote 1 hook file(s).\n"})
-		if content, want := fixture.read(".git/hooks/pre-push"), "#!/bin/sh\n"+checkpointHookBlock(configuration.CheckpointPrePush, carried)+"# team hook\n"; content != want {
-			t.Fatalf("hook = %q, want %q", content, want)
-		}
-	}
-}
-
-func TestCheckpointInstallCarriesTheCallersConfigurationIntoPerCloneManagerFiles(t *testing.T) {
-	config := filepath.Join(t.TempDir(), "it's my config.json")
-	for file, key := range map[string]string{"lefthook.yml": "run: ", ".pre-commit-config.yaml": "entry: "} {
-		t.Run(file, func(t *testing.T) {
-			fixture := newHookInstallFixture(t, configuration.CheckpointPrePush)
-			outside := filepath.Join(t.TempDir(), file)
-			if err := os.WriteFile(outside, nil, 0o644); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.Symlink(outside, filepath.Join(fixture.repository, file)); err != nil {
-				t.Fatal(err)
-			}
-			result := fixture.install("--yes", "--config", config)
-			if strings.Contains(result.stdout, "shared with the team") {
-				t.Fatalf("a %s outside the work tree was treated as shared: %+v", file, result)
-			}
-			if got := fixture.runManagerCommand(fixture.read(file)+result.stdout, key); !strings.HasPrefix(got, "checkpoint\nhook\ngit\npre-push\n--config\n"+config+"\n--\n") {
-				t.Fatalf("%s command arguments = %q, want --config %s", file, got, config)
-			}
-		})
-	}
+	config := filepath.Join(t.TempDir(), "my config.json")
+	warning := "warning: the hooks load each Caller's default Global Configuration, not --config '" + config + "'\n"
+	assertRunContains(t, fixture.install("--yes", "--config", config), commandRun{stdout: warning})
 }
 
 // runManagerCommand runs the YAML command after key in text through sh, the
@@ -613,15 +479,6 @@ func (fixture hookInstallFixture) recordArguments(command string) string {
 	return string(received)
 }
 
-// linkOutside makes name in the work tree a symlink to a new directory
-// outside it.
-func (fixture hookInstallFixture) linkOutside(name string) {
-	fixture.t.Helper()
-	if err := os.Symlink(fixture.t.TempDir(), filepath.Join(fixture.repository, name)); err != nil {
-		fixture.t.Fatal(err)
-	}
-}
-
 func TestCheckpointInstallMakesAnExistingHookExecutable(t *testing.T) {
 	fixture := newHookInstallFixture(t, configuration.CheckpointPrePush)
 	fixture.provideStandIn()
@@ -680,7 +537,7 @@ func (fixture hookInstallFixture) installThroughLink() {
 	if info, err := os.Lstat(hook); err != nil || info.Mode()&fs.ModeSymlink == 0 {
 		t.Fatalf("hook is no longer a symlink: %v %v", info, err)
 	}
-	if script := fixture.read("scripts/pre-push"); !strings.Contains(script, checkpointHookBlock(configuration.CheckpointPrePush, "")) {
+	if script := fixture.read("scripts/pre-push"); !strings.Contains(script, checkpointHookBlock(configuration.CheckpointPrePush)) {
 		t.Fatalf("linked script was not edited:\n%s", script)
 	}
 	entries, err := os.ReadDir(filepath.Join(fixture.repository, "scripts"))
@@ -723,25 +580,5 @@ func TestCheckpointInstallLeavesAHookForAnotherInterpreterToTheCaller(t *testing
 					"  " + command + "\n"})
 			}
 		})
-	}
-}
-
-func TestCheckpointInstallLeavesLefthookFilesItCannotExtendToTheCaller(t *testing.T) {
-	for _, existing := range []string{
-		"'pre-push':\n  commands:\n    lint:\n      run: make lint\n",
-		"\"pre-push\":\n  commands:\n    lint:\n      run: make lint\n",
-		"{pre-push: {commands: {lint: {run: make lint}}}}\n",
-		"  pre-push:\n    commands:\n      lint:\n        run: make lint\n",
-		"# hooks\n  pre-commit:\n    commands:\n      lint:\n        run: make lint\n",
-		"pre-commit:\n  commands:\n    lint:\n      run: make lint\n...\n",
-		"pre-commit:\n  commands:\n    lint:\n      run: make lint\n---\nother: true\n",
-	} {
-		fixture := newHookInstallFixture(t, configuration.CheckpointPrePush)
-		fixture.provideStandIn()
-		fixture.writeFile("lefthook.yml", existing)
-		result := fixture.install("--yes")
-		if !strings.HasPrefix(result.stdout, "pre-push: add by hand to ") || fixture.read("lefthook.yml") != existing {
-			t.Fatalf("install over %q = %+v, lefthook.yml = %q", existing, result, fixture.read("lefthook.yml"))
-		}
 	}
 }

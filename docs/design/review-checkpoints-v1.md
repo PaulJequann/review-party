@@ -96,9 +96,9 @@ installed files do not change when the logic changes.
 Git hooks are added through the manager the repository already uses, and
 existing hook lines are never overwritten or reordered:
 
-- **lefthook, husky, pre-commit:** a step is added to the committed config
-  where the installer can do so without rewriting a line, or printed to add by
-  hand. Slice 3 decisions below give the exact rules.
+- **husky:** a marked block is inserted into the committed hook script.
+- **lefthook, pre-commit:** a snippet is printed to add to the committed
+  config by hand. Slice 3 decisions below give the exact rules.
 - **`core.hooksPath` or plain `.git/hooks`:** a marked block is inserted into
   `pre-push`, or the file is created. This is per clone, so each Caller's
   `init` installs it. Linked worktrees share the common hooks directory.
@@ -198,58 +198,37 @@ installed form stops git only on exit 1. Any other status, such as a usage
 error from a `review-party` that predates `checkpoint hook`, warns with the
 status and allows.
 
-**Hook tools.** The installer edits only files whose format it can extend
-without rewriting a line. Plain hooks, `core.hooksPath`, and husky get a
-marked block after the shebang, or a new `#!/bin/sh` file with mode 0755. A
-compiled hook, or one whose shebang names an interpreter other than a POSIX
-shell, gets a printed command to call by hand instead. The pre-push command
-names the arguments to pass after `--`. The pre-push block captures git's ref
-lines and feeds them back as standard input, so a hook that reads them still
-receives them byte for byte. lefthook YAML gains a `review-party-checkpoint`
-command, with `use_stdin: true` for pre-push, only when its root is a block
-mapping at column zero and no line is a key for that hook, plain or quoted. A
-lefthook file that already has the key, or is TOML or JSON, gets a printed
-snippet to add by hand. lefthook pastes the hook's arguments into the shell
-text unquoted, so the pre-push command reads the remote, `{1}`, from a quoted
-heredoc with a `:` before it, which keeps a remote named like the delimiter
-from ending the heredoc. The hook does not use the URL, so the command does
-not pass it. git refuses a remote name with a newline. A push to a raw path
-or URL is passed whole unless one of its lines is exactly
-`REVIEW_PARTY_REMOTE`. Only the person pushing can type that, and
-`--no-verify` already skips the hook for them.
-lefthook skips a pre-push command when `HEAD` has no file changes against
-`@{push}`, so it does not check a push of another branch from an up-to-date
-`HEAD`. The installer does not merge YAML. The pre-commit framework gets a
-printed `repo: local` snippet until a line of its configuration that is not a
-comment holds the snippet's `entry`, so an entry that loads another `--config`
-gets the current snippet. That
-framework passes pre-push facts as `PRE_COMMIT_*` variables rather than git's
-ref lines, so the snippet rebuilds one ref line from them. Every form passes
-the hook's arguments after `--`, so a remote named like an option cannot turn
-the call into a usage error that allows the push. lefthook, husky, and the
-pre-commit framework run only after each clone installs them, so the
-installer and init print `lefthook install` when git's hook is not an
-executable file that calls lefthook, `npx husky` when git's hooks directory is
-neither `.husky` nor a `.husky/_` holding the executable wrapper husky 9
-generates for the hook, and `pre-commit install --hook-type <checkpoint>` when
-git's hook is not an executable file that pre-commit generated. A symlinked
-hook is written at its target, even a target that does not exist yet, so the
-link survives. These edits go straight to disk after confirmation. They do not
-go through a configuration Plan, because hook files are not Review Party
-configuration. husky and lefthook files are committed, so their edit reaches
-the team when the Caller commits it. A hook in plain `.git/hooks`, or in a
-`core.hooksPath` that is outside the work tree or ignored by git, belongs to
-one clone. The installer decides this for each file it writes, after
-following symlinks, so a plain hook linked to a script in the work tree counts
-as shared. A per-clone file carries the installing Caller's `--config` as an
-absolute path, because git runs hooks from the work tree root. A shared file
-never does, because each teammate loads their own configuration, and the
-installer warns for each file that drops `--config`. A rerun with another `--config` regenerates a
-block the installer generated, and init reports such a block as loading
-another configuration. A block that differs in any other way counts as edited
-and its text is left alone. Installing into an existing hook script, including
-one with an edited block, also makes it executable, since git skips one that
-is not.
+**Hook tools.** The installer edits only hook scripts. Plain hooks,
+`core.hooksPath`, and husky get a marked block after the shebang, or a new
+`#!/bin/sh` file with mode 0755. A block already present is left alone, and a
+block that differs from the generated one is reported as edited. Installing
+into an existing hook script also makes it executable, since git skips one
+that is not. A compiled hook, or one whose shebang names an interpreter other
+than a POSIX shell, gets a printed command to call by hand instead. The
+pre-push block captures git's ref lines and feeds them back as standard input,
+so a hook that reads them still receives them byte for byte. A symlinked hook
+is written at its target, even a target that does not exist yet, so the link
+survives.
+
+lefthook and the pre-commit framework get a printed snippet, because editing
+YAML without a parser cannot be made safe. A Checkpoint counts as installed
+there when a line that is not a comment calls `review-party checkpoint hook git
+<checkpoint>`. lefthook pastes the hook's arguments into the shell text
+unquoted, so the lefthook pre-push snippet reads the remote from a quoted
+heredoc. The pre-commit framework passes pre-push facts as `PRE_COMMIT_*`
+variables rather than git's ref lines, so its snippet rebuilds one ref line
+from them. Every form passes the hook's arguments after `--`, so a remote named
+like an option cannot turn the call into a usage error that allows the push.
+
+lefthook, husky, and the pre-commit framework run only after each clone
+installs them. The installer and init print `lefthook install`, `npx husky`, or
+`pre-commit install --hook-type <checkpoint>` when git's hook in this clone is
+not the one that tool generates.
+
+Installed hooks never carry `--config`. Each Caller's hook loads that Caller's
+default Global Configuration, and install warns when it was given another one.
+Hook edits go straight to disk after confirmation, not through a configuration
+Plan, because hook files are not Review Party configuration.
 
 ## Open questions
 

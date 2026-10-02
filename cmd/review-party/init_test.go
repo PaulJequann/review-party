@@ -262,9 +262,10 @@ func TestInitWithoutATerminalNamesEachCheckpointWithoutItsGitHook(t *testing.T) 
 	}
 	_, stdout, _ = fixture.run(t, commandIO{})
 	want := ready + "Checkpoint pre-push has no git hook; add to " + lefthook + " (lefthook) by hand:\n" +
-		"  " + strings.ReplaceAll(strings.TrimSuffix(lefthookPrePushEntry(""), "\n"), "\n", "\n  ") + "\n" +
+		"  " + strings.ReplaceAll(strings.TrimSuffix(lefthookPrePushEntry(), "\n"), "\n", "\n  ") + "\n" +
 		"Checkpoint pre-push git hook does not run until lefthook is active in this clone: lefthook install\n" +
-		"Checkpoint pre-commit has no git hook: " + install +
+		"Checkpoint pre-commit has no git hook; add to " + lefthook + " (lefthook) by hand:\n" +
+		"  pre-commit:\n    commands:\n      review-party-checkpoint:\n        run: '" + hookCommand{configuration.CheckpointPreCommit, "review-party checkpoint hook git pre-commit"}.guarded() + "'\n" +
 		"Checkpoint pre-commit git hook does not run until lefthook is active in this clone: lefthook install\n"
 	if stdout != want {
 		t.Fatalf("lefthook stdout = %q, want %q", stdout, want)
@@ -298,26 +299,6 @@ func TestInitWithoutATerminalNamesTheHuskyActivationStep(t *testing.T) {
 	}
 	if _, stdout, _ := fixture.run(t, commandIO{}); stdout != ready {
 		t.Fatalf("active husky stdout = %q, want %q", stdout, ready)
-	}
-}
-
-func TestInitWithoutATerminalNamesAGitHookThatLoadsAnotherConfiguration(t *testing.T) {
-	fixture := newInitFixture(t)
-	fixture.profile(t, configuration.ScopeGlobal, "docs")
-	if exit, _, stderr := fixture.run(t, commandIO{}, "--profile", "docs", "--yes"); exit != 0 {
-		t.Fatalf("setup exit = %d, stderr = %q", exit, stderr)
-	}
-	fixture.declareCheckpoints(t, configuration.CheckpointPrePush)
-	fixture.installHooks(t)
-	hook := filepath.Join(fixture.repository, ".git", "hooks", "pre-push")
-	elsewhere := "#!/bin/sh\n" + checkpointHookBlock(configuration.CheckpointPrePush, configurationArgument("/elsewhere.json"))
-	if err := os.WriteFile(hook, []byte(elsewhere), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	want := "Repository is ready: review-party run --repo " + fixture.repository + "\n" +
-		"Checkpoint pre-push git hook " + hook + " loads another configuration: review-party checkpoint install git --repo " + fixture.repository + "\n"
-	if _, stdout, _ := fixture.run(t, commandIO{}); stdout != want {
-		t.Fatalf("stdout = %q, want %q", stdout, want)
 	}
 }
 

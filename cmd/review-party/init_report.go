@@ -98,12 +98,10 @@ func hookGapLines(step hookInstallStep, tool hookTool, install string) []string 
 		for _, line := range step.manual {
 			lines = append(lines, "  "+line)
 		}
-	case hookCreated, hookInserted, hookAppended:
+	case hookCreated, hookInserted:
 		lines = append(lines, checkpoint+" has no git hook: "+install)
 	case hookNotExecutable:
 		lines = append(lines, checkpoint+" git hook "+step.path+" is not executable, so git skips it: "+install)
-	case hookRefreshed:
-		lines = append(lines, checkpoint+" git hook "+step.path+" loads another configuration: "+install)
 	case hookInstalled, hookEdited:
 	}
 	if step.activate != "" {

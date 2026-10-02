@@ -85,11 +85,3 @@ func ResolveHookLocations(repository string) (HookLocations, error) {
 	}
 	return HookLocations{Directory: location, HooksPath: strings.TrimSuffix(string(hooksPath), "\n")}, nil
 }
-
-// IgnoresPath reports whether git ignores path, relative to the repository
-// root, so a file there stays in this clone. A tracked file is not ignored,
-// and a failed check counts as not ignored.
-func IgnoresPath(repository, path string) bool {
-	_, err := gitOutput(repository, "check-ignore", "-q", "--", path)
-	return err == nil
-}
