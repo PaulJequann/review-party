@@ -41,6 +41,9 @@ line and exit 0, so a broken setup never stops a push or commit.`,
 	}
 	addConfigurationFlag(git)
 	hook.AddCommand(git)
+	for _, adapter := range agentIntegrations {
+		hook.AddCommand(newAgentHookCommand(adapter, streams))
+	}
 	return hook
 }
 
@@ -63,18 +66,13 @@ func executeCheckpointHook(ctx context.Context, options checkpointOptions, hookA
 }
 
 func decideCheckpointHook(ctx context.Context, options checkpointOptions, hookArgs []string, streams commandIO) hookDecision {
-	root, err := subject.ResolveRepositoryRoot(".")
-	if err != nil {
+	root, declared, err := declaredCheckpoint(options, streams)
+	switch {
+	case err != nil:
 		return hookDecision{warning: err}
-	}
-	declared, err := streams.configurationManager(options.configuration).Checkpoints(configuration.Repository(root))
-	if err != nil {
-		return hookDecision{warning: err}
-	}
-	if _, ok := declared[options.name]; !ok {
+	case !declared:
 		return hookDecision{}
-	}
-	if options.name == configuration.CheckpointPreCommit {
+	case options.name == configuration.CheckpointPreCommit:
 		return decideHookContent(ctx, options)
 	}
 	refs, err := readPushedRefs(hookArgs, streams.input)
@@ -82,6 +80,22 @@ func decideCheckpointHook(ctx context.Context, options checkpointOptions, hookAr
 		return hookDecision{warning: err}
 	}
 	return decidePushedRefs(ctx, root, options, refs)
+}
+
+// declaredCheckpoint finds the root of the repository a hook checks and
+// whether it declares the Checkpoint. Every hook stays silent on an
+// undeclared one.
+func declaredCheckpoint(options checkpointOptions, streams commandIO) (string, bool, error) {
+	root, err := subject.ResolveRepositoryRoot(options.repository)
+	if err != nil {
+		return "", false, err
+	}
+	declared, err := streams.configurationManager(options.configuration).Checkpoints(configuration.Repository(root))
+	if err != nil {
+		return "", false, err
+	}
+	_, ok := declared[options.name]
+	return root, ok, nil
 }
 
 // readPushedRefs parses the refs git sends a pre-push hook. Its first
@@ -101,14 +115,14 @@ func readPushedRefs(hookArgs []string, input io.Reader) ([]subject.PushedRef, er
 // decidePushedRefs checks every pushed ref and refuses on the first that does
 // not pass. A ref without a base is allowed with a warning.
 func decidePushedRefs(ctx context.Context, root string, options checkpointOptions, refs []subject.PushedRef) hookDecision {
-	var warnings []string
+	var warnings []error
 	for _, ref := range refs {
 		if ref.Deletes() {
 			continue
 		}
 		base, err := subject.PushedRefBase(root, ref)
 		if err != nil {
-			warnings = append(warnings, err.Error())
+			warnings = append(warnings, err)
 			continue
 		}
 		options.base, options.head = base, ref.LocalObject
@@ -117,13 +131,22 @@ func decidePushedRefs(ctx context.Context, root string, options checkpointOption
 			return decision
 		}
 		if decision.warning != nil {
-			warnings = append(warnings, decision.warning.Error())
+			warnings = append(warnings, decision.warning)
 		}
 	}
+	return joinedWarning(warnings)
+}
+
+// joinedWarning folds the warnings of several checks into one line.
+func joinedWarning(warnings []error) hookDecision {
 	if len(warnings) == 0 {
 		return hookDecision{}
 	}
-	return hookDecision{warning: errors.New(strings.Join(warnings, "; "))}
+	messages := make([]string, 0, len(warnings))
+	for _, warning := range warnings {
+		messages = append(messages, warning.Error())
+	}
+	return hookDecision{warning: errors.New(strings.Join(messages, "; "))}
 }
 
 func decideHookContent(ctx context.Context, options checkpointOptions) hookDecision {
@@ -145,8 +168,11 @@ func decideHookContent(ctx context.Context, options checkpointOptions) hookDecis
 // and the next command, never a judgment of the change.
 func hookRefusal(report checkpointReport) string {
 	scope := "the staged changes"
-	if report.Checkpoint == configuration.CheckpointPrePush {
+	switch {
+	case report.Checkpoint == configuration.CheckpointPrePush:
 		scope = shortObject(report.Base) + ".." + shortObject(report.Head)
+	case report.commit == commitTracked:
+		scope = "the tracked changes"
 	}
 	waiting := "has no completed Review of"
 	if report.nextLabel == "wait" {

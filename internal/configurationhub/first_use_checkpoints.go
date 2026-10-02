@@ -13,13 +13,14 @@ import (
 	"reviewparty/internal/configuration"
 )
 
-// HookInstaller installs the git Integration for every declared Checkpoint.
-// It prints what it would write, asks confirm only when something would be
-// written, and reports the result to the Hub's output.
-type HookInstaller func(confirm func() (bool, error)) error
+// HookInstaller installs one Integration for every declared Checkpoint, into
+// the team's files or, when personal, the Caller's own. It prints what it
+// would write, asks confirm only when something would be written, and reports
+// the result to the Hub's output.
+type HookInstaller func(integration configuration.IntegrationName, personal bool, confirm func() (bool, error)) error
 
 // checkpointsStep shows the declared Checkpoints or offers to declare one,
-// then offers the git Integration for whatever is declared.
+// then offers the Integrations for whatever is declared.
 func (e *editor) checkpointsStep() error {
 	declared, err := e.manager.Checkpoints(e.Repository)
 	switch {
@@ -46,13 +47,14 @@ type checkpointDraft struct {
 	exemptions       string
 	smallChangeLines string
 	waivers          configuration.WaiverPolicy
+	integrations     []configuration.IntegrationName
 }
 
 func (draft checkpointDraft) checkpoint() (configuration.Checkpoint, error) {
 	checkpoint := configuration.NewCheckpoint()
 	checkpoint.ExemptPaths = strings.Fields(draft.exemptions)
 	checkpoint.Waivers = draft.waivers
-	checkpoint.Integrations = []configuration.IntegrationName{configuration.IntegrationGit}
+	checkpoint.Integrations = draft.integrations
 	lines, err := strconv.Atoi(strings.TrimSpace(draft.smallChangeLines))
 	checkpoint.SmallChangeLines = lines
 	return checkpoint, err
@@ -61,7 +63,10 @@ func (draft checkpointDraft) checkpoint() (configuration.Checkpoint, error) {
 // declareCheckpoint offers to declare one Checkpoint and publishes it
 // through its own Plan.
 func (e *editor) declareCheckpoint() error {
-	draft := checkpointDraft{name: configuration.CheckpointPrePush, smallChangeLines: "0", waivers: configuration.WaiversHuman}
+	draft := checkpointDraft{
+		name: configuration.CheckpointPrePush, smallChangeLines: "0", waivers: configuration.WaiversHuman,
+		integrations: append([]configuration.IntegrationName{configuration.IntegrationGit}, e.AgentsOnPath...),
+	}
 	choice := huh.NewSelect[configuration.CheckpointName]().
 		Title("Which Review Checkpoint should this repository declare?").
 		Options(
@@ -80,6 +85,8 @@ func (e *editor) declareCheckpoint() error {
 			huh.NewOption("anyone: any caller, including agents and scripts", configuration.WaiversAnyone),
 			huh.NewOption("none: only Reviews pass it", configuration.WaiversNone),
 		).Value(&draft.waivers),
+		huh.NewMultiSelect[configuration.IntegrationName]().Title("Which Integrations must every contributor install (the team floor)?").
+			Options(integrationOptions(configuration.IntegrationNames())...).Value(&draft.integrations),
 	); err != nil {
 		return err
 	}
@@ -152,8 +159,24 @@ func (e *editor) selectedDocumentationProfiles() ([]string, error) {
 	return names, nil
 }
 
-// integrationsStep offers the git hooks for the declared Checkpoints,
-// preselecting yes. The installer reports a hook that is already in place.
+// integrationOptions labels Integrations for a multi-select.
+func integrationOptions(integrations []configuration.IntegrationName) []huh.Option[configuration.IntegrationName] {
+	labels := map[configuration.IntegrationName]string{
+		configuration.IntegrationGit:        "git: git hooks",
+		configuration.IntegrationClaudeCode: "claude-code: a Claude Code PreToolUse hook",
+		configuration.IntegrationCodex:      "codex: a Codex PreToolUse hook",
+	}
+	options := make([]huh.Option[configuration.IntegrationName], 0, len(integrations))
+	for _, integration := range integrations {
+		options = append(options, huh.NewOption(labels[integration], integration))
+	}
+	return options
+}
+
+// integrationsStep installs the team floor the declared Checkpoints list,
+// preselecting yes, then offers the Caller Agent hooks outside the floor as
+// personal additions, preselecting the agents on PATH. The installer reports
+// a hook that is already in place.
 func (e *editor) integrationsStep() error {
 	if e.InstallCheckpointHooks == nil {
 		return nil
@@ -162,9 +185,45 @@ func (e *editor) integrationsStep() error {
 	if err != nil || len(declared) == 0 {
 		return err
 	}
-	return e.InstallCheckpointHooks(func() (bool, error) {
+	var personal []configuration.IntegrationName
+	for _, integration := range configuration.IntegrationNames() {
+		switch {
+		case configuration.FloorIntegrates(declared, integration):
+			err = e.InstallCheckpointHooks(integration, false, e.confirmHooks(integration))
+		case integration != configuration.IntegrationGit:
+			personal = append(personal, integration)
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return e.personalIntegrations(personal)
+}
+
+func (e *editor) confirmHooks(integration configuration.IntegrationName) func() (bool, error) {
+	return func() (bool, error) {
 		install := true
-		err := e.form(huh.NewConfirm().Title("Install these git hooks now?").Value(&install))
+		err := e.form(huh.NewConfirm().Title("Install these " + string(integration) + " hooks now?").Value(&install))
 		return install, err
+	}
+}
+
+// personalIntegrations offers Caller Agent hooks for the Caller alone.
+func (e *editor) personalIntegrations(offered []configuration.IntegrationName) error {
+	if len(offered) == 0 {
+		return nil
+	}
+	chosen := slices.DeleteFunc(slices.Clone(offered), func(integration configuration.IntegrationName) bool {
+		return !slices.Contains(e.AgentsOnPath, integration)
 	})
+	if err := e.form(huh.NewMultiSelect[configuration.IntegrationName]().Title("Install agent hooks for yourself only?").
+		Options(integrationOptions(offered)...).Value(&chosen)); err != nil {
+		return err
+	}
+	for _, integration := range chosen {
+		if err := e.InstallCheckpointHooks(integration, true, e.confirmHooks(integration)); err != nil {
+			return err
+		}
+	}
+	return nil
 }

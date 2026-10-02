@@ -9,7 +9,7 @@ inference.
 
 | Agent | Event | Configuration | Refusal | Matches command text |
 |---|---|---|---|---|
-| Claude Code 2.1.285 | `PreToolUse`, matcher `Bash` | `.claude/settings.json` (committed), `.claude/settings.local.json` (local), `~/.claude/settings.json` | exit 2 with stderr, or `permissionDecision: "deny"` with a reason | Yes, through `if: "Bash(git push*)"`, checked per subcommand |
+| Claude Code 2.1.285 | `PreToolUse`, matcher `Bash` | `.claude/settings.json` (committed), `.claude/settings.local.json` (local), `~/.claude/settings.json` | exit 2 with stderr, or `permissionDecision: "deny"` with a reason | Yes, through an `if` rule such as `Bash(git *)`, checked per subcommand after `VAR=value` words are stripped |
 | Codex CLI 0.159.2 | `PreToolUse` | `.codex/hooks.json` or `.codex/config.toml` (project), `~/.codex/...` (user) | exit 2 with stderr, or `permissionDecision: "deny"` | No; the matcher is a regex on the tool name |
 | opencode 1.18.33 | plugin `tool.execute.before` | `.opencode/plugins/` or `~/.config/opencode/plugins/` (JS/TS) | throw an `Error` | Plugin code reads `output.args.command` |
 | Cursor | `beforeShellExecution` | `.cursor/hooks.json`, `~/.cursor/hooks.json` | exit 2, or `permission: "deny"` | Not documented; unconfirmed for `cursor-agent` |
@@ -53,4 +53,12 @@ directory.
 Codex and opencode run the hook on every shell call, so the Integration's
 command must classify the call and exit before loading configuration or the
 ledger for anything that is not a commit or push. Only Claude Code filters in
-configuration.
+configuration. `Bash(git *)` is the narrowest rule that still catches `git -C
+dir push`, which `Bash(git push*)` misses.
+
+Both Claude Code and Codex block on exit 2, and also read a JSON
+`permissionDecision: "deny"` on stdout with exit 0. A CLI exits 2 for reasons
+other than a refusal: Go's runtime exits 2 on a panic, and an older binary
+exits 2 on an unknown subcommand. An Integration that refuses through the JSON
+deny and ends its installed command in `|| true` cannot block a tool call
+through any of those, which keeps a setup gap from blocking.

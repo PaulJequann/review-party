@@ -113,7 +113,18 @@ type checkpointOptions struct {
 	configuration string
 	base          string
 	head          string
+	// commit says which content a pre-commit Checkpoint checks.
+	commit commitScope
 }
+
+// commitScope is the content a commit takes: the index, or every tracked
+// change as git commit -a commits it.
+type commitScope int
+
+const (
+	commitStaged commitScope = iota
+	commitTracked
+)
 
 func checkpointOptionsFromCommand(cmd *cobra.Command, args []string) (checkpointOptions, error) {
 	options := checkpointOptions{
@@ -148,6 +159,7 @@ type checkpointReport struct {
 	NextCommand     string                       `json:"next_command,omitempty"`
 	WaiveCommand    string                       `json:"waive_command,omitempty"`
 	nextLabel       string
+	commit          commitScope
 }
 
 type checkpointExemption struct {
@@ -269,11 +281,14 @@ func pushCheckpointContent(root string, options checkpointOptions) (checkpointCo
 }
 
 func commitCheckpointContent(root string, options checkpointOptions) (checkpointContent, error) {
+	if options.commit == commitTracked {
+		return trackedCheckpointContent(root, options)
+	}
 	staged, err := subject.StagedContentChanges(root)
 	if err != nil {
 		return checkpointContent{}, err
 	}
-	working, err := subject.WorkingContentChanges(root)
+	working, err := subject.WorkingContentChanges(root, subject.AllFiles)
 	if err != nil {
 		return checkpointContent{}, err
 	}
@@ -297,6 +312,24 @@ func (options checkpointOptions) followUpArguments(root string) string {
 		arguments = " --repo " + shellQuoteArgument(root) + arguments
 	}
 	return arguments
+}
+
+// trackedCheckpointContent is what git commit -a commits. No waive command
+// names this content, since checkpoint waive pre-commit waives the index.
+func trackedCheckpointContent(root string, options checkpointOptions) (checkpointContent, error) {
+	tracked, err := subject.WorkingContentChanges(root, subject.TrackedFiles)
+	if err != nil {
+		return checkpointContent{}, err
+	}
+	lines, err := subject.TrackedLineCounts(root)
+	if err != nil {
+		return checkpointContent{}, err
+	}
+	return checkpointContent{
+		report:     checkpointReport{Checkpoint: configuration.CheckpointPreCommit, commit: commitTracked},
+		coverage:   engine.CoverageSubject{Changes: tracked, Lines: lines},
+		runCommand: "review-party run" + options.followUpArguments(root),
+	}, nil
 }
 
 // completeCheckpointReport names one next step for a Checkpoint that does not

@@ -1,6 +1,6 @@
 # Review Checkpoints v1
 
-Status: accepted on 2026-10-01; slices 1 to 3 implemented. Ownership is recorded in
+Status: accepted on 2026-10-01; slices 1 to 4 implemented. Ownership is recorded in
 [ADR 0001](../adr/0001-project-declared-review-checkpoints.md). Hook facts per
 Caller Agent are in
 [Caller Agent hooks](../research/caller-agent-hooks-2026-10-01.md).
@@ -87,8 +87,8 @@ installed files do not change when the logic changes.
 | Integration | Installed into | Command |
 |---|---|---|
 | `git` | The repository's hook manager (see below) | `review-party checkpoint hook git pre-push` |
-| `claude-code` | `.claude/settings.json` (team) or `.claude/settings.local.json` (personal), `PreToolUse` with `if: "Bash(git push*)"` | `review-party checkpoint hook claude-code` |
-| `codex` | `.codex/hooks.json` (team) or `~/.codex/hooks.json` (personal), `PreToolUse` | `review-party checkpoint hook codex` |
+| `claude-code` | `.claude/settings.json` (team) or `.claude/settings.local.json` (personal), one `PreToolUse` entry with `if: "Bash(git *)"` | `review-party checkpoint hook claude-code \|\| true` behind a `command -v` guard that warns |
+| `codex` | `.codex/hooks.json` (team) or `$CODEX_HOME/hooks.json`, by default `~/.codex/hooks.json` (personal), one `PreToolUse` entry with matcher `Bash` | `review-party checkpoint hook codex \|\| true` behind a `command -v` guard |
 | `agents-md` | A marked block in `AGENTS.md`, or `CLAUDE.md` when only that exists | None; advisory text |
 
 `review-party checkpoint check pre-push` gives the same answer without a hook.
@@ -117,22 +117,31 @@ The refusal never calls the change bad. It mentions waivers only when
 
 ### Missing binary
 
-If `review-party` is not on `PATH`, every Integration warns on one line and
-allows the action. A missing binary is a setup gap. Blocking teammates who
-have not installed Review Party would push teams to remove the hooks. Claude
-Code already treats exit 127 as non-blocking; Git hook managers do not, so the
-shim checks `command -v review-party` first.
+If `review-party` is not on `PATH`, every Integration allows the action. A
+missing binary is a setup gap. Blocking teammates who have not installed
+Review Party would push teams to remove the hooks. Every shim checks `command
+-v review-party` first. The git hook and Claude Code warn on one line. The
+Codex entry allows silently, because Codex would print the warning before
+every shell command. `init` reports the missing binary instead. Both agent
+entries also end in `|| true`, so no exit status from an old or broken
+`review-party` blocks a tool call. Slice 4 decisions below give the reasons.
 
 ### Known limits
 
 - Codex matches hooks on tool name only, so the Codex hook runs on every shell
-  command. `checkpoint hook codex` must classify the command and exit before
-  loading configuration or the ledger. `init` warns about this cost. Measure
-  it once integrated, before calling slice 4 done.
+  command. `checkpoint hook codex` classifies the command and exits before
+  loading configuration or the ledger. The installer prints the measured cost,
+  which Slice 4 decisions below record.
 - Codex activates a project hook only after the Caller approves it through
   Codex `/hooks`. `init` reports that step. `doctor` does not read Codex trust
   state.
 - Git hooks are skipped by `--no-verify`. Caller Agent hooks are not.
+- A `review-party` on `PATH` that predates `checkpoint hook` fails on the
+  unknown command, and `|| true` lets the tool call run unchecked without a
+  warning. Its message is on stderr, which Claude Code sends to its debug log
+  when the hook exits 0
+  ([Exit code 0](https://code.claude.com/docs/en/hooks#exit-code-0)). The
+  Codex documentation does not say what Codex does with that stderr.
 
 ### AGENTS.md block
 
@@ -230,12 +239,142 @@ default Global Configuration, and install warns when it was given another one.
 Hook edits go straight to disk after confirmation, not through a configuration
 Plan, because hook files are not Review Party configuration.
 
+## Slice 4 decisions
+
+**Agent protocol.** Claude Code and Codex send the same `PreToolUse` fields
+the hook reads, `tool_name`, `tool_input.command`, and `cwd`. Both read the
+same JSON deny on stdout with exit 0 and pass its reason to the model
+([Claude Code PreToolUse decision control](https://code.claude.com/docs/en/hooks#pretooluse-decision-control),
+[Codex hooks](https://learn.chatgpt.com/docs/hooks)). Each agent is therefore
+one table entry, and the decision is the git hook's. A refusal prints
+`{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision":
+"deny", "permissionDecisionReason": "<the git hook's line>"}}` and exits 0.
+An undecidable case prints `{"systemMessage": "warning: ..."}` and exits 0,
+which both agents show without blocking. Only a failed write exits 1. Both
+agents also block on exit 2, but the hook never uses it, because an old
+`review-party`, a usage error, and a Go panic exit 2 too, and under Codex
+that would block every shell command. A tool other than `Bash` is not
+relevant.
+
+**Classification.** The hook returns before it reads configuration, the
+ledger, or git unless the command contains `git` and either `push` or
+`commit`. It then splits the command on `&&`, `||`, `;`, `|`, `&`, and
+newlines. It removes quoting, drops redirections and here-document bodies,
+and keeps a command substitution as one opaque word. It expands nothing. A
+segment is relevant when, after `VAR=value` words and wrappers such as `env`,
+`command`, and `time`, its first word is `git` and its first word after git's
+global options is `push` or `commit`. `-C` moves the repository the hook
+decides. `--git-dir`, `--work-tree`, a `GIT_DIR`, `GIT_WORK_TREE`, or
+`GIT_INDEX_FILE` assignment, a `-c` or `--config-env` key under `push.`,
+`remote.`, or `branch.`, options to a wrapper such as `env -u NAME`, an
+abbreviation of a long option the hook reads, such as `--mir`, or a global
+option the hook does not know leaves the Checkpoint undecided, with a
+warning. A command whose last `--dry-run` or `--no-dry-run` is `--dry-run`
+sends nothing, so it is not relevant.
+
+**Push.** The hook rebuilds the ref lines git would pass to pre-push and
+decides them as the git hook does. `git push` without a refspec pushes the
+current branch to the remote the command names, else to
+`branch.<name>.pushRemote`, `remote.pushDefault`, the upstream remote, or
+`origin`. The branch lands on its upstream when the upstream is on that remote
+and `push.default` is unset, `simple`, or `upstream`. Otherwise it lands on the
+same name. Another `push.default`, or push refspecs configured for the remote,
+leave the Checkpoint undecided. A refspec's remote object is the clone's tracking ref for the destination, or
+zero, which takes the new-branch base. `--all`, `--branches`, `--mirror`,
+`--tags`, `--delete`, `--prune`, a pattern refspec, an unresolvable revision,
+and a detached HEAD without a refspec leave the Checkpoint undecided.
+
+**Chained commands.** A relevant segment with any segment before it is
+refused when its Checkpoint is declared, as in `git add -A && git commit -m x`.
+The content at hook time is not what git will see, and the hook does not run
+the earlier commands to find out. The refusal asks the Caller to run that `git
+push` or `git commit` as its own command. A `cd` to one literal word is not a
+preceding command: it moves the directory the later segments are decided in,
+resolved against `cwd` and any earlier `cd`, so `cd app && git push` and `cd
+app; git commit -m x` are decided in `app`. Agents emit that form constantly.
+The `cd` counts only when it runs unconditionally in the hook's shell: outside
+a subshell, ending in `&&`, `;`, or a newline, and after a segment that does
+too. A `cd` to a word with a variable, a command substitution, `~`, or a glob,
+`cd -`, a `cd` with options, and a `cd` in a pipeline, a subshell, or after
+`||` still count as preceding commands. Segments after the relevant one, such
+as `| tail`, do not matter.
+
+**Commit forms.** Plain `git commit` decides the staged content, as
+`checkpoint check pre-commit` does. `-a` and `--all` decide the tracked
+working-tree changes against HEAD, which is what they commit. Pathspecs,
+`--only`, `--include`, `-p`, `--patch`, `--interactive`, and
+`--pathspec-from-file` commit content the hook cannot see, so they are refused
+with one line telling the Caller to stage the change and run `git commit`
+without paths. This closes the commit-forms question that slice 3 left open.
+
+**Missing binary.** Both entries fail open. The Claude Code entry is
+
+```sh
+if command -v review-party >/dev/null 2>&1; then review-party checkpoint hook claude-code || true; else echo '{"systemMessage":"warning: review-party is not on PATH, so Review Checkpoints were not checked"}'; fi
+```
+
+so a missing binary prints the one-line warning as a JSON `systemMessage` and
+the git command runs. The Codex entry is
+
+```sh
+if command -v review-party >/dev/null 2>&1; then review-party checkpoint hook codex || true; fi
+```
+
+and allows silently, because Codex would print a warning before every shell
+command. `|| true` makes the exit status 0 whatever `review-party` returns, so
+an old binary without `checkpoint hook`, a usage error after a flag change,
+or a panic cannot block a tool call. The refusal still reaches the agent,
+because it is JSON on stdout rather than an exit status. The installer warns
+when `review-party` is not on `PATH`.
+
+**Entries.** Each agent gets one entry that every declared Checkpoint shares,
+since the hook decides which Checkpoint a command meets. The Claude Code entry
+has matcher `Bash` and the `if` rule `Bash(git *)`, so the hook starts only for
+git commands. Claude Code checks an `if` rule against each subcommand after
+stripping `VAR=value` words, so `Bash(git *)` also catches `git -C dir push`,
+`FOO=bar git push`, and `npm test && git push`, where `Bash(git push*)` would
+miss `git -C`
+([common fields](https://code.claude.com/docs/en/hooks#common-fields)). Codex
+filters by tool name only. The installer appends the entry after the last
+element of `hooks.PreToolUse`, creating the keys or the file when absent, in
+the file's own indentation. Existing bytes are kept. `$CODEX_HOME` moves the
+personal Codex file
+([advanced configuration](https://learn.chatgpt.com/codex/config-file/config-advanced)).
+
+**Cost.** Measured on 2026-10-01 on an AMD Ryzen 7 7800X3D, 16 CPUs, Linux
+7.2.2, zsh as `$SHELL`, and bash as `/bin/sh`, with the built binary and an
+agent `PreToolUse` payload on stdin. Each case started a fresh process, timed
+from spawn to exit:
+
+| Case | Runs | p50 | p95 |
+|---|---|---|---|
+| Codex, `ls -la`, binary run directly | 300 | 17.8 ms | 18.5 ms |
+| Codex, `ls -la`, guarded entry under `zsh -lc` | 300 | 68.2 ms | 70.7 ms |
+| Codex, `true` under `zsh -lc`, for comparison | 300 | 49.7 ms | 51.8 ms |
+| Codex, refused `git push`, binary run directly | 30 | 39.6 ms | 40.8 ms |
+| Codex, refused `git push`, guarded entry under `zsh -lc` | 30 | 90.4 ms | 94.2 ms |
+| Claude Code, `git status`, guarded entry under `sh -c` | 200 | 18.8 ms | 19.5 ms |
+| `true` under `sh -c`, for comparison | 200 | 0.9 ms | 1.0 ms |
+
+Codex runs a hook command with `$SHELL -lc`
+([command_runner.rs](https://github.com/openai/codex/blob/main/codex-rs/hooks/src/engine/command_runner.rs)),
+and starts that login shell only because the hook exists. The Caller's added
+cost per Codex shell command is therefore the whole guarded-entry time, about
+70 ms. Across three runs on this machine its p50 was 68 to 73 ms and its p95
+71 to 89 ms. Most of it is the login shell, 50 to 55 ms here, before the
+hook's 18 ms. Claude Code runs hook commands with `sh -c`
+([command hook fields](https://code.claude.com/docs/en/hooks#command-hook-fields)),
+and the `Bash(git *)` rule starts the hook for every git command, so `git
+status` and `git log` each wait about 19 ms more. Other shell commands do not
+start it.
+Of the hook's time, 15 to 16 ms is package initialization in
+`github.com/mattn/go-runewidth` v0.0.27, which builds its width table eagerly.
+It is linked in through the Configuration Hub's terminal libraries. v0.0.30
+fills only the first 0x300 entries at init and builds the rest on first use. Moving to it is a dependency change and is left
+for its own decision.
+
 ## Open questions
 
-- **Commit forms.** `git commit -a` and `git commit <paths>` commit content
-  that is not staged when the Caller Agent hook runs. The hook must derive the
-  commit's change from the command, or treat a form it cannot parse as
-  uncovered.
 - **Personal Checkpoints.** A Caller who wants a Checkpoint in a shared
   repository whose team declares none has nowhere to declare it. Global
   Configuration applies to every repository. Recommendation: defer until

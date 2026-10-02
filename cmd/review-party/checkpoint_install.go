@@ -1,10 +1,10 @@
 package main
 
-// The git Checkpoint Integration installer wires `review-party checkpoint hook
-// git` into whichever hook tool the repository already uses. It only adds:
-// existing hook lines are never altered, an installed block is a no-op, and a
-// block someone edited is reported and left alone. lefthook and the pre-commit
-// framework get a snippet to add by hand.
+// Checkpoint Integration installers wire `review-party checkpoint hook` into
+// git's hook tool or a Caller Agent's hook settings. They only add: existing
+// lines and entries are never altered, an installed entry is a no-op, and one
+// someone edited is reported and left alone. Configuration the installer
+// cannot extend safely gets a snippet to add by hand.
 
 import (
 	"errors"
@@ -40,7 +40,7 @@ Configuration. Rerunning is safe.`,
 		Example: "  review-party checkpoint install git\n  review-party checkpoint install git --yes",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			options := hookInstallOptions{repository: stringFlag(cmd, "repo"), configuration: stringFlag(cmd, "config"), yes: boolFlag(cmd, "yes")}
+			options := hookInstallOptions{repository: stringFlag(cmd, "repo"), configuration: stringFlag(cmd, "config"), yes: boolFlag(cmd, "yes"), integration: configuration.IntegrationGit}
 			return commandResult(executeCheckpointInstall(options, streams))
 		},
 	}
@@ -48,6 +48,9 @@ Configuration. Rerunning is safe.`,
 	addConfigurationFlag(git)
 	git.Flags().Bool("yes", false, "Write the hooks without a confirmation prompt")
 	install.AddCommand(git)
+	for _, agent := range agentIntegrations {
+		install.AddCommand(newAgentInstallCommand(agent, streams))
+	}
 	return install
 }
 
@@ -55,6 +58,8 @@ type hookInstallOptions struct {
 	repository    string
 	configuration string
 	yes           bool
+	integration   configuration.IntegrationName
+	personal      bool
 }
 
 var (
@@ -81,7 +86,7 @@ func executeCheckpointInstall(options hookInstallOptions, streams commandIO) int
 		}
 		return confirmed, err
 	}
-	target := hookInstallTarget{root: root, configuration: options.configuration}
+	target := hookInstallTarget{root: root, configuration: options.configuration, integration: options.integration, personal: options.personal}
 	err = installCheckpointHooks(target, streams.configurationManager(options.configuration), streams.output, confirm)
 	switch {
 	case errors.Is(err, errNoCheckpointDeclared), errors.Is(err, errHookInstallUnconfirmed):
@@ -92,30 +97,43 @@ func executeCheckpointInstall(options hookInstallOptions, streams commandIO) int
 	return 0
 }
 
-// installCheckpointHooks prints what installing the git Integration for every
+// installCheckpointHooks prints what installing one Integration for every
 // declared Checkpoint does, and writes only when confirm agrees. The init
 // journey shares it with its own confirmation form.
 func installCheckpointHooks(target hookInstallTarget, manager *configuration.Manager, output io.Writer, confirm func() (bool, error)) error {
-	plan, err := planHookInstall(target, manager)
+	plan, err := planIntegrationInstall(target, manager)
 	if err != nil {
 		return err
 	}
 	if len(plan.steps) == 0 {
 		return errNoCheckpointDeclared
 	}
-	if err := writeCommandOutput(output, plan.render); err != nil || len(plan.writes) == 0 {
+	if err := writeCommandOutput(output, plan.render); err != nil {
 		return err
 	}
-	confirmed, err := confirm()
-	if err != nil || !confirmed {
-		return err
-	}
-	if err := plan.apply(); err != nil {
+	if proceed, err := plan.applyConfirmed(confirm); err != nil || !proceed {
 		return err
 	}
 	return writeCommandOutput(output, func(output *commandOutput) {
-		output.write("Wrote %d hook file(s).\n", len(plan.writes))
+		if len(plan.writes) > 0 {
+			output.write("Wrote %d hook file(s).\n", len(plan.writes))
+		}
+		for _, line := range plan.followUp {
+			output.write("%s\n", line)
+		}
 	})
+}
+
+func planIntegrationInstall(target hookInstallTarget, manager *configuration.Manager) (hookInstallPlan, error) {
+	if target.integration == configuration.IntegrationGit {
+		return planHookInstall(target, manager)
+	}
+	for _, agent := range agentIntegrations {
+		if agent.integration == target.integration {
+			return planAgentHookInstall(target, manager, agent)
+		}
+	}
+	return hookInstallPlan{}, fmt.Errorf("no installer for the %s Integration", target.integration)
 }
 
 // hookTool is the hook manager a repository uses, in detection order.
@@ -127,6 +145,8 @@ const (
 	hookToolPreCommit hookTool = "pre-commit framework"
 	hookToolHooksPath hookTool = "core.hooksPath"
 	hookToolPlain     hookTool = "git hooks"
+	hookToolClaude    hookTool = "Claude Code"
+	hookToolCodex     hookTool = "Codex"
 )
 
 // hookOutcome is what the installer does for one Checkpoint.
@@ -141,6 +161,10 @@ const (
 	// hookNotExecutable is an installed block in a hook git skips because the
 	// file lost its execute bits.
 	hookNotExecutable hookOutcome = "make executable"
+	// Caller Agent settings files take PreToolUse entries.
+	hookEntryAdded  hookOutcome = "add a PreToolUse entry to"
+	hookEntryShared hookOutcome = "share the PreToolUse entry added to"
+	hookEntryEdited hookOutcome = "edited review-party entry left unchanged in"
 )
 
 type hookInstallStep struct {
@@ -153,11 +177,15 @@ type hookInstallStep struct {
 	activate string
 }
 
-// hookInstallTarget is the repository whose hooks are installed and the
-// Caller's --config, which installed hooks do not carry.
+// hookInstallTarget is the repository whose hooks are installed, the
+// Caller's --config, which installed hooks do not carry, and the Integration
+// to install. Personal selects a Caller Agent's personal settings over the
+// team file.
 type hookInstallTarget struct {
 	root          string
 	configuration string
+	integration   configuration.IntegrationName
+	personal      bool
 }
 
 type hookInstallPlan struct {
@@ -170,13 +198,26 @@ type hookInstallPlan struct {
 	hooks  string
 	steps  []hookInstallStep
 	writes map[string][]byte
-	// missingBinary reports that review-party is not on PATH, so installed
-	// hooks will warn and allow until it is.
-	missingBinary bool
+	// fileMode is the mode of a file the plan creates. An executable mode
+	// also restores the execute bits of an existing hook.
+	fileMode fs.FileMode
 	// config is the Caller's --config argument when it is not the default.
 	// Installed hooks leave it out, so install warns that they load the
 	// default.
 	config string
+	// warnings follow the steps, before confirmation; followUp follows the
+	// install, naming what the Caller still has to do.
+	warnings []string
+	followUp []string
+}
+
+// missingBinaryNote names what installed hooks do while review-party is
+// not on PATH, or is empty when it is.
+func missingBinaryNote(effect string) []string {
+	if _, err := exec.LookPath("review-party"); err == nil {
+		return nil
+	}
+	return []string{"warning: review-party is not on PATH; " + effect + " until it is"}
 }
 
 func planHookInstall(target hookInstallTarget, manager *configuration.Manager) (hookInstallPlan, error) {
@@ -189,10 +230,9 @@ func planHookInstall(target hookInstallTarget, manager *configuration.Manager) (
 		return hookInstallPlan{}, err
 	}
 	tool, location := detectHookTool(target.root, locations)
-	_, lookErr := exec.LookPath("review-party")
 	plan := hookInstallPlan{
-		tool: tool, location: location, hooks: locations.Directory, writes: map[string][]byte{}, missingBinary: lookErr != nil,
-		config: configurationArgument(target.configuration),
+		tool: tool, location: location, hooks: locations.Directory, writes: map[string][]byte{}, fileMode: 0o755,
+		config: configurationArgument(target.configuration), warnings: missingBinaryNote("the hooks warn and allow"),
 	}
 	for _, name := range configuration.SortedCheckpointNames(declared) {
 		step, err := plan.planCheckpoint(name)
@@ -291,6 +331,7 @@ func (plan *hookInstallPlan) planCheckpoint(name configuration.CheckpointName) (
 		return plan.planManagerSnippet(name, preCommitFrameworkSnippet(name))
 	case hookToolHusky, hookToolHooksPath, hookToolPlain:
 		return plan.planHookScript(name)
+	case hookToolClaude, hookToolCodex:
 	}
 	return hookInstallStep{}, fmt.Errorf("unknown hook tool %q", plan.tool)
 }
@@ -341,7 +382,7 @@ func (plan *hookInstallPlan) planHookScript(name configuration.CheckpointName) (
 		}
 	case hookManual:
 		step.manual = hookScriptCall(name)
-	case hookCreated, hookNotExecutable:
+	case hookCreated, hookNotExecutable, hookEntryAdded, hookEntryShared, hookEntryEdited:
 	}
 	return step, nil
 }
@@ -546,19 +587,35 @@ func (plan hookInstallPlan) render(output *commandOutput) {
 			output.write("  git does not run it in this clone until you run: %s\n", step.activate)
 		}
 	}
-	if plan.missingBinary {
-		output.write("warning: review-party is not on PATH; the hooks warn and allow until it is\n")
+	for _, warning := range plan.warnings {
+		output.write("%s\n", warning)
 	}
 	if plan.config != "" {
 		output.write("warning: the hooks load each Caller's default Global Configuration, not%s\n", plan.config)
 	}
 }
 
+// applyConfirmed writes the plan's files when it has any and confirm agrees.
+// It reports false when the Caller declined.
+func (plan hookInstallPlan) applyConfirmed(confirm func() (bool, error)) (bool, error) {
+	if len(plan.writes) == 0 {
+		return true, nil
+	}
+	confirmed, err := confirm()
+	if err != nil || !confirmed {
+		return false, err
+	}
+	return true, plan.apply()
+}
+
 func (plan hookInstallPlan) apply() error {
 	for path, content := range plan.writes {
-		mode := fs.FileMode(0o755)
+		mode := plan.fileMode
 		if info, err := os.Stat(path); err == nil {
-			mode = info.Mode().Perm() | 0o111
+			mode = info.Mode().Perm()
+		}
+		if plan.fileMode&0o111 != 0 {
+			mode |= 0o111
 		}
 		if err := replaceFile(path, content, mode); err != nil {
 			return fmt.Errorf("write %s: %w", path, err)

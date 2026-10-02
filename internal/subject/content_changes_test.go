@@ -109,7 +109,7 @@ func TestWorkingChangesContentMatchesStagingEverything(t *testing.T) {
 	repository := testRepository(t)
 	makeEveryKindOfWorkingChange(t, repository)
 
-	working, err := WorkingContentChanges(repository)
+	working, err := WorkingContentChanges(repository, AllFiles)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +165,7 @@ func makeEveryKindOfWorkingChange(t *testing.T, repository string) {
 func TestUntrackedContentHashesLikeGitHashObject(t *testing.T) {
 	repository := testRepository(t)
 	writeTestFile(t, filepath.Join(repository, "fresh.txt"), "fresh content\n")
-	changes, err := WorkingContentChanges(repository)
+	changes, err := WorkingContentChanges(repository, AllFiles)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -77,11 +77,11 @@ func (fixture initFixture) declareCheckpoints(t *testing.T, names ...configurati
 	}
 }
 
-func (fixture initFixture) installHooks(t *testing.T) {
+func (fixture initFixture) installHooks(t *testing.T, integration configuration.IntegrationName) {
 	t.Helper()
 	var output bytes.Buffer
 	streams := commandIO{input: strings.NewReader(""), output: &output, errors: &output, configurationManager: func(string) *configuration.Manager { return fixture.manager }}
-	if exit := execute(context.Background(), []string{"checkpoint", "install", "git", "--repo", fixture.repository, "--yes"}, streams); exit != 0 {
+	if exit := execute(context.Background(), []string{"checkpoint", "install", string(integration), "--repo", fixture.repository, "--yes"}, streams); exit != 0 {
 		t.Fatalf("install exit = %d, output = %q", exit, output.String())
 	}
 }
@@ -243,7 +243,7 @@ func TestInitWithoutATerminalNamesEachCheckpointWithoutItsGitHook(t *testing.T) 
 		t.Fatalf("stdout = %q, want %q", stdout, want)
 	}
 
-	fixture.installHooks(t)
+	fixture.installHooks(t, configuration.IntegrationGit)
 	if _, stdout, _ = fixture.run(t, commandIO{}); stdout != ready {
 		t.Fatalf("installed stdout = %q, want %q", stdout, ready)
 	}
@@ -283,7 +283,7 @@ func TestInitWithoutATerminalNamesTheHuskyActivationStep(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(wrapper), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	fixture.installHooks(t)
+	fixture.installHooks(t, configuration.IntegrationGit)
 	ready := "Repository is ready: review-party run --repo " + fixture.repository + "\n"
 	if _, stdout, _ := fixture.run(t, commandIO{}); stdout != ready+"Checkpoint pre-push git hook does not run until husky is active in this clone: npx husky\n" {
 		t.Fatalf("inactive husky stdout = %q", stdout)
@@ -318,12 +318,52 @@ func TestInitReportHintsCarryAnAbsoluteConfiguration(t *testing.T) {
 	}
 }
 
+func TestInitWithoutATerminalNamesMissingAgentFloorHooks(t *testing.T) {
+	fixture := newInitFixture(t)
+	fixture.profile(t, configuration.ScopeGlobal, "docs")
+	if exit, _, stderr := fixture.run(t, commandIO{}, "--profile", "docs", "--yes"); exit != 0 {
+		t.Fatalf("setup exit = %d, stderr = %q", exit, stderr)
+	}
+	agents, git := configuration.NewCheckpoint(), configuration.NewCheckpoint()
+	agents.Integrations = []configuration.IntegrationName{configuration.IntegrationClaudeCode, configuration.IntegrationCodex}
+	git.Integrations = []configuration.IntegrationName{configuration.IntegrationGit}
+	plan, err := fixture.manager.Plan(configuration.Repository(fixture.repository), []configuration.Intent{
+		configuration.SetCheckpoint{Name: configuration.CheckpointPrePush, Checkpoint: agents},
+		configuration.SetCheckpoint{Name: configuration.CheckpointPreCommit, Checkpoint: git},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.manager.Publish(plan); err != nil {
+		t.Fatal(err)
+	}
+	ready := "Repository is ready: review-party run --repo " + fixture.repository + "\n"
+	gitGap := "Checkpoint pre-commit has no git hook: review-party checkpoint install git --repo " + fixture.repository + "\n"
+
+	_, stdout, _ := fixture.run(t, commandIO{})
+	want := ready + gitGap +
+		"Checkpoint pre-push has no claude-code hook: review-party checkpoint install claude-code --repo " + fixture.repository + "\n" +
+		"Checkpoint pre-push has no codex hook: review-party checkpoint install codex --repo " + fixture.repository + "\n" +
+		codexApprovalStep + "\n"
+	if stdout != want {
+		t.Fatalf("stdout = %q, want %q", stdout, want)
+	}
+
+	fixture.installHooks(t, configuration.IntegrationClaudeCode)
+	fixture.installHooks(t, configuration.IntegrationCodex)
+	if _, stdout, _ = fixture.run(t, commandIO{}); stdout != ready+gitGap+codexApprovalStep+"\n" {
+		t.Fatalf("installed stdout = %q", stdout)
+	}
+}
+
 func TestInitInATerminalDeclaresACheckpointAndInstallsItsHook(t *testing.T) {
 	fixture := newInitFixture(t)
 	fixture.profile(t, configuration.ScopeGlobal, "bugs")
+	pathWithOnlyGit(t)
 	streams := commandIO{
-		// bugs, publish, pre-push, no exemptions, 0 lines, human waivers, publish, install
-		input:    iotest.OneByteReader(strings.NewReader("1\ny\n1\n\n0\n1\ny\ny\n")),
+		// bugs, publish, pre-push, no exemptions, 0 lines, human waivers,
+		// the git floor, publish, install, no personal agent hooks
+		input:    iotest.OneByteReader(strings.NewReader("1\ny\n1\n\n0\n1\n0\ny\ny\n0\n")),
 		terminal: func(any) bool { return true },
 	}
 
@@ -338,4 +378,19 @@ func TestInitInATerminalDeclaresACheckpointAndInstallsItsHook(t *testing.T) {
 	if !strings.HasSuffix(stdout, "Repository is ready: review-party run --repo "+fixture.repository+"\n") {
 		t.Fatalf("an installed hook still reported missing:\n%s", stdout)
 	}
+}
+
+// pathWithOnlyGit sets PATH to a directory holding git alone, so init finds
+// no Caller Agent to preselect.
+func pathWithOnlyGit(t *testing.T) {
+	t.Helper()
+	git, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory := t.TempDir()
+	if err := os.Symlink(git, filepath.Join(directory, "git")); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", directory)
 }

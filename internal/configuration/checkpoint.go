@@ -51,7 +51,26 @@ const (
 // IntegrationName names a Checkpoint Integration the team installs as floor.
 type IntegrationName string
 
-const IntegrationGit IntegrationName = "git"
+const (
+	IntegrationGit        IntegrationName = "git"
+	IntegrationClaudeCode IntegrationName = "claude-code"
+	IntegrationCodex      IntegrationName = "codex"
+)
+
+// IntegrationNames lists every supported Integration in install order.
+func IntegrationNames() []IntegrationName {
+	return []IntegrationName{IntegrationGit, IntegrationClaudeCode, IntegrationCodex}
+}
+
+// ParseIntegrationName accepts one supported Integration name.
+func ParseIntegrationName(value string) (IntegrationName, error) {
+	for _, name := range IntegrationNames() {
+		if string(name) == value {
+			return name, nil
+		}
+	}
+	return "", fmt.Errorf("unknown integration %q; expected git, claude-code, or codex", value)
+}
 
 // Checkpoint is one declared Review Checkpoint.
 type Checkpoint struct {
@@ -88,6 +107,17 @@ func (checkpoint *Checkpoint) UnmarshalJSON(payload []byte) error {
 func (checkpoint Checkpoint) Exempts(name string) bool {
 	for _, pattern := range checkpoint.ExemptPaths {
 		if matchPathPattern(pattern, name) {
+			return true
+		}
+	}
+	return false
+}
+
+// FloorIntegrates reports whether any of the Checkpoints lists the
+// Integration as team floor.
+func FloorIntegrates(checkpoints map[CheckpointName]Checkpoint, integration IntegrationName) bool {
+	for _, checkpoint := range checkpoints {
+		if checkpoint.Integrates(integration) {
 			return true
 		}
 	}
@@ -193,8 +223,8 @@ func validateCheckpoint(checkpoint Checkpoint) error {
 func validateIntegrations(integrations []IntegrationName) error {
 	seen := map[IntegrationName]bool{}
 	for _, integration := range integrations {
-		if integration != IntegrationGit {
-			return checkpointFieldError{"integrations", fmt.Errorf("unknown integration %q; expected git", integration)}
+		if _, err := ParseIntegrationName(string(integration)); err != nil {
+			return checkpointFieldError{"integrations", err}
 		}
 		if seen[integration] {
 			return checkpointFieldError{"integrations", fmt.Errorf("integration %q is listed twice", integration)}
