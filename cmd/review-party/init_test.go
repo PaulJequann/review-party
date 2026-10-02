@@ -321,6 +321,22 @@ func TestInitWithoutATerminalNamesAGitHookThatLoadsAnotherConfiguration(t *testi
 	}
 }
 
+func TestInitReportHintsCarryAnAbsoluteConfiguration(t *testing.T) {
+	fixture := newInitFixture(t)
+	fixture.profile(t, configuration.ScopeGlobal, "docs")
+	if exit, _, stderr := fixture.run(t, commandIO{}, "--profile", "docs", "--yes"); exit != 0 {
+		t.Fatalf("setup exit = %d, stderr = %q", exit, stderr)
+	}
+	absolute, err := filepath.Abs("relative.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "Repository is ready: review-party run --repo " + fixture.repository + configurationArgument(absolute) + "\n"
+	if _, stdout, _ := fixture.run(t, commandIO{}, "--config", "relative.json"); stdout != want {
+		t.Fatalf("stdout = %q, want %q", stdout, want)
+	}
+}
+
 func TestInitInATerminalDeclaresACheckpointAndInstallsItsHook(t *testing.T) {
 	fixture := newInitFixture(t)
 	fixture.profile(t, configuration.ScopeGlobal, "bugs")

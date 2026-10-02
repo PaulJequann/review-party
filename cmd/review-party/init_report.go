@@ -2,6 +2,7 @@ package main
 
 import (
 	"io"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -20,7 +21,14 @@ type initReport struct {
 }
 
 func reportInitGaps(output io.Writer, manager *configuration.Manager, repository configuration.Repository, options initOptions) error {
-	report := initReport{manager: manager, repository: repository, configuration: options.configuration, config: configurationArgument(options.configuration)}
+	report := initReport{manager: manager, repository: repository, configuration: options.configuration}
+	if options.configuration != "" {
+		absolute, err := filepath.Abs(options.configuration)
+		if err != nil {
+			return err
+		}
+		report.config = configurationArgument(absolute)
+	}
 	lines, err := report.lines()
 	if err != nil {
 		return err

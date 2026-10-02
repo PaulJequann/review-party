@@ -565,7 +565,7 @@ func (plan *hookInstallPlan) planLefthook(name configuration.CheckpointName) (ho
 	}
 	text := string(content)
 	switch {
-	case strings.Contains(text, command):
+	case strings.HasPrefix(text, command) || strings.Contains(text, "\n"+command):
 		step.outcome = hookInstalled
 	case !slices.Contains([]string{".yml", ".yaml"}, filepath.Ext(path)) || lefthookResistsAppend(text, name):
 		step.outcome, step.manual = hookManual, strings.Split(strings.TrimSuffix(command, "\n"), "\n")

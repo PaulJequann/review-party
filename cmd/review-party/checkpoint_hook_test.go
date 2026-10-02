@@ -324,6 +324,23 @@ func TestCheckpointInstallExtendsLefthookOnlyWhereTheHookIsFree(t *testing.T) {
 	assertRun(t, fixture.install("--yes"), commandRun{stdout: "pre-push: already installed in " + config + " (lefthook)\n" + manual})
 }
 
+func TestCheckpointInstallCountsOnlyARootLefthookEntryAsInstalled(t *testing.T) {
+	for name, existing := range map[string]string{
+		"commented": "# " + lefthookPrePushEntry(""),
+		"other key": "old-" + lefthookPrePushEntry(""),
+	} {
+		t.Run(name, func(t *testing.T) {
+			fixture := newHookInstallFixture(t, configuration.CheckpointPrePush)
+			fixture.provideStandIn()
+			fixture.writeFile("lefthook.yml", existing)
+			fixture.writeExecutable(".git/hooks/pre-push", "#!/bin/sh\ncall_lefthook run \"pre-push\" \"$@\"\n")
+			if result := fixture.install("--yes"); result.exit != 0 || strings.Contains(result.stdout, "already installed") {
+				t.Fatalf("an inactive lefthook entry counted as installed: %+v", result)
+			}
+		})
+	}
+}
+
 // lefthookPrePushEntry is the pre-push entry the installer appends to
 // lefthook.yml, carrying config as the --config argument.
 func lefthookPrePushEntry(config string) string {
