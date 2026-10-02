@@ -37,10 +37,12 @@ func newConfigCheckpointCommand(streams commandIO) *cobra.Command {
 Omitted flags take their defaults, so set replaces the whole declaration.
 --exempt takes slash-separated patterns relative to the repository root: * and
 ? match within one path segment, ** as a whole segment matches any number of
-segments, and a pattern without / matches the file name at any depth.`
-	set.Example = "  review-party config checkpoint set pre-push --exempt '*.md' --exempt 'docs/**' --integration git\n  review-party config checkpoint set pre-commit --small-change-lines 10 --waivers anyone --yes"
+segments, and a pattern without / matches the file name at any depth.
+--requirement judged also needs a current verdict, recorded with review-party
+finding record, on every Finding of the covering Reviews.`
+	set.Example = "  review-party config checkpoint set pre-push --exempt '*.md' --exempt 'docs/**' --integration git\n  review-party config checkpoint set pre-push --requirement judged --yes\n  review-party config checkpoint set pre-commit --small-change-lines 10 --waivers anyone --yes"
 	set.ValidArgs = checkpointNameArguments()
-	set.Flags().String("requirement", string(configuration.RequirementReviewed), "What the Checkpoint expects: reviewed")
+	set.Flags().String("requirement", string(configuration.RequirementReviewed), "What the Checkpoint expects: reviewed, or judged for a verdict on every Finding too")
 	set.Flags().StringArray("exempt", nil, "Path pattern the Checkpoint does not require Reviews for; repeatable")
 	set.Flags().Int("small-change-lines", 0, "Pass changes of at most this many added plus deleted lines; 0 disables")
 	set.Flags().String("waivers", string(configuration.WaiversHuman), "Who may waive the Checkpoint: anyone, human, or none")

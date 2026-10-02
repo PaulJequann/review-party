@@ -621,6 +621,14 @@ deleted lines, measured over the whole change, so splitting a push into small
 commits does not pass each one. A binary file never counts as small.
 `--waivers` is `human` (the default), `anyone`, or `none`.
 
+`--requirement` is `reviewed` (the default) or `judged`. Under `judged`, the
+covering Reviews also need a current verdict on every Finding, recorded with
+`review-party finding record <id>`. Accepted, rejected, and deferred all
+count. Any covering Review whose Findings all have verdicts passes, so judging
+the Review you just ran is enough. A verdict recorded before a Finding's text
+changed no longer counts. A Finding whose location is one of the change's
+exempt paths needs no verdict.
+
 An exempt path pattern is relative to the repository root and separated by
 `/`. Each segment is a Go `path.Match` pattern, and a `**` segment matches any
 number of directories. A pattern without `/`, such as `*.md`, matches the file
@@ -629,8 +637,9 @@ recorded change before they are compared. A change whose every path is exempt
 passes.
 
 `review-party checkpoint check pre-push` reports whether the change is
-covered, exempt, waived, or still needs a Review, with the next command.
-`--format json` adds the exemption and waiver details. When a change should
+covered, exempt, waived, unjudged, or still needs a Review, with the next
+command. `--format json` adds the exemption and waiver details, and lists the
+unjudged Finding ordinals of each covering Review. When a change should
 pass without its Reviews, record a waiver with a reason:
 
 ```sh
@@ -653,8 +662,8 @@ another branch from an up-to-date `HEAD`. Installed hooks load each Caller's
 default Global Configuration, not `--config`. Rerunning the installer changes
 nothing, and a block someone edited is left alone.
 
-The hook refuses an uncovered change with one line that names the Checkpoint
-and the next command. It mentions waivers only under `anyone`. When the hook
+The hook refuses an uncovered or unjudged change with one line that names the
+Checkpoint and the next command. It mentions waivers only under `anyone`. When the hook
 cannot decide, because `review-party` is not on `PATH`, the configuration does
 not load, or git cannot name a base, it warns on one line and allows the push
 or commit.
@@ -712,8 +721,8 @@ review-party checkpoint install agents-md
 It writes a block between `<!-- review-party checkpoints: begin -->` and
 `<!-- review-party checkpoints: end -->` into `AGENTS.md` at the repository
 root, or into `CLAUDE.md` when only that exists. The block has one line per
-declared Checkpoint naming the command that satisfies it, and mentions waivers
-only under `anyone`. A missing block is appended after one blank line, and the
+declared Checkpoint naming the command that satisfies it, adds `review-party
+finding record <id>` under `judged`, and mentions waivers only under `anyone`. A missing block is appended after one blank line, and the
 rest of the file keeps every byte. After a Checkpoint declaration changes, the
 block is stale and the installer replaces only the lines between the markers,
 which a terminal confirms and which needs `--yes` without one. Unbalanced or

@@ -34,10 +34,15 @@ func ParseCheckpointName(value string) (CheckpointName, error) {
 	return "", fmt.Errorf("unknown checkpoint %q; expected pre-push or pre-commit", value)
 }
 
-// CheckpointRequirement says what a Checkpoint expects of the change.
+// CheckpointRequirement says what a Checkpoint expects of the change:
+// reviewed needs Coverage, and judged also needs a current Verdict on every
+// Finding of the covering Reviews.
 type CheckpointRequirement string
 
-const RequirementReviewed CheckpointRequirement = "reviewed"
+const (
+	RequirementReviewed CheckpointRequirement = "reviewed"
+	RequirementJudged   CheckpointRequirement = "judged"
+)
 
 // WaiverPolicy says who may record a Checkpoint Waiver.
 type WaiverPolicy string
@@ -202,8 +207,10 @@ func (failure checkpointFieldError) Error() string { return failure.field + ": "
 func (failure checkpointFieldError) Unwrap() error { return failure.err }
 
 func validateCheckpoint(checkpoint Checkpoint) error {
-	if checkpoint.Requirement != RequirementReviewed {
-		return checkpointFieldError{"requirement", fmt.Errorf("unknown requirement %q; expected reviewed", checkpoint.Requirement)}
+	switch checkpoint.Requirement {
+	case RequirementReviewed, RequirementJudged:
+	default:
+		return checkpointFieldError{"requirement", fmt.Errorf("unknown requirement %q; expected reviewed or judged", checkpoint.Requirement)}
 	}
 	switch checkpoint.Waivers {
 	case WaiversAnyone, WaiversHuman, WaiversNone:

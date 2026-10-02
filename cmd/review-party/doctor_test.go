@@ -145,13 +145,13 @@ func TestDoctorNamesAMarkdownExemptionADocumentationProfileReviews(t *testing.T)
 		"--model", "grok-4.5", "--effort", "high", "--deadline", "1m", "--yes",
 	})
 	requireConfigSuccess(t, []string{"config", "reviews", "add", "--scope", "global", "--profile", "prose", "--repo", fixture.repository, "--yes"})
-	fixture.declare("pre-push", "--exempt", "*.md", "--exempt", "vendor/**", "--exempt", "docs/**", "--small-change-lines", "5", "--waivers", "anyone")
+	fixture.declare("pre-push", "--requirement", "judged", "--exempt", "*.md", "--exempt", "vendor/**", "--exempt", "docs/**", "--small-change-lines", "5", "--waivers", "anyone")
 	repository := shellWord(fixture.repository)
 
-	fix := "review-party config checkpoint set pre-push --repo " + repository + " --exempt 'vendor/**' --small-change-lines 5 --waivers anyone"
+	fix := "review-party config checkpoint set pre-push --repo " + repository + " --requirement judged --exempt 'vendor/**' --small-change-lines 5 --waivers anyone"
 	assertRun(t, fixture.doctor(), commandRun{stdout: "configuration is valid\nCheckpoint pre-push exempts *.md, docs/**, so changes the documentation Profile prose reviews pass it unreviewed; fix: " + fix + "\n"})
 
-	fixture.declare("pre-push", "--exempt", "vendor/**", "--small-change-lines", "5", "--waivers", "anyone")
+	fixture.declare("pre-push", "--requirement", "judged", "--exempt", "vendor/**", "--small-change-lines", "5", "--waivers", "anyone")
 	assertRun(t, fixture.doctor(), commandRun{stdout: "configuration is valid\n"})
 }
 

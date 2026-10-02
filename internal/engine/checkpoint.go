@@ -1,8 +1,9 @@
 package engine
 
 // A Checkpoint decision layers the declared Checkpoint over Coverage:
-// exemptions narrow the content first, then Coverage, then a Waiver of the
-// exact remaining content. An undeclared Checkpoint is plain Coverage.
+// exemptions narrow the content first, then Coverage, under the judged
+// requirement the Verdicts on the covering Reviews' Findings, then a Waiver of
+// the exact remaining content. An undeclared Checkpoint is plain Coverage.
 
 import (
 	"context"
@@ -20,11 +21,12 @@ import (
 type CheckpointState string
 
 const (
-	CheckpointCovered CheckpointState = "covered"
-	CheckpointRunning CheckpointState = "running"
-	CheckpointMissing CheckpointState = "missing"
-	CheckpointExempt  CheckpointState = "exempt"
-	CheckpointWaived  CheckpointState = "waived"
+	CheckpointCovered  CheckpointState = "covered"
+	CheckpointRunning  CheckpointState = "running"
+	CheckpointMissing  CheckpointState = "missing"
+	CheckpointUnjudged CheckpointState = "unjudged"
+	CheckpointExempt   CheckpointState = "exempt"
+	CheckpointWaived   CheckpointState = "waived"
 )
 
 // Passes reports whether the Checkpoint accepts the change in this state.
@@ -92,7 +94,7 @@ func (conductor *Conductor) CheckCheckpoint(_ context.Context, request Checkpoin
 		report.State = CheckpointExempt
 		return report, nil
 	}
-	report.Coverage, err = conductor.checkCoverage(request.Repository, content, declaration)
+	report.Coverage, err = conductor.checkCoverage(request.Repository, content, declaration, conductor.newFindingJudge(report.Declaration))
 	if err != nil {
 		return CheckpointReport{}, err
 	}
@@ -104,7 +106,10 @@ func (conductor *Conductor) CheckCheckpoint(_ context.Context, request Checkpoin
 }
 
 func checkpointStateOf(coverage CoverageReport) CheckpointState {
-	if coverage.Covered {
+	switch {
+	case coverage.Covered && !coverage.judged():
+		return CheckpointUnjudged
+	case coverage.Covered:
 		return CheckpointCovered
 	}
 	for _, profile := range coverage.Profiles {

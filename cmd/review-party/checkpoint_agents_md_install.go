@@ -89,17 +89,33 @@ func planAgentsMDInstall(target hookInstallTarget, manager *configuration.Manage
 	return plan, nil
 }
 
+// agentsMDInstruction is what one Checkpoint's line tells the agent to do
+// before the action the Checkpoint guards. uncovered names what a reviewed
+// Checkpoint refuses.
+type agentsMDInstruction struct {
+	before    string
+	review    string
+	action    string
+	uncovered string
+}
+
+var agentsMDInstructions = map[configuration.CheckpointName]agentsMDInstruction{
+	configuration.CheckpointPreCommit: {before: "Before committing", review: "stage the change, stash any other changes, and review it with `review-party run`", action: "commit", uncovered: "commit whose staged content"},
+	configuration.CheckpointPrePush:   {before: "Before pushing", review: "review the change with `review-party run --base <upstream> --head HEAD`", action: "push", uncovered: "push"},
+}
+
 // agentsMDBody is the text between the markers: one line per declared
-// Checkpoint naming the command that satisfies it, then where to read more.
+// Checkpoint naming the commands that satisfy it, then where to read more.
 // Waivers are mentioned only where any caller may record one, as the
 // refusal does.
 func agentsMDBody(declared map[configuration.CheckpointName]configuration.Checkpoint, names []configuration.CheckpointName) string {
 	var body strings.Builder
 	for _, name := range names {
-		if name == configuration.CheckpointPreCommit {
-			body.WriteString("Before committing, stage the change, stash any other changes, and review it with `review-party run`; the pre-commit Checkpoint refuses a commit whose staged content no completed Review covers.")
+		instruction := agentsMDInstructions[name]
+		if declared[name].Requirement == configuration.RequirementJudged {
+			fmt.Fprintf(&body, "%s, %s and record a verdict for each Finding with `review-party finding record <id>`; the %s Checkpoint refuses a %s until a completed Review covers it and every Finding has a verdict.", instruction.before, instruction.review, name, instruction.action)
 		} else {
-			body.WriteString("Before pushing, review the change with `review-party run --base <upstream> --head HEAD`; the pre-push Checkpoint refuses a push no completed Review covers.")
+			fmt.Fprintf(&body, "%s, %s; the %s Checkpoint refuses a %s no completed Review covers.", instruction.before, instruction.review, name, instruction.uncovered)
 		}
 		if declared[name].Waivers == configuration.WaiversAnyone {
 			body.WriteString(" When a Review does not fit, waive it with `review-party checkpoint waive " + string(name) + ` --reason "<why>"` + "`.")

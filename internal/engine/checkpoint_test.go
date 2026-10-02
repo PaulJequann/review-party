@@ -76,6 +76,7 @@ type checkpointOutcome struct {
 	Declared  bool
 	Exemption *CheckpointExemption
 	ReviewIDs []model.ReviewID
+	Unjudged  []UnjudgedReview
 	Waiver    string
 }
 
@@ -83,6 +84,7 @@ func outcomeOf(report CheckpointReport) checkpointOutcome {
 	outcome := checkpointOutcome{State: report.State, Declared: report.Declaration != nil, Exemption: report.Exemption}
 	for _, profile := range report.Coverage.Profiles {
 		outcome.ReviewIDs = append(outcome.ReviewIDs, profile.ReviewIDs...)
+		outcome.Unjudged = append(outcome.Unjudged, profile.Unjudged...)
 	}
 	if report.Waiver != nil {
 		outcome.Waiver = string(report.Waiver.WaivedBy) + ": " + report.Waiver.Reason

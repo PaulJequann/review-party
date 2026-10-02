@@ -44,6 +44,7 @@ func (e *editor) checkpointsStep() error {
 // checkpointDraft holds the form answers; numbers stay text until parsed.
 type checkpointDraft struct {
 	name             configuration.CheckpointName
+	requirement      configuration.CheckpointRequirement
 	exemptions       string
 	smallChangeLines string
 	waivers          configuration.WaiverPolicy
@@ -52,6 +53,7 @@ type checkpointDraft struct {
 
 func (draft checkpointDraft) checkpoint() (configuration.Checkpoint, error) {
 	checkpoint := configuration.NewCheckpoint()
+	checkpoint.Requirement = draft.requirement
 	checkpoint.ExemptPaths = strings.Fields(draft.exemptions)
 	checkpoint.Waivers = draft.waivers
 	checkpoint.Integrations = draft.integrations
@@ -64,7 +66,7 @@ func (draft checkpointDraft) checkpoint() (configuration.Checkpoint, error) {
 // through its own Plan.
 func (e *editor) declareCheckpoint() error {
 	draft := checkpointDraft{
-		name: configuration.CheckpointPrePush, smallChangeLines: "0", waivers: configuration.WaiversHuman,
+		name: configuration.CheckpointPrePush, requirement: configuration.RequirementReviewed, smallChangeLines: "0", waivers: configuration.WaiversHuman,
 		integrations: slices.Concat([]configuration.IntegrationName{configuration.IntegrationGit}, e.AgentsOnPath, []configuration.IntegrationName{configuration.IntegrationAgentsMD}),
 	}
 	choice := huh.NewSelect[configuration.CheckpointName]().
@@ -78,6 +80,10 @@ func (e *editor) declareCheckpoint() error {
 		return err
 	}
 	if err := e.form(
+		huh.NewSelect[configuration.CheckpointRequirement]().Title("What should the Checkpoint require?").Options(
+			huh.NewOption("reviewed: a completed Review of every selected Profile covers the change", configuration.RequirementReviewed),
+			huh.NewOption("judged: covered, and every Finding of those Reviews has a verdict", configuration.RequirementJudged),
+		).Value(&draft.requirement),
 		huh.NewInput().Title("Exempt paths (space-separated patterns such as *.md docs/**; blank for none)").Value(&draft.exemptions).Validate(validateExemptions),
 		huh.NewInput().Title("Pass changes of at most this many changed lines (0 disables)").Value(&draft.smallChangeLines).Validate(validateLineLimit),
 		huh.NewSelect[configuration.WaiverPolicy]().Title("Who may waive the Checkpoint?").Options(

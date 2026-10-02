@@ -402,10 +402,10 @@ func TestInitInATerminalDeclaresACheckpointAndInstallsItsHook(t *testing.T) {
 	fixture.profile(t, configuration.ScopeGlobal, "bugs")
 	pathWithOnlyGit(t)
 	streams := commandIO{
-		// bugs, publish, pre-push, no exemptions, 0 lines, human waivers,
+		// bugs, publish, pre-push, reviewed, no exemptions, 0 lines, human waivers,
 		// the git and agents-md floor, publish, install the git hook, write
 		// the agents-md block, no personal agent hooks
-		input:    iotest.OneByteReader(strings.NewReader("1\ny\n1\n\n0\n1\n0\ny\ny\ny\n0\n")),
+		input:    iotest.OneByteReader(strings.NewReader("1\ny\n1\n1\n\n0\n1\n0\ny\ny\ny\n0\n")),
 		terminal: func(any) bool { return true },
 	}
 
