@@ -37,6 +37,23 @@ func TestCheckpointWaiverMatchesOnlyItsKey(t *testing.T) {
 	}
 }
 
+func TestCheckpointWaiverPrefersATerminalWaiverOverANewerNonInteractiveOne(t *testing.T) {
+	ledger := newTestLedger(t, t.TempDir())
+	defer closeTestResource(t, ledger.Close)
+	key := model.WaiverKey{Checkpoint: "pre-push", ContentDigest: model.ContentChangesDigest(coveredChanges)}
+	terminal, agent := waiverFixture("wv_1", key, 1), waiverFixture("wv_2", key, 2)
+	agent.WaivedBy = model.WaivedByNonInteractive
+	for _, waiver := range []model.CheckpointWaiver{terminal, agent} {
+		if err := ledger.RecordCheckpointWaiver(waiver); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if found, ok := lookupWaiver(t, ledger, key); !ok || !reflect.DeepEqual(found, terminal) {
+		t.Fatalf("waiver = %#v (found %v), want the terminal waiver %#v", found, ok, terminal)
+	}
+}
+
 func lookupWaiver(t *testing.T, ledger *LedgerRecordStore, key model.WaiverKey) (model.CheckpointWaiver, bool) {
 	t.Helper()
 	found, ok, err := ledger.CheckpointWaiver(key)

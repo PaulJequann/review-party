@@ -18,11 +18,15 @@ func (s *LedgerRecordStore) RecordCheckpointWaiver(waiver model.CheckpointWaiver
 	return nil
 }
 
-// CheckpointWaiver returns the newest Waiver recorded for exactly this key.
+// CheckpointWaiver returns the Waiver recorded for exactly this key that the
+// most policies accept: the newest terminal Waiver, else the newest of any
+// kind. Every policy that accepts a non-interactive Waiver accepts a terminal
+// one too.
 func (s *LedgerRecordStore) CheckpointWaiver(key model.WaiverKey) (model.CheckpointWaiver, bool, error) {
 	waiver := model.CheckpointWaiver{Key: key}
 	err := s.db.QueryRow(`SELECT id,reason,waived_by,created_at FROM checkpoint_waivers
-		WHERE checkpoint = ? AND content_digest = ? ORDER BY created_at DESC, id DESC LIMIT 1`, key.Checkpoint, key.ContentDigest).
+		WHERE checkpoint = ? AND content_digest = ? ORDER BY waived_by = ? DESC, created_at DESC, id DESC LIMIT 1`,
+		key.Checkpoint, key.ContentDigest, model.WaivedByTerminal).
 		Scan(&waiver.ID, &waiver.Reason, &waiver.WaivedBy, &waiver.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.CheckpointWaiver{}, false, nil
