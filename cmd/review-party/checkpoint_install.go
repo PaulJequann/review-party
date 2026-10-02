@@ -81,7 +81,7 @@ func executeCheckpointInstall(options hookInstallOptions, streams commandIO) int
 		}
 		return confirmed, err
 	}
-	target := hookInstallTarget{root: root, config: configurationArgument(options.configuration)}
+	target := hookInstallTarget{root: root, configuration: options.configuration}
 	err = installCheckpointHooks(target, streams.configurationManager(options.configuration), streams.output, confirm)
 	switch {
 	case errors.Is(err, errNoCheckpointDeclared), errors.Is(err, errHookInstallUnconfirmed):
@@ -151,8 +151,8 @@ type hookInstallStep struct {
 // hookInstallTarget is the repository whose hooks are installed and the
 // --config argument its hooks need to load the Caller's configuration.
 type hookInstallTarget struct {
-	root   string
-	config string
+	root          string
+	configuration string
 }
 
 type hookInstallPlan struct {
@@ -181,10 +181,14 @@ func planHookInstall(target hookInstallTarget, manager *configuration.Manager) (
 	if err != nil {
 		return hookInstallPlan{}, err
 	}
+	config, err := target.configArgument()
+	if err != nil {
+		return hookInstallPlan{}, err
+	}
 	_, lookErr := exec.LookPath("review-party")
 	plan := hookInstallPlan{
 		tool: tool, location: location, writes: map[string][]byte{}, missingBinary: lookErr != nil,
-		config: target.config, committed: target.committed(tool, location),
+		config: config, committed: target.committed(tool, location),
 	}
 	for _, name := range configuration.SortedCheckpointNames(declared) {
 		step, err := plan.planCheckpoint(name)
@@ -226,6 +230,16 @@ func detectHookTool(root string) (hookTool, string, error) {
 		return hookToolHooksPath, locations.Directory, nil
 	}
 	return hookToolPlain, locations.Directory, nil
+}
+
+// configArgument is the --config argument for a per-clone hook. git runs hooks
+// from the work tree root, so a relative path would name a different file there.
+func (target hookInstallTarget) configArgument() (string, error) {
+	if target.configuration == "" {
+		return "", nil
+	}
+	path, err := filepath.Abs(target.configuration)
+	return configurationArgument(path), err
 }
 
 // committed reports whether the hooks live in files the team shares: a hook
@@ -403,7 +417,7 @@ func (plan *hookInstallPlan) planLefthook(name configuration.CheckpointName) (ho
 	switch {
 	case strings.Contains(text, command):
 		step.outcome = hookInstalled
-	case !slices.Contains([]string{".yml", ".yaml"}, filepath.Ext(path)) || hasTopLevelKey(text, name):
+	case !slices.Contains([]string{".yml", ".yaml"}, filepath.Ext(path)) || lefthookResistsAppend(text, name):
 		step.outcome, step.manual = hookManual, strings.Split(strings.TrimSuffix(command, "\n"), "\n")
 	default:
 		step.outcome = hookAppended
@@ -415,11 +429,25 @@ func (plan *hookInstallPlan) planLefthook(name configuration.CheckpointName) (ho
 	return step, nil
 }
 
-// hasTopLevelKey reports whether appending a block mapping for the hook could
-// duplicate a key: a plain or quoted top-level key for it, or a top-level flow
-// mapping the installer cannot extend.
-func hasTopLevelKey(yaml string, name configuration.CheckpointName) bool {
-	return regexp.MustCompile(`(?m)^(?:["']?` + regexp.QuoteMeta(string(name)) + `["']?\s*:|\{)`).MatchString(yaml)
+var (
+	lefthookRootKey   = regexp.MustCompile(`^["']?[\w.-]+["']?[ \t]*:`)
+	lefthookBlankLine = regexp.MustCompile(`^\s*(---|#.*)?\s*$`)
+)
+
+// lefthookResistsAppend reports whether appending a block mapping for the hook
+// could duplicate a key or break the file: a plain or quoted key for the hook
+// at any depth, or a root that is not a block mapping at column zero.
+// Either falls back to the manual snippet.
+func lefthookResistsAppend(yaml string, name configuration.CheckpointName) bool {
+	if regexp.MustCompile(`(?m)^[ \t]*["']?` + regexp.QuoteMeta(string(name)) + `["']?[ \t]*:`).MatchString(yaml) {
+		return true
+	}
+	for _, line := range strings.Split(yaml, "\n") {
+		if !lefthookBlankLine.MatchString(line) {
+			return !lefthookRootKey.MatchString(line)
+		}
+	}
+	return false
 }
 
 // preCommitFrameworkSnippet is a local hook for .pre-commit-config.yaml. The

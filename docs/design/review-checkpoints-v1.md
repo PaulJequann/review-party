@@ -198,27 +198,27 @@ object is zero or not present locally, uses the merge base with
 **Hook tools.** The installer edits only files whose format it can extend
 without rewriting a line. Plain hooks, `core.hooksPath`, and husky get a
 marked block after the shebang, or a new `#!/bin/sh` file with mode 0755. A
-hook whose shebang names an interpreter other than a POSIX shell gets a printed
-command to call by hand instead. The
-pre-push block captures git's ref lines and feeds them back as standard input,
-so a hook that reads them still receives them byte for byte. lefthook YAML
-gains a `review-party-checkpoint` command, with `use_stdin: true` for
-pre-push, only when the file has no top-level key for that hook, plain or
-quoted, and is not a flow mapping. A lefthook
-file that already has the key, or is TOML or JSON, gets a printed snippet to
-add by hand. The installer does not merge YAML. The pre-commit framework
-always gets a printed `repo: local` snippet and `pre-commit install
---hook-type pre-push`. That framework passes pre-push facts as
-`PRE_COMMIT_*` variables rather than git's ref lines, so the snippet rebuilds
-one ref line from them. These edits go straight to disk after confirmation.
-They do not go through a configuration Plan, because hook files are not Review
-Party configuration. husky and lefthook files are committed, so their edit
-reaches the team when the Caller commits it. A hook in plain `.git/hooks` or
-in a `core.hooksPath` outside the work tree belongs to one clone, so it
-carries the installing Caller's `--config`. A committed hook never does,
-because each teammate loads their own configuration, and the installer warns
-when `--config` is dropped. Installing into an existing hook script also makes
-it executable, since git skips one that is not.
+hook whose shebang names an interpreter other than a POSIX shell gets a
+printed command to call by hand instead. The pre-push block captures git's ref
+lines and feeds them back as standard input, so a hook that reads them still
+receives them byte for byte. lefthook YAML gains a `review-party-checkpoint`
+command, with `use_stdin: true` for pre-push, only when its root is a block
+mapping at column zero and no line is a key for that hook, plain or quoted. A
+lefthook file that already has the key, or is TOML or JSON, gets a printed
+snippet to add by hand. The installer does not merge YAML. The pre-commit
+framework always gets a printed `repo: local` snippet and `pre-commit install
+--hook-type pre-push`. That framework passes pre-push facts as `PRE_COMMIT_*`
+variables rather than git's ref lines, so the snippet rebuilds one ref line
+from them. These edits go straight to disk after confirmation. They do not go
+through a configuration Plan, because hook files are not Review Party
+configuration. husky and lefthook files are committed, so their edit reaches
+the team when the Caller commits it. A hook in plain `.git/hooks` or in a
+`core.hooksPath` outside the work tree belongs to one clone, so it carries the
+installing Caller's `--config` as an absolute path, because git runs hooks
+from the work tree root. A committed hook never does, because each teammate
+loads their own configuration, and the installer warns when `--config` is
+dropped. Installing into an existing hook script also makes it executable,
+since git skips one that is not.
 
 ## Open questions
 

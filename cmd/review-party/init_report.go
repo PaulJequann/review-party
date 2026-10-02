@@ -14,11 +14,13 @@ import (
 type initReport struct {
 	manager    *configuration.Manager
 	repository configuration.Repository
-	config     string
+	// configuration is the --config path; config is the argument hints carry.
+	configuration string
+	config        string
 }
 
 func reportInitGaps(output io.Writer, manager *configuration.Manager, repository configuration.Repository, options initOptions) error {
-	report := initReport{manager: manager, repository: repository, config: configurationArgument(options.configuration)}
+	report := initReport{manager: manager, repository: repository, configuration: options.configuration, config: configurationArgument(options.configuration)}
 	lines, err := report.lines()
 	if err != nil {
 		return err
@@ -61,7 +63,7 @@ func (report initReport) checkpointLines() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	plan, err := planHookInstall(hookInstallTarget{root: string(report.repository), config: report.config}, report.manager)
+	plan, err := planHookInstall(hookInstallTarget{root: string(report.repository), configuration: report.configuration}, report.manager)
 	if err != nil {
 		return nil, err
 	}

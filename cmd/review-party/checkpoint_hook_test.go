@@ -297,6 +297,17 @@ func TestCheckpointInstallCarriesTheCallersConfigurationOnlyIntoPerCloneHooks(t 
 		t.Fatalf("plain hook = %q, want %q", content, want)
 	}
 
+	relative := newHookInstallFixture(t, configuration.CheckpointPreCommit)
+	relative.provideStandIn()
+	absolute, err := filepath.Abs("relative.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertRunContains(t, relative.install("--yes", "--config", "relative.json"), commandRun{stdout: "Wrote 1 hook file(s)."})
+	if content, want := relative.read(".git/hooks/pre-commit"), "#!/bin/sh\n"+checkpointHookBlock(configuration.CheckpointPreCommit, " --config "+shellQuoteArgument(absolute)); content != want {
+		t.Fatalf("relative --config hook = %q, want %q", content, want)
+	}
+
 	shared := newHookInstallFixture(t, configuration.CheckpointPreCommit)
 	shared.provideStandIn()
 	shared.writeFile(".husky/_/h", "")
@@ -354,11 +365,13 @@ func TestCheckpointInstallLeavesAHookForAnotherInterpreterToTheCaller(t *testing
 	}
 }
 
-func TestCheckpointInstallLeavesAQuotedLefthookKeyToTheCaller(t *testing.T) {
+func TestCheckpointInstallLeavesLefthookFilesItCannotExtendToTheCaller(t *testing.T) {
 	for _, existing := range []string{
 		"'pre-push':\n  commands:\n    lint:\n      run: make lint\n",
 		"\"pre-push\":\n  commands:\n    lint:\n      run: make lint\n",
 		"{pre-push: {commands: {lint: {run: make lint}}}}\n",
+		"  pre-push:\n    commands:\n      lint:\n        run: make lint\n",
+		"# hooks\n  pre-commit:\n    commands:\n      lint:\n        run: make lint\n",
 	} {
 		fixture := newHookInstallFixture(t, configuration.CheckpointPrePush)
 		fixture.provideStandIn()
