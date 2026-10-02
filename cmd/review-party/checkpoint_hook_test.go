@@ -204,6 +204,25 @@ func TestCheckpointInstallKeepsAnExistingPrePushHookAndItsInput(t *testing.T) {
 	}
 }
 
+func TestCheckpointInstallMakesAnEditedHookExecutableWithoutRewritingIt(t *testing.T) {
+	fixture := newHookInstallFixture(t, configuration.CheckpointPrePush)
+	fixture.provideStandIn()
+	assertRunContains(t, fixture.install("--yes"), commandRun{stdout: "Wrote 1 hook file(s)."})
+	hook := filepath.Join(fixture.repository, ".git", "hooks", "pre-push")
+	edited := strings.Replace(fixture.read(".git/hooks/pre-push"), "then exit 1; fi", "then exit 0; fi", 1)
+	fixture.writeFile(".git/hooks/pre-push", edited)
+	if err := os.Chmod(hook, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	assertRun(t, fixture.install("--yes"), commandRun{stdout: "pre-push: make executable " + hook + " (git hooks)\nWrote 1 hook file(s).\n"})
+	if info, err := os.Stat(hook); err != nil || info.Mode().Perm() != 0o755 {
+		t.Fatalf("edited hook stat = %v, %v, want mode 0755", info, err)
+	}
+	if fixture.read(".git/hooks/pre-push") != edited {
+		t.Fatal("making an edited hook executable rewrote its block")
+	}
+}
+
 func TestCheckpointHookShellBlocksOnlyOnARefusal(t *testing.T) {
 	fixture := newHookInstallFixture(t, configuration.CheckpointPreCommit)
 	assertRunContains(t, fixture.install("--yes"), commandRun{stdout: "Wrote 1 hook file(s)."})

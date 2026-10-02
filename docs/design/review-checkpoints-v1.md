@@ -245,8 +245,9 @@ because each teammate loads their own configuration, and the installer warns
 when `--config` is dropped. A rerun with another `--config` regenerates a
 block the installer generated, and init reports such a block as loading
 another configuration. A block that differs in any other way counts as edited
-and is left alone. Installing into an existing hook script also makes it
-executable, since git skips one that is not.
+and its text is left alone. Installing into an existing hook script, including
+one with an edited block, also makes it executable, since git skips one that
+is not.
 
 ## Open questions
 

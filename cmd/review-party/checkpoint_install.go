@@ -371,14 +371,14 @@ func (plan *hookInstallPlan) planHookScript(name configuration.CheckpointName) (
 	switch outcome {
 	case hookInserted, hookRefreshed:
 		plan.writes[path] = []byte(updated)
-	case hookInstalled:
+	case hookInstalled, hookEdited:
 		if !step.executable() {
 			step.outcome = hookNotExecutable
 			plan.writes[path] = content
 		}
 	case hookManual:
 		step.manual = plan.hookScriptCall(name)
-	case hookCreated, hookAppended, hookEdited, hookNotExecutable:
+	case hookCreated, hookAppended, hookNotExecutable:
 	}
 	return step, nil
 }
