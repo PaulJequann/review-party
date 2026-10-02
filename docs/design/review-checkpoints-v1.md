@@ -208,7 +208,11 @@ receives them byte for byte. lefthook YAML gains a `review-party-checkpoint`
 command, with `use_stdin: true` for pre-push, only when its root is a block
 mapping at column zero and no line is a key for that hook, plain or quoted. A
 lefthook file that already has the key, or is TOML or JSON, gets a printed
-snippet to add by hand. The installer does not merge YAML. The pre-commit
+snippet to add by hand. lefthook pastes the hook's arguments `{1}` and `{2}`
+into the shell text unquoted, so the pre-push command reads each one from a
+quoted heredoc and passes it on as a single word. lefthook skips a pre-push
+command when `HEAD` has no file changes against `@{push}`, so it does not
+check a push of another branch from an up-to-date `HEAD`. The installer does not merge YAML. The pre-commit
 framework gets a printed `repo: local` snippet until its configuration has a
 hook with the snippet's id, `review-party-checkpoint-<checkpoint>`. That
 framework passes pre-push facts as `PRE_COMMIT_*` variables rather than git's
@@ -216,10 +220,10 @@ ref lines, so the snippet rebuilds one ref line from them. Every form passes
 the hook's arguments after `--`, so a remote named like an option cannot turn
 the call into a usage error that allows the push. lefthook, husky, and the
 pre-commit framework run only after each clone installs them, so the
-installer and init print `lefthook install` when git's hook does not call
-lefthook, `npx husky` when git's hooks directory is not `.husky` or
-`.husky/_`, and `pre-commit install --hook-type <checkpoint>` when git's hook
-is not the one pre-commit generated. A symlinked hook is written at its target, even a
+installer and init print `lefthook install` when git's hook is not an
+executable file that calls lefthook, `npx husky` when git's hooks directory is
+not `.husky` or `.husky/_`, and `pre-commit install --hook-type <checkpoint>`
+when git's hook is not an executable file that pre-commit generated. A symlinked hook is written at its target, even a
 target that does not exist yet, so the link survives. These edits go straight to disk after confirmation. They do not go
 through a configuration Plan, because hook files are not Review Party
 configuration. husky and lefthook files are committed, so their edit reaches

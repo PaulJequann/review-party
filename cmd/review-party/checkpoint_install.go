@@ -269,11 +269,12 @@ func (plan *hookInstallPlan) huskyActive() bool {
 	return hooks == husky || hooks == filepath.Join(husky, "_")
 }
 
-// generatedHook reports whether git's hook for the Checkpoint is the one a
+// generatedHook reports whether git runs the Checkpoint's hook from the file a
 // hook tool's install command generates, which carries marker.
 func (plan *hookInstallPlan) generatedHook(name configuration.CheckpointName, marker string) bool {
-	content, err := os.ReadFile(filepath.Join(plan.hooks, string(name)))
-	return err == nil && strings.Contains(string(content), marker)
+	path := filepath.Join(plan.hooks, string(name))
+	content, err := os.ReadFile(path)
+	return err == nil && strings.Contains(string(content), marker) && hookInstallStep{path: path}.executable()
 }
 
 // configArgument is the --config argument for a per-clone hook. git runs hooks
@@ -467,13 +468,19 @@ func runsInPosixShell(shebang []string) bool {
 // https://lefthook.dev/configuration/: run executes through sh with {1} and
 // {2} as the hook's arguments (https://lefthook.dev/configuration/run/), and
 // use_stdin passes git's ref lines through (https://lefthook.dev/configuration/use_stdin/).
+// lefthook pastes {1} and {2} into the shell text unquoted, so the pre-push
+// run reads each from a quoted heredoc, where the shell takes it literally.
 func (plan *hookInstallPlan) lefthookCommand(name configuration.CheckpointName) string {
 	if name == configuration.CheckpointPreCommit {
 		run := hookCommand{name, "review-party checkpoint hook git pre-commit" + plan.config}.guarded()
 		return "pre-commit:\n  commands:\n    review-party-checkpoint:\n      run: " + yamlSingleQuoted(run) + "\n"
 	}
-	run := hookCommand{name, "review-party checkpoint hook git pre-push" + plan.config + " -- {1} {2}"}.guarded()
-	return "pre-push:\n  commands:\n    review-party-checkpoint:\n      run: " + yamlSingleQuoted(run) + "\n      use_stdin: true\n"
+	run := []string{
+		"review_party_remote=$(cat <<'REVIEW_PARTY_ARG'", "{1}", "REVIEW_PARTY_ARG", ")",
+		"review_party_url=$(cat <<'REVIEW_PARTY_ARG'", "{2}", "REVIEW_PARTY_ARG", ")",
+		hookCommand{name, "review-party checkpoint hook git pre-push" + plan.config + ` -- "$review_party_remote" "$review_party_url"`}.guarded(),
+	}
+	return "pre-push:\n  commands:\n    review-party-checkpoint:\n      run: |\n        " + strings.Join(run, "\n        ") + "\n      use_stdin: true\n"
 }
 
 // hookCommand is the review-party call a hook makes for one Checkpoint.

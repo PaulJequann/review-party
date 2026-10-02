@@ -642,6 +642,9 @@ scripts, it inserts a marked block after the shebang and never changes the
 existing lines. A pre-push hook that reads git's ref lines still receives them
 unchanged. lefthook YAML gains a `review-party-checkpoint` command when the hook
 has no entry yet. Otherwise the installer prints the snippet to add by hand.
+lefthook skips a pre-push command when `HEAD` has no file changes against
+`@{push}`, so it does not check a push of another branch from an up-to-date
+`HEAD`.
 Rerunning it changes nothing, except that a block it generated for another
 `--config` is regenerated for the current one. A block someone edited is left
 alone.
