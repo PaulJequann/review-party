@@ -468,17 +468,18 @@ func runsInPosixShell(shebang []string) bool {
 // https://lefthook.dev/configuration/: run executes through sh with {1} and
 // {2} as the hook's arguments (https://lefthook.dev/configuration/run/), and
 // use_stdin passes git's ref lines through (https://lefthook.dev/configuration/use_stdin/).
-// lefthook pastes {1} and {2} into the shell text unquoted, so the pre-push
-// run reads each from a quoted heredoc, where the shell takes it literally.
+// lefthook pastes {1}, the remote, into the shell text unquoted, so the
+// pre-push run reads it from a quoted heredoc, where the shell takes it
+// literally. The : before it keeps a remote named like the delimiter from
+// ending the heredoc early.
 func (plan *hookInstallPlan) lefthookCommand(name configuration.CheckpointName) string {
 	if name == configuration.CheckpointPreCommit {
 		run := hookCommand{name, "review-party checkpoint hook git pre-commit" + plan.config}.guarded()
 		return "pre-commit:\n  commands:\n    review-party-checkpoint:\n      run: " + yamlSingleQuoted(run) + "\n"
 	}
 	run := []string{
-		"review_party_remote=$(cat <<'REVIEW_PARTY_ARG'", "{1}", "REVIEW_PARTY_ARG", ")",
-		"review_party_url=$(cat <<'REVIEW_PARTY_ARG'", "{2}", "REVIEW_PARTY_ARG", ")",
-		hookCommand{name, "review-party checkpoint hook git pre-push" + plan.config + ` -- "$review_party_remote" "$review_party_url"`}.guarded(),
+		"review_party_remote=$(cat <<'REVIEW_PARTY_REMOTE'", ":{1}", "REVIEW_PARTY_REMOTE", ")",
+		hookCommand{name, "review-party checkpoint hook git pre-push" + plan.config + ` -- "${review_party_remote#:}"`}.guarded(),
 	}
 	return "pre-push:\n  commands:\n    review-party-checkpoint:\n      run: |\n        " + strings.Join(run, "\n        ") + "\n      use_stdin: true\n"
 }
@@ -565,22 +566,26 @@ func lefthookResistsAppend(yaml string, name configuration.CheckpointName) bool 
 	return false
 }
 
-// preCommitFrameworkSnippet is a local hook for .pre-commit-config.yaml. The
-// framework sets PRE_COMMIT_* variables for pre-push hooks instead of passing
-// git's ref lines (https://pre-commit.com/), so the entry rebuilds one line.
-func (plan *hookInstallPlan) preCommitFrameworkSnippet(name configuration.CheckpointName) []string {
+// preCommitFrameworkEntry is the entry key of the local hook for
+// .pre-commit-config.yaml. The framework sets PRE_COMMIT_* variables for
+// pre-push hooks instead of passing git's ref lines (https://pre-commit.com/),
+// so the entry rebuilds one line.
+func (plan *hookInstallPlan) preCommitFrameworkEntry(name configuration.CheckpointName) string {
 	command, arguments := "review-party checkpoint hook git pre-commit", ""
 	if name == configuration.CheckpointPrePush {
 		command = `printf "%s %s %s %s\n" "$PRE_COMMIT_LOCAL_BRANCH" "$PRE_COMMIT_TO_REF" "$PRE_COMMIT_REMOTE_BRANCH" "$PRE_COMMIT_FROM_REF" | review-party checkpoint hook git pre-push`
 		arguments = ` -- "$PRE_COMMIT_REMOTE_NAME"`
 	}
-	entry := yamlSingleQuoted("sh -c " + shellQuoteArgument(hookCommand{name, command + plan.config + arguments}.guarded()))
+	return "entry: " + yamlSingleQuoted("sh -c "+shellQuoteArgument(hookCommand{name, command + plan.config + arguments}.guarded()))
+}
+
+func (plan *hookInstallPlan) preCommitFrameworkSnippet(name configuration.CheckpointName) []string {
 	return []string{
 		"- repo: local",
 		"  hooks:",
 		"    - id: review-party-checkpoint-" + string(name),
 		"      name: review-party " + string(name) + " Checkpoint",
-		"      entry: " + entry,
+		"      " + plan.preCommitFrameworkEntry(name),
 		"      language: system",
 		"      pass_filenames: false",
 		"      always_run: true",
@@ -589,16 +594,16 @@ func (plan *hookInstallPlan) preCommitFrameworkSnippet(name configuration.Checkp
 }
 
 // planPreCommitFramework finds the Checkpoint's hook in the framework's
-// configuration by the id the snippet gives it. The installer never edits
-// that file.
+// configuration by the entry the snippet gives it, so an entry that loads
+// another --config gets the current snippet. The installer never edits that
+// file.
 func (plan *hookInstallPlan) planPreCommitFramework(name configuration.CheckpointName) (hookInstallStep, error) {
 	content, _, err := plan.pending(plan.location)
 	if err != nil {
 		return hookInstallStep{}, err
 	}
 	step := hookInstallStep{checkpoint: name, path: plan.location, outcome: hookInstalled}
-	id := regexp.MustCompile(`(?m)^[ \t-]*id:[ \t]*["']?review-party-checkpoint-` + regexp.QuoteMeta(string(name)) + `["']?[ \t]*(#.*)?$`)
-	if !id.Match(content) {
+	if !strings.Contains(string(content), plan.preCommitFrameworkEntry(name)) {
 		step.outcome, step.manual = hookManual, plan.preCommitFrameworkSnippet(name)
 	}
 	return step, nil
