@@ -480,10 +480,12 @@ stale verdict judged text the Finding no longer holds, so it does not count.
 
 **Exempt-path Findings.** A Finding's location is free text that the result
 contract writes as `path:line`. The text before the first `:`, trimmed, is
-the Finding's path. A Finding whose path is exactly one of the change's exempt
-paths needs no verdict, since the Checkpoint never asked for a Review of that
-file. A location without that shape, one that names more than one file, or a
-path the change did not exempt still needs a verdict. The match errs toward
+the Finding's path. A Finding whose path the Checkpoint's exemptions match
+needs no verdict, since the Checkpoint never asks for a Review of that file.
+This holds for a path only the covering Review changed, which Coverage already
+leaves out of its comparison. A location without that shape, one that names
+more than one file, or a path the exemptions do not match still needs a
+verdict. The match errs toward
 asking, because a misread location must not let an unjudged Finding pass. A
 small change passes before Coverage is checked, so it is never judged.
 

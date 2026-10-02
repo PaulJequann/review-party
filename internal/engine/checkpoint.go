@@ -94,7 +94,7 @@ func (conductor *Conductor) CheckCheckpoint(_ context.Context, request Checkpoin
 		report.State = CheckpointExempt
 		return report, nil
 	}
-	report.Coverage, err = conductor.checkCoverage(request.Repository, content, declaration, conductor.newFindingJudge(report.Declaration, exemption))
+	report.Coverage, err = conductor.checkCoverage(request.Repository, content, declaration, conductor.newFindingJudge(report.Declaration))
 	if err != nil {
 		return CheckpointReport{}, err
 	}

@@ -74,7 +74,7 @@ func TestJudgedCountsOnlyCurrentVerdicts(t *testing.T) {
 			name: "a location naming more than an exempt path", findings: findingsAt("README.md and a.go", "docs/README.md:1"),
 			want: checkpointOutcome{
 				State: CheckpointUnjudged, Declared: true, Exemption: exempted, ReviewIDs: []model.ReviewID{"rp_code"},
-				Unjudged: []UnjudgedReview{{Review: "rp_code", Ordinals: []int{1, 2}}},
+				Unjudged: []UnjudgedReview{{Review: "rp_code", Ordinals: []int{1}}},
 			},
 		},
 	} {
@@ -93,6 +93,18 @@ func TestJudgedCountsOnlyCurrentVerdicts(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestJudgedSkipsFindingsInPathsOnlyTheReviewChanged(t *testing.T) {
+	fake := &coverageStore{
+		reviews:  []recordedCoverage{recorded(bugsSource, "rp_code", model.LifecycleCompleted, joined(coverageFirst, readmeNew))},
+		findings: map[model.ReviewID][]model.Finding{"rp_code": findingsAt("README.md:3")},
+	}
+	conductor, repository := newCheckpointConductor(t, fake, judgedCheckpoint())
+
+	assertOutcome(t, checkPrePush(t, conductor, repository, CoverageSubject{Changes: coverageFirst}), checkpointOutcome{
+		State: CheckpointCovered, Declared: true, ReviewIDs: []model.ReviewID{"rp_code"},
+	})
 }
 
 func TestAnyFullyJudgedCoveringReviewPasses(t *testing.T) {

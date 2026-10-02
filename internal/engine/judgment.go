@@ -3,8 +3,8 @@ package engine
 // Under the judged requirement a covered Profile also needs its Findings
 // judged. A Profile passes when Coverage holds over Reviews whose every
 // Finding has a current Verdict, so judging any one covering Review, or one
-// Review per commit, is enough. A Finding located in a path the Checkpoint's
-// exemptions removed from the change needs no Verdict. Verdicts are read only
+// Review per commit, is enough. A Finding located in a path the Checkpoint
+// exempts needs no Verdict. Verdicts are read only
 // for Profiles that Coverage already holds for.
 
 import (
@@ -27,23 +27,17 @@ type UnjudgedReview struct {
 // remembers each Review's unjudged ordinals, so a Review read for one pass is
 // not read again.
 type findingJudge struct {
-	conductor *Conductor
-	exempt    map[string]bool
-	unjudged  map[model.ReviewID][]int
+	conductor   *Conductor
+	declaration configuration.Checkpoint
+	unjudged    map[model.ReviewID][]int
 }
 
 // newFindingJudge returns no judge unless the Checkpoint is declared judged.
-func (conductor *Conductor) newFindingJudge(declaration *configuration.Checkpoint, exemption *CheckpointExemption) *findingJudge {
+func (conductor *Conductor) newFindingJudge(declaration *configuration.Checkpoint) *findingJudge {
 	if declaration == nil || declaration.Requirement != configuration.RequirementJudged {
 		return nil
 	}
-	judge := &findingJudge{conductor: conductor, exempt: map[string]bool{}, unjudged: map[model.ReviewID][]int{}}
-	if exemption != nil {
-		for _, path := range exemption.ExemptPaths {
-			judge.exempt[path] = true
-		}
-	}
-	return judge
+	return &findingJudge{conductor: conductor, declaration: *declaration, unjudged: map[model.ReviewID][]int{}}
 }
 
 // decide decides a Profile's Coverage and, when there is a judge, its
@@ -126,7 +120,7 @@ func (judge *findingJudge) unjudgedOrdinals(id model.ReviewID) ([]int, error) {
 	}
 	ordinals := []int{}
 	for _, finding := range findings {
-		if !current[finding.Ordinal] && !judge.exempt[findingPath(finding.Location)] {
+		if !current[finding.Ordinal] && !judge.declaration.Exempts(findingPath(finding.Location)) {
 			ordinals = append(ordinals, finding.Ordinal)
 		}
 	}
@@ -156,8 +150,8 @@ func (judge *findingJudge) currentVerdicts(id model.ReviewID) (map[int]bool, err
 }
 
 // findingPath reads the path of a Finding's location, which the result
-// contract writes as path:line. Text that names no single changed path never
-// matches an exempt path.
+// contract writes as path:line. Text that names no single path never matches
+// an exemption.
 func findingPath(location string) string {
 	path, _, _ := strings.Cut(location, ":")
 	return strings.TrimSpace(path)
