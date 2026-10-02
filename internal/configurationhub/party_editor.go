@@ -15,6 +15,11 @@ type partyFormDraft struct {
 
 func (e *editor) createParty() error {
 	draft := &e.draftSet().party
+	if draft.scope == "" {
+		if err := e.form(huh.NewSelect[string]().Title("Configuration scope").Options(scopeOptions()...).Value(&draft.scope)); err != nil {
+			return err
+		}
+	}
 	if err := e.form(e.partyFields(draft)...); err != nil {
 		return err
 	}
@@ -33,19 +38,12 @@ func (e *editor) createParty() error {
 	return err
 }
 
-// partyFields asks only for what the draft does not already hold. A Global
-// Party may reference only Global Profiles, so a seeded Global draft offers
-// no others. Members are chosen before the scope field exists because a huh
-// Select writes its first option into an empty bound value.
+// partyFields asks only for what the draft does not already hold. The scope
+// is settled before these fields are built: a Global Party may reference only
+// Global Profiles, and accessible prompts never rebuild a field's options.
 func (e *editor) partyFields(draft *partyFormDraft) []huh.Field {
-	members := e.profileReferenceOptions()
-	if draft.scope == string(configuration.ScopeGlobal) {
-		members = globalProfileOptions(members)
-	}
-	fields := make([]huh.Field, 0, 5)
-	if draft.scope == "" {
-		fields = append(fields, huh.NewSelect[string]().Title("Configuration scope").Options(scopeOptions()...).Value(&draft.scope))
-	}
+	members := partyMemberOptions(e.profileReferenceOptions(), draft.scope)
+	fields := make([]huh.Field, 0, 4)
 	if draft.name == "" {
 		fields = append(fields, huh.NewInput().Title("Party name").Value(&draft.name))
 	}
@@ -54,6 +52,13 @@ func (e *editor) partyFields(draft *partyFormDraft) []huh.Field {
 		huh.NewMultiSelect[string]().Title("Profiles").Options(members...).Value(&draft.profileRefs),
 		huh.NewInput().Title("Concurrency limit").Value(&draft.limit),
 	)
+}
+
+func partyMemberOptions(options []huh.Option[string], scope string) []huh.Option[string] {
+	if scope == string(configuration.ScopeGlobal) {
+		return globalProfileOptions(options)
+	}
+	return options
 }
 
 func globalProfileOptions(options []huh.Option[string]) []huh.Option[string] {
