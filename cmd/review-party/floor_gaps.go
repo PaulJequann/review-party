@@ -1,6 +1,7 @@
 package main
 
 import (
+	"path/filepath"
 	"strings"
 
 	"reviewparty/internal/configuration"
@@ -43,9 +44,13 @@ var floorGapStates = map[hookOutcome]floorGapState{
 
 // planFloorGaps plans every Integration's install for the repository and
 // keeps the gaps of the Checkpoints that list it as team floor. Checkpoints
-// that do not list an Integration are not reported for it.
+// that do not list an Integration are not reported for it. A fix carries an
+// absolute --config, so it works from any directory.
 func planFloorGaps(manager *configuration.Manager, repository, configurationPath string) ([]floorGap, error) {
 	declared, err := manager.Checkpoints(configuration.Repository(repository))
+	if err == nil && configurationPath != "" {
+		configurationPath, err = filepath.Abs(configurationPath)
+	}
 	if err != nil {
 		return nil, err
 	}

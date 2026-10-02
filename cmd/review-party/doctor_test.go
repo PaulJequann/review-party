@@ -58,8 +58,10 @@ func TestDoctorNamesEachMissingFloorIntegrationWithItsFix(t *testing.T) {
 		"Checkpoint pre-push has no claude-code hook; fix: review-party checkpoint install claude-code --repo " + repository + "\n" +
 		"Checkpoint pre-push has no agents-md block; fix: review-party checkpoint install agents-md --repo " + repository + "\n"})
 
-	config := filepath.Join(t.TempDir(), "review-party.json")
-	assertRunContains(t, fixture.doctor("--config", config), commandRun{stdout: "fix: review-party checkpoint install agents-md --repo " + repository + " --config " + shellQuoteArgument(config) + "\n"})
+	directory := t.TempDir()
+	t.Chdir(directory)
+	config := filepath.Join(directory, "review-party.json")
+	assertRunContains(t, fixture.doctor("--config", "review-party.json"), commandRun{stdout: "fix: review-party checkpoint install agents-md --repo " + repository + " --config " + shellQuoteArgument(config) + "\n"})
 
 	result := fixture.doctor("--format", "json")
 	install := "review-party checkpoint install %s --repo " + repository
@@ -157,7 +159,7 @@ func TestDoctorListsRecentWaiversReadOnly(t *testing.T) {
 	fixture := newCheckpointFixture(t)
 	fixture.declare("pre-push", "--waivers", "anyone")
 	fixture.commit("one.go", "package app\n\nconst one = 1\n")
-	if result := fixture.waive("", false, "pre-push", "--base", fixture.base, "--reason", "generated code"); result.exit != 0 {
+	if result := fixture.waive("", false, "pre-push", "--base", fixture.base, "--reason", "generated\r\ncode\n"); result.exit != 0 {
 		t.Fatalf("waive = %+v", result)
 	}
 

@@ -11,7 +11,7 @@ import (
 
 const (
 	prePushLine   = "Before pushing, review the change with `review-party run --base <upstream> --head HEAD`; the pre-push Checkpoint refuses a push no completed Review covers.\n"
-	preCommitLine = "Before committing, review the staged changes with `review-party run`; the pre-commit Checkpoint refuses a commit no completed Review covers.\n"
+	preCommitLine = "Before committing, stage the change, stash any other changes, and review it with `review-party run`; the pre-commit Checkpoint refuses a commit whose staged content no completed Review covers.\n"
 	helpLine      = "`review-party checkpoint --help` has details.\n"
 )
 

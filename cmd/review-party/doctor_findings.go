@@ -181,6 +181,8 @@ func (result doctorResult) findingLines() []string {
 	return lines
 }
 
+// waiverLine renders one Waiver on one line, folding the line breaks a
+// reason may carry.
 func waiverLine(waiver model.CheckpointWaiver) string {
-	return fmt.Sprintf("Waiver %s waived %s on %s (%s): %s", waiver.ID, waiver.Key.Checkpoint, waiver.CreatedAt.UTC().Format(time.RFC3339), waiver.WaivedBy, waiver.Reason)
+	return fmt.Sprintf("Waiver %s waived %s on %s (%s): %s", waiver.ID, waiver.Key.Checkpoint, waiver.CreatedAt.UTC().Format(time.RFC3339), waiver.WaivedBy, strings.Join(strings.Fields(waiver.Reason), " "))
 }
