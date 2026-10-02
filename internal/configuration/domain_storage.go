@@ -378,7 +378,7 @@ func (manager *Manager) decodeProfile(metadata, instructions []byte, scope Scope
 		return Profile{}, false, err
 	}
 	profile.Instructions, profile.Scope = string(instructions), scope
-	profile.Source, profile.SourceDigest = authoredProfileSource(scope, name), profileSourceRevision(profile, instructions)
+	profile.Source, profile.SourceDigest = ProfileSource(scope, name), profileSourceRevision(profile, instructions)
 	return profile, true, nil
 }
 
@@ -391,7 +391,10 @@ func renderProfile(profile Profile) ([]byte, error) {
 	return append(payload, '\n'), nil
 }
 
-func authoredProfileSource(scope Scope, name string) string {
+// ProfileSource names an authored Profile by scope and name. Executed Reviews
+// record it as ProfileRevision.Source, so it is how a Review is traced back
+// to the Profile that produced it.
+func ProfileSource(scope Scope, name string) string {
 	if scope == ScopeRepository {
 		return "repository:.reviewparty/profiles/" + name
 	}

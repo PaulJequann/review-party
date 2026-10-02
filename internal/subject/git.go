@@ -167,13 +167,9 @@ func resolveCommittedRange(root repositoryRoot, reference model.SubjectReference
 		return model.ReviewSubject{}, errors.New("committed range requires both base and head revisions")
 	}
 	resolver := committedRangeResolver{repository: root}
-	base, err := resolver.resolveCommit(revisionName(reference.Base))
+	base, head, err := resolver.resolveRange(revisionName(reference.Base), revisionName(reference.Head))
 	if err != nil {
-		return model.ReviewSubject{}, fmt.Errorf("resolve base revision: %w", err)
-	}
-	head, err := resolver.resolveCommit(revisionName(reference.Head))
-	if err != nil {
-		return model.ReviewSubject{}, fmt.Errorf("resolve head revision: %w", err)
+		return model.ReviewSubject{}, err
 	}
 	patch, err := resolver.patch(base, head)
 	if err != nil {
@@ -187,13 +183,29 @@ func resolveCommittedRange(root repositoryRoot, reference model.SubjectReference
 		return model.ReviewSubject{}, err
 	}
 	facts.ChangedFiles = len(paths)
-	capture := committedRangeCapture{repository: root, base: base, head: head, patch: patch, paths: paths, facts: facts}
+	changes, err := root.treeContentChanges(revisionName(base), revisionName(head))
+	if err != nil {
+		return model.ReviewSubject{}, err
+	}
+	capture := committedRangeCapture{repository: root, base: base, head: head, patch: patch, paths: paths, facts: facts, changes: changes}
 	return capture.subject(), nil
 }
 
 type committedRangeResolver struct{ repository repositoryRoot }
 type commitObject string
 type revisionName string
+
+func (resolver committedRangeResolver) resolveRange(base, head revisionName) (commitObject, commitObject, error) {
+	baseObject, err := resolver.resolveCommit(base)
+	if err != nil {
+		return "", "", fmt.Errorf("resolve base revision: %w", err)
+	}
+	headObject, err := resolver.resolveCommit(head)
+	if err != nil {
+		return "", "", fmt.Errorf("resolve head revision: %w", err)
+	}
+	return baseObject, headObject, nil
+}
 
 func (resolver committedRangeResolver) resolveCommit(revision revisionName) (commitObject, error) {
 	value, err := gitOutput(string(resolver.repository), "rev-parse", "--verify", string(revision)+"^{commit}")
@@ -217,6 +229,7 @@ type committedRangeCapture struct {
 	patch      []byte
 	paths      []string
 	facts      model.SubjectFacts
+	changes    []model.ContentChange
 }
 
 func (capture committedRangeCapture) subject() model.ReviewSubject {
@@ -226,7 +239,7 @@ func (capture committedRangeCapture) subject() model.ReviewSubject {
 		hash.Write([]byte{0})
 	}
 	hash.Write(capture.patch)
-	return model.ReviewSubject{Kind: model.SubjectCommittedRange, Repository: string(capture.repository), Identity: hex.EncodeToString(hash.Sum(nil)), BaseObject: string(capture.base), HeadObject: string(capture.head), ChangedPaths: capture.paths, Patch: string(capture.patch), Facts: &capture.facts}
+	return model.ReviewSubject{Kind: model.SubjectCommittedRange, Repository: string(capture.repository), Identity: hex.EncodeToString(hash.Sum(nil)), BaseObject: string(capture.base), HeadObject: string(capture.head), ChangedPaths: capture.paths, Patch: string(capture.patch), Facts: &capture.facts, ContentChanges: capture.changes}
 }
 
 func ResolveWorkingChanges(repository string) (model.ReviewSubject, error) {
@@ -254,12 +267,13 @@ func newWorkingChangesSubject(root repositoryRoot, capture workingChangesCapture
 	hash.Write(capture.patch)
 
 	return model.ReviewSubject{
-		Kind:         model.SubjectWorkingChanges,
-		Repository:   string(root),
-		Identity:     hex.EncodeToString(hash.Sum(nil)),
-		ChangedPaths: capture.paths,
-		Patch:        string(capture.patch),
-		Facts:        &capture.facts,
+		Kind:           model.SubjectWorkingChanges,
+		Repository:     string(root),
+		Identity:       hex.EncodeToString(hash.Sum(nil)),
+		ChangedPaths:   capture.paths,
+		Patch:          string(capture.patch),
+		Facts:          &capture.facts,
+		ContentChanges: capture.changes,
 	}
 }
 
@@ -276,8 +290,15 @@ func ResolveRepositoryRoot(repository string) (string, error) {
 }
 
 func gitOutput(repository string, args ...string) ([]byte, error) {
+	return gitInputOutput(repository, nil, args...)
+}
+
+func gitInputOutput(repository string, input []byte, args ...string) ([]byte, error) {
 	command := exec.Command("git", args...)
 	command.Dir = repository
+	if input != nil {
+		command.Stdin = bytes.NewReader(input)
+	}
 	output, err := command.Output()
 	if err == nil {
 		return output, nil

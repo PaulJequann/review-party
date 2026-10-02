@@ -13,34 +13,46 @@ import (
 )
 
 type workingChangesCapture struct {
-	paths []string
-	patch []byte
-	facts model.SubjectFacts
+	paths   []string
+	patch   []byte
+	facts   model.SubjectFacts
+	changes []model.ContentChange
 }
 
-func captureWorkingChanges(repositoryRoot string) (workingChangesCapture, error) {
-	base := workingChangesBase(repositoryRoot)
-	trackedPatch, err := gitOutput(repositoryRoot, "diff", "--binary", "--no-ext-diff", base, "--")
+func captureWorkingChanges(repository string) (workingChangesCapture, error) {
+	root := repositoryRoot(repository)
+	base := workingChangesBase(repository)
+	trackedPatch, err := gitOutput(repository, "diff", "--binary", "--no-ext-diff", base, "--")
 	if err != nil {
 		return workingChangesCapture{}, fmt.Errorf("capture tracked working changes: %w", err)
 	}
 
-	untracked, err := gitOutput(repositoryRoot, "ls-files", "--others", "--exclude-standard", "-z")
-	if err != nil {
-		return workingChangesCapture{}, fmt.Errorf("list untracked files: %w", err)
-	}
-
-	untrackedPaths := splitNUL(untracked)
-	patch, err := combineWorkingChangePatches(repositoryRoot, trackedPatch, untrackedPaths)
+	untracked, err := untrackedPaths(repository)
 	if err != nil {
 		return workingChangesCapture{}, err
 	}
-	paths, facts, err := measureCapturedPatch(repositoryRoot, patch)
+	patch, err := combineWorkingChangePatches(repository, trackedPatch, untracked)
+	if err != nil {
+		return workingChangesCapture{}, err
+	}
+	paths, facts, err := measureCapturedPatch(repository, patch)
 	if err != nil {
 		return workingChangesCapture{}, err
 	}
 	facts.ChangedFiles = len(paths)
-	return workingChangesCapture{paths: paths, patch: patch, facts: facts}, nil
+	changes, err := root.workingContentChanges(revisionName(base), untracked)
+	if err != nil {
+		return workingChangesCapture{}, err
+	}
+	return workingChangesCapture{paths: paths, patch: patch, facts: facts, changes: changes}, nil
+}
+
+func untrackedPaths(repositoryRoot string) ([]string, error) {
+	listing, err := gitOutput(repositoryRoot, "ls-files", "--others", "--exclude-standard", "-z")
+	if err != nil {
+		return nil, fmt.Errorf("list untracked files: %w", err)
+	}
+	return splitNUL(listing), nil
 }
 
 func workingChangesBase(repositoryRoot string) string {

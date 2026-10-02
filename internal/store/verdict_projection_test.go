@@ -252,8 +252,8 @@ func TestPrepareUpgradesSchemaElevenLedgerToTakeVerdicts(t *testing.T) {
 	if err := PrepareReviewRecordState(directory); err != nil {
 		t.Fatalf("prepare = %v", err)
 	}
-	if version := readSchemaVersion(t, directory); version != 12 {
-		t.Fatalf("schema version = %d, want 12", version)
+	if version := readSchemaVersion(t, directory); version != currentLedgerSchemaVersion {
+		t.Fatalf("schema version = %d, want %d", version, currentLedgerSchemaVersion)
 	}
 	ledger, err := openLedgerRecordStore(directory, false)
 	if err != nil {

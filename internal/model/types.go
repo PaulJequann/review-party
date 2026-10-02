@@ -1,7 +1,11 @@
 // Package model defines Review Party domain types.
 package model
 
-import "time"
+import (
+	"slices"
+	"strings"
+	"time"
+)
 
 type ReviewID string
 
@@ -436,6 +440,25 @@ type ReviewSubject struct {
 	ChangedPaths []string      `json:"changed_paths"`
 	Patch        string        `json:"patch"`
 	Facts        *SubjectFacts `json:"facts,omitempty"`
+	// ContentChanges is the commit-free identity of the reviewed content,
+	// sorted by Path; Checkpoints match Reviews on this set alone.
+	ContentChanges []ContentChange `json:"content_changes,omitempty"`
+}
+
+// ZeroObjectID stands for the side of a ContentChange where the path does not exist.
+const ZeroObjectID = "0000000000000000000000000000000000000000"
+
+// ContentChange names one path's blob before and after a change, by full object ID.
+type ContentChange struct {
+	Path   string `json:"path"`
+	Before string `json:"before"`
+	After  string `json:"after"`
+}
+
+func SortContentChanges(changes []ContentChange) {
+	slices.SortFunc(changes, func(left, right ContentChange) int {
+		return strings.Compare(left.Path, right.Path)
+	})
 }
 
 type SubjectFacts struct {
