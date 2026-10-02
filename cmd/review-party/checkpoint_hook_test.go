@@ -363,8 +363,8 @@ func TestCheckpointInstallCarriesTheCallersConfigurationOnlyIntoPerCloneHooks(t 
 }
 
 func TestCheckpointInstallCarriesTheCallersConfigurationIntoPerCloneManagerFiles(t *testing.T) {
-	config := filepath.Join(t.TempDir(), "my config.json")
-	for _, file := range []string{"lefthook.yml", ".pre-commit-config.yaml"} {
+	config := filepath.Join(t.TempDir(), "it's my config.json")
+	for file, key := range map[string]string{"lefthook.yml": "run: ", ".pre-commit-config.yaml": "entry: "} {
 		t.Run(file, func(t *testing.T) {
 			fixture := newHookInstallFixture(t, configuration.CheckpointPrePush)
 			outside := filepath.Join(t.TempDir(), file)
@@ -378,11 +378,37 @@ func TestCheckpointInstallCarriesTheCallersConfigurationIntoPerCloneManagerFiles
 			if strings.Contains(result.stdout, "shared with the team") {
 				t.Fatalf("a %s outside the work tree was treated as shared: %+v", file, result)
 			}
-			if got := result.stdout + fixture.read(file); !strings.Contains(got, config) {
-				t.Fatalf("install = %+v, %s = %q, want --config %s", result, file, fixture.read(file), config)
+			if got := fixture.runManagerCommand(result.stdout+fixture.read(file), key); !strings.HasSuffix(got, "\n--config\n"+config+"\n") {
+				t.Fatalf("%s command arguments = %q, want --config %s", file, got, config)
 			}
 		})
 	}
+}
+
+// runManagerCommand runs the YAML single-quoted command after key in text
+// through sh, the way lefthook and the pre-commit framework would, and
+// returns the arguments review-party received, one per line.
+func (fixture hookInstallFixture) runManagerCommand(text, key string) string {
+	fixture.t.Helper()
+	_, quoted, found := strings.Cut(text, key)
+	if !found {
+		fixture.t.Fatalf("no %q in %q", key, text)
+	}
+	quoted, _, _ = strings.Cut(quoted, "\n")
+	command := strings.ReplaceAll(strings.TrimSuffix(strings.TrimPrefix(quoted, "'"), "'"), "''", "'")
+	arguments := filepath.Join(fixture.t.TempDir(), "arguments")
+	standIn := "#!/bin/sh\nprintf '%s\\n' \"$@\" > " + shellQuoteArgument(arguments) + "\n"
+	if err := os.WriteFile(filepath.Join(fixture.bin, "review-party"), []byte(standIn), 0o755); err != nil {
+		fixture.t.Fatal(err)
+	}
+	if output, err := exec.Command("sh", "-c", command).CombinedOutput(); err != nil {
+		fixture.t.Fatalf("run %q: %v: %s", command, err, output)
+	}
+	received, err := os.ReadFile(arguments)
+	if err != nil {
+		fixture.t.Fatal(err)
+	}
+	return string(received)
 }
 
 // linkOutside makes name in the work tree a symlink to a new directory

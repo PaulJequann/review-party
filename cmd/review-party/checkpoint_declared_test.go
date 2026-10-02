@@ -192,6 +192,21 @@ func TestCheckpointWaiverPolicies(t *testing.T) {
 	assertRunContains(t, commandRun{exit, stdout, stderr}, commandRun{stdout: "waived by " + string(report.Waiver.ID) + " (terminal): hotfix\n"})
 }
 
+func TestCheckpointHumanWaiverInJSONPromptsAPersonWhileStdoutIsPiped(t *testing.T) {
+	fixture := newCheckpointFixture(t)
+	fixture.commit("one.go", "package app\n\nconst one = 1\n")
+	fixture.declare("pre-push", "--waivers", "human")
+	var stdout, stderr bytes.Buffer
+	streams := productionCommandIO(strings.NewReader("y\n"), &stdout, &stderr)
+	streams.terminal = func(stream any) bool { return stream != &stdout }
+	arguments := []string{"checkpoint", "waive", "pre-push", "--base", fixture.base, "--reason", "hotfix", "--format", "json", "--repo", fixture.repository}
+	result := commandRun{exit: execute(context.Background(), arguments, streams), stdout: stdout.String(), stderr: stderr.String()}
+	assertRunContains(t, result, commandRun{stdout: result.stdout, stderr: "Waive the pre-push Checkpoint for this exact change"})
+	if report := decodeCheckpointReport(t, result); report.Waiver == nil || report.Waiver.WaivedBy != model.WaivedByTerminal {
+		t.Fatalf("piped human waiver = %+v", result)
+	}
+}
+
 func TestCheckpointAnyonePolicyWaivesWithoutATerminalAndOffersTheCommand(t *testing.T) {
 	fixture := newCheckpointFixture(t)
 	fixture.declare("pre-push", "--waivers", "anyone")

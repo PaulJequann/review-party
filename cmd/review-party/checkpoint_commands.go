@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -429,11 +430,12 @@ func executeCheckpointWaive(ctx context.Context, options checkpointWaiveOptions,
 	if current.Declaration == nil || current.State.Passes() {
 		return target.waive(ctx, options, model.WaivedByNonInteractive, streams)
 	}
-	by, err := options.confirmation(current.Declaration.Waivers, streams.interactive())
+	prompt := options.promptStream(streams)
+	by, err := options.confirmation(current.Declaration.Waivers, streams.isTerminal(streams.input) && streams.isTerminal(prompt))
 	if err != nil {
 		return printCommandError(streams.errors, usageExitCode, err)
 	}
-	if err := options.confirm(by, streams); err != nil {
+	if err := options.confirm(by, streams.input, prompt); err != nil {
 		return printFailure(streams.errors, err)
 	}
 	return target.waive(ctx, options, by, streams)
@@ -455,16 +457,21 @@ func (options checkpointWaiveOptions) confirmation(policy configuration.WaiverPo
 	}
 }
 
-func (options checkpointWaiveOptions) confirm(by model.WaivedBy, streams commandIO) error {
+// promptStream is where the confirmation goes: standard error under JSON, so
+// standard output carries only the report and may be piped.
+func (options checkpointWaiveOptions) promptStream(streams commandIO) io.Writer {
+	if options.format == "json" {
+		return streams.errors
+	}
+	return streams.output
+}
+
+func (options checkpointWaiveOptions) confirm(by model.WaivedBy, input io.Reader, prompt io.Writer) error {
 	if by != model.WaivedByTerminal {
 		return nil
 	}
 	question := fmt.Sprintf("Waive the %s Checkpoint for this exact change, reason %q?", options.name, options.reason)
-	prompt := streams.output
-	if options.format == "json" {
-		prompt = streams.errors
-	}
-	confirmed, err := confirmPrompt(streams.input, prompt, question)
+	confirmed, err := confirmPrompt(input, prompt, question)
 	if err == nil && !confirmed {
 		err = errors.New("waiver cancelled")
 	}
