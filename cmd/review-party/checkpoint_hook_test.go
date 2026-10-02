@@ -346,6 +346,10 @@ func TestCheckpointInstallPrintsTheSnippetForAPreCommitEntryThatLoadsAnotherConf
 	if got := fixture.install("--yes", "--config", second).stdout; !strings.Contains(got, "add by hand") || !strings.Contains(got, shellQuoteArgument(second)) {
 		t.Fatalf("install with another --config = %q, want the snippet carrying %s", got, second)
 	}
+	fixture.writeFile(".pre-commit-config.yaml", strings.Replace(fixture.read(".pre-commit-config.yaml"), "entry: ", "# entry: ", 1))
+	if got := fixture.install("--yes", "--config", first).stdout; !strings.Contains(got, "add by hand") {
+		t.Fatalf("install with the entry commented out = %q, want the snippet", got)
+	}
 }
 
 func TestCheckpointInstallPrintsThePreCommitFrameworkSteps(t *testing.T) {
@@ -632,29 +636,36 @@ func (fixture hookInstallFixture) installThroughLink() {
 
 func TestCheckpointInstallLeavesAHookForAnotherInterpreterToTheCaller(t *testing.T) {
 	for _, test := range []struct {
-		shebang string
-		edited  bool
+		checkpoint configuration.CheckpointName
+		original   string
+		edited     bool
 	}{
-		{"#!/usr/bin/env python3", false},
-		{"#!/usr/bin/ruby -w", false},
-		{"#!/usr/bin/env -S bash -e", true},
-		{"#!/bin/zsh", true},
+		{configuration.CheckpointPreCommit, "#!/usr/bin/env python3\nrun_checks()\n", false},
+		{configuration.CheckpointPreCommit, "#!/usr/bin/ruby -w\nrun_checks()\n", false},
+		{configuration.CheckpointPreCommit, "#!/usr/bin/env -S bash -e\nrun_checks()\n", true},
+		{configuration.CheckpointPreCommit, "#!/bin/zsh\nrun_checks()\n", true},
+		{configuration.CheckpointPrePush, "\x7fELF\x02\x01\x01\x00\x00\x00", false},
 	} {
-		t.Run(test.shebang, func(t *testing.T) {
-			fixture := newHookInstallFixture(t, configuration.CheckpointPreCommit)
+		t.Run(test.original, func(t *testing.T) {
+			fixture := newHookInstallFixture(t, test.checkpoint)
 			fixture.provideStandIn()
-			original := test.shebang + "\nrun_checks()\n"
-			fixture.writeFile(".git/hooks/pre-commit", original)
+			hook := ".git/hooks/" + string(test.checkpoint)
+			fixture.writeFile(hook, test.original)
 			result := fixture.install("--yes")
-			if edited := fixture.read(".git/hooks/pre-commit") != original; edited != test.edited {
+			if edited := fixture.read(hook) != test.original; edited != test.edited {
 				t.Fatalf("edited = %v, want %v: %+v", edited, test.edited, result)
 			}
+			command := map[configuration.CheckpointName]string{
+				configuration.CheckpointPreCommit: "review-party checkpoint hook git pre-commit",
+				configuration.CheckpointPrePush:   "review-party checkpoint hook git pre-push -- <remote> <url>",
+			}[test.checkpoint]
 			if !test.edited {
-				assertRun(t, result, commandRun{stdout: "pre-commit: add by hand to " + filepath.Join(fixture.repository, ".git/hooks/pre-commit") + " (git hooks)\n" +
+				assertRun(t, result, commandRun{stdout: string(test.checkpoint) + ": add by hand to " + filepath.Join(fixture.repository, hook) + " (git hooks)\n" +
 					"  # This hook is not a shell script. Run the command below from it with the\n" +
-					"  # hook's arguments and standard input. Stop only when it exits 1; any other\n" +
-					"  # status means the Checkpoint was not checked, so warn and continue.\n" +
-					"  review-party checkpoint hook git pre-commit\n"})
+					"  # hook's arguments in place of any <placeholders>, and its standard input.\n" +
+					"  # Stop only when it exits 1; any other status means the Checkpoint was not\n" +
+					"  # checked, so warn and continue.\n" +
+					"  " + command + "\n"})
 			}
 		})
 	}

@@ -201,8 +201,9 @@ status and allows.
 **Hook tools.** The installer edits only files whose format it can extend
 without rewriting a line. Plain hooks, `core.hooksPath`, and husky get a
 marked block after the shebang, or a new `#!/bin/sh` file with mode 0755. A
-hook whose shebang names an interpreter other than a POSIX shell gets a
-printed command to call by hand instead. The pre-push block captures git's ref
+compiled hook, or one whose shebang names an interpreter other than a POSIX
+shell, gets a printed command to call by hand instead. The pre-push command
+names the arguments to pass after `--`. The pre-push block captures git's ref
 lines and feeds them back as standard input, so a hook that reads them still
 receives them byte for byte. lefthook YAML gains a `review-party-checkpoint`
 command, with `use_stdin: true` for pre-push, only when its root is a block
@@ -219,9 +220,9 @@ or URL is passed whole unless one of its lines is exactly
 lefthook skips a pre-push command when `HEAD` has no file changes against
 `@{push}`, so it does not check a push of another branch from an up-to-date
 `HEAD`. The installer does not merge YAML. The pre-commit framework gets a
-printed `repo: local` snippet until its configuration has the snippet's
-`entry` line, so an entry that loads another `--config` gets the current
-snippet. That
+printed `repo: local` snippet until a line of its configuration that is not a
+comment holds the snippet's `entry`, so an entry that loads another `--config`
+gets the current snippet. That
 framework passes pre-push facts as `PRE_COMMIT_*` variables rather than git's
 ref lines, so the snippet rebuilds one ref line from them. Every form passes
 the hook's arguments after `--`, so a remote named like an option cannot turn

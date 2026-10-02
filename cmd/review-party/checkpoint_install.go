@@ -362,15 +362,26 @@ func (plan *hookInstallPlan) planHookScript(name configuration.CheckpointName) (
 			plan.writes[path] = content
 		}
 	case hookManual:
-		step.manual = []string{
-			"# This hook is not a shell script. Run the command below from it with the",
-			"# hook's arguments and standard input. Stop only when it exits 1; any other",
-			"# status means the Checkpoint was not checked, so warn and continue.",
-			"review-party checkpoint hook git " + string(name) + plan.config,
-		}
+		step.manual = plan.hookScriptCall(name)
 	case hookCreated, hookAppended, hookEdited, hookNotExecutable:
 	}
 	return step, nil
+}
+
+// hookScriptCall is what to add by hand to a hook the shell block cannot
+// run in.
+func (plan *hookInstallPlan) hookScriptCall(name configuration.CheckpointName) []string {
+	command := "review-party checkpoint hook git " + string(name) + plan.config
+	if name == configuration.CheckpointPrePush {
+		command += " -- <remote> <url>"
+	}
+	return []string{
+		"# This hook is not a shell script. Run the command below from it with the",
+		"# hook's arguments in place of any <placeholders>, and its standard input.",
+		"# Stop only when it exits 1; any other status means the Checkpoint was not",
+		"# checked, so warn and continue.",
+		command,
+	}
 }
 
 // executable reports whether git can run the step's hook. A hook it cannot
@@ -413,8 +424,9 @@ func checkpointHookBlock(name configuration.CheckpointName, config string) strin
 // insertHookBlock adds the block after the shebang, or at the top of a hook
 // without one. A present block is rewritten only when the installer
 // generated it with another --config; any other difference is the Caller's
-// edit. A hook for another interpreter cannot run the shell block, so it is
-// left for the Caller to edit by hand.
+// edit. A hook for another interpreter, or a compiled one, which holds a NUL
+// byte, cannot run the shell block, so it is left for the Caller to edit by
+// hand.
 func insertHookBlock(content string, name configuration.CheckpointName, block string) (string, hookOutcome) {
 	start, end := hookBlockMarkers(name)
 	if index := strings.Index(content, start+"\n"); index >= 0 {
@@ -427,6 +439,9 @@ func insertHookBlock(content string, name configuration.CheckpointName, block st
 			return content[:index] + block + content[index+len(present):], hookRefreshed
 		}
 		return content, hookEdited
+	}
+	if strings.ContainsRune(content, 0) {
+		return content, hookManual
 	}
 	if !strings.HasPrefix(content, "#!") {
 		return block + content, hookInserted
@@ -594,16 +609,17 @@ func (plan *hookInstallPlan) preCommitFrameworkSnippet(name configuration.Checkp
 }
 
 // planPreCommitFramework finds the Checkpoint's hook in the framework's
-// configuration by the entry the snippet gives it, so an entry that loads
-// another --config gets the current snippet. The installer never edits that
-// file.
+// configuration by the entry the snippet gives it, on a line that is not a
+// comment, so an entry that loads another --config gets the current snippet.
+// The installer never edits that file.
 func (plan *hookInstallPlan) planPreCommitFramework(name configuration.CheckpointName) (hookInstallStep, error) {
 	content, _, err := plan.pending(plan.location)
 	if err != nil {
 		return hookInstallStep{}, err
 	}
 	step := hookInstallStep{checkpoint: name, path: plan.location, outcome: hookInstalled}
-	if !strings.Contains(string(content), plan.preCommitFrameworkEntry(name)) {
+	entry := regexp.MustCompile(`(?m)^[ \t]*(-[ \t]+)?` + regexp.QuoteMeta(plan.preCommitFrameworkEntry(name)) + `[ \t]*(#.*)?$`)
+	if !entry.Match(content) {
 		step.outcome, step.manual = hookManual, plan.preCommitFrameworkSnippet(name)
 	}
 	return step, nil
