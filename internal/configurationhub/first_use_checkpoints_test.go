@@ -89,6 +89,7 @@ func TestFirstUseDeclaresACheckpointThenOffersItsHooks(t *testing.T) {
 
 	output := journey.run(t,
 		"",             // pre-push, the default
+		"2",            // requirement: judged
 		"*.md docs/**", // exemptions
 		"5",            // small-change lines
 		"",             // waivers: human, the default
@@ -101,6 +102,7 @@ func TestFirstUseDeclaresACheckpointThenOffersItsHooks(t *testing.T) {
 
 	declared, err := journey.manager.Checkpoints(journey.repository)
 	want := configuration.NewCheckpoint()
+	want.Requirement = configuration.RequirementJudged
 	want.ExemptPaths, want.SmallChangeLines = []string{"*.md", "docs/**"}, 5
 	want.Integrations = []configuration.IntegrationName{configuration.IntegrationGit, configuration.IntegrationAgentsMD}
 	if err != nil || !reflect.DeepEqual(declared, map[configuration.CheckpointName]configuration.Checkpoint{configuration.CheckpointPrePush: want}) {
@@ -119,6 +121,7 @@ func TestFirstUseWarnsWhenMarkdownExemptionsSkipADocumentationProfile(t *testing
 
 	output := journey.run(t,
 		"2",    // pre-commit
+		"",     // requirement: reviewed, the default
 		"*.md", // exemptions
 		"0",    // small-change lines
 		"2",    // waivers: anyone
@@ -141,7 +144,7 @@ func TestFirstUseWarnsWhenMarkdownExemptionsSkipADocumentationProfile(t *testing
 func TestFirstUseDoesNotTakeAProfileNamedForDocsAsADocumentationReview(t *testing.T) {
 	journey := newTemplateCheckpointJourney(t, "docs", "bugs")
 
-	output := journey.run(t, "", "*.md", "0", "", "0", "n")
+	output := journey.run(t, "", "", "*.md", "0", "", "0", "n")
 
 	if strings.Contains(output, "warning: exempting *.md") {
 		t.Fatalf("warned for a bugs Profile named docs:\n%s", output)
@@ -177,6 +180,7 @@ func TestFirstUsePreselectsAgentsOnPathInTheFloor(t *testing.T) {
 
 	output := journey.run(t,
 		"",  // pre-push
+		"",  // requirement: reviewed, the default
 		"",  // no exemptions
 		"0", // small-change lines
 		"",  // waivers: human
@@ -192,6 +196,9 @@ func TestFirstUsePreselectsAgentsOnPathInTheFloor(t *testing.T) {
 	want := []configuration.IntegrationName{configuration.IntegrationGit, configuration.IntegrationCodex, configuration.IntegrationAgentsMD}
 	if err != nil || !reflect.DeepEqual(declared[configuration.CheckpointPrePush].Integrations, want) {
 		t.Fatalf("declared = %#v, %v\noutput:\n%s", declared, err, output)
+	}
+	if requirement := declared[configuration.CheckpointPrePush].Requirement; requirement != configuration.RequirementReviewed {
+		t.Fatalf("requirement = %q, want the reviewed default", requirement)
 	}
 	if !reflect.DeepEqual(journey.installer.installs, []string{"git team true", "codex team true", "agents-md team true"}) {
 		t.Fatalf("installs = %q", journey.installer.installs)

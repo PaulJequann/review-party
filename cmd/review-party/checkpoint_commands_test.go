@@ -80,22 +80,31 @@ func (fixture checkpointFixture) commit(path, content string) string {
 // as a run of that Profile would.
 func (fixture checkpointFixture) saveReview(id model.ReviewID, profile string, lifecycle model.Lifecycle, changes []model.ContentChange) {
 	fixture.t.Helper()
-	ledger, err := store.NewLedgerRecordStore(fixture.ledger)
-	if err != nil {
-		fixture.t.Fatal(err)
+	record := fixture.reviewRecord(id, profile, lifecycle, changes)
+	if lifecycle == model.LifecycleCompleted {
+		record.Result = &model.ReviewResult{Status: model.ResultClean, Summary: "clean"}
 	}
-	defer closeCheckpointLedger(fixture.t, ledger)
+	fixture.save(record)
+}
+
+func (fixture checkpointFixture) reviewRecord(id model.ReviewID, profile string, lifecycle model.Lifecycle, changes []model.ContentChange) model.ReviewRecord {
 	now := time.Now().UTC()
-	record := model.ReviewRecord{
+	return model.ReviewRecord{
 		SchemaVersion: model.CurrentReviewRecordSchemaVersion, ID: id, Lifecycle: lifecycle,
 		Subject:         model.ReviewSubject{Kind: model.SubjectCommittedRange, Repository: fixture.repository, Identity: string(id), ChangedPaths: []string{}, ContentChanges: changes},
 		ProfileRevision: model.ProfileRevision{Name: profile, Source: "repository:.reviewparty/profiles/" + profile},
 		ProfileSnapshot: model.ProfileSnapshot{Name: profile},
 		CreatedAt:       now, UpdatedAt: now,
 	}
-	if lifecycle == model.LifecycleCompleted {
-		record.Result = &model.ReviewResult{Status: model.ResultClean, Summary: "clean"}
+}
+
+func (fixture checkpointFixture) save(record model.ReviewRecord) {
+	fixture.t.Helper()
+	ledger, err := store.NewLedgerRecordStore(fixture.ledger)
+	if err != nil {
+		fixture.t.Fatal(err)
 	}
+	defer closeCheckpointLedger(fixture.t, ledger)
 	if err := ledger.Save(record); err != nil {
 		fixture.t.Fatal(err)
 	}

@@ -1,6 +1,6 @@
 # Review Checkpoints v1
 
-Status: accepted on 2026-10-01; slices 1 to 5 implemented. Ownership is recorded in
+Status: accepted on 2026-10-01; all six slices implemented. Ownership is recorded in
 [ADR 0001](../adr/0001-project-declared-review-checkpoints.md). Hook facts per
 Caller Agent are in
 [Caller Agent hooks](../research/caller-agent-hooks-2026-10-01.md).
@@ -457,6 +457,84 @@ the fix.
   the Template ID.
 - A linked worktree resolves to its own root, so its Waivers are listed there
   and not in the main checkout.
+
+## Slice 6 decisions
+
+**Which Review counts.** For each Profile that Coverage holds for, Coverage is
+decided again over only the completed Reviews whose every Finding has a
+current verdict. The whole-set and per-commit rules are unchanged. When those
+Reviews cover the change, they are the Profile's Reviews and it passes. So any
+fully judged covering Review passes, even when a newer covering Review has no
+verdicts yet, and a Caller passes by judging the Review they just ran.
+Counting only the newest covering Review would make a Caller who reran a
+Review judge again content an older, judged Review already examined. When no
+judged Reviews cover the change, the Profile keeps the Reviews that supplied
+Coverage, and the report lists each of them that has an unjudged Finding.
+
+**Current verdict.** A verdict counts when finding feedback does not mark it
+stale. Accepted, rejected, and deferred all count, because the requirement is
+that a Caller judged each Finding, not that the Caller agreed with it. Whether
+a deferred Finding should block delivery is the repository's decision, under
+the AGENTS.md rule "Keep project governance outside the review engine." A
+stale verdict judged text the Finding no longer holds, so it does not count.
+
+**Exempt-path Findings.** A Finding's location is free text that the result
+contract writes as `path:line`. The text before the first `:`, trimmed, is
+the Finding's path. A Finding whose path is exactly one of the change's exempt
+paths needs no verdict, since the Checkpoint never asked for a Review of that
+file. A location without that shape, one that names more than one file, or a
+path the change did not exempt still needs a verdict. The match errs toward
+asking, because a misread location must not let an unjudged Finding pass. A
+small change passes before Coverage is checked, so it is never judged.
+
+**Refusal wording.** The refusal reads `pre-push Checkpoint needs a verdict on
+Findings 1, 2 of <id> for <base>..<head>; judge: review-party finding record
+<id>`. With more than one unjudged Review it adds `; 2 more Reviews need
+verdicts`, and under `anyone` it ends with the waive command as before. It
+names one Review, the first in selection order, because each Review takes its
+own `finding record` command, and two or more full commands would not fit a
+short line. The count says more remain, and `checkpoint check` lists every
+one. The ordinals are named because `finding record` reads them on standard
+input. The git, Claude Code, and Codex hooks share this line, as they do for
+`reviewed`. It says what the change still needs, never that it is bad.
+
+**`checkpoint check`.** The Checkpoint state is `unjudged`, and `covered`
+stays true, since Coverage holds. Each Profile's state stays `covered`, and
+its `unjudged` list names each Review ID with its unjudged ordinals. The text
+form appends `; no verdict on Finding 1 of <id>` to the Profile line and
+labels the next command `judge:`. The check exits 1, as for any reached
+decision that does not pass. A missing Review comes first, then a running one,
+then verdicts, because verdicts are read only once Coverage holds.
+
+**Cost.** Verdicts are read only under `judged`, and only for Profiles that
+Coverage holds for. Each completed candidate Coverage already returned costs
+one ledger record load and one verdict query, at most once per check. The
+Codex hook still classifies the command and exits before it loads
+configuration or the ledger.
+
+**Declaration.** `config checkpoint set --requirement judged` declares it, and
+validation accepts `reviewed` or `judged`. `init` asks for the requirement in
+the same form that asks for exemptions and the waiver policy, with `reviewed`
+as the default. The doctor fix for a Markdown exemption repeats
+`--requirement judged`, so running it keeps the requirement.
+
+**AGENTS.md block.** Under `judged`, a Checkpoint's line reads, for pre-push,
+"Before pushing, review the change with `review-party run --base <upstream>
+--head HEAD` and record a verdict for each Finding with `review-party finding
+record <id>`; the pre-push Checkpoint refuses a push until a completed Review
+covers it and every Finding has a verdict." Under `reviewed`, the line is the
+slice 5 line byte for byte, so blocks installed before this slice stay
+installed. Changing a Checkpoint's requirement makes its block stale.
+
+**Deviations.**
+
+- The Model defines `judged` as Coverage and a verdict on every Finding
+  without naming whose Findings. A Profile can pass on an older, judged
+  Review than the one that supplies its Coverage, as the which Review rule
+  above explains. The Reviews that supply Coverage are the ones named when
+  nothing judged covers the change.
+- The refusal for unjudged Findings says "needs a verdict on" instead of the
+  "has no completed Review of" shape, since a completed Review exists.
 
 ## Open questions
 

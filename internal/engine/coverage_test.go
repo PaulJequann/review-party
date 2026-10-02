@@ -79,9 +79,12 @@ func TestDecideCoverage(t *testing.T) {
 // coverageStore keeps the ledger contract: a Profile source's Reviews that
 // share an entry with the query, newest first, each with its full set.
 type coverageStore struct {
-	reviews []recordedCoverage
-	waivers []model.CheckpointWaiver
-	queries int
+	reviews  []recordedCoverage
+	waivers  []model.CheckpointWaiver
+	queries  int
+	findings map[model.ReviewID][]model.Finding
+	verdicts []model.FindingVerdict
+	loads    int
 }
 
 type recordedCoverage struct {
@@ -99,8 +102,27 @@ func recorded(source, id string, lifecycle model.Lifecycle, changes ...[]model.C
 
 func (*coverageStore) Save(model.ReviewRecord) error { return nil }
 
-func (*coverageStore) Load(model.ReviewID) (model.ReviewRecord, error) {
-	return model.ReviewRecord{}, errors.New("not found")
+func (fake *coverageStore) Load(id model.ReviewID) (model.ReviewRecord, error) {
+	fake.loads++
+	findings, found := fake.findings[id]
+	if !found {
+		return model.ReviewRecord{}, errors.New("not found")
+	}
+	return model.ReviewRecord{ID: id, Result: &model.ReviewResult{Findings: findings}}, nil
+}
+
+func (fake *coverageStore) ListVerdicts(query store.VerdictQuery) ([]model.FindingVerdict, error) {
+	var verdicts []model.FindingVerdict
+	for _, verdict := range fake.verdicts {
+		if slices.Contains(query.ReviewIDs, verdict.ReviewID) {
+			verdicts = append(verdicts, verdict)
+		}
+	}
+	return verdicts, nil
+}
+
+func (*coverageStore) RecordVerdicts(store.VerdictBatch) (store.VerdictTally, error) {
+	return store.VerdictTally{}, nil
 }
 
 func (fake *coverageStore) CoverageCandidates(query store.CoverageQuery) ([]store.CoverageCandidate, error) {

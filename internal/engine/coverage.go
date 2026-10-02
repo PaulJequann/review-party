@@ -31,16 +31,29 @@ type CoverageSubject struct {
 	Lines   subject.LineCounts
 }
 
+// ProfileCoverage is one Profile's Coverage. Under the judged requirement,
+// Unjudged lists the covering Reviews whose Findings still need Verdicts.
 type ProfileCoverage struct {
 	Scope     configuration.Scope
 	Profile   string
 	State     CoverageState
 	ReviewIDs []model.ReviewID
+	Unjudged  []UnjudgedReview
 }
 
 type CoverageReport struct {
 	Covered  bool
 	Profiles []ProfileCoverage
+}
+
+// judged reports whether every covered Profile has its Findings judged.
+func (report CoverageReport) judged() bool {
+	for _, profile := range report.Profiles {
+		if len(profile.Unjudged) > 0 {
+			return false
+		}
+	}
+	return true
 }
 
 type coverageLedger interface {
@@ -49,8 +62,9 @@ type coverageLedger interface {
 
 // checkCoverage reports, per selected Profile in selection order, whether a
 // Review of that Profile covers the content. A Review covers a set when its
-// recorded set, without the declaration's exempt paths, equals it.
-func (conductor *Conductor) checkCoverage(repository string, coverage CoverageSubject, declaration configuration.Checkpoint) (CoverageReport, error) {
+// recorded set, without the declaration's exempt paths, equals it. A judge,
+// present under the judged requirement, then decides each covered Profile.
+func (conductor *Conductor) checkCoverage(repository string, coverage CoverageSubject, declaration configuration.Checkpoint, judge *findingJudge) (CoverageReport, error) {
 	resolved, err := conductor.configuration.ResolveRun(configuration.RunRequest{Repository: configuration.Repository(repository)})
 	if errors.Is(err, configuration.ErrNoRepositorySelection) {
 		return CoverageReport{}, fmt.Errorf("%w; run review-party init to choose the Reviews this repository runs", err)
@@ -69,15 +83,16 @@ func (conductor *Conductor) checkCoverage(repository string, coverage CoverageSu
 			candidates, err := ledger.CoverageCandidates(store.CoverageQuery{ProfileSource: source, Changes: changes})
 			return coveringCandidates(candidates, changes, declaration), err
 		}
-		state, ids, err := decideCoverage(lookup, coverage)
+		entry := ProfileCoverage{Scope: profile.Scope, Profile: profile.Profile}
+		entry.State, entry.ReviewIDs, entry.Unjudged, err = judge.decide(lookup, coverage)
 		if errors.Is(err, store.ErrReviewRecordStateNotInitialized) {
 			return CoverageReport{}, InitializationRequiredError{Repository: repository}
 		}
 		if err != nil {
 			return CoverageReport{}, fmt.Errorf("check coverage for Profile %q: %w", profile.Profile, err)
 		}
-		report.Covered = report.Covered && state == CoverageCovered
-		report.Profiles = append(report.Profiles, ProfileCoverage{Scope: profile.Scope, Profile: profile.Profile, State: state, ReviewIDs: ids})
+		report.Covered = report.Covered && entry.State == CoverageCovered
+		report.Profiles = append(report.Profiles, entry)
 	}
 	return report, nil
 }

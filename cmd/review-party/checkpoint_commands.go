@@ -10,6 +10,7 @@ import (
 	"io"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -49,8 +50,11 @@ A Review covers content when its Subject changed the same paths from the same
 blobs to the same blobs, so rebased, amended, or recommitted content stays
 covered. When the repository declares the Checkpoint, its exempt paths are
 left out of both sides, a small enough change passes, and a matching Waiver
-passes. Exits 0 when the Checkpoint passes, 1 when a Review is missing or still
-running, and 2 on a usage error or when Review Party is not initialized.`,
+passes. Under the judged requirement, every Finding of the covering Reviews
+also needs a current verdict, recorded with review-party finding record.
+Exits 0 when the Checkpoint passes, 1 when a Review is missing or still
+running or a Finding has no verdict, and 2 on a usage error or when Review
+Party is not initialized.`,
 		Example: "  review-party checkpoint check pre-push\n  review-party checkpoint check pre-push --base origin/main --head HEAD\n  review-party checkpoint check pre-commit --format json",
 		Args:    cobra.MatchAll(cobra.ExactArgs(1), cobra.OnlyValidArgs),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -174,6 +178,9 @@ type checkpointProfile struct {
 	Name      string           `json:"name"`
 	State     string           `json:"state"`
 	ReviewIDs []model.ReviewID `json:"review_ids"`
+	// Unjudged lists, under the judged requirement, the covering Reviews with
+	// Findings that have no current verdict.
+	Unjudged []engine.UnjudgedReview `json:"unjudged,omitempty"`
 }
 
 var rangeSourceDescriptions = map[string]string{
@@ -334,7 +341,7 @@ func trackedCheckpointContent(root string, options checkpointOptions) (checkpoin
 
 // completeCheckpointReport names one next step for a Checkpoint that does not
 // pass: a run when any Profile lacks a Review, otherwise a wait on the first
-// Review still running. Only a policy that lets anyone waive adds the waive
+// Review still running, otherwise verdicts on the first unjudged Review. Only a policy that lets anyone waive adds the waive
 // command.
 func completeCheckpointReport(content checkpointContent, result engine.CheckpointReport, configurationPath string) checkpointReport {
 	report := content.report
@@ -344,7 +351,7 @@ func completeCheckpointReport(content checkpointContent, result engine.Checkpoin
 	report.Profiles = make([]checkpointProfile, 0, len(result.Coverage.Profiles))
 	for _, profile := range result.Coverage.Profiles {
 		ids := append([]model.ReviewID{}, profile.ReviewIDs...)
-		report.Profiles = append(report.Profiles, checkpointProfile{Scope: string(profile.Scope), Name: profile.Profile, State: string(profile.State), ReviewIDs: ids})
+		report.Profiles = append(report.Profiles, checkpointProfile{Scope: string(profile.Scope), Name: profile.Profile, State: string(profile.State), ReviewIDs: ids, Unjudged: profile.Unjudged})
 	}
 	if result.Declaration != nil {
 		report.Waivers = result.Declaration.Waivers
@@ -377,10 +384,21 @@ func nextCheckpointStep(profiles []checkpointProfile, runCommand, configurationP
 			running = profile.ReviewIDs[0]
 		}
 	}
-	if running == "" {
-		return "", ""
+	if running != "" {
+		return "wait", fmt.Sprintf("review-party wait %s%s", running, configurationArgument(configurationPath))
 	}
-	return "wait", fmt.Sprintf("review-party wait %s%s", running, configurationArgument(configurationPath))
+	if unjudged := unjudgedReviews(profiles); len(unjudged) > 0 {
+		return "judge", fmt.Sprintf("review-party finding record %s%s", unjudged[0].Review, configurationArgument(configurationPath))
+	}
+	return "", ""
+}
+
+func unjudgedReviews(profiles []checkpointProfile) []engine.UnjudgedReview {
+	var unjudged []engine.UnjudgedReview
+	for _, profile := range profiles {
+		unjudged = append(unjudged, profile.Unjudged...)
+	}
+	return unjudged
 }
 
 func printHumanCheckpoint(output *commandOutput, report checkpointReport) {
@@ -437,10 +455,30 @@ func checkpointProfileState(profile checkpointProfile) string {
 	case len(ids) == 0:
 		return profile.State
 	case profile.State == string(engine.CoverageCovered):
-		return "covered by " + strings.Join(ids, ", ")
+		return "covered by " + strings.Join(ids, ", ") + unjudgedFindings(profile.Unjudged)
 	default:
 		return profile.State + " " + strings.Join(ids, ", ")
 	}
+}
+
+func unjudgedFindings(unjudged []engine.UnjudgedReview) string {
+	text := ""
+	for _, review := range unjudged {
+		text += fmt.Sprintf("; no verdict on %s of %s", findingOrdinals(review.Ordinals), review.Review)
+	}
+	return text
+}
+
+// findingOrdinals names Findings by ordinal: "Finding 2" or "Findings 1, 3".
+func findingOrdinals(ordinals []int) string {
+	numbers := make([]string, 0, len(ordinals))
+	for _, ordinal := range ordinals {
+		numbers = append(numbers, strconv.Itoa(ordinal))
+	}
+	if len(numbers) == 1 {
+		return "Finding " + numbers[0]
+	}
+	return "Findings " + strings.Join(numbers, ", ")
 }
 
 type checkpointWaiveOptions struct {

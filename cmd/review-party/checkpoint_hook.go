@@ -174,13 +174,31 @@ func hookRefusal(report checkpointReport) string {
 	case report.commit == commitTracked:
 		scope = "the tracked changes"
 	}
-	waiting := "has no completed Review of"
-	if report.nextLabel == "wait" {
-		waiting = "is waiting on a running Review of"
+	var line string
+	switch report.nextLabel {
+	case "wait":
+		line = fmt.Sprintf("%s Checkpoint is waiting on a running Review of %s; wait: %s", report.Checkpoint, scope, report.NextCommand)
+	case "judge":
+		line = judgeRefusal(report, scope)
+	default:
+		line = fmt.Sprintf("%s Checkpoint has no completed Review of %s; %s: %s", report.Checkpoint, scope, report.nextLabel, report.NextCommand)
 	}
-	line := fmt.Sprintf("%s Checkpoint %s %s; %s: %s", report.Checkpoint, waiting, scope, report.nextLabel, report.NextCommand)
 	if report.WaiveCommand != "" {
 		line += "; or waive: " + report.WaiveCommand
+	}
+	return line
+}
+
+// judgeRefusal names the first Review whose Findings need verdicts and counts
+// the rest, since each Review takes its own finding record command.
+func judgeRefusal(report checkpointReport, scope string) string {
+	unjudged := unjudgedReviews(report.Profiles)
+	line := fmt.Sprintf("%s Checkpoint needs a verdict on %s of %s for %s; judge: %s", report.Checkpoint, findingOrdinals(unjudged[0].Ordinals), unjudged[0].Review, scope, report.NextCommand)
+	switch more := len(unjudged) - 1; {
+	case more == 1:
+		line += "; 1 more Review needs verdicts"
+	case more > 1:
+		line += fmt.Sprintf("; %d more Reviews need verdicts", more)
 	}
 	return line
 }
