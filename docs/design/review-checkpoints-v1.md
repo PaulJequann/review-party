@@ -228,7 +228,9 @@ the team when the Caller commits it. A hook in plain `.git/hooks` or in a
 installing Caller's `--config` as an absolute path, because git runs hooks
 from the work tree root. A committed hook never does, because each teammate
 loads their own configuration, and the installer warns when `--config` is
-dropped. Installing into an existing hook script also makes it executable,
+dropped. A rerun with another `--config` regenerates a block the installer
+generated, and init reports such a block as loading another configuration. A
+block that differs in any other way counts as edited and is left alone. Installing into an existing hook script also makes it executable,
 since git skips one that is not.
 
 ## Open questions

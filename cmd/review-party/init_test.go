@@ -294,6 +294,26 @@ func TestInitWithoutATerminalNamesTheHuskyActivationStep(t *testing.T) {
 	}
 }
 
+func TestInitWithoutATerminalNamesAGitHookThatLoadsAnotherConfiguration(t *testing.T) {
+	fixture := newInitFixture(t)
+	fixture.profile(t, configuration.ScopeGlobal, "docs")
+	if exit, _, stderr := fixture.run(t, commandIO{}, "--profile", "docs", "--yes"); exit != 0 {
+		t.Fatalf("setup exit = %d, stderr = %q", exit, stderr)
+	}
+	fixture.declareCheckpoints(t, configuration.CheckpointPrePush)
+	fixture.installHooks(t)
+	hook := filepath.Join(fixture.repository, ".git", "hooks", "pre-push")
+	elsewhere := "#!/bin/sh\n" + checkpointHookBlock(configuration.CheckpointPrePush, configurationArgument("/elsewhere.json"))
+	if err := os.WriteFile(hook, []byte(elsewhere), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	want := "Repository is ready: review-party run --repo " + fixture.repository + "\n" +
+		"Checkpoint pre-push git hook " + hook + " loads another configuration: review-party checkpoint install git --repo " + fixture.repository + "\n"
+	if _, stdout, _ := fixture.run(t, commandIO{}); stdout != want {
+		t.Fatalf("stdout = %q, want %q", stdout, want)
+	}
+}
+
 func TestInitInATerminalDeclaresACheckpointAndInstallsItsHook(t *testing.T) {
 	fixture := newInitFixture(t)
 	fixture.profile(t, configuration.ScopeGlobal, "bugs")

@@ -137,6 +137,9 @@ const (
 	hookInserted  hookOutcome = "add the review-party block to"
 	hookAppended  hookOutcome = "add a review-party-checkpoint command to"
 	hookInstalled hookOutcome = "already installed in"
+	// hookRefreshed is a generated block whose --config differs from the
+	// one this install carries.
+	hookRefreshed hookOutcome = "update the --config of the review-party block in"
 	hookEdited    hookOutcome = "edited review-party block left unchanged in"
 	hookManual    hookOutcome = "add by hand to"
 	// hookNotExecutable is an installed block in a hook git skips because the
@@ -347,10 +350,10 @@ func (plan *hookInstallPlan) planHookScript(name configuration.CheckpointName) (
 		plan.writes[path] = []byte("#!/bin/sh\n" + block)
 		return step, nil
 	}
-	updated, outcome := insertHookBlock(string(content), block)
+	updated, outcome := insertHookBlock(string(content), name, block)
 	step.outcome = outcome
 	switch outcome {
-	case hookInserted:
+	case hookInserted, hookRefreshed:
 		plan.writes[path] = []byte(updated)
 	case hookInstalled:
 		if !step.executable() {
@@ -407,14 +410,20 @@ func checkpointHookBlock(name configuration.CheckpointName, config string) strin
 }
 
 // insertHookBlock adds the block after the shebang, or at the top of a hook
-// without one. A present block is compared, never rewritten. A hook for
-// another interpreter cannot run the shell block, so it is left for the
-// Caller to edit by hand.
-func insertHookBlock(content, block string) (string, hookOutcome) {
-	start := block[:strings.Index(block, "\n")+1]
-	if index := strings.Index(content, start); index >= 0 {
-		if strings.HasPrefix(content[index:], block) {
+// without one. A present block is rewritten only when the installer
+// generated it with another --config; any other difference is the Caller's
+// edit. A hook for another interpreter cannot run the shell block, so it is
+// left for the Caller to edit by hand.
+func insertHookBlock(content string, name configuration.CheckpointName, block string) (string, hookOutcome) {
+	start, end := hookBlockMarkers(name)
+	if index := strings.Index(content, start+"\n"); index >= 0 {
+		present, _, _ := strings.Cut(content[index:], end+"\n")
+		present += end + "\n"
+		switch {
+		case present == block:
 			return content, hookInstalled
+		case generatedWithConfig(name, present):
+			return content[:index] + block + content[index+len(present):], hookRefreshed
 		}
 		return content, hookEdited
 	}
@@ -429,6 +438,18 @@ func insertHookBlock(content, block string) (string, hookOutcome) {
 		return shebang + "\n" + block, hookInserted
 	}
 	return shebang + "\n" + block + rest, hookInserted
+}
+
+// generatedWithConfig reports whether block is the one checkpointHookBlock
+// generates for some --config argument. It reads that argument from where
+// the generated block places it and regenerates the block to compare.
+func generatedWithConfig(name configuration.CheckpointName, block string) bool {
+	const placeholder = "\x00"
+	before, after, _ := strings.Cut(checkpointHookBlock(name, placeholder), placeholder)
+	rest, found := strings.CutPrefix(block, before)
+	next, _, _ := strings.Cut(after, placeholder)
+	config, _, carried := strings.Cut(rest, next)
+	return found && carried && checkpointHookBlock(name, config) == block
 }
 
 var posixShells = []string{"sh", "bash", "dash", "zsh", "ksh", "ash", "mksh"}

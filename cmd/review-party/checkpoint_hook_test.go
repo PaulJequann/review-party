@@ -402,6 +402,26 @@ func TestCheckpointInstallCarriesTheCallersConfigurationOnlyIntoPerCloneHooks(t 
 	}
 }
 
+func TestCheckpointInstallUpdatesTheConfigurationAGeneratedBlockCarries(t *testing.T) {
+	fixture := newHookInstallFixture(t, configuration.CheckpointPrePush)
+	fixture.provideStandIn()
+	fixture.writeFile(".git/hooks/pre-push", "#!/bin/sh\n# team hook\n")
+	hookPath := filepath.Join(fixture.repository, ".git", "hooks", "pre-push")
+	first, second := filepath.Join(t.TempDir(), "first.json"), filepath.Join(t.TempDir(), "second.json")
+	assertRunContains(t, fixture.install("--yes", "--config", first), commandRun{stdout: "Wrote 1 hook file(s)."})
+
+	for _, carried := range []string{configurationArgument(second), ""} {
+		arguments := []string{"--yes"}
+		if carried != "" {
+			arguments = append(arguments, "--config", second)
+		}
+		assertRun(t, fixture.install(arguments...), commandRun{stdout: "pre-push: update the --config of the review-party block in " + hookPath + " (git hooks)\nWrote 1 hook file(s).\n"})
+		if content, want := fixture.read(".git/hooks/pre-push"), "#!/bin/sh\n"+checkpointHookBlock(configuration.CheckpointPrePush, carried)+"# team hook\n"; content != want {
+			t.Fatalf("hook = %q, want %q", content, want)
+		}
+	}
+}
+
 func TestCheckpointInstallCarriesTheCallersConfigurationIntoPerCloneManagerFiles(t *testing.T) {
 	config := filepath.Join(t.TempDir(), "it's my config.json")
 	for file, key := range map[string]string{"lefthook.yml": "run: ", ".pre-commit-config.yaml": "entry: "} {
