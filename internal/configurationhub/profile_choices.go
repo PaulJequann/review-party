@@ -313,15 +313,19 @@ func (e *editor) editAccessibleProfileIdentity(draft *configuration.ProfileDraft
 	if strings.TrimSpace(draft.Reviewer) != "" {
 		return nil
 	}
-	options := make([]huh.Option[string], 0)
-	for _, reviewer := range e.Discovery.Reviewers() {
-		options = append(options, huh.NewOption(reviewer, reviewer))
+	reviewer, _ := profileFieldSpecFor("reviewer")
+	reviewers := e.Discovery.Reviewers()
+	if len(reviewers) == 0 {
+		return e.editProfileField(draft, reviewer)
 	}
-	value := options[0].Value
+	options := make([]huh.Option[string], 0, len(reviewers))
+	for _, name := range reviewers {
+		options = append(options, huh.NewOption(name, name))
+	}
+	value := reviewers[0]
 	if err := e.form(huh.NewSelect[string]().Title("Reviewer").Options(options...).Value(&value)); err != nil {
 		return err
 	}
-	reviewer, _ := profileFieldSpecFor("reviewer")
 	reviewer.set(draft, value)
 	return nil
 }

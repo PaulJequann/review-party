@@ -84,6 +84,26 @@ _Avoid_: Review Package, transcript, universal verdict
 The event that asks Review Party to begin a review, such as a direct command, project event, or schedule. It is independent of the Review Subject and Review Profile.
 _Avoid_: Mode, Review Subject, Review Profile
 
+**Review Checkpoint**:
+A point in a Caller's workflow, such as before commit or before push, at which a repository expects its Review selection to have covered the change being recorded or shared. It requires either Coverage alone or Coverage with a verdict on every Finding. A Checkpoint checks for Reviews; it never starts one, so it is not a Review Trigger.
+_Avoid_: Gate, Review Trigger, delivery decision
+
+**Coverage**:
+The fact that, for every Profile in the Review selection, a completed Review examined exactly the content changes at a Review Checkpoint. It is matched on what changed in each path rather than on commit identity, so rewording or rebasing commits that leave those changes intact keeps it. An Incomplete Review never provides Coverage.
+_Avoid_: Approval, clean result, reviewed commit
+
+**Checkpoint Integration**:
+An installed artifact that presents a Review Checkpoint to a Caller: project instructions, a Git hook, or a Caller Agent hook. Each Integration is advisory, warning and allowing, or blocking, refusing the action. The repository may declare a team floor of Integrations, and each Caller may add more of their own.
+_Avoid_: Enforcement policy, Review Trigger
+
+**Checkpoint Exemption**:
+A rule declared on a Review Checkpoint that treats some changes as needing no Coverage: changes confined to declared paths, or a whole Checkpoint change no larger than a declared number of lines. An exempt change passes by rule; nobody bypasses anything.
+_Avoid_: Bypass, skip, Waiver
+
+**Checkpoint Waiver**:
+A recorded, reasoned decision that one exact content change may pass a Review Checkpoint without Coverage. The repository declares who may waive. A Waiver never carries over to a different change and stays visible in the review history.
+_Avoid_: Bypass, override, Exemption
+
 **Profile Revision**:
 One exact version of a Review Profile and its effective review recipe. Every effective change, including an experimental override, produces a distinct revision retained by the review that used it.
 _Avoid_: Profile name, mutable configuration
@@ -138,11 +158,11 @@ The deterministic local operation that makes a Review Record ledger usable by ap
 _Avoid_: Legacy import, exposed records-directory setup, implicit inspect setup
 
 **Review Party Initialization**:
-The first-use operation that prepares Review Party for one repository, including its managed Review Record state. It does not create a custom Review Profile.
-_Avoid_: Profile initialization, first Review
+The first-use operation that brings one repository to a runnable state. It prepares managed Review Record state and, where the repository still lacks them, leads the Caller through Profile Creation and the repository's Review selection, composing those operations rather than replacing them. Run without setup choices in a terminal, it opens the Configuration Hub's first-use journey; given explicit setup choices, it applies only those.
+_Avoid_: Profile initialization, first Review, setup wizard
 
 **Configuration Hub**:
-The interactive control center for inspecting and changing Review Party configuration over time. It serves recurring customization as Reviewers, models, Profiles, and preferences change; first-use guidance is one journey through the Hub rather than its defining purpose.
+The interactive control center for inspecting and changing Review Party configuration over time. It serves recurring customization as Reviewers, models, Profiles, and preferences change; first-use guidance is one journey through the Hub, entered through Review Party Initialization, rather than its defining purpose.
 _Avoid_: Setup wizard, onboarding screen, web UI
 
 **Global Configuration**:
@@ -150,7 +170,7 @@ Caller-owned configuration available to every repository, including reusable Rev
 _Avoid_: Automatically enabled baseline, organization configuration, repository configuration
 
 **Repository Configuration**:
-Review Party configuration associated with one repository. It defines repository-owned Profiles and Parties and selects that repository's ordered default Reviews from Global and Repository Configuration.
+Review Party configuration associated with one repository and shared by everyone who works in it. It defines repository-owned Profiles and Parties and selects that repository's ordered default Reviews from Global and Repository Configuration. A selected Global Profile or Party is a name every Caller binds in their own Global Configuration, so the repository decides what is reviewed while each Caller decides which Reviewer and model review it.
 _Avoid_: Global Configuration, project delivery policy, Party inheritance
 
 **Configuration Scope**:
@@ -183,7 +203,7 @@ Manual model IDs remain valid Profile inputs. `config profile create` warns when
 the selected model is not immediately known.
 
 **Profile Creation**:
-The operation that saves one complete executable Review Profile from a Review Profile Template or blank instructions plus a Reviewer, model, reasoning effort, and Execution Deadline. Agents invoke it with `review-party config profile create`. It is separate from Review Party Initialization.
+The operation that saves one complete executable Review Profile from a Review Profile Template or blank instructions plus a Reviewer, model, reasoning effort, and Execution Deadline. Agents invoke it with `review-party config profile create`. Review Party Initialization may invoke it as one step, but it remains a separate operation with its own reviewed Plan.
 _Avoid_: Profile init, template selection alone, unnamed profile material
 
 **Incomplete Review**:
@@ -209,6 +229,10 @@ _Avoid_: Remediation Review, continuing Review, remediation pass
 **Caller**:
 The person, agent, or automation that asks Review Party to conduct a review and consumes its Review Record. The Caller identifies what it wants reviewed and supplies required authority, while retaining responsibility for remediation and delivery decisions.
 _Avoid_: User, reviewer, delivery gate
+
+**Caller Agent**:
+A coding agent acting as Caller, such as the agent session in which a developer is working. The same product may serve as a Reviewer's Agent Harness in another Review; the role, not the product, decides the term.
+_Avoid_: Agent Harness, Reviewer
 
 **Reviewer**:
 The configured coding agent and model responsible for contributing a Review Pass. Its harness and transport are recorded separately because they can materially affect its behavior.

@@ -1,24 +1,55 @@
 package main
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"io"
 
+	"reviewparty/internal/configuration"
+	"reviewparty/internal/configurationhub" //nolint:depguard // Cobra is the terminal composition root for the dedicated Hub adapter.
+	"reviewparty/internal/discovery"
 	"reviewparty/internal/engine"
 )
 
 type initOptions struct {
-	repository     string
-	stateDirectory string
-	configuration  string
-	backup         bool
-	fresh          bool
-	yes            bool
+	repository       string
+	stateDirectory   string
+	configuration    string
+	backup           bool
+	fresh            bool
+	yes              bool
+	accessible       bool
+	setup            []setupTarget
+	discoveryService func() *discovery.Service
 }
 
-func executeInit(options initOptions, stdout, stderr io.Writer) int {
+// setupTarget is one --profile or --party name, kept in command-line order.
+type setupTarget struct {
+	kind  configuration.AuthoredItemKind
+	value string
+}
+
+// setupTargetFlag appends every occurrence of one repeatable setup flag to a
+// list the --profile and --party flags share, so their interleaved order is
+// the order they join the selection.
+type setupTargetFlag struct {
+	kind    configuration.AuthoredItemKind
+	targets *[]setupTarget
+}
+
+func (flag setupTargetFlag) String() string { return "" }
+
+func (flag setupTargetFlag) Set(value string) error {
+	*flag.targets = append(*flag.targets, setupTarget{kind: flag.kind, value: value})
+	return nil
+}
+
+func (flag setupTargetFlag) Type() string { return "name" }
+
+func executeInit(ctx context.Context, options initOptions, streams commandIO) int {
 	if !initRecoveryConfirmed(options) {
-		return printFailure(stderr, errors.New("state recovery requires --yes for this confirmation step"))
+		return printFailure(streams.errors, errors.New("state recovery requires --yes for this confirmation step"))
 	}
 	result, err := engine.InitializeReviewParty(engine.ReviewPartyInitialization{
 		Repository:              options.repository,
@@ -28,10 +59,31 @@ func executeInit(options initOptions, stdout, stderr io.Writer) int {
 		BackupIncompatible:      options.backup, Fresh: options.fresh,
 	})
 	if err != nil {
-		return printFailure(stderr, err)
+		return printFailure(streams.errors, err)
 	}
-	if err := printInitialization(stdout, result, options); err != nil {
-		return printFailure(stderr, err)
+	if err := printStateRecovery(streams.output, result, options); err != nil || result.Backup != nil {
+		return failureCode(streams.errors, err)
+	}
+	manager := streams.configurationManager(options.configuration)
+	repository := configuration.Repository(result.Repository)
+	switch {
+	case len(options.setup) > 0:
+		return applyInitSetup(manager, repository, options, streams)
+	case streams.interactive():
+		hub := configurationHubOptions{
+			repository: result.Repository, configuration: options.configuration,
+			accessible: options.accessible, discoveryService: options.discoveryService,
+		}
+		if err := runFirstUseJourney(ctx, manager, hub, streams); err != nil {
+			return printFailure(streams.errors, err)
+		}
+	}
+	return failureCode(streams.errors, reportInitGaps(streams.output, manager, repository, options))
+}
+
+func failureCode(output io.Writer, err error) int {
+	if err != nil {
+		return printFailure(output, err)
 	}
 	return 0
 }
@@ -43,23 +95,18 @@ func initRecoveryConfirmed(options initOptions) bool {
 	return options.yes
 }
 
-func printInitialization(output io.Writer, result engine.ReviewPartyInitializationResult, options initOptions) error {
+// printStateRecovery reports state preparation only when it recovered from
+// incompatible state; ordinary preparation is silent.
+func printStateRecovery(output io.Writer, result engine.ReviewPartyInitializationResult, options initOptions) error {
 	return writeCommandOutput(output, func(output *commandOutput) {
 		if result.Backup != nil {
 			output.write("Incompatible state was backed up without migration to %s.\n", result.Backup.Directory)
 			output.write("Next: separately confirm fresh state with %s.\n", freshInitializationCommand(result.Repository, options))
 			return
 		}
-		output.write("Review Party is ready for %s.\n", result.Repository)
-		if result.AdvancedState {
-			output.write("Advanced state location: %s\n", result.StateDirectory)
-		} else {
-			output.write("State is managed automatically.\n")
+		if options.fresh {
+			output.write("Fresh state is ready for %s.\n", result.Repository)
 		}
-		if result.AlreadyReady {
-			output.write("Existing state was kept unchanged.\n")
-		}
-		output.write("Next: configure a saved Review Profile for %s.\n", result.Repository)
 	})
 }
 
@@ -72,4 +119,42 @@ func freshInitializationCommand(repository string, options initOptions) string {
 		command += " --config " + shellQuoteArgument(options.configuration)
 	}
 	return command
+}
+
+// applyInitSetup adds each named Profile or Party to the selection group of
+// the scope it resolves to, Repository before Global, through one Plan.
+// Names the selection already holds change nothing.
+func applyInitSetup(manager *configuration.Manager, repository configuration.Repository, options initOptions, streams commandIO) int {
+	selection, err := currentReviewSelection(manager, repository)
+	if err != nil {
+		return printFailure(streams.errors, err)
+	}
+	for _, target := range options.setup {
+		group, item, err := manager.ResolveSelectionTarget(repository, target.kind, target.value)
+		if err != nil {
+			return printFailure(streams.errors, err)
+		}
+		selection = configuration.AddReviewSelection(selection, group, item).Selection
+	}
+	plan, err := manager.Plan(repository, []configuration.Intent{configuration.SetReviewSelection{Selection: selection}})
+	if err != nil {
+		return printFailure(streams.errors, err)
+	}
+	if plan.Valid() && len(plan.Changes()) == 0 {
+		return printCommandOutput(streams.output, streams.errors, func(output *commandOutput) {
+			output.write("The Review selection already includes every name given; nothing was written.\n")
+		})
+	}
+	return publishConfigurationPlan(manager, plan, configurationMutationOptions{
+		repository: string(repository), configuration: options.configuration, yes: options.yes, format: "human",
+	}, streams)
+}
+
+func runFirstUseJourney(parent context.Context, manager *configuration.Manager, hub configurationHubOptions, streams commandIO) error {
+	ctx, stop := configurationHubContext(parent)
+	defer stop()
+	if err := configurationhub.RunFirstUse(manager, hub.runOptions(ctx, manager, streams)); err != nil {
+		return fmt.Errorf("run first-use journey: %w", err)
+	}
+	return nil
 }

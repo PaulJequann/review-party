@@ -269,8 +269,9 @@ func (model *Model) openProfileInstructionsForm() tea.Cmd {
 func (model *Model) openPartyForm() tea.Cmd {
 	draft := &model.session.party
 	options := model.profileReferenceOptions()
-	profileSelect := huh.NewMultiSelect[string]().Title("Profiles").Options(options...).Value(&draft.profileRefs).
-		WithHeight(min(max(len(options)+1, 2), 8))
+	profileSelect := huh.NewMultiSelect[string]().Title("Profiles").
+		OptionsFunc(func() []huh.Option[string] { return partyMemberOptions(options, draft.scope) }, &draft.scope).
+		Value(&draft.profileRefs).WithHeight(min(max(len(options)+1, 2), 8))
 	return model.openForm(formParty, []huh.Field{
 		huh.NewSelect[string]().Title("Configuration scope").Options(scopeOptions()...).Value(&draft.scope),
 		huh.NewInput().Title("Party name").Value(&draft.name),

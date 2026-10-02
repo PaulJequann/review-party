@@ -17,6 +17,9 @@ type editor struct {
 	manager  *configuration.Manager
 	drafts   *draftSet
 	snapshot Snapshot
+	// standalone lets forms run outside accessible mode without the Hub's
+	// tea program. Only the first-use journey sets it.
+	standalone bool
 }
 
 type draftSet struct {
@@ -95,10 +98,14 @@ func (e *editor) form(fields ...huh.Field) error {
 		input = io.NopCloser(strings.NewReader(""))
 	}
 	form := huh.NewForm(huh.NewGroup(fields...)).WithAccessible(e.Accessible).WithInput(input).WithOutput(e.Output)
-	if !e.Accessible {
+	switch {
+	case e.Accessible:
+		return runAccessibleForm(ctx, form, input)
+	case e.standalone:
+		return form.RunWithContext(ctx)
+	default:
 		return errors.New("interactive forms must be hosted by the Configuration Hub")
 	}
-	return runAccessibleForm(ctx, form, input)
 }
 
 func runAccessibleForm(ctx context.Context, form *huh.Form, input io.ReadCloser) error {

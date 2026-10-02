@@ -23,6 +23,22 @@ type commandIO struct {
 	output               io.Writer
 	errors               io.Writer
 	configurationManager func(string) *configuration.Manager
+	// terminal reports whether a stream is an interactive terminal. Nil uses
+	// the real check; tests substitute it to reach terminal-only paths.
+	terminal func(stream any) bool
+}
+
+func (streams commandIO) isTerminal(stream any) bool {
+	if streams.terminal != nil {
+		return streams.terminal(stream)
+	}
+	return isTerminalStream(stream)
+}
+
+// interactive reports whether both stdin and stdout reach a terminal, which
+// prompting forms need.
+func (streams commandIO) interactive() bool {
+	return streams.isTerminal(streams.input) && streams.isTerminal(streams.output)
 }
 
 type commandExitError struct {
