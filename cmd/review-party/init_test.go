@@ -262,10 +262,33 @@ func TestInitWithoutATerminalNamesEachCheckpointWithoutItsGitHook(t *testing.T) 
 	}
 	_, stdout, _ = fixture.run(t, commandIO{})
 	want := ready + "Checkpoint pre-push has no git hook; add to " + lefthook + " (lefthook) by hand:\n" +
-		"  pre-push:\n    commands:\n      review-party-checkpoint:\n        run: '" + hookCommand{configuration.CheckpointPrePush, "review-party checkpoint hook git pre-push {1} {2}"}.guarded() + "'\n        use_stdin: true\n" +
+		"  pre-push:\n    commands:\n      review-party-checkpoint:\n        run: '" + hookCommand{configuration.CheckpointPrePush, "review-party checkpoint hook git pre-push -- {1} {2}"}.guarded() + "'\n        use_stdin: true\n" +
 		"Checkpoint pre-commit has no git hook: " + install
 	if stdout != want {
 		t.Fatalf("lefthook stdout = %q, want %q", stdout, want)
+	}
+}
+
+func TestInitWithoutATerminalNamesTheHuskyActivationStep(t *testing.T) {
+	fixture := newInitFixture(t)
+	fixture.profile(t, configuration.ScopeGlobal, "docs")
+	if exit, _, stderr := fixture.run(t, commandIO{}, "--profile", "docs", "--yes"); exit != 0 {
+		t.Fatalf("setup exit = %d, stderr = %q", exit, stderr)
+	}
+	fixture.declareCheckpoints(t, configuration.CheckpointPrePush)
+	if err := os.Mkdir(filepath.Join(fixture.repository, ".husky"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fixture.installHooks(t)
+	ready := "Repository is ready: review-party run --repo " + fixture.repository + "\n"
+	if _, stdout, _ := fixture.run(t, commandIO{}); stdout != ready+"Checkpoint pre-push git hook does not run until husky is active in this clone: npx husky\n" {
+		t.Fatalf("inactive husky stdout = %q", stdout)
+	}
+	if output, err := exec.Command("git", "-C", fixture.repository, "config", "core.hooksPath", ".husky/_").CombinedOutput(); err != nil {
+		t.Fatalf("activate husky: %v: %s", err, output)
+	}
+	if _, stdout, _ := fixture.run(t, commandIO{}); stdout != ready {
+		t.Fatalf("active husky stdout = %q, want %q", stdout, ready)
 	}
 }
 

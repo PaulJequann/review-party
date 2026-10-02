@@ -78,24 +78,28 @@ func (report initReport) checkpointLines() ([]string, error) {
 }
 
 // hookGapLines reports what one planned hook step says is still missing:
-// nothing when the hook is in place, the snippet when it must be added by
-// hand, and the install command otherwise.
+// the snippet when it must be added by hand, the install command when the
+// installer can add it, and the command that activates a hook tool git does
+// not run in this clone.
 func hookGapLines(step hookInstallStep, tool hookTool, install string) []string {
-	missing := "Checkpoint " + string(step.checkpoint) + " has no git hook"
+	checkpoint := "Checkpoint " + string(step.checkpoint)
+	var lines []string
 	switch step.outcome {
 	case hookManual:
-		lines := []string{missing + "; add to " + step.path + " (" + string(tool) + ") by hand:"}
+		lines = append(lines, checkpoint+" has no git hook; add to "+step.path+" ("+string(tool)+") by hand:")
 		for _, line := range step.manual {
 			lines = append(lines, "  "+line)
 		}
-		return lines
 	case hookCreated, hookInserted, hookAppended:
-		return []string{missing + ": " + install}
+		lines = append(lines, checkpoint+" has no git hook: "+install)
 	case hookNotExecutable:
-		return []string{"Checkpoint " + string(step.checkpoint) + " git hook " + step.path + " is not executable, so git skips it: " + install}
+		lines = append(lines, checkpoint+" git hook "+step.path+" is not executable, so git skips it: "+install)
 	case hookInstalled, hookEdited:
 	}
-	return nil
+	if step.activate != "" {
+		lines = append(lines, checkpoint+" git hook does not run until "+string(tool)+" is active in this clone: "+step.activate)
+	}
+	return lines
 }
 
 func (report initReport) definitionLine(missing configuration.UnresolvedReferenceError) string {
