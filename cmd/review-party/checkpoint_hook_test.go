@@ -309,6 +309,18 @@ func TestCheckpointInstallCarriesTheCallersConfigurationOnlyIntoPerCloneHooks(t 
 		t.Fatalf("relative --config hook = %q, want %q", content, want)
 	}
 
+	linked := newHookInstallFixture(t, configuration.CheckpointPreCommit)
+	linked.provideStandIn()
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(linked.repository, ".githooks")); err != nil {
+		t.Fatal(err)
+	}
+	linked.git("config", "core.hooksPath", ".githooks")
+	assertRunContains(t, linked.install("--yes", "--config", config), commandRun{stdout: "Wrote 1 hook file(s)."})
+	if content, want := linked.read(".githooks/pre-commit"), "#!/bin/sh\n"+checkpointHookBlock(configuration.CheckpointPreCommit, " --config '"+config+"'"); content != want {
+		t.Fatalf("hooksPath symlinked outside the work tree = %q, want %q", content, want)
+	}
+
 	shared := newHookInstallFixture(t, configuration.CheckpointPreCommit)
 	shared.provideStandIn()
 	shared.writeFile(".husky/_/h", "")
@@ -394,6 +406,8 @@ func TestCheckpointInstallLeavesLefthookFilesItCannotExtendToTheCaller(t *testin
 		"{pre-push: {commands: {lint: {run: make lint}}}}\n",
 		"  pre-push:\n    commands:\n      lint:\n        run: make lint\n",
 		"# hooks\n  pre-commit:\n    commands:\n      lint:\n        run: make lint\n",
+		"pre-commit:\n  commands:\n    lint:\n      run: make lint\n...\n",
+		"pre-commit:\n  commands:\n    lint:\n      run: make lint\n---\nother: true\n",
 	} {
 		fixture := newHookInstallFixture(t, configuration.CheckpointPrePush)
 		fixture.provideStandIn()

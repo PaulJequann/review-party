@@ -248,8 +248,22 @@ func (target hookInstallTarget) committed(tool hookTool, location string) bool {
 	if tool == hookToolPlain {
 		return false
 	}
-	relative, err := filepath.Rel(target.root, location)
+	relative, err := filepath.Rel(resolvedPath(target.root), resolvedPath(location))
 	return tool != hookToolHooksPath || err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
+}
+
+// resolvedPath resolves symlinks in the longest existing prefix of path, so a
+// hooks directory that does not exist yet resolves through its parents.
+func resolvedPath(path string) string {
+	resolved, err := filepath.EvalSymlinks(path)
+	if err == nil {
+		return resolved
+	}
+	parent := filepath.Dir(path)
+	if parent == path {
+		return path
+	}
+	return filepath.Join(resolvedPath(parent), filepath.Base(path))
 }
 
 func (plan *hookInstallPlan) planCheckpoint(name configuration.CheckpointName) (hookInstallStep, error) {
@@ -432,19 +446,24 @@ func (plan *hookInstallPlan) planLefthook(name configuration.CheckpointName) (ho
 var (
 	lefthookRootKey   = regexp.MustCompile(`^["']?[\w.-]+["']?[ \t]*:`)
 	lefthookBlankLine = regexp.MustCompile(`^\s*(---|#.*)?\s*$`)
+	// yamlDocumentMarker ends a document or starts another, so an appended
+	// mapping after one would land outside the document lefthook reads.
+	yamlDocumentMarker = regexp.MustCompile(`(?m)^(---|\.\.\.)([ \t]|$)`)
 )
 
 // lefthookResistsAppend reports whether appending a block mapping for the hook
 // could duplicate a key or break the file: a plain or quoted key for the hook
-// at any depth, or a root that is not a block mapping at column zero.
+// at any depth, a root that is not a block mapping at column zero, or a
+// document marker after the first key.
 // Either falls back to the manual snippet.
 func lefthookResistsAppend(yaml string, name configuration.CheckpointName) bool {
 	if regexp.MustCompile(`(?m)^[ \t]*["']?` + regexp.QuoteMeta(string(name)) + `["']?[ \t]*:`).MatchString(yaml) {
 		return true
 	}
-	for _, line := range strings.Split(yaml, "\n") {
+	lines := strings.Split(yaml, "\n")
+	for index, line := range lines {
 		if !lefthookBlankLine.MatchString(line) {
-			return !lefthookRootKey.MatchString(line)
+			return !lefthookRootKey.MatchString(line) || yamlDocumentMarker.MatchString(strings.Join(lines[index:], "\n"))
 		}
 	}
 	return false
