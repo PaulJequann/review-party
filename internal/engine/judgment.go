@@ -120,7 +120,7 @@ func (judge *findingJudge) unjudgedOrdinals(id model.ReviewID) ([]int, error) {
 	}
 	ordinals := []int{}
 	for _, finding := range findings {
-		if !current[finding.Ordinal] && !judge.declaration.Exempts(findingPath(finding.Location)) {
+		if !current[finding.Ordinal] && !judge.exempts(finding.Location) {
 			ordinals = append(ordinals, finding.Ordinal)
 		}
 	}
@@ -149,10 +149,10 @@ func (judge *findingJudge) currentVerdicts(id model.ReviewID) (map[int]bool, err
 	return current, nil
 }
 
-// findingPath reads the path of a Finding's location, which the result
-// contract writes as path:line. Text that names no single path never matches
-// an exemption.
-func findingPath(location string) string {
-	path, _, _ := strings.Cut(location, ":")
-	return strings.TrimSpace(path)
+// exempts reports whether a Finding's location is one path:line, as the
+// result contract writes it, in a path the Checkpoint exempts. Any other
+// location, such as one naming two files, needs a Verdict.
+func (judge *findingJudge) exempts(location string) bool {
+	path, line, found := strings.Cut(strings.TrimSpace(location), ":")
+	return found && line != "" && strings.Trim(line, "0123456789-:") == "" && judge.declaration.Exempts(path)
 }

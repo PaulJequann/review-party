@@ -71,10 +71,10 @@ func TestJudgedCountsOnlyCurrentVerdicts(t *testing.T) {
 			want:     checkpointOutcome{State: CheckpointCovered, Declared: true, Exemption: exempted, ReviewIDs: []model.ReviewID{"rp_code"}},
 		},
 		{
-			name: "a location naming more than an exempt path", findings: findingsAt("README.md and a.go", "docs/README.md:1"),
+			name: "a location that is not one path and line", findings: findingsAt("README.md and a.go", "docs/README.md:1", "README.md:3 and a.go:5", "README.md"),
 			want: checkpointOutcome{
 				State: CheckpointUnjudged, Declared: true, Exemption: exempted, ReviewIDs: []model.ReviewID{"rp_code"},
-				Unjudged: []UnjudgedReview{{Review: "rp_code", Ordinals: []int{1}}},
+				Unjudged: []UnjudgedReview{{Review: "rp_code", Ordinals: []int{1, 3, 4}}},
 			},
 		},
 	} {
