@@ -197,11 +197,14 @@ object is zero or not present locally, uses the merge base with
 
 **Hook tools.** The installer edits only files whose format it can extend
 without rewriting a line. Plain hooks, `core.hooksPath`, and husky get a
-marked block after the shebang, or a new `#!/bin/sh` file with mode 0755. The
+marked block after the shebang, or a new `#!/bin/sh` file with mode 0755. A
+hook whose shebang names an interpreter other than a POSIX shell gets a printed
+command to call by hand instead. The
 pre-push block captures git's ref lines and feeds them back as standard input,
 so a hook that reads them still receives them byte for byte. lefthook YAML
 gains a `review-party-checkpoint` command, with `use_stdin: true` for
-pre-push, only when the file has no top-level key for that hook. A lefthook
+pre-push, only when the file has no top-level key for that hook, plain or
+quoted, and is not a flow mapping. A lefthook
 file that already has the key, or is TOML or JSON, gets a printed snippet to
 add by hand. The installer does not merge YAML. The pre-commit framework
 always gets a printed `repo: local` snippet and `pre-commit install

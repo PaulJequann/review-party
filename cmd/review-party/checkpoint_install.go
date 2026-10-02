@@ -196,23 +196,27 @@ func planHookInstall(target hookInstallTarget, manager *configuration.Manager) (
 	return plan, nil
 }
 
-var lefthookConfigFiles = []string{
-	"lefthook.yml", "lefthook.yaml", ".lefthook.yml", ".lefthook.yaml", ".config/lefthook.yml", ".config/lefthook.yaml",
-	"lefthook.toml", ".lefthook.toml", ".config/lefthook.toml",
-	"lefthook.json", ".lefthook.json", ".config/lefthook.json", "lefthook.jsonc", ".lefthook.jsonc", ".config/lefthook.jsonc",
+// hookToolMarkers are the files that select a hook tool, in the order they
+// are checked. The first present one wins.
+var hookToolMarkers = []struct {
+	path string
+	tool hookTool
+}{
+	{"lefthook.yml", hookToolLefthook}, {"lefthook.yaml", hookToolLefthook}, {".lefthook.yml", hookToolLefthook},
+	{".lefthook.yaml", hookToolLefthook}, {".config/lefthook.yml", hookToolLefthook}, {".config/lefthook.yaml", hookToolLefthook},
+	{"lefthook.toml", hookToolLefthook}, {".lefthook.toml", hookToolLefthook}, {".config/lefthook.toml", hookToolLefthook},
+	{"lefthook.json", hookToolLefthook}, {".lefthook.json", hookToolLefthook}, {".config/lefthook.json", hookToolLefthook},
+	{"lefthook.jsonc", hookToolLefthook}, {".lefthook.jsonc", hookToolLefthook}, {".config/lefthook.jsonc", hookToolLefthook},
+	{".husky", hookToolHusky},
+	{".pre-commit-config.yaml", hookToolPreCommit},
 }
 
 func detectHookTool(root string) (hookTool, string, error) {
-	for _, name := range lefthookConfigFiles {
-		if exists(filepath.Join(root, name)) {
-			return hookToolLefthook, filepath.Join(root, name), nil
+	for _, marker := range hookToolMarkers {
+		path := filepath.Join(root, marker.path)
+		if _, err := os.Stat(path); err == nil {
+			return marker.tool, path, nil
 		}
-	}
-	if exists(filepath.Join(root, ".husky")) {
-		return hookToolHusky, filepath.Join(root, ".husky"), nil
-	}
-	if exists(filepath.Join(root, ".pre-commit-config.yaml")) {
-		return hookToolPreCommit, filepath.Join(root, ".pre-commit-config.yaml"), nil
 	}
 	locations, err := subject.ResolveHookLocations(root)
 	if err != nil {
@@ -232,11 +236,6 @@ func (target hookInstallTarget) committed(tool hookTool, location string) bool {
 	}
 	relative, err := filepath.Rel(target.root, location)
 	return tool != hookToolHooksPath || err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
-}
-
-func exists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
 }
 
 func (plan *hookInstallPlan) planCheckpoint(name configuration.CheckpointName) (hookInstallStep, error) {
@@ -285,8 +284,16 @@ func (plan *hookInstallPlan) planHookScript(name configuration.CheckpointName) (
 	}
 	updated, outcome := insertHookBlock(string(content), block)
 	step.outcome = outcome
-	if outcome == hookInserted {
+	switch outcome {
+	case hookInserted:
 		plan.writes[path] = []byte(updated)
+	case hookManual:
+		step.manual = []string{
+			"# This hook is not a shell script. Run the command below from it with the",
+			"# hook's arguments and standard input, and stop when it exits non-zero.",
+			"review-party checkpoint hook git " + string(name) + config,
+		}
+	case hookCreated, hookAppended, hookInstalled, hookEdited:
 	}
 	return step, nil
 }
@@ -322,7 +329,9 @@ func checkpointHookBlock(name configuration.CheckpointName, config string) strin
 }
 
 // insertHookBlock adds the block after the shebang, or at the top of a hook
-// without one. A present block is compared, never rewritten.
+// without one. A present block is compared, never rewritten. A hook for
+// another interpreter cannot run the shell block, so it is left for the
+// Caller to edit by hand.
 func insertHookBlock(content, block string) (string, hookOutcome) {
 	start := block[:strings.Index(block, "\n")+1]
 	if index := strings.Index(content, start); index >= 0 {
@@ -335,10 +344,24 @@ func insertHookBlock(content, block string) (string, hookOutcome) {
 		return block + content, hookInserted
 	}
 	shebang, rest, found := strings.Cut(content, "\n")
+	if !runsInPosixShell(strings.Fields(shebang[2:])) {
+		return content, hookManual
+	}
 	if !found {
 		return shebang + "\n" + block, hookInserted
 	}
 	return shebang + "\n" + block + rest, hookInserted
+}
+
+var posixShells = []string{"sh", "bash", "dash", "zsh", "ksh", "ash", "mksh"}
+
+// runsInPosixShell reports whether a shebang's fields name a POSIX shell,
+// directly or through env.
+func runsInPosixShell(shebang []string) bool {
+	if len(shebang) > 1 && filepath.Base(shebang[0]) == "env" {
+		shebang = slices.DeleteFunc(shebang[1:], func(field string) bool { return strings.HasPrefix(field, "-") })
+	}
+	return len(shebang) > 0 && slices.Contains(posixShells, filepath.Base(shebang[0]))
 }
 
 // lefthookCommand is the lefthook entry for one Checkpoint. Keys follow
@@ -392,8 +415,11 @@ func (plan *hookInstallPlan) planLefthook(name configuration.CheckpointName) (ho
 	return step, nil
 }
 
+// hasTopLevelKey reports whether appending a block mapping for the hook could
+// duplicate a key: a plain or quoted top-level key for it, or a top-level flow
+// mapping the installer cannot extend.
 func hasTopLevelKey(yaml string, name configuration.CheckpointName) bool {
-	return regexp.MustCompile(`(?m)^` + regexp.QuoteMeta(string(name)) + `\s*:`).MatchString(yaml)
+	return regexp.MustCompile(`(?m)^(?:["']?` + regexp.QuoteMeta(string(name)) + `["']?\s*:|\{)`).MatchString(yaml)
 }
 
 // preCommitFrameworkSnippet is a local hook for .pre-commit-config.yaml. The

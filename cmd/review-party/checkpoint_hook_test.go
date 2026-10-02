@@ -324,3 +324,48 @@ func TestCheckpointInstallMakesAnExistingHookExecutable(t *testing.T) {
 		t.Fatalf("hook mode = %v, want 0755", mode)
 	}
 }
+
+func TestCheckpointInstallLeavesAHookForAnotherInterpreterToTheCaller(t *testing.T) {
+	for _, test := range []struct {
+		shebang string
+		edited  bool
+	}{
+		{"#!/usr/bin/env python3", false},
+		{"#!/usr/bin/ruby -w", false},
+		{"#!/usr/bin/env -S bash -e", true},
+		{"#!/bin/zsh", true},
+	} {
+		t.Run(test.shebang, func(t *testing.T) {
+			fixture := newHookInstallFixture(t, configuration.CheckpointPreCommit)
+			fixture.provideStandIn()
+			original := test.shebang + "\nrun_checks()\n"
+			fixture.writeFile(".git/hooks/pre-commit", original)
+			result := fixture.install("--yes")
+			if edited := fixture.read(".git/hooks/pre-commit") != original; edited != test.edited {
+				t.Fatalf("edited = %v, want %v: %+v", edited, test.edited, result)
+			}
+			if !test.edited {
+				assertRun(t, result, commandRun{stdout: "pre-commit: add by hand to " + filepath.Join(fixture.repository, ".git/hooks/pre-commit") + " (git hooks)\n" +
+					"  # This hook is not a shell script. Run the command below from it with the\n" +
+					"  # hook's arguments and standard input, and stop when it exits non-zero.\n" +
+					"  review-party checkpoint hook git pre-commit\n"})
+			}
+		})
+	}
+}
+
+func TestCheckpointInstallLeavesAQuotedLefthookKeyToTheCaller(t *testing.T) {
+	for _, existing := range []string{
+		"'pre-push':\n  commands:\n    lint:\n      run: make lint\n",
+		"\"pre-push\":\n  commands:\n    lint:\n      run: make lint\n",
+		"{pre-push: {commands: {lint: {run: make lint}}}}\n",
+	} {
+		fixture := newHookInstallFixture(t, configuration.CheckpointPrePush)
+		fixture.provideStandIn()
+		fixture.writeFile("lefthook.yml", existing)
+		result := fixture.install("--yes")
+		if !strings.HasPrefix(result.stdout, "pre-push: add by hand to ") || fixture.read("lefthook.yml") != existing {
+			t.Fatalf("install over %q = %+v, lefthook.yml = %q", existing, result, fixture.read("lefthook.yml"))
+		}
+	}
+}
