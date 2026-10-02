@@ -379,6 +379,21 @@ func TestCheckpointInstallMakesAnExistingHookExecutable(t *testing.T) {
 	if mode := info.Mode().Perm(); mode != 0o755 {
 		t.Fatalf("hook mode = %v, want 0755", mode)
 	}
+
+	installed := fixture.read(".git/hooks/pre-push")
+	if err := os.Chmod(hook, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	assertRun(t, fixture.install("--yes"), commandRun{stdout: "pre-push: make executable " + hook + " (git hooks)\nWrote 1 hook file(s).\n"})
+	if info, err = os.Stat(hook); err != nil {
+		t.Fatal(err)
+	}
+	if mode := info.Mode().Perm(); mode != 0o755 {
+		t.Fatalf("reinstalled hook mode = %v, want 0755", mode)
+	}
+	if got := fixture.read(".git/hooks/pre-push"); got != installed {
+		t.Fatalf("reinstalled hook content = %q, want %q", got, installed)
+	}
 }
 
 func TestCheckpointInstallEditsASymlinkedHookAtItsTarget(t *testing.T) {
@@ -424,7 +439,8 @@ func TestCheckpointInstallLeavesAHookForAnotherInterpreterToTheCaller(t *testing
 			if !test.edited {
 				assertRun(t, result, commandRun{stdout: "pre-commit: add by hand to " + filepath.Join(fixture.repository, ".git/hooks/pre-commit") + " (git hooks)\n" +
 					"  # This hook is not a shell script. Run the command below from it with the\n" +
-					"  # hook's arguments and standard input, and stop when it exits non-zero.\n" +
+					"  # hook's arguments and standard input. Stop only when it exits 1; any other\n" +
+					"  # status means the Checkpoint was not checked, so warn and continue.\n" +
 					"  review-party checkpoint hook git pre-commit\n"})
 			}
 		})

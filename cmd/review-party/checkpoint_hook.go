@@ -74,7 +74,6 @@ func decideCheckpointHook(ctx context.Context, options checkpointOptions, hookAr
 	if _, ok := declared[options.name]; !ok {
 		return hookDecision{}
 	}
-	options.repository = root
 	if options.name == configuration.CheckpointPreCommit {
 		return decideHookContent(ctx, options)
 	}
@@ -82,7 +81,7 @@ func decideCheckpointHook(ctx context.Context, options checkpointOptions, hookAr
 	if err != nil {
 		return hookDecision{warning: err}
 	}
-	return decidePushedRefs(ctx, options, refs)
+	return decidePushedRefs(ctx, root, options, refs)
 }
 
 // readPushedRefs parses the refs git sends a pre-push hook. Its first
@@ -101,13 +100,13 @@ func readPushedRefs(hookArgs []string, input io.Reader) ([]subject.PushedRef, er
 
 // decidePushedRefs checks every pushed ref and refuses on the first that does
 // not pass. A ref without a base is allowed with a warning.
-func decidePushedRefs(ctx context.Context, options checkpointOptions, refs []subject.PushedRef) hookDecision {
+func decidePushedRefs(ctx context.Context, root string, options checkpointOptions, refs []subject.PushedRef) hookDecision {
 	var warnings []string
 	for _, ref := range refs {
 		if ref.Deletes() {
 			continue
 		}
-		base, err := subject.PushedRefBase(options.repository, ref)
+		base, err := subject.PushedRefBase(root, ref)
 		if err != nil {
 			warnings = append(warnings, err.Error())
 			continue

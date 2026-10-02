@@ -91,6 +91,8 @@ func hookGapLines(step hookInstallStep, tool hookTool, install string) []string 
 		return lines
 	case hookCreated, hookInserted, hookAppended:
 		return []string{missing + ": " + install}
+	case hookNotExecutable:
+		return []string{"Checkpoint " + string(step.checkpoint) + " git hook " + step.path + " is not executable, so git skips it: " + install}
 	case hookInstalled, hookEdited:
 	}
 	return nil

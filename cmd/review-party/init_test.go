@@ -248,6 +248,14 @@ func TestInitWithoutATerminalNamesEachCheckpointWithoutItsGitHook(t *testing.T) 
 		t.Fatalf("installed stdout = %q, want %q", stdout, ready)
 	}
 
+	hook := filepath.Join(fixture.repository, ".git", "hooks", "pre-push")
+	if err := os.Chmod(hook, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, stdout, _ = fixture.run(t, commandIO{}); stdout != ready+"Checkpoint pre-push git hook "+hook+" is not executable, so git skips it: "+install {
+		t.Fatalf("non-executable stdout = %q", stdout)
+	}
+
 	lefthook := filepath.Join(fixture.repository, "lefthook.yml")
 	if err := os.WriteFile(lefthook, []byte("pre-push:\n  commands: {}\n"), 0o644); err != nil {
 		t.Fatal(err)

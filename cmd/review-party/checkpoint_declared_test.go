@@ -197,7 +197,7 @@ func TestCheckpointAnyonePolicyWaivesWithoutATerminalAndOffersTheCommand(t *test
 	head := fixture.commit("one.go", "package app\n\nconst one = 1\n")
 
 	exit, stdout, _ := fixture.check("pre-push", "--base", fixture.base)
-	waiveLine := "waive: review-party checkpoint waive pre-push --base " + fixture.base + " --head " + head + ` --reason "<why>"` + "\n"
+	waiveLine := "waive: review-party checkpoint waive pre-push --base " + fixture.base + " --head " + head + " --repo " + shellQuoteArgument(fixture.repository) + ` --reason "<why>"` + "\n"
 	if exit != 1 || !strings.HasSuffix(stdout, waiveLine) {
 		t.Fatalf("uncovered anyone check exit = %d, stdout = %q", exit, stdout)
 	}

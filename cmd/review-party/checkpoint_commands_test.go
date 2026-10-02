@@ -188,7 +188,7 @@ func TestCheckpointPrePushMissingPrintsRunCommand(t *testing.T) {
 	for _, line := range []string{
 		"bugs (repository): covered by rp_1725192000000_00000000000000c1\n",
 		"docs (repository): missing\n",
-		"next: review-party run --base " + fixture.base + " --head " + head + "\n",
+		"next: review-party run --base " + fixture.base + " --head " + head + " --repo " + shellQuoteArgument(fixture.repository) + "\n",
 	} {
 		if !strings.Contains(stdout, line) {
 			t.Fatalf("stdout lacks %q:\n%s", line, stdout)
@@ -238,7 +238,7 @@ func TestCheckpointPreCommitWithPartialStagingIsUncovered(t *testing.T) {
 		"bugs (repository): covered by rp_1725192000000_00000000000000e1\n" +
 		"docs (repository): missing\n" +
 		"The Review must match the staged content, so stash or stage the rest of your changes first.\n" +
-		"next: review-party run\n"
+		"next: review-party run --repo " + shellQuoteArgument(fixture.repository) + "\n"
 	if stdout != want {
 		t.Fatalf("stdout = %q, want %q", stdout, want)
 	}

@@ -139,6 +139,9 @@ const (
 	hookInstalled hookOutcome = "already installed in"
 	hookEdited    hookOutcome = "edited review-party block left unchanged in"
 	hookManual    hookOutcome = "add by hand to"
+	// hookNotExecutable is an installed block in a hook git skips because the
+	// file lost its execute bits.
+	hookNotExecutable hookOutcome = "make executable"
 )
 
 type hookInstallStep struct {
@@ -166,10 +169,11 @@ type hookInstallPlan struct {
 	// missingBinary reports that review-party is not on PATH, so installed
 	// hooks will warn and allow until it is.
 	missingBinary bool
-	// config is the --config argument hooks in this clone carry. committed
-	// hooks are shared with the team, so they never carry one.
-	config    string
-	committed bool
+	// config is the --config argument the hooks carry. Committed hooks are
+	// shared with the team, so they carry none, and droppedConfig keeps the
+	// Caller's argument for the warning.
+	config        string
+	droppedConfig string
 }
 
 func planHookInstall(target hookInstallTarget, manager *configuration.Manager) (hookInstallPlan, error) {
@@ -188,7 +192,11 @@ func planHookInstall(target hookInstallTarget, manager *configuration.Manager) (
 	_, lookErr := exec.LookPath("review-party")
 	plan := hookInstallPlan{
 		tool: tool, location: location, writes: map[string][]byte{}, missingBinary: lookErr != nil,
-		config: config, committed: target.committed(tool, location),
+	}
+	if target.committed(tool, location) {
+		plan.droppedConfig = config
+	} else {
+		plan.config = config
 	}
 	for _, name := range configuration.SortedCheckpointNames(declared) {
 		step, err := plan.planCheckpoint(name)
@@ -300,11 +308,7 @@ func (plan *hookInstallPlan) planHookScript(name configuration.CheckpointName) (
 		return hookInstallStep{}, err
 	}
 	step := hookInstallStep{checkpoint: name, path: path}
-	config := plan.config
-	if plan.committed {
-		config = ""
-	}
-	block := checkpointHookBlock(name, config)
+	block := checkpointHookBlock(name, plan.config)
 	if !found {
 		step.outcome = hookCreated
 		plan.writes[path] = []byte("#!/bin/sh\n" + block)
@@ -315,15 +319,28 @@ func (plan *hookInstallPlan) planHookScript(name configuration.CheckpointName) (
 	switch outcome {
 	case hookInserted:
 		plan.writes[path] = []byte(updated)
+	case hookInstalled:
+		if !step.executable() {
+			step.outcome = hookNotExecutable
+			plan.writes[path] = content
+		}
 	case hookManual:
 		step.manual = []string{
 			"# This hook is not a shell script. Run the command below from it with the",
-			"# hook's arguments and standard input, and stop when it exits non-zero.",
-			"review-party checkpoint hook git " + string(name) + config,
+			"# hook's arguments and standard input. Stop only when it exits 1; any other",
+			"# status means the Checkpoint was not checked, so warn and continue.",
+			"review-party checkpoint hook git " + string(name) + plan.config,
 		}
-	case hookCreated, hookAppended, hookInstalled, hookEdited:
+	case hookCreated, hookAppended, hookEdited, hookNotExecutable:
 	}
 	return step, nil
+}
+
+// executable reports whether git can run the step's hook. A hook it cannot
+// stat counts as executable, so install leaves it to git to report.
+func (step hookInstallStep) executable() bool {
+	info, err := os.Stat(step.path)
+	return err != nil || info.Mode().Perm()&0o100 != 0
 }
 
 func hookBlockMarkers(name configuration.CheckpointName) (string, string) {
@@ -520,8 +537,8 @@ func (plan hookInstallPlan) render(output *commandOutput) {
 	if plan.missingBinary {
 		output.write("warning: review-party is not on PATH; the hooks warn and allow until it is\n")
 	}
-	if plan.committed && plan.config != "" {
-		output.write("warning: %s hooks are shared with the team, so they load each Caller's default configuration, not%s\n", plan.tool, plan.config)
+	if plan.droppedConfig != "" {
+		output.write("warning: %s hooks are shared with the team, so they load each Caller's default configuration, not%s\n", plan.tool, plan.droppedConfig)
 	}
 }
 

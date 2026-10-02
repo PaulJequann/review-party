@@ -228,7 +228,7 @@ func renderCheckpointReport(format string, streams commandIO, report checkpointR
 
 func resolveCheckpointContent(root string, options checkpointOptions) (checkpointContent, error) {
 	if options.name == configuration.CheckpointPreCommit {
-		return commitCheckpointContent(root, options.configuration)
+		return commitCheckpointContent(root, options)
 	}
 	return pushCheckpointContent(root, options)
 }
@@ -250,7 +250,7 @@ func pushCheckpointContent(root string, options checkpointOptions) (checkpointCo
 	if err != nil {
 		return checkpointContent{}, err
 	}
-	rangeArguments := fmt.Sprintf(" --base %s --head %s%s", changes.Base, changes.Head, configurationArgument(options.configuration))
+	rangeArguments := fmt.Sprintf(" --base %s --head %s%s", changes.Base, changes.Head, options.followUpArguments(root))
 	return checkpointContent{
 		report:       checkpointReport{Checkpoint: configuration.CheckpointPrePush, Base: changes.Base, Head: changes.Head, RangeSource: source},
 		coverage:     engine.CoverageSubject{Changes: changes.Changes, Commits: changes.Commits, Lines: changes.Lines},
@@ -259,7 +259,7 @@ func pushCheckpointContent(root string, options checkpointOptions) (checkpointCo
 	}, nil
 }
 
-func commitCheckpointContent(root, configurationPath string) (checkpointContent, error) {
+func commitCheckpointContent(root string, options checkpointOptions) (checkpointContent, error) {
 	staged, err := subject.StagedContentChanges(root)
 	if err != nil {
 		return checkpointContent{}, err
@@ -275,9 +275,19 @@ func commitCheckpointContent(root, configurationPath string) (checkpointContent,
 	return checkpointContent{
 		report:       checkpointReport{Checkpoint: configuration.CheckpointPreCommit, UnstagedContent: !slices.Equal(staged, working)},
 		coverage:     engine.CoverageSubject{Changes: staged, Lines: lines},
-		runCommand:   "review-party run" + configurationArgument(configurationPath),
-		waiveCommand: "review-party checkpoint waive pre-commit" + configurationArgument(configurationPath) + ` --reason "<why>"`,
+		runCommand:   "review-party run" + options.followUpArguments(root),
+		waiveCommand: "review-party checkpoint waive pre-commit" + options.followUpArguments(root) + ` --reason "<why>"`,
 	}, nil
+}
+
+// followUpArguments keep a suggested command on the repository and
+// configuration this check used, wherever the Caller runs it from.
+func (options checkpointOptions) followUpArguments(root string) string {
+	arguments := configurationArgument(options.configuration)
+	if options.repository != "" {
+		arguments = " --repo " + shellQuoteArgument(root) + arguments
+	}
+	return arguments
 }
 
 // completeCheckpointReport names one next step for a Checkpoint that does not
