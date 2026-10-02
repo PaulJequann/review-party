@@ -136,6 +136,7 @@ func newRootCommand(streams commandIO) *cobra.Command {
 		newFindingCommand(streams),
 		newStatusCommand(streams),
 		newWaitCommand(streams),
+		newCheckpointCommand(streams),
 		newProfilesCommand(streams),
 		newExplainCommand("explain", streams),
 		newProfileCommand(streams),

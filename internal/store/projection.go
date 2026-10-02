@@ -116,11 +116,18 @@ func replaceReviewChildren(tx *sql.Tx, record model.ReviewRecord) error {
 			return err
 		}
 	}
-	if record.Result == nil {
+	if err := insertFindings(tx, record.ID, record.Result); err != nil {
+		return err
+	}
+	return replaceContentChanges(tx, record.ID, record.Subject.ContentChanges)
+}
+
+func insertFindings(tx *sql.Tx, id model.ReviewID, result *model.ReviewResult) error {
+	if result == nil {
 		return nil
 	}
-	for _, finding := range record.Result.Findings {
-		if err := insertFinding(tx, record.ID, finding); err != nil {
+	for _, finding := range result.Findings {
+		if err := insertFinding(tx, id, finding); err != nil {
 			return err
 		}
 	}

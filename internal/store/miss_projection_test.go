@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -270,6 +271,9 @@ func TestLedgerMissRemovalWithAnUnknownIDChangesNothing(t *testing.T) {
 
 // writeLedgerAtSchema writes a ledger migrated only up to version, as an older
 // release left it, holding one completed review.
+// writeLedgerAtSchema saves the fixture through today's projection, which
+// writes tables later migrations add, so it builds the full schema and then
+// removes whatever the requested version did not yet have.
 func writeLedgerAtSchema(t *testing.T, directory string, version int) model.ReviewRecord {
 	t.Helper()
 	db, err := sql.Open("sqlite", filepath.Join(directory, ledgerFilename))
@@ -277,10 +281,31 @@ func writeLedgerAtSchema(t *testing.T, directory string, version int) model.Revi
 		t.Fatal(err)
 	}
 	defer closeTestResource(t, db.Close)
-	script := "CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY);"
+	execLedgerMigrations(t, db, "CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY);", func(migration int) bool { return migration <= version })
+	tables := ledgerTables(t, db)
+	execLedgerMigrations(t, db, "", func(migration int) bool { return migration > version })
+	review := ledgerFixture(model.LifecycleCompleted)
+	if err := (reviewRecordProjection{db: db}).save(review); err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range ledgerTables(t, db) {
+		if !slices.Contains(tables, table) {
+			if _, err := db.Exec("DROP TABLE " + table); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if _, err := db.Exec("DELETE FROM schema_migrations WHERE version > ?", version); err != nil {
+		t.Fatal(err)
+	}
+	return review
+}
+
+func execLedgerMigrations(t *testing.T, db *sql.DB, script string, selected func(int) bool) {
+	t.Helper()
 	for _, migration := range ledgerMigrations {
-		if migration.version > version {
-			break
+		if !selected(migration.version) {
+			continue
 		}
 		statements, err := migrationFiles.ReadFile(migration.path)
 		if err != nil {
@@ -288,14 +313,37 @@ func writeLedgerAtSchema(t *testing.T, directory string, version int) model.Revi
 		}
 		script += fmt.Sprintf("%s;INSERT INTO schema_migrations(version) VALUES(%d);", statements, migration.version)
 	}
+	if script == "" {
+		return
+	}
 	if _, err := db.Exec(script); err != nil {
 		t.Fatal(err)
 	}
-	review := ledgerFixture(model.LifecycleCompleted)
-	if err := (reviewRecordProjection{db: db}).save(review); err != nil {
+}
+
+func ledgerTables(t *testing.T, db *sql.DB) []string {
+	t.Helper()
+	rows, err := db.Query("SELECT name FROM sqlite_master WHERE type = 'table'")
+	if err != nil {
 		t.Fatal(err)
 	}
-	return review
+	defer func() {
+		if err := rows.Close(); err != nil {
+			t.Errorf("close rows: %v", err)
+		}
+	}()
+	var tables []string
+	for rows.Next() {
+		var table string
+		if err := rows.Scan(&table); err != nil {
+			t.Fatal(err)
+		}
+		tables = append(tables, table)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return tables
 }
 
 func TestPrepareUpgradesSchemaTenLedgerPreservingReviews(t *testing.T) {
