@@ -1,6 +1,6 @@
 # Review Checkpoints v1
 
-Status: accepted on 2026-10-01; not implemented. Ownership is recorded in
+Status: accepted on 2026-10-01; slices 1 to 3 implemented. Ownership is recorded in
 [ADR 0001](../adr/0001-project-declared-review-checkpoints.md). Hook facts per
 Caller Agent are in
 [Caller Agent hooks](../research/caller-agent-hooks-2026-10-01.md).
@@ -94,8 +94,9 @@ installed files do not change when the logic changes.
 Git hooks are added through the manager the repository already uses, and
 existing hook lines are never overwritten or reordered:
 
-- **lefthook, husky, pre-commit:** a step is added to the committed config,
-  as team floor, through a reviewed Plan.
+- **lefthook, husky, pre-commit:** a step is added to the committed config
+  where the installer can do so without rewriting a line, or printed to add by
+  hand. Slice 3 decisions below give the exact rules.
 - **`core.hooksPath` or plain `.git/hooks`:** a marked block is inserted into
   `pre-push`, or the file is created. This is per clone, so each Caller's
   `init` installs it. Linked worktrees share the common hooks directory.
@@ -171,10 +172,46 @@ Each slice works without the ones after it.
 5. The AGENTS.md block and `doctor` reporting.
 6. The `judged` requirement, after finding feedback ships.
 
+## Slice 3 decisions
+
+**Pattern language.** An `exempt_paths` pattern is relative to the repository
+root and separated by `/`. Each segment is a Go `path.Match` pattern, and a
+`**` segment matches zero or more directories. A pattern without `/` matches
+the base name at any depth, so `*.md` exempts `docs/guide.md`. Validation
+rejects an empty pattern, a leading `/`, an empty, `.`, or `..` segment, and a
+malformed segment. Exemptions filter both the Checkpoint change and each
+candidate Review's recorded change before they are compared, so a Review of
+the code alone covers a push that also edits exempt files.
+
+**Hook error policy.** The git hook refuses, with exit 1, only when it reached
+a decision and the change does not pass. When `review-party` is missing, the
+configuration does not load, the ref lines do not parse, git fails, or no base
+can be found, the hook prints one warning line and exits 0. An undeclared
+Checkpoint exits 0 silently. A ref deletion is skipped. When this clone has
+the remote object, the base is its merge base with the pushed object, so a
+forced push does not count the commits it drops. A new branch, whose remote
+object is zero or not present locally, uses the merge base with
+`refs/remotes/<remote>/HEAD`, then `refs/remotes/origin/HEAD`.
+
+**Hook tools.** The installer edits only files whose format it can extend
+without rewriting a line. Plain hooks, `core.hooksPath`, and husky get a
+marked block after the shebang, or a new `#!/bin/sh` file with mode 0755. The
+pre-push block captures git's ref lines and feeds them back as standard input,
+so a hook that reads them still receives them byte for byte. lefthook YAML
+gains a `review-party-checkpoint` command, with `use_stdin: true` for
+pre-push, only when the file has no top-level key for that hook. A lefthook
+file that already has the key, or is TOML or JSON, gets a printed snippet to
+add by hand. The installer does not merge YAML. The pre-commit framework
+always gets a printed `repo: local` snippet and `pre-commit install
+--hook-type pre-push`. That framework passes pre-push facts as
+`PRE_COMMIT_*` variables rather than git's ref lines, so the snippet rebuilds
+one ref line from them. These edits go straight to disk after confirmation.
+They do not go through a configuration Plan, because hook files are not Review
+Party configuration. husky and lefthook files are committed, so their edit
+reaches the team when the Caller commits it.
+
 ## Open questions
 
-- **Checkpoint base.** A pre-push to a new branch has a zero remote object.
-  Recommendation: use the merge base with the remote default branch.
 - **Commit forms.** `git commit -a` and `git commit <paths>` commit content
   that is not staged when the Caller Agent hook runs. The hook must derive the
   commit's change from the command, or treat a form it cannot parse as

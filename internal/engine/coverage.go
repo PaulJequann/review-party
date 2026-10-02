@@ -5,7 +5,6 @@ package engine
 // facts; the Caller decides what an uncovered Checkpoint blocks.
 
 import (
-	"context"
 	"errors"
 	"fmt"
 
@@ -23,11 +22,13 @@ const (
 	CoverageMissing CoverageState = "missing"
 )
 
-// CoverageSubject is the content a Checkpoint accepts: the whole set, and for
-// a committed range the set each commit introduces.
+// CoverageSubject is the content a Checkpoint accepts: the whole set, for a
+// committed range the set each commit introduces, and the line counts that
+// size the whole change.
 type CoverageSubject struct {
 	Changes []model.ContentChange
 	Commits []subject.CommitContentChanges
+	Lines   subject.LineCounts
 }
 
 type ProfileCoverage struct {
@@ -43,12 +44,13 @@ type CoverageReport struct {
 }
 
 type coverageLedger interface {
-	ContentChangeCoverage(store.CoverageQuery) ([]store.CoverageCandidate, error)
+	CoverageCandidates(store.CoverageQuery) ([]store.CoverageCandidate, error)
 }
 
-// CheckCoverage reports, per selected Profile in selection order, whether a
-// Review of that Profile covers the content.
-func (conductor *Conductor) CheckCoverage(_ context.Context, repository string, coverage CoverageSubject) (CoverageReport, error) {
+// checkCoverage reports, per selected Profile in selection order, whether a
+// Review of that Profile covers the content. A Review covers a set when its
+// recorded set, without the declaration's exempt paths, equals it.
+func (conductor *Conductor) checkCoverage(repository string, coverage CoverageSubject, declaration configuration.Checkpoint) (CoverageReport, error) {
 	resolved, err := conductor.configuration.ResolveRun(configuration.RunRequest{Repository: configuration.Repository(repository)})
 	if errors.Is(err, configuration.ErrNoRepositorySelection) {
 		return CoverageReport{}, fmt.Errorf("%w; run review-party init to choose the Reviews this repository runs", err)
@@ -64,7 +66,8 @@ func (conductor *Conductor) CheckCoverage(_ context.Context, repository string, 
 	for _, profile := range resolved.Expanded {
 		source := configuration.ProfileSource(profile.Scope, profile.Profile)
 		lookup := func(changes []model.ContentChange) ([]store.CoverageCandidate, error) {
-			return ledger.ContentChangeCoverage(store.CoverageQuery{ProfileSource: source, Changes: changes})
+			candidates, err := ledger.CoverageCandidates(store.CoverageQuery{ProfileSource: source, Changes: changes})
+			return coveringCandidates(candidates, changes, declaration), err
 		}
 		state, ids, err := decideCoverage(lookup, coverage)
 		if errors.Is(err, store.ErrReviewRecordStateNotInitialized) {
@@ -80,6 +83,30 @@ func (conductor *Conductor) CheckCoverage(_ context.Context, repository string, 
 }
 
 type coverageLookup func([]model.ContentChange) ([]store.CoverageCandidate, error)
+
+// coveringCandidates keeps, in order, the candidates whose recorded set
+// without exempt paths equals the wanted set.
+func coveringCandidates(candidates []store.CoverageCandidate, wanted []model.ContentChange, declaration configuration.Checkpoint) []store.CoverageCandidate {
+	want := make(map[model.ContentChange]bool, len(wanted))
+	for _, change := range wanted {
+		want[change] = true
+	}
+	var covering []store.CoverageCandidate
+	for _, candidate := range candidates {
+		recorded, _ := partitionExempt(declaration, candidate.Changes)
+		if len(recorded) != len(want) {
+			continue
+		}
+		equal := true
+		for _, change := range recorded {
+			equal = equal && want[change]
+		}
+		if equal {
+			covering = append(covering, candidate)
+		}
+	}
+	return covering
+}
 
 // decideCoverage prefers one completed Review of the whole set, then
 // completed Reviews of every commit, then Reviews still in flight. An

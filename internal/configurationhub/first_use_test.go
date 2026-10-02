@@ -103,6 +103,7 @@ func TestFirstUseCreatesADeclaredGlobalProfileFromItsSameNamedTemplate(t *testin
 		"",      // Template: the preselected same-named one, listed second
 		"n",     // keep the Template instructions
 		"y",     // publish
+		"3",     // no Checkpoint
 	)
 
 	profile, found, err := teammate.LoadProfile(configuration.ScopeGlobal, "", "documentation")
@@ -126,6 +127,7 @@ func TestFirstUsePublishesAChosenExistingProfileAsTheSelection(t *testing.T) {
 	runFirstUse(t, manager, repository,
 		"1", // Global Profile bugs
 		"y", // publish the selection
+		"3", // no Checkpoint
 	)
 
 	selection := selectionOf(t, manager, repository)
@@ -146,6 +148,7 @@ func TestFirstUseSavesAChosenGlobalPartyAsARepositoryParty(t *testing.T) {
 		"",  // save as a Repository Party: default yes
 		"y", // publish the Repository Party
 		"y", // publish the selection
+		"3", // no Checkpoint
 	)
 
 	party, found, err := manager.LoadParty(configuration.ScopeRepository, repository, "crew")

@@ -60,6 +60,32 @@ func (fixture initFixture) run(t *testing.T, streams commandIO, arguments ...str
 	return exit, stdout.String(), stderr.String()
 }
 
+func (fixture initFixture) declareCheckpoints(t *testing.T, names ...configuration.CheckpointName) {
+	t.Helper()
+	intents := make([]configuration.Intent, 0, len(names))
+	for _, name := range names {
+		checkpoint := configuration.NewCheckpoint()
+		checkpoint.Integrations = []configuration.IntegrationName{configuration.IntegrationGit}
+		intents = append(intents, configuration.SetCheckpoint{Name: name, Checkpoint: checkpoint})
+	}
+	plan, err := fixture.manager.Plan(configuration.Repository(fixture.repository), intents)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.manager.Publish(plan); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func (fixture initFixture) installHooks(t *testing.T) {
+	t.Helper()
+	var output bytes.Buffer
+	streams := commandIO{input: strings.NewReader(""), output: &output, errors: &output, configurationManager: func(string) *configuration.Manager { return fixture.manager }}
+	if exit := execute(context.Background(), []string{"checkpoint", "install", "git", "--repo", fixture.repository, "--yes"}, streams); exit != 0 {
+		t.Fatalf("install exit = %d, output = %q", exit, output.String())
+	}
+}
+
 func (fixture initFixture) selection(t *testing.T) (configuration.ReviewSelection, bool) {
 	t.Helper()
 	selection, value, err := fixture.manager.EffectiveReviewSelection(configuration.Repository(fixture.repository))
@@ -178,5 +204,81 @@ func TestInitInATerminalRunsTheFirstUseJourney(t *testing.T) {
 	}
 	if !strings.HasSuffix(stdout, "Repository is ready: review-party run --repo "+fixture.repository+"\n") {
 		t.Fatalf("journey did not end with the remaining report:\n%s", stdout)
+	}
+}
+
+func TestInitReportLeavesAHookOutsideTheTeamFloorToTheCaller(t *testing.T) {
+	fixture := newInitFixture(t)
+	fixture.profile(t, configuration.ScopeGlobal, "docs")
+	if exit, _, stderr := fixture.run(t, commandIO{}, "--profile", "docs", "--yes"); exit != 0 {
+		t.Fatalf("setup exit = %d, stderr = %q", exit, stderr)
+	}
+	plan, err := fixture.manager.Plan(configuration.Repository(fixture.repository), []configuration.Intent{
+		configuration.SetCheckpoint{Name: configuration.CheckpointPrePush, Checkpoint: configuration.NewCheckpoint()},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.manager.Publish(plan); err != nil {
+		t.Fatal(err)
+	}
+	_, stdout, _ := fixture.run(t, commandIO{})
+	if want := "Repository is ready: review-party run --repo " + fixture.repository + "\n"; stdout != want {
+		t.Fatalf("stdout = %q, want only %q", stdout, want)
+	}
+}
+
+func TestInitWithoutATerminalNamesEachCheckpointWithoutItsGitHook(t *testing.T) {
+	fixture := newInitFixture(t)
+	fixture.profile(t, configuration.ScopeGlobal, "docs")
+	if exit, _, stderr := fixture.run(t, commandIO{}, "--profile", "docs", "--yes"); exit != 0 {
+		t.Fatalf("setup exit = %d, stderr = %q", exit, stderr)
+	}
+	fixture.declareCheckpoints(t, configuration.CheckpointPrePush, configuration.CheckpointPreCommit)
+	ready := "Repository is ready: review-party run --repo " + fixture.repository + "\n"
+	install := "review-party checkpoint install git --repo " + fixture.repository + "\n"
+
+	_, stdout, _ := fixture.run(t, commandIO{})
+	if want := ready + "Checkpoint pre-push has no git hook: " + install + "Checkpoint pre-commit has no git hook: " + install; stdout != want {
+		t.Fatalf("stdout = %q, want %q", stdout, want)
+	}
+
+	fixture.installHooks(t)
+	if _, stdout, _ = fixture.run(t, commandIO{}); stdout != ready {
+		t.Fatalf("installed stdout = %q, want %q", stdout, ready)
+	}
+
+	lefthook := filepath.Join(fixture.repository, "lefthook.yml")
+	if err := os.WriteFile(lefthook, []byte("pre-push:\n  commands: {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, stdout, _ = fixture.run(t, commandIO{})
+	want := ready + "Checkpoint pre-push has no git hook; add to " + lefthook + " (lefthook) by hand:\n" +
+		"  pre-push:\n    commands:\n      review-party-checkpoint:\n        run: '" + guardedHookCommand(configuration.CheckpointPrePush, "review-party checkpoint hook git pre-push {1} {2}") + "'\n        use_stdin: true\n" +
+		"Checkpoint pre-commit has no git hook: " + install
+	if stdout != want {
+		t.Fatalf("lefthook stdout = %q, want %q", stdout, want)
+	}
+}
+
+func TestInitInATerminalDeclaresACheckpointAndInstallsItsHook(t *testing.T) {
+	fixture := newInitFixture(t)
+	fixture.profile(t, configuration.ScopeGlobal, "bugs")
+	streams := commandIO{
+		// bugs, publish, pre-push, no exemptions, 0 lines, human waivers, publish, install
+		input:    iotest.OneByteReader(strings.NewReader("1\ny\n1\n\n0\n1\ny\ny\n")),
+		terminal: func(any) bool { return true },
+	}
+
+	exit, stdout, stderr := fixture.run(t, streams, "--accessible")
+	if exit != 0 {
+		t.Fatalf("exit = %d, stderr = %q\n%s", exit, stderr, stdout)
+	}
+	hook, err := os.ReadFile(filepath.Join(fixture.repository, ".git", "hooks", "pre-push"))
+	if err != nil || !strings.Contains(string(hook), "review-party checkpoint hook git pre-push") {
+		t.Fatalf("pre-push hook = %q, %v\n%s", hook, err, stdout)
+	}
+	if !strings.HasSuffix(stdout, "Repository is ready: review-party run --repo "+fixture.repository+"\n") {
+		t.Fatalf("an installed hook still reported missing:\n%s", stdout)
 	}
 }

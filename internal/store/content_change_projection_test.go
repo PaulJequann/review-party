@@ -41,7 +41,7 @@ func TestSaveAndLoadKeepContentChanges(t *testing.T) {
 
 	record.Subject.ContentChanges = coveredChanges[:1]
 	saveTestReviews(t, ledger, record)
-	stale, err := ledger.ContentChangeCoverage(CoverageQuery{ProfileSource: coverageSource, Changes: coveredChanges})
+	stale, err := ledger.CoverageCandidates(CoverageQuery{ProfileSource: coverageSource, Changes: coveredChanges[1:]})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,10 +50,11 @@ func TestSaveAndLoadKeepContentChanges(t *testing.T) {
 	}
 }
 
-func TestContentChangeCoverageMatchesExactSetForProfile(t *testing.T) {
+func TestCoverageCandidatesShareAnEntryWithTheQueryForProfile(t *testing.T) {
 	ledger := newTestLedger(t, t.TempDir())
 	defer closeTestResource(t, ledger.Close)
-	superset := append(append([]model.ContentChange{}, coveredChanges...), model.ContentChange{Path: "c.go", Before: model.ZeroObjectID, After: "4444444444444444444444444444444444444444"})
+	extra := model.ContentChange{Path: "c.go", Before: model.ZeroObjectID, After: "4444444444444444444444444444444444444444"}
+	superset := []model.ContentChange{coveredChanges[0], coveredChanges[1], extra}
 	differentAfter := []model.ContentChange{coveredChanges[0], {Path: "b.go", Before: coveredChanges[1].Before, After: "5555555555555555555555555555555555555555"}}
 	otherProfile := coverageFixture("rp_1723200000000_00000000000000b3", model.LifecycleCompleted, coveredChanges, 3)
 	otherProfile.ProfileRevision.Source = "global:profiles/bugs"
@@ -63,30 +64,33 @@ func TestContentChangeCoverageMatchesExactSetForProfile(t *testing.T) {
 		otherProfile,
 		coverageFixture("rp_1723200000000_00000000000000b4", model.LifecycleCompleted, superset, 4),
 		coverageFixture("rp_1723200000000_00000000000000b5", model.LifecycleCompleted, coveredChanges[:1], 5),
-		coverageFixture("rp_1723200000000_00000000000000b6", model.LifecycleCompleted, differentAfter, 6),
+		coverageFixture("rp_1723200000000_00000000000000b6", model.LifecycleCompleted, differentAfter[1:], 6),
+		coverageFixture("rp_1723200000000_00000000000000b7", model.LifecycleCompleted, []model.ContentChange{extra}, 7),
 	)
 
-	candidates, err := ledger.ContentChangeCoverage(CoverageQuery{ProfileSource: coverageSource, Changes: coveredChanges})
+	candidates, err := ledger.CoverageCandidates(CoverageQuery{ProfileSource: coverageSource, Changes: coveredChanges})
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := []CoverageCandidate{
-		{ID: "rp_1723200000000_00000000000000b2", Lifecycle: model.LifecycleIncomplete},
-		{ID: "rp_1723200000000_00000000000000b1", Lifecycle: model.LifecycleCompleted},
+		{ID: "rp_1723200000000_00000000000000b5", Lifecycle: model.LifecycleCompleted, Changes: coveredChanges[:1]},
+		{ID: "rp_1723200000000_00000000000000b4", Lifecycle: model.LifecycleCompleted, Changes: superset},
+		{ID: "rp_1723200000000_00000000000000b2", Lifecycle: model.LifecycleIncomplete, Changes: coveredChanges},
+		{ID: "rp_1723200000000_00000000000000b1", Lifecycle: model.LifecycleCompleted, Changes: coveredChanges},
 	}
 	if got := withoutCreatedAt(candidates); !reflect.DeepEqual(got, want) {
 		t.Fatalf("candidates = %#v, want %#v", got, want)
 	}
 }
 
-func TestContentChangeCoverageRejectsEmptyAndRepeatedSets(t *testing.T) {
+func TestCoverageCandidatesRejectEmptyAndRepeatedSets(t *testing.T) {
 	ledger := newTestLedger(t, t.TempDir())
 	defer closeTestResource(t, ledger.Close)
 	for name, changes := range map[string][]model.ContentChange{
 		"empty":    nil,
 		"repeated": {coveredChanges[0], coveredChanges[0]},
 	} {
-		if _, err := ledger.ContentChangeCoverage(CoverageQuery{ProfileSource: coverageSource, Changes: changes}); err == nil {
+		if _, err := ledger.CoverageCandidates(CoverageQuery{ProfileSource: coverageSource, Changes: changes}); err == nil {
 			t.Fatalf("%s set: coverage query succeeded", name)
 		}
 	}
@@ -112,7 +116,7 @@ func TestPrepareUpgradesSchemaTwelveLedgerToIndexContentChanges(t *testing.T) {
 	}
 	covered := coverageFixture("rp_1723200000000_00000000000000c1", model.LifecycleCompleted, coveredChanges, 1)
 	saveTestReviews(t, ledger, covered)
-	candidates, err := ledger.ContentChangeCoverage(CoverageQuery{ProfileSource: coverageSource, Changes: coveredChanges})
+	candidates, err := ledger.CoverageCandidates(CoverageQuery{ProfileSource: coverageSource, Changes: coveredChanges})
 	if err != nil {
 		t.Fatal(err)
 	}

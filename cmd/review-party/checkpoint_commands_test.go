@@ -136,7 +136,7 @@ func TestCheckpointPrePushCoveredByOneRangeReview(t *testing.T) {
 	if exit != 0 {
 		t.Fatalf("exit = %d, stdout = %q, stderr = %q", exit, stdout, stderr)
 	}
-	want := `{"checkpoint": "pre-push", "base": "` + fixture.base + `", "head": "` + head + `", "range_source": "flags", "covered": true, "profiles": [
+	want := `{"checkpoint": "pre-push", "base": "` + fixture.base + `", "head": "` + head + `", "range_source": "flags", "state": "covered", "covered": true, "profiles": [
 		{"scope": "repository", "name": "bugs", "state": "covered", "review_ids": ["rp_1725192000000_00000000000000a1"]},
 		{"scope": "repository", "name": "docs", "state": "covered", "review_ids": ["rp_1725192000000_00000000000000a2"]}]}`
 	var got, wanted any

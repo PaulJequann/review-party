@@ -2,6 +2,8 @@
 package model
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"slices"
 	"strings"
 	"time"
@@ -459,6 +461,19 @@ func SortContentChanges(changes []ContentChange) {
 	slices.SortFunc(changes, func(left, right ContentChange) int {
 		return strings.Compare(left.Path, right.Path)
 	})
+}
+
+// ContentChangesDigest is the sha256 of a content change set's canonical
+// encoding: entries sorted by path, each field NUL-terminated. Git paths never
+// contain NUL, so distinct sets never share an encoding.
+func ContentChangesDigest(changes []ContentChange) string {
+	sorted := slices.Clone(changes)
+	SortContentChanges(sorted)
+	hash := sha256.New()
+	for _, change := range sorted {
+		hash.Write([]byte(change.Path + "\x00" + change.Before + "\x00" + change.After + "\x00"))
+	}
+	return hex.EncodeToString(hash.Sum(nil))
 }
 
 type SubjectFacts struct {

@@ -26,6 +26,11 @@ func reportInitGaps(output io.Writer, manager *configuration.Manager, repository
 	if err != nil {
 		return err
 	}
+	hooks, err := report.checkpointLines()
+	if err != nil {
+		return err
+	}
+	lines = append(lines, hooks...)
 	return writeCommandOutput(output, func(output *commandOutput) {
 		for _, line := range lines {
 			output.write("%s\n", line)
@@ -49,6 +54,47 @@ func (report initReport) lines() ([]string, error) {
 		lines = append(lines, report.definitionLine(missing))
 	}
 	return lines, nil
+}
+
+// checkpointLines names each Checkpoint that lists the git Integration as team
+// floor but has no git hook in place, with the command that installs it or the
+// snippet a hook tool needs by hand. A block someone edited counts as in place.
+func (report initReport) checkpointLines() ([]string, error) {
+	declared, err := report.manager.Checkpoints(report.repository)
+	if err != nil {
+		return nil, err
+	}
+	plan, err := planHookInstall(string(report.repository), report.manager)
+	if err != nil {
+		return nil, err
+	}
+	install := "review-party checkpoint install git --repo " + shellWord(string(report.repository)) + report.config
+	var lines []string
+	for _, step := range plan.steps {
+		if declared[step.checkpoint].Integrates(configuration.IntegrationGit) {
+			lines = append(lines, hookGapLines(step, plan.tool, install)...)
+		}
+	}
+	return lines, nil
+}
+
+// hookGapLines reports what one planned hook step says is still missing:
+// nothing when the hook is in place, the snippet when it must be added by
+// hand, and the install command otherwise.
+func hookGapLines(step hookInstallStep, tool hookTool, install string) []string {
+	missing := "Checkpoint " + string(step.checkpoint) + " has no git hook"
+	switch step.outcome {
+	case hookManual:
+		lines := []string{missing + "; add to " + step.path + " (" + string(tool) + ") by hand:"}
+		for _, line := range step.manual {
+			lines = append(lines, "  "+line)
+		}
+		return lines
+	case hookCreated, hookInserted, hookAppended:
+		return []string{missing + ": " + install}
+	case hookInstalled, hookEdited:
+	}
+	return nil
 }
 
 func (report initReport) definitionLine(missing configuration.UnresolvedReferenceError) string {

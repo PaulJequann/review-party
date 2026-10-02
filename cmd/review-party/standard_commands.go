@@ -167,7 +167,7 @@ func newConfigCommand(streams commandIO) *cobra.Command {
 	file := &cobra.Command{Use: "file", Short: "Inspect authored Configuration files", Args: cobra.NoArgs, RunE: showCommandHelp}
 	addConfigurationFlag(path)
 	file.AddCommand(newConfigFileShowCommand(streams))
-	cmd.AddCommand(path, file, newConfigShowCommand(streams), newConfigValidateCommand(streams), newConfigDiscoveryCommand(streams, dependencies), newConfigProfileCommand(streams, dependencies), newConfigPartyCommand(streams), newConfigReviewsCommand(streams))
+	cmd.AddCommand(path, file, newConfigShowCommand(streams), newConfigValidateCommand(streams), newConfigDiscoveryCommand(streams, dependencies), newConfigProfileCommand(streams, dependencies), newConfigPartyCommand(streams), newConfigReviewsCommand(streams), newConfigCheckpointCommand(streams))
 	return cmd
 }
 
