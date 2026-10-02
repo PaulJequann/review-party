@@ -155,7 +155,8 @@ func runFirstUseJourney(parent context.Context, manager *configuration.Manager, 
 	defer stop()
 	options := hub.runOptions(ctx, manager, streams)
 	options.InstallCheckpointHooks = func(confirm func() (bool, error)) error {
-		return installCheckpointHooks(hub.repository, manager, streams.output, confirm)
+		target := hookInstallTarget{root: hub.repository, config: configurationArgument(hub.configuration)}
+		return installCheckpointHooks(target, manager, streams.output, confirm)
 	}
 	if err := configurationhub.RunFirstUse(manager, options); err != nil {
 		return fmt.Errorf("run first-use journey: %w", err)

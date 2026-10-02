@@ -208,7 +208,12 @@ always gets a printed `repo: local` snippet and `pre-commit install
 one ref line from them. These edits go straight to disk after confirmation.
 They do not go through a configuration Plan, because hook files are not Review
 Party configuration. husky and lefthook files are committed, so their edit
-reaches the team when the Caller commits it.
+reaches the team when the Caller commits it. A hook in plain `.git/hooks` or
+in a `core.hooksPath` outside the work tree belongs to one clone, so it
+carries the installing Caller's `--config`. A committed hook never does,
+because each teammate loads their own configuration, and the installer warns
+when `--config` is dropped. Installing into an existing hook script also makes
+it executable, since git skips one that is not.
 
 ## Open questions
 

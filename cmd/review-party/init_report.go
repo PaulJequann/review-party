@@ -18,10 +18,7 @@ type initReport struct {
 }
 
 func reportInitGaps(output io.Writer, manager *configuration.Manager, repository configuration.Repository, options initOptions) error {
-	report := initReport{manager: manager, repository: repository}
-	if options.configuration != "" && options.configuration != defaultUserConfigurationPath() {
-		report.config = " --config " + shellWord(options.configuration)
-	}
+	report := initReport{manager: manager, repository: repository, config: configurationArgument(options.configuration)}
 	lines, err := report.lines()
 	if err != nil {
 		return err
@@ -64,7 +61,7 @@ func (report initReport) checkpointLines() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	plan, err := planHookInstall(string(report.repository), report.manager)
+	plan, err := planHookInstall(hookInstallTarget{root: string(report.repository), config: report.config}, report.manager)
 	if err != nil {
 		return nil, err
 	}

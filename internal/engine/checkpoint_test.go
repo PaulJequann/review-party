@@ -235,13 +235,17 @@ func TestAWaiverPassesOnlyTheContentItWaived(t *testing.T) {
 	}
 }
 
-func TestWaivingACoveredCheckpointRecordsNothing(t *testing.T) {
-	fake := &coverageStore{reviews: []recordedCoverage{recorded(bugsSource, "rp_code", model.LifecycleCompleted, coverageFirst)}}
-	conductor, repository := newCheckpointConductor(t, fake, waivable(configuration.WaiversAnyone))
+func TestWaivingACoveredCheckpointRecordsNothingUnderAnyPolicy(t *testing.T) {
+	for _, policy := range []configuration.WaiverPolicy{configuration.WaiversAnyone, configuration.WaiversHuman, configuration.WaiversNone} {
+		t.Run(string(policy), func(t *testing.T) {
+			fake := &coverageStore{reviews: []recordedCoverage{recorded(bugsSource, "rp_code", model.LifecycleCompleted, coverageFirst)}}
+			conductor, repository := newCheckpointConductor(t, fake, waivable(policy))
 
-	assertOutcome(t, mustWaive(t, conductor, repository, CoverageSubject{Changes: coverageFirst}), checkpointOutcome{State: CheckpointCovered, Declared: true, ReviewIDs: []model.ReviewID{"rp_code"}})
-	if len(fake.waivers) != 0 {
-		t.Fatalf("waiving a covered Checkpoint recorded %d waivers", len(fake.waivers))
+			assertOutcome(t, mustWaive(t, conductor, repository, CoverageSubject{Changes: coverageFirst}), checkpointOutcome{State: CheckpointCovered, Declared: true, ReviewIDs: []model.ReviewID{"rp_code"}})
+			if len(fake.waivers) != 0 {
+				t.Fatalf("waiving a covered Checkpoint recorded %d waivers", len(fake.waivers))
+			}
+		})
 	}
 }
 

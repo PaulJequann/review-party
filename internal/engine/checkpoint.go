@@ -229,18 +229,9 @@ func WaiverPermission(policy configuration.WaiverPolicy, by model.WaivedBy) erro
 	}
 }
 
-func (report CheckpointReport) permitsWaiver(by model.WaivedBy) error {
-	if report.Declaration == nil {
-		return fmt.Errorf("checkpoint %s is not declared; declare it with review-party config checkpoint set %s", report.Name, report.Name)
-	}
-	if err := WaiverPermission(report.Declaration.Waivers, by); err != nil {
-		return fmt.Errorf("checkpoint %s: %w", report.Name, err)
-	}
-	return nil
-}
-
 // WaiveCheckpoint records a Waiver when the Checkpoint does not already pass.
-// A Checkpoint that passes is returned unchanged, so waiving twice records once.
+// A Checkpoint that passes is returned unchanged before the waiver policy is
+// consulted, so waiving twice records once from any terminal.
 func (conductor *Conductor) WaiveCheckpoint(ctx context.Context, request WaiverRequest) (CheckpointReport, error) {
 	if strings.TrimSpace(request.Reason) == "" {
 		return CheckpointReport{}, errors.New("a waiver requires a reason")
@@ -249,25 +240,36 @@ func (conductor *Conductor) WaiveCheckpoint(ctx context.Context, request WaiverR
 	if err != nil {
 		return CheckpointReport{}, err
 	}
-	if err := report.permitsWaiver(request.WaivedBy); err != nil {
-		return CheckpointReport{}, err
+	if report.Declaration == nil {
+		return CheckpointReport{}, fmt.Errorf("checkpoint %s is not declared; declare it with review-party config checkpoint set %s", report.Name, report.Name)
 	}
 	if report.State.Passes() {
 		return report, nil
 	}
-	ledger, ok := conductor.store.(waiverLedger)
-	if !ok {
-		return CheckpointReport{}, errors.New("checkpoint waivers require the SQLite ledger")
+	if err := WaiverPermission(report.Declaration.Waivers, request.WaivedBy); err != nil {
+		return CheckpointReport{}, fmt.Errorf("checkpoint %s: %w", report.Name, err)
 	}
-	id, err := newDomainID("cw", conductor.now())
+	waiver, err := conductor.recordWaiver(report.WaiverKey, request)
 	if err != nil {
 		return CheckpointReport{}, err
-	}
-	waiver := model.CheckpointWaiver{ID: model.WaiverID(id), Key: report.WaiverKey, Reason: strings.TrimSpace(request.Reason), WaivedBy: request.WaivedBy, CreatedAt: conductor.now().UTC()}
-	if err := ledger.RecordCheckpointWaiver(waiver); err != nil {
-		return CheckpointReport{}, ledgerStateError(err)
 	}
 	report.State = CheckpointWaived
 	report.Waiver = &waiver
 	return report, nil
+}
+
+func (conductor *Conductor) recordWaiver(key model.WaiverKey, request WaiverRequest) (model.CheckpointWaiver, error) {
+	ledger, ok := conductor.store.(waiverLedger)
+	if !ok {
+		return model.CheckpointWaiver{}, errors.New("checkpoint waivers require the SQLite ledger")
+	}
+	id, err := newDomainID("cw", conductor.now())
+	if err != nil {
+		return model.CheckpointWaiver{}, err
+	}
+	waiver := model.CheckpointWaiver{ID: model.WaiverID(id), Key: key, Reason: strings.TrimSpace(request.Reason), WaivedBy: request.WaivedBy, CreatedAt: conductor.now().UTC()}
+	if err := ledger.RecordCheckpointWaiver(waiver); err != nil {
+		return model.CheckpointWaiver{}, ledgerStateError(err)
+	}
+	return waiver, nil
 }

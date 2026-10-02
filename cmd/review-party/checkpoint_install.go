@@ -81,7 +81,8 @@ func executeCheckpointInstall(options hookInstallOptions, streams commandIO) int
 		}
 		return confirmed, err
 	}
-	err = installCheckpointHooks(root, streams.configurationManager(options.configuration), streams.output, confirm)
+	target := hookInstallTarget{root: root, config: configurationArgument(options.configuration)}
+	err = installCheckpointHooks(target, streams.configurationManager(options.configuration), streams.output, confirm)
 	switch {
 	case errors.Is(err, errNoCheckpointDeclared), errors.Is(err, errHookInstallUnconfirmed):
 		return printCommandError(streams.errors, usageExitCode, err)
@@ -94,8 +95,8 @@ func executeCheckpointInstall(options hookInstallOptions, streams commandIO) int
 // installCheckpointHooks prints what installing the git Integration for every
 // declared Checkpoint does, and writes only when confirm agrees. The init
 // journey shares it with its own confirmation form.
-func installCheckpointHooks(root string, manager *configuration.Manager, output io.Writer, confirm func() (bool, error)) error {
-	plan, err := planHookInstall(root, manager)
+func installCheckpointHooks(target hookInstallTarget, manager *configuration.Manager, output io.Writer, confirm func() (bool, error)) error {
+	plan, err := planHookInstall(target, manager)
 	if err != nil {
 		return err
 	}
@@ -147,6 +148,13 @@ type hookInstallStep struct {
 	manual     []string
 }
 
+// hookInstallTarget is the repository whose hooks are installed and the
+// --config argument its hooks need to load the Caller's configuration.
+type hookInstallTarget struct {
+	root   string
+	config string
+}
+
 type hookInstallPlan struct {
 	tool hookTool
 	// location is where the tool keeps Checkpoint entries: a configuration
@@ -158,19 +166,26 @@ type hookInstallPlan struct {
 	// missingBinary reports that review-party is not on PATH, so installed
 	// hooks will warn and allow until it is.
 	missingBinary bool
+	// config is the --config argument hooks in this clone carry. committed
+	// hooks are shared with the team, so they never carry one.
+	config    string
+	committed bool
 }
 
-func planHookInstall(root string, manager *configuration.Manager) (hookInstallPlan, error) {
-	declared, err := manager.Checkpoints(configuration.Repository(root))
+func planHookInstall(target hookInstallTarget, manager *configuration.Manager) (hookInstallPlan, error) {
+	declared, err := manager.Checkpoints(configuration.Repository(target.root))
 	if err != nil {
 		return hookInstallPlan{}, err
 	}
-	tool, location, err := detectHookTool(root)
+	tool, location, err := detectHookTool(target.root)
 	if err != nil {
 		return hookInstallPlan{}, err
 	}
 	_, lookErr := exec.LookPath("review-party")
-	plan := hookInstallPlan{tool: tool, location: location, writes: map[string][]byte{}, missingBinary: lookErr != nil}
+	plan := hookInstallPlan{
+		tool: tool, location: location, writes: map[string][]byte{}, missingBinary: lookErr != nil,
+		config: target.config, committed: target.committed(tool, location),
+	}
 	for _, name := range configuration.SortedCheckpointNames(declared) {
 		step, err := plan.planCheckpoint(name)
 		if err != nil {
@@ -207,6 +222,16 @@ func detectHookTool(root string) (hookTool, string, error) {
 		return hookToolHooksPath, locations.Directory, nil
 	}
 	return hookToolPlain, locations.Directory, nil
+}
+
+// committed reports whether the hooks live in files the team shares: a hook
+// tool's configuration, or a core.hooksPath inside the work tree.
+func (target hookInstallTarget) committed(tool hookTool, location string) bool {
+	if tool == hookToolPlain {
+		return false
+	}
+	relative, err := filepath.Rel(target.root, location)
+	return tool != hookToolHooksPath || err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
 }
 
 func exists(path string) bool {
@@ -248,7 +273,11 @@ func (plan *hookInstallPlan) planHookScript(name configuration.CheckpointName) (
 		return hookInstallStep{}, err
 	}
 	step := hookInstallStep{checkpoint: name, path: path}
-	block := checkpointHookBlock(name)
+	config := plan.config
+	if plan.committed {
+		config = ""
+	}
+	block := checkpointHookBlock(name, config)
 	if !found {
 		step.outcome = hookCreated
 		plan.writes[path] = []byte("#!/bin/sh\n" + block)
@@ -269,19 +298,19 @@ func hookBlockMarkers(name configuration.CheckpointName) (string, string) {
 // checkpointHookBlock is the shell the installer adds to a hook script. The
 // pre-push block reads the refs git sends, hands them to review-party, and
 // feeds them back as standard input so the rest of the hook still reads them.
-func checkpointHookBlock(name configuration.CheckpointName) string {
+func checkpointHookBlock(name configuration.CheckpointName, config string) string {
 	start, end := hookBlockMarkers(name)
 	missing := "  " + missingBinaryWarning(name) + "\n"
 	if name == configuration.CheckpointPreCommit {
 		return start + "\n" +
 			"if command -v review-party >/dev/null 2>&1; then\n" +
-			"  review-party checkpoint hook git pre-commit || exit $?\n" +
+			"  review-party checkpoint hook git pre-commit" + config + " || exit $?\n" +
 			"else\n" + missing + "fi\n" + end + "\n"
 	}
 	return start + "\n" +
 		"review_party_refs=$(cat)\n" +
 		"if command -v review-party >/dev/null 2>&1; then\n" +
-		"  printf '%s\\n' \"$review_party_refs\" | review-party checkpoint hook git pre-push \"$@\" || exit $?\n" +
+		"  printf '%s\\n' \"$review_party_refs\" | review-party checkpoint hook git pre-push" + config + " \"$@\" || exit $?\n" +
 		"else\n" + missing + "fi\n" +
 		"if [ -n \"$review_party_refs\" ]; then\n" +
 		"exec 0<<REVIEW_PARTY_REFS\n" +
@@ -400,6 +429,9 @@ func (plan hookInstallPlan) render(output *commandOutput) {
 	if plan.missingBinary {
 		output.write("warning: review-party is not on PATH; the hooks warn and allow until it is\n")
 	}
+	if plan.committed && plan.config != "" {
+		output.write("warning: %s hooks are shared with the team, so they load each Caller's default configuration, not%s\n", plan.tool, plan.config)
+	}
 }
 
 func (plan hookInstallPlan) apply() error {
@@ -407,6 +439,9 @@ func (plan hookInstallPlan) apply() error {
 		mode := fs.FileMode(0o755)
 		if info, err := os.Stat(path); err == nil {
 			mode = info.Mode().Perm()
+		}
+		if plan.tool != hookToolLefthook {
+			mode |= 0o111
 		}
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			return fmt.Errorf("create %s: %w", filepath.Dir(path), err)

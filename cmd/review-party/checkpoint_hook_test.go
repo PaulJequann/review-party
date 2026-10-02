@@ -175,7 +175,7 @@ func TestCheckpointInstallKeepsAnExistingPrePushHookAndItsInput(t *testing.T) {
 		"Wrote 1 hook file(s).\n"
 	assertRun(t, installed, commandRun{stdout: want})
 	content := fixture.read(".git/hooks/pre-push")
-	if want := "#!/bin/sh\n" + checkpointHookBlock(configuration.CheckpointPrePush) + "# team hook\ncat > hook-saw\n"; content != want {
+	if want := "#!/bin/sh\n" + checkpointHookBlock(configuration.CheckpointPrePush, "") + "# team hook\ncat > hook-saw\n"; content != want {
 		t.Fatalf("hook = %q, want %q", content, want)
 	}
 
@@ -227,7 +227,7 @@ func TestCheckpointInstallCreatesMissingHooksWhereTheToolRunsThem(t *testing.T) 
 			if mode := info.Mode().Perm(); mode != 0o755 {
 				t.Fatalf("created hook mode = %v", mode)
 			}
-			if content, want := fixture.read(test.hook), "#!/bin/sh\n"+checkpointHookBlock(configuration.CheckpointPreCommit); content != want {
+			if content, want := fixture.read(test.hook), "#!/bin/sh\n"+checkpointHookBlock(configuration.CheckpointPreCommit, ""); content != want {
 				t.Fatalf("created hook = %q, want %q", content, want)
 			}
 		})
@@ -285,5 +285,42 @@ func TestCheckpointInstallPrintsThePreCommitFrameworkSteps(t *testing.T) {
 	}
 	if config := fixture.read(".pre-commit-config.yaml"); config != "repos: []\n" {
 		t.Fatalf(".pre-commit-config.yaml = %q", config)
+	}
+}
+
+func TestCheckpointInstallCarriesTheCallersConfigurationOnlyIntoPerCloneHooks(t *testing.T) {
+	fixture := newHookInstallFixture(t, configuration.CheckpointPreCommit)
+	fixture.provideStandIn()
+	config := filepath.Join(t.TempDir(), "my config.json")
+	assertRunContains(t, fixture.install("--yes", "--config", config), commandRun{stdout: "Wrote 1 hook file(s)."})
+	if content, want := fixture.read(".git/hooks/pre-commit"), "#!/bin/sh\n"+checkpointHookBlock(configuration.CheckpointPreCommit, " --config '"+config+"'"); content != want {
+		t.Fatalf("plain hook = %q, want %q", content, want)
+	}
+
+	shared := newHookInstallFixture(t, configuration.CheckpointPreCommit)
+	shared.provideStandIn()
+	shared.writeFile(".husky/_/h", "")
+	result := shared.install("--yes", "--config", config)
+	assertRunContains(t, result, commandRun{stdout: "warning: husky hooks are shared with the team, so they load each Caller's default configuration, not --config '" + config + "'\n"})
+	if content, want := shared.read(".husky/pre-commit"), "#!/bin/sh\n"+checkpointHookBlock(configuration.CheckpointPreCommit, ""); content != want {
+		t.Fatalf("husky hook = %q, want %q", content, want)
+	}
+}
+
+func TestCheckpointInstallMakesAnExistingHookExecutable(t *testing.T) {
+	fixture := newHookInstallFixture(t, configuration.CheckpointPrePush)
+	fixture.provideStandIn()
+	fixture.writeFile(".git/hooks/pre-push", "#!/bin/sh\n# team hook\n")
+	hook := filepath.Join(fixture.repository, ".git", "hooks", "pre-push")
+	if err := os.Chmod(hook, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	assertRunContains(t, fixture.install("--yes"), commandRun{stdout: "Wrote 1 hook file(s)."})
+	info, err := os.Stat(hook)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mode := info.Mode().Perm(); mode != 0o755 {
+		t.Fatalf("hook mode = %v, want 0755", mode)
 	}
 }
