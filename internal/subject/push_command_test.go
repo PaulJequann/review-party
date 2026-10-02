@@ -26,6 +26,24 @@ func TestPushCommandRefsForTheCurrentBranch(t *testing.T) {
 	assertPushCommandRefs(t, repository, PushCommand{Remote: "upstream"}, current("upstream", "refs/heads/trunk", base))
 	assertPushCommandRefs(t, repository, PushCommand{Remote: "fork"}, current("fork", "refs/heads/"+branch, zero))
 
+	runTestCommand(t, repository, "git", "config", "push.default", "current")
+	assertPushCommandRefs(t, repository, PushCommand{}, current("upstream", "refs/heads/"+branch, zero))
+	runTestCommand(t, repository, "git", "config", "--unset", "push.default")
+
+	runTestCommand(t, repository, "git", "config", "remote.pushDefault", "fork")
+	assertPushCommandRefs(t, repository, PushCommand{}, current("fork", "refs/heads/"+branch, zero))
+	runTestCommand(t, repository, "git", "config", "branch."+branch+".pushRemote", "mirror")
+	assertPushCommandRefs(t, repository, PushCommand{}, current("mirror", "refs/heads/"+branch, zero))
+	assertPushCommandRefs(t, repository, PushCommand{Remote: "upstream"}, current("upstream", "refs/heads/trunk", base))
+
+	for key, value := range map[string]string{"push.default": "matching", "remote.mirror.push": "refs/heads/*:refs/heads/*"} {
+		runTestCommand(t, repository, "git", "config", key, value)
+		if refs, err := (PushCommand{}).Refs(repository); err == nil {
+			t.Fatalf("push with %s = %s resolved %v", key, value, refs)
+		}
+		runTestCommand(t, repository, "git", "config", "--unset", key)
+	}
+
 	runTestCommand(t, repository, "git", "checkout", "--quiet", "--detach")
 	if _, err := (PushCommand{}).Refs(repository); !errors.Is(err, ErrDetachedPush) {
 		t.Fatalf("detached push = %v", err)

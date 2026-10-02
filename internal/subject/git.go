@@ -289,6 +289,28 @@ func ResolveRepositoryRoot(repository string) (string, error) {
 	return repositoryRoot, nil
 }
 
+// readGitConfig returns the clone's configuration keyed as git config --list
+// prints keys, with the section and variable in lowercase and the subsection
+// as written. A key set more than once keeps its last value, as git config
+// --get does.
+func readGitConfig(repository string) (map[string]string, error) {
+	output, err := gitOutput(repository, "config", "--list", "-z")
+	if err != nil {
+		return nil, err
+	}
+	config := map[string]string{}
+	for entry := range strings.SplitSeq(strings.TrimSuffix(string(output), "\x00"), "\x00") {
+		key, value, _ := strings.Cut(entry, "\n")
+		config[key] = value
+	}
+	return config, nil
+}
+
+func gitLine(repository string, args ...string) (string, error) {
+	output, err := gitOutput(repository, args...)
+	return strings.TrimSpace(string(output)), err
+}
+
 func gitOutput(repository string, args ...string) ([]byte, error) {
 	return gitInputOutput(repository, nil, args...)
 }

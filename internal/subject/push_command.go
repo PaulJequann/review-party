@@ -23,10 +23,12 @@ var ErrDetachedPush = errors.New("git push without a refspec from a detached HEA
 const zeroObject = "0000000000000000000000000000000000000000"
 
 // Refs returns one PushedRef per ref the push would update, leaving out
-// deletions. Without refspecs the current branch goes to its upstream when
-// the upstream is on the pushed remote, else to the same name on the remote,
-// which is origin unless named. A refspec's remote object is the clone's
-// tracking ref for the destination, zero when there is none.
+// deletions. Without refspecs the current branch goes to the remote the
+// command names, else the branch's push remote, remote.pushDefault, its
+// upstream remote, or origin. It lands on its upstream when the upstream is on
+// that remote and push.default is unset, simple, or upstream, else on the same
+// name. A refspec's remote object is the clone's tracking ref for the
+// destination, zero when there is none.
 func (command PushCommand) Refs(repository string) ([]PushedRef, error) {
 	if len(command.Refspecs) == 0 {
 		return command.currentBranchRefs(repository)
@@ -49,24 +51,42 @@ func (command PushCommand) currentBranchRefs(repository string) ([]PushedRef, er
 	if err != nil {
 		return nil, ErrDetachedPush
 	}
-	upstreamRemote, err := gitLine(repository, "config", "--default", "", "--get", "branch."+branch+".remote")
+	config, err := readGitConfig(repository)
 	if err != nil {
 		return nil, err
 	}
-	upstreamRef, err := gitLine(repository, "config", "--default", "", "--get", "branch."+branch+".merge")
+	remote, destination, err := command.currentBranchTarget(config, branch)
 	if err != nil {
 		return nil, err
-	}
-	remote := cmp.Or(command.Remote, upstreamRemote, "origin")
-	destination := "refs/heads/" + branch
-	if upstreamRemote == remote && upstreamRef != "" {
-		destination = upstreamRef
 	}
 	object, err := gitLine(repository, "rev-parse", "--verify", "HEAD^{commit}")
 	if err != nil {
 		return nil, err
 	}
 	return []PushedRef{{Remote: remote, LocalRef: "refs/heads/" + branch, LocalObject: object, RemoteRef: destination, RemoteObject: trackingObject(repository, remote, destination)}}, nil
+}
+
+// currentBranchTarget is the remote and the remote ref a push without
+// refspecs sends branch to under config. Push refspecs configured for the
+// remote, or a push.default that does not push the current branch alone, name
+// refs the hook does not resolve.
+func (command PushCommand) currentBranchTarget(config map[string]string, branch string) (remote, destination string, err error) {
+	section := "branch." + branch + "."
+	upstreamRemote, upstreamRef := config[section+"remote"], config[section+"merge"]
+	remote = cmp.Or(command.Remote, config[section+"pushremote"], config["remote.pushdefault"], upstreamRemote, "origin")
+	if config["remote."+remote+".push"] != "" {
+		return "", "", fmt.Errorf("git push to %s uses its configured push refspecs, which the hook does not resolve", remote)
+	}
+	switch mode := config["push.default"]; mode {
+	case "", "simple", "upstream", "tracking":
+		if upstreamRemote == remote && upstreamRef != "" {
+			return remote, upstreamRef, nil
+		}
+	case "current":
+	default:
+		return "", "", fmt.Errorf("git push with push.default %s names refs the hook does not resolve", mode)
+	}
+	return remote, "refs/heads/" + branch, nil
 }
 
 // refspecRef resolves one "<src>[:<dst>]" refspec. An empty source deletes
@@ -123,9 +143,4 @@ func trackingObject(repository, remote, destination string) string {
 		return zeroObject
 	}
 	return object
-}
-
-func gitLine(repository string, args ...string) (string, error) {
-	output, err := gitOutput(repository, args...)
-	return strings.TrimSpace(string(output)), err
 }

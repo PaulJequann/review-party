@@ -264,15 +264,20 @@ and keeps a command substitution as one opaque word. It expands nothing. A
 segment is relevant when, after `VAR=value` words and wrappers such as `env`,
 `command`, and `time`, its first word is `git` and its first word after git's
 global options is `push` or `commit`. `-C` moves the repository the hook
-decides. `--git-dir`, `--work-tree`, or a global option the hook does not know
-leaves the Checkpoint undecided, with a warning. `--dry-run` sends nothing, so
-it is not relevant.
+decides. `--git-dir`, `--work-tree`, a `GIT_DIR`, `GIT_WORK_TREE`, or
+`GIT_INDEX_FILE` assignment, a `-c` key under `push.`, `remote.`, or `branch.`,
+or a global option the hook does not know leaves the Checkpoint undecided, with
+a warning. A command whose last `--dry-run` or `--no-dry-run` is `--dry-run`
+sends nothing, so it is not relevant.
 
 **Push.** The hook rebuilds the ref lines git would pass to pre-push and
-decides them as the git hook does. `git push` alone pushes the current branch
-to its upstream when the upstream is on the pushed remote. Otherwise it
-pushes the branch to the same name on the named remote, or on `origin`. A
-refspec's remote object is the clone's tracking ref for the destination, or
+decides them as the git hook does. `git push` without a refspec pushes the
+current branch to the remote the command names, else to
+`branch.<name>.pushRemote`, `remote.pushDefault`, the upstream remote, or
+`origin`. The branch lands on its upstream when the upstream is on that remote
+and `push.default` is unset, `simple`, or `upstream`. Otherwise it lands on the
+same name. Another `push.default`, or push refspecs configured for the remote,
+leave the Checkpoint undecided. A refspec's remote object is the clone's tracking ref for the destination, or
 zero, which takes the new-branch base. `--all`, `--branches`, `--mirror`,
 `--tags`, `--delete`, `--prune`, a pattern refspec, an unresolvable revision,
 and a detached HEAD without a refspec leave the Checkpoint undecided.

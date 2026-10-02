@@ -129,7 +129,7 @@ var gitVerbCheckpoints = map[string]configuration.CheckpointName{
 }
 
 func classifyGitSegment(words shellWords) (agentGitCommand, bool) {
-	words = words.withoutCommandPrefixes()
+	prefixes, words := words.splitCommandPrefixes()
 	if len(words) == 0 || filepath.Base(words[0]) != "git" {
 		return agentGitCommand{}, false
 	}
@@ -142,6 +142,9 @@ func classifyGitSegment(words shellWords) (agentGitCommand, bool) {
 		return agentGitCommand{}, false
 	case command.form == formUndecidable:
 		return command, true
+	case prefixes.assignRepository():
+		command.form, command.reason = formUndecidable, "a GIT_DIR, GIT_WORK_TREE, or GIT_INDEX_FILE assignment names a repository the hook does not resolve"
+		return command, true
 	case checkpoint == configuration.CheckpointPrePush:
 		return readPushArguments(command, pushOptions.read(reader))
 	}
@@ -150,19 +153,30 @@ func classifyGitSegment(words shellWords) (agentGitCommand, bool) {
 
 // commandPrefixes are words a shell or a wrapper reads before the command
 // itself; shellAssignment matches the VAR=value words a shell reads there.
+// repositoryVariables are the assignments that point git at another
+// repository, work tree, or index.
 var (
-	commandPrefixes = []string{"!", "{", "if", "then", "else", "elif", "do", "while", "until", "time", "command", "exec", "nohup", "env"}
-	shellAssignment = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
+	commandPrefixes     = []string{"!", "{", "if", "then", "else", "elif", "do", "while", "until", "time", "command", "exec", "nohup", "env"}
+	shellAssignment     = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
+	repositoryVariables = []string{"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"}
 )
 
-func (words shellWords) withoutCommandPrefixes() shellWords {
+// splitCommandPrefixes returns the prefix words and the command after them.
+func (words shellWords) splitCommandPrefixes() (shellWords, shellWords) {
 	start := slices.IndexFunc(words, func(word string) bool {
 		return !shellAssignment.MatchString(word) && !slices.Contains(commandPrefixes, word)
 	})
 	if start < 0 {
-		return nil
+		return words, nil
 	}
-	return words[start:]
+	return words[:start], words[start:]
+}
+
+func (words shellWords) assignRepository() bool {
+	return slices.ContainsFunc(words, func(word string) bool {
+		name, _, _ := strings.Cut(word, "=")
+		return slices.Contains(repositoryVariables, name)
+	})
 }
 
 func (words shellWords) firstGitVerb() string {
@@ -211,10 +225,12 @@ func splitOption(word string) optionWord {
 
 // gitValueOptions are git's global options that take the next word as their
 // value, and gitRepositoryOptions those of them that name a repository the
-// hook does not resolve; gitFlags take no value.
+// hook does not resolve. gitPushConfig prefixes the -c keys that change where
+// a push goes. gitFlags take no value.
 var (
 	gitValueOptions      = []string{"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--super-prefix", "--config-env", "--attr-source", "--shallow-file"}
 	gitRepositoryOptions = []string{"--git-dir", "--work-tree"}
+	gitPushConfig        = []string{"push.", "remote.", "branch."}
 	gitFlags             = []string{"-p", "--paginate", "-P", "--no-pager", "--bare", "--no-replace-objects", "--literal-pathspecs", "--glob-pathspecs", "--noglob-pathspecs", "--icase-pathspecs", "--no-optional-locks", "--no-lazy-fetch", "--no-advice"}
 )
 
@@ -235,8 +251,9 @@ func readGitGlobalOptions(reader *segmentReader) (command agentGitCommand, verb 
 }
 
 // readGitGlobalOption reads one global option. -C moves the directory git
-// runs in. --git-dir, --work-tree, or an option this reader does not know
-// makes the command undecidable.
+// runs in. --git-dir, --work-tree, -c with a key that changes where git
+// pushes, or an option this reader does not know makes the command
+// undecidable.
 func (command *agentGitCommand) readGitGlobalOption(option optionWord, reader *segmentReader) {
 	switch {
 	case slices.Contains(gitFlags, option.word):
@@ -244,6 +261,10 @@ func (command *agentGitCommand) readGitGlobalOption(option optionWord, reader *s
 		command.directory = within(command.directory, reader.takeValue(option))
 	case slices.Contains(gitRepositoryOptions, option.name):
 		command.form, command.reason = formUndecidable, fmt.Sprintf("git %s names a repository the hook does not resolve", option.name)
+	case option.name == "-c":
+		if key, _, _ := strings.Cut(strings.ToLower(reader.takeValue(option)), "="); slices.ContainsFunc(gitPushConfig, func(prefix string) bool { return strings.HasPrefix(key, prefix) }) {
+			command.form, command.reason = formUndecidable, fmt.Sprintf("git -c %s changes where git pushes, which the hook does not resolve", key)
+		}
 	case slices.Contains(gitValueOptions, option.name):
 		reader.takeValue(option)
 	default:
@@ -266,8 +287,10 @@ type commandOptions struct {
 type optionMeaning int
 
 const (
-	// meaningDryRun sends nothing, so the hook has nothing to check.
+	// meaningDryRun sends nothing, so the hook has nothing to check, unless
+	// a later meaningNotDryRun turns it off.
 	meaningDryRun optionMeaning = iota + 1
+	meaningNotDryRun
 	meaningTracked
 	meaningPaths
 	meaningUndecidable
@@ -277,7 +300,7 @@ var pushOptions = commandOptions{
 	valued:      []string{"--repo", "-o", "--push-option", "--receive-pack", "--exec", "--recurse-submodules"},
 	valuedShort: "o",
 	meanings: map[string]optionMeaning{
-		"-n": meaningDryRun, "--dry-run": meaningDryRun,
+		"-n": meaningDryRun, "--dry-run": meaningDryRun, "--no-dry-run": meaningNotDryRun,
 		"--all": meaningUndecidable, "--branches": meaningUndecidable, "--mirror": meaningUndecidable, "--tags": meaningUndecidable,
 		"-d": meaningUndecidable, "--delete": meaningUndecidable, "--prune": meaningUndecidable,
 	},
@@ -291,8 +314,8 @@ var commitOptions = commandOptions{
 	valuedShort:  "mFCct",
 	optionalTail: "Su",
 	meanings: map[string]optionMeaning{
-		"--dry-run": meaningDryRun,
-		"-a":        meaningTracked, "--all": meaningTracked,
+		"--dry-run": meaningDryRun, "--no-dry-run": meaningNotDryRun,
+		"-a": meaningTracked, "--all": meaningTracked,
 		"-p": meaningPaths, "--patch": meaningPaths, "--interactive": meaningPaths, "-o": meaningPaths, "--only": meaningPaths,
 		"-i": meaningPaths, "--include": meaningPaths, "--pathspec-from-file": meaningPaths,
 	},
@@ -306,6 +329,17 @@ type commandArguments struct {
 
 func (arguments commandArguments) means(meaning optionMeaning) bool {
 	return slices.Contains(arguments.meanings, meaning)
+}
+
+// dryRun reports whether the last dry-run option given turns dry run on.
+func (arguments commandArguments) dryRun() bool {
+	dryRun := false
+	for _, meaning := range arguments.meanings {
+		if meaning == meaningDryRun || meaning == meaningNotDryRun {
+			dryRun = meaning == meaningDryRun
+		}
+	}
+	return dryRun
 }
 
 func (options commandOptions) read(reader *segmentReader) commandArguments {
@@ -352,7 +386,7 @@ func (options commandOptions) readCluster(letters string, reader *segmentReader)
 
 func readPushArguments(command agentGitCommand, arguments commandArguments) (agentGitCommand, bool) {
 	switch {
-	case arguments.means(meaningDryRun):
+	case arguments.dryRun():
 		return agentGitCommand{}, false
 	case arguments.means(meaningUndecidable):
 		command.form, command.reason = formUndecidable, "git push names refs the hook does not resolve"
@@ -368,7 +402,7 @@ func readPushArguments(command agentGitCommand, arguments commandArguments) (age
 
 func readCommitArguments(command agentGitCommand, arguments commandArguments) (agentGitCommand, bool) {
 	switch {
-	case arguments.means(meaningDryRun):
+	case arguments.dryRun():
 		return agentGitCommand{}, false
 	case arguments.means(meaningPaths) || len(arguments.positional) > 0:
 		command.form = formCommitPaths
