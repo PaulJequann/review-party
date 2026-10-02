@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -333,6 +334,27 @@ func TestCheckpointInstallMakesAnExistingHookExecutable(t *testing.T) {
 	}
 	if mode := info.Mode().Perm(); mode != 0o755 {
 		t.Fatalf("hook mode = %v, want 0755", mode)
+	}
+}
+
+func TestCheckpointInstallEditsASymlinkedHookAtItsTarget(t *testing.T) {
+	fixture := newHookInstallFixture(t, configuration.CheckpointPrePush)
+	fixture.provideStandIn()
+	fixture.writeFile("scripts/pre-push", "#!/bin/sh\n# team hook\n")
+	hook := filepath.Join(fixture.repository, ".git", "hooks", "pre-push")
+	if err := os.Symlink(filepath.Join("..", "..", "scripts", "pre-push"), hook); err != nil {
+		t.Fatal(err)
+	}
+	assertRunContains(t, fixture.install("--yes"), commandRun{stdout: "Wrote 1 hook file(s)."})
+	if info, err := os.Lstat(hook); err != nil || info.Mode()&fs.ModeSymlink == 0 {
+		t.Fatalf("hook is no longer a symlink: %v %v", info, err)
+	}
+	if script := fixture.read("scripts/pre-push"); !strings.Contains(script, checkpointHookBlock(configuration.CheckpointPrePush, "")) {
+		t.Fatalf("linked script was not edited:\n%s", script)
+	}
+	entries, err := os.ReadDir(filepath.Join(fixture.repository, "scripts"))
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("scripts directory = %v %v, want only pre-push", entries, err)
 	}
 }
 

@@ -500,12 +500,32 @@ func (plan hookInstallPlan) apply() error {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			return fmt.Errorf("create %s: %w", filepath.Dir(path), err)
 		}
-		if err := os.WriteFile(path, content, mode); err != nil {
+		if err := replaceFile(path, content, mode); err != nil {
 			return fmt.Errorf("write %s: %w", path, err)
-		}
-		if err := os.Chmod(path, mode); err != nil {
-			return fmt.Errorf("make %s executable: %w", path, err)
 		}
 	}
 	return nil
+}
+
+// replaceFile writes content beside path and renames it over path, so a
+// failed write leaves the existing hook intact. A symlinked hook is replaced
+// at its target, so the link survives.
+func replaceFile(path string, content []byte, mode fs.FileMode) (returnErr error) {
+	if target, err := filepath.EvalSymlinks(path); err == nil {
+		path = target
+	}
+	temporary, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+"-*.tmp")
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if returnErr != nil {
+			returnErr = errors.Join(returnErr, os.Remove(temporary.Name()))
+		}
+	}()
+	_, writeErr := temporary.Write(content)
+	if err := errors.Join(writeErr, temporary.Chmod(mode), temporary.Close()); err != nil {
+		return err
+	}
+	return os.Rename(temporary.Name(), path)
 }
