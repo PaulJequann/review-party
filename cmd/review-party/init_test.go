@@ -254,7 +254,7 @@ func TestInitWithoutATerminalNamesEachCheckpointWithoutItsGitHook(t *testing.T) 
 	}
 	_, stdout, _ = fixture.run(t, commandIO{})
 	want := ready + "Checkpoint pre-push has no git hook; add to " + lefthook + " (lefthook) by hand:\n" +
-		"  pre-push:\n    commands:\n      review-party-checkpoint:\n        run: '" + guardedHookCommand(configuration.CheckpointPrePush, "review-party checkpoint hook git pre-push {1} {2}") + "'\n        use_stdin: true\n" +
+		"  pre-push:\n    commands:\n      review-party-checkpoint:\n        run: '" + hookCommand{configuration.CheckpointPrePush, "review-party checkpoint hook git pre-push {1} {2}"}.guarded() + "'\n        use_stdin: true\n" +
 		"Checkpoint pre-commit has no git hook: " + install
 	if stdout != want {
 		t.Fatalf("lefthook stdout = %q, want %q", stdout, want)

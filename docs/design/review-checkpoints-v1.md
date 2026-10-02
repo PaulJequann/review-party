@@ -193,7 +193,10 @@ Checkpoint exits 0 silently. A ref deletion is skipped. When this clone has
 the remote object, the base is its merge base with the pushed object, so a
 forced push does not count the commits it drops. A new branch, whose remote
 object is zero or not present locally, uses the merge base with
-`refs/remotes/<remote>/HEAD`, then `refs/remotes/origin/HEAD`.
+`refs/remotes/<remote>/HEAD`, then `refs/remotes/origin/HEAD`. Every
+installed form stops git only on exit 1. Any other status, such as a usage
+error from a `review-party` that predates `checkpoint hook`, warns with the
+status and allows.
 
 **Hook tools.** The installer edits only files whose format it can extend
 without rewriting a line. Plain hooks, `core.hooksPath`, and husky get a

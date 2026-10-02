@@ -339,13 +339,13 @@ func checkpointHookBlock(name configuration.CheckpointName, config string) strin
 	if name == configuration.CheckpointPreCommit {
 		return start + "\n" +
 			"if command -v review-party >/dev/null 2>&1; then\n" +
-			"  review-party checkpoint hook git pre-commit" + config + " || exit $?\n" +
+			"  " + strings.Join(hookCommand{name, "review-party checkpoint hook git pre-commit" + config}.checked(), "\n  ") + "\n" +
 			"else\n" + missing + "fi\n" + end + "\n"
 	}
 	return start + "\n" +
 		"review_party_refs=$(cat)\n" +
 		"if command -v review-party >/dev/null 2>&1; then\n" +
-		"  printf '%s\\n' \"$review_party_refs\" | review-party checkpoint hook git pre-push" + config + " \"$@\" || exit $?\n" +
+		"  " + strings.Join(hookCommand{name, "printf '%s\\n' \"$review_party_refs\" | review-party checkpoint hook git pre-push" + config + " \"$@\""}.checked(), "\n  ") + "\n" +
 		"else\n" + missing + "fi\n" +
 		"if [ -n \"$review_party_refs\" ]; then\n" +
 		"exec 0<<REVIEW_PARTY_REFS\n" +
@@ -398,17 +398,35 @@ func runsInPosixShell(shebang []string) bool {
 // use_stdin passes git's ref lines through (https://lefthook.dev/configuration/use_stdin/).
 func lefthookCommand(name configuration.CheckpointName) string {
 	if name == configuration.CheckpointPreCommit {
-		run := guardedHookCommand(name, "review-party checkpoint hook git pre-commit")
+		run := hookCommand{name, "review-party checkpoint hook git pre-commit"}.guarded()
 		return "pre-commit:\n  commands:\n    review-party-checkpoint:\n      run: " + yamlSingleQuoted(run) + "\n"
 	}
-	run := guardedHookCommand(name, "review-party checkpoint hook git pre-push {1} {2}")
+	run := hookCommand{name, "review-party checkpoint hook git pre-push {1} {2}"}.guarded()
 	return "pre-push:\n  commands:\n    review-party-checkpoint:\n      run: " + yamlSingleQuoted(run) + "\n      use_stdin: true\n"
 }
 
-// guardedHookCommand runs command only when review-party is on PATH and
-// otherwise warns, so a missing binary never blocks the hook.
-func guardedHookCommand(name configuration.CheckpointName, command string) string {
-	return "if command -v review-party >/dev/null 2>&1; then " + command + "; else " + missingBinaryWarning(name) + "; fi"
+// hookCommand is the review-party call a hook makes for one Checkpoint.
+type hookCommand struct {
+	checkpoint configuration.CheckpointName
+	run        string
+}
+
+// guarded runs the command only when review-party is on PATH and otherwise
+// warns, so a missing binary never blocks the hook.
+func (command hookCommand) guarded() string {
+	return "if command -v review-party >/dev/null 2>&1; then " + strings.Join(command.checked(), "; ") + "; else " + missingBinaryWarning(command.checkpoint) + "; fi"
+}
+
+// checked stops the hook only on exit 1, a reached refusal. Any other status,
+// such as a usage error from a review-party that predates the command, warns
+// and lets git continue. The || keeps it safe under set -e.
+func (command hookCommand) checked() []string {
+	return []string{
+		"review_party_status=0",
+		command.run + " || review_party_status=$?",
+		`if [ "$review_party_status" -eq 1 ]; then exit 1; fi`,
+		`if [ "$review_party_status" -ne 0 ]; then echo "review-party: warning: review-party exited $review_party_status; ` + string(command.checkpoint) + ` Checkpoint not checked" >&2; fi`,
+	}
 }
 
 func missingBinaryWarning(name configuration.CheckpointName) string {
@@ -477,7 +495,7 @@ func preCommitFrameworkSnippet(name configuration.CheckpointName) []string {
 	if name == configuration.CheckpointPrePush {
 		command = `printf "%s %s %s %s\n" "$PRE_COMMIT_LOCAL_BRANCH" "$PRE_COMMIT_TO_REF" "$PRE_COMMIT_REMOTE_BRANCH" "$PRE_COMMIT_FROM_REF" | review-party checkpoint hook git pre-push "$PRE_COMMIT_REMOTE_NAME"`
 	}
-	entry := yamlSingleQuoted("sh -c '" + guardedHookCommand(name, command) + "'")
+	entry := yamlSingleQuoted("sh -c '" + hookCommand{name, command}.guarded() + "'")
 	return []string{
 		"- repo: local",
 		"  hooks:",

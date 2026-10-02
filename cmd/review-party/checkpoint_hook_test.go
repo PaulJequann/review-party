@@ -1,6 +1,8 @@
 package main
 
 import (
+	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -193,11 +195,41 @@ func TestCheckpointInstallKeepsAnExistingPrePushHookAndItsInput(t *testing.T) {
 
 	again := fixture.install()
 	assertRun(t, again, commandRun{stdout: "pre-push: already installed in " + hookPath + " (git hooks)\n"})
-	edited := strings.Replace(content, "|| exit $?", "|| true", 1)
+	edited := strings.Replace(content, "then exit 1; fi", "then exit 0; fi", 1)
 	fixture.writeFile(".git/hooks/pre-push", edited)
 	assertRun(t, fixture.install(), commandRun{stdout: "pre-push: edited review-party block left unchanged in " + hookPath + " (git hooks)\n"})
 	if fixture.read(".git/hooks/pre-push") != edited {
 		t.Fatal("an edited block was rewritten")
+	}
+}
+
+func TestCheckpointHookShellBlocksOnlyOnARefusal(t *testing.T) {
+	fixture := newHookInstallFixture(t, configuration.CheckpointPreCommit)
+	assertRunContains(t, fixture.install("--yes"), commandRun{stdout: "Wrote 1 hook file(s)."})
+	hook := filepath.Join(fixture.repository, ".git", "hooks", "pre-commit")
+	guarded := hookCommand{configuration.CheckpointPreCommit, "review-party checkpoint hook git pre-commit"}.guarded()
+	warning := "review-party: warning: review-party exited 2; pre-commit Checkpoint not checked\n"
+	for _, status := range []struct {
+		code       int
+		wantCode   int
+		wantStderr string
+	}{{0, 0, ""}, {1, 1, ""}, {2, 0, warning}} {
+		script := fmt.Sprintf("#!/bin/sh\nexit %d\n", status.code)
+		if err := os.WriteFile(filepath.Join(fixture.bin, "review-party"), []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		for form, command := range map[string]*exec.Cmd{"hook block": exec.Command(hook), "lefthook and pre-commit framework": exec.Command("sh", "-c", guarded)} {
+			command.Dir = fixture.repository
+			var stderr strings.Builder
+			command.Stderr = &stderr
+			var exit *exec.ExitError
+			if err := command.Run(); err != nil && !errors.As(err, &exit) {
+				t.Fatal(err)
+			}
+			if code := command.ProcessState.ExitCode(); code != status.wantCode || stderr.String() != status.wantStderr {
+				t.Errorf("%s with review-party exiting %d = exit %d, stderr %q; want exit %d, stderr %q", form, status.code, code, stderr.String(), status.wantCode, status.wantStderr)
+			}
+		}
 	}
 }
 
@@ -259,10 +291,10 @@ func TestCheckpointInstallExtendsLefthookOnlyWhereTheHookIsFree(t *testing.T) {
 	result := fixture.install("--yes")
 	want := "pre-push: add a review-party-checkpoint command to " + config + " (lefthook)\n" +
 		"pre-commit: add by hand to " + config + " (lefthook)\n" +
-		"  pre-commit:\n    commands:\n      review-party-checkpoint:\n        run: '" + guardedHookCommand(configuration.CheckpointPreCommit, "review-party checkpoint hook git pre-commit") + "'\n" +
+		"  pre-commit:\n    commands:\n      review-party-checkpoint:\n        run: '" + hookCommand{configuration.CheckpointPreCommit, "review-party checkpoint hook git pre-commit"}.guarded() + "'\n" +
 		"Wrote 1 hook file(s).\n"
 	assertRun(t, result, commandRun{stdout: want})
-	appended := existing + "\npre-push:\n  commands:\n    review-party-checkpoint:\n      run: '" + guardedHookCommand(configuration.CheckpointPrePush, "review-party checkpoint hook git pre-push {1} {2}") + "'\n      use_stdin: true\n"
+	appended := existing + "\npre-push:\n  commands:\n    review-party-checkpoint:\n      run: '" + hookCommand{configuration.CheckpointPrePush, "review-party checkpoint hook git pre-push {1} {2}"}.guarded() + "'\n      use_stdin: true\n"
 	if fixture.read("lefthook.yml") != appended {
 		t.Fatalf("lefthook.yml = %q", fixture.read("lefthook.yml"))
 	}
