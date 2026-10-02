@@ -214,11 +214,12 @@ hook with the snippet's id, `review-party-checkpoint-<checkpoint>`. That
 framework passes pre-push facts as `PRE_COMMIT_*` variables rather than git's
 ref lines, so the snippet rebuilds one ref line from them. Every form passes
 the hook's arguments after `--`, so a remote named like an option cannot turn
-the call into a usage error that allows the push. husky and the pre-commit
-framework run only after each clone installs them, so the installer and init
-print `npx husky` when git's hooks directory is not `.husky` or `.husky/_`,
-and `pre-commit install --hook-type <checkpoint>` when git's hook is not the
-one pre-commit generated. A symlinked hook is written at its target, even a
+the call into a usage error that allows the push. lefthook, husky, and the
+pre-commit framework run only after each clone installs them, so the
+installer and init print `lefthook install` when git's hook does not call
+lefthook, `npx husky` when git's hooks directory is not `.husky` or
+`.husky/_`, and `pre-commit install --hook-type <checkpoint>` when git's hook
+is not the one pre-commit generated. A symlinked hook is written at its target, even a
 target that does not exist yet, so the link survives. These edits go straight to disk after confirmation. They do not go
 through a configuration Plan, because hook files are not Review Party
 configuration. husky and lefthook files are committed, so their edit reaches

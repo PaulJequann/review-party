@@ -290,18 +290,20 @@ func TestCheckpointInstallExtendsLefthookOnlyWhereTheHookIsFree(t *testing.T) {
 	config := filepath.Join(fixture.repository, "lefthook.yml")
 
 	result := fixture.install("--yes")
-	want := "pre-push: add a review-party-checkpoint command to " + config + " (lefthook)\n" +
-		"pre-commit: add by hand to " + config + " (lefthook)\n" +
-		"  pre-commit:\n    commands:\n      review-party-checkpoint:\n        run: '" + hookCommand{configuration.CheckpointPreCommit, "review-party checkpoint hook git pre-commit"}.guarded() + "'\n" +
+	activate := "  git does not run it in this clone until you run: lefthook install\n"
+	manual := "pre-commit: add by hand to " + config + " (lefthook)\n" +
+		"  pre-commit:\n    commands:\n      review-party-checkpoint:\n        run: '" + hookCommand{configuration.CheckpointPreCommit, "review-party checkpoint hook git pre-commit"}.guarded() + "'\n"
+	want := "pre-push: add a review-party-checkpoint command to " + config + " (lefthook)\n" + activate + manual + activate +
 		"Wrote 1 hook file(s).\n"
 	assertRun(t, result, commandRun{stdout: want})
 	appended := existing + "\npre-push:\n  commands:\n    review-party-checkpoint:\n      run: '" + hookCommand{configuration.CheckpointPrePush, "review-party checkpoint hook git pre-push -- {1} {2}"}.guarded() + "'\n      use_stdin: true\n"
 	if fixture.read("lefthook.yml") != appended {
 		t.Fatalf("lefthook.yml = %q", fixture.read("lefthook.yml"))
 	}
-	if again := fixture.install("--yes"); !strings.HasPrefix(again.stdout, "pre-push: already installed in "+config+" (lefthook)\n") || strings.Contains(again.stdout, "Wrote") {
-		t.Fatalf("second install = %+v", again)
+	for _, name := range []string{"pre-push", "pre-commit"} {
+		fixture.writeFile(".git/hooks/"+name, "#!/bin/sh\ncall_lefthook run \""+name+"\" \"$@\"\n")
 	}
+	assertRun(t, fixture.install("--yes"), commandRun{stdout: "pre-push: already installed in " + config + " (lefthook)\n" + manual})
 }
 
 func TestCheckpointInstallPrintsThePreCommitFrameworkSteps(t *testing.T) {
@@ -416,7 +418,7 @@ func TestCheckpointInstallCarriesTheCallersConfigurationIntoPerCloneManagerFiles
 			if strings.Contains(result.stdout, "shared with the team") {
 				t.Fatalf("a %s outside the work tree was treated as shared: %+v", file, result)
 			}
-			if got := fixture.runManagerCommand(result.stdout+fixture.read(file), key); !strings.HasPrefix(got, "checkpoint\nhook\ngit\npre-push\n--config\n"+config+"\n--\n") {
+			if got := fixture.runManagerCommand(fixture.read(file)+result.stdout, key); !strings.HasPrefix(got, "checkpoint\nhook\ngit\npre-push\n--config\n"+config+"\n--\n") {
 				t.Fatalf("%s command arguments = %q, want --config %s", file, got, config)
 			}
 		})
