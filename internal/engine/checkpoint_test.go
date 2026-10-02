@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"reviewparty/internal/configuration"
 	"reviewparty/internal/model"
@@ -233,6 +234,29 @@ func TestAWaiverPassesOnlyTheContentItWaived(t *testing.T) {
 	if len(fake.waivers) != 1 || fake.waivers[0].Repository != repository {
 		t.Fatalf("waiving twice recorded %#v, want one waiver from %s", fake.waivers, repository)
 	}
+}
+
+func TestRecentWaiversListOnlyThisRepositoryWithinTheWindow(t *testing.T) {
+	fake := &coverageStore{}
+	conductor, repository := newCheckpointConductor(t, fake, waivable(configuration.WaiversAnyone))
+	fake.waivers = append(fake.waivers, model.CheckpointWaiver{ID: "cw_old", Repository: repository, CreatedAt: time.Now().Add(-31 * 24 * time.Hour)})
+	waived := mustWaive(t, conductor, repository, CoverageSubject{Changes: coverageFirst})
+
+	if recent, want := recentWaivers(t, conductor, repository), []model.CheckpointWaiver{*waived.Waiver}; !reflect.DeepEqual(recent, want) || want[0].Repository != repository {
+		t.Fatalf("recent waivers = %#v, want %#v in %s", recent, want, repository)
+	}
+	if elsewhere := recentWaivers(t, conductor, t.TempDir()); len(elsewhere) != 0 {
+		t.Fatalf("another repository's waivers = %#v", elsewhere)
+	}
+}
+
+func recentWaivers(t *testing.T, conductor *Conductor, repository string) []model.CheckpointWaiver {
+	t.Helper()
+	recent, err := conductor.RecentCheckpointWaivers(repository, 30*24*time.Hour)
+	if err != nil {
+		t.Fatalf("recent waivers in %s = %v", repository, err)
+	}
+	return recent
 }
 
 func TestWaivingACoveredCheckpointRecordsNothingUnderAnyPolicy(t *testing.T) {

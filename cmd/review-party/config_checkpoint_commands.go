@@ -44,7 +44,7 @@ segments, and a pattern without / matches the file name at any depth.`
 	set.Flags().StringArray("exempt", nil, "Path pattern the Checkpoint does not require Reviews for; repeatable")
 	set.Flags().Int("small-change-lines", 0, "Pass changes of at most this many added plus deleted lines; 0 disables")
 	set.Flags().String("waivers", string(configuration.WaiversHuman), "Who may waive the Checkpoint: anyone, human, or none")
-	set.Flags().StringArray("integration", nil, "Integration the team installs for this Checkpoint: git, claude-code, or codex; repeatable")
+	set.Flags().StringArray("integration", nil, "Integration the team installs for this Checkpoint: git, claude-code, codex, or agents-md; repeatable")
 	addConfigMutationFlags(set, false, false, "")
 
 	remove := newConfigLeafCommand("remove <pre-push|pre-commit>", "Remove one Review Checkpoint", cobra.MatchAll(cobra.ExactArgs(1), cobra.OnlyValidArgs), func(cmd *cobra.Command, args []string) error {

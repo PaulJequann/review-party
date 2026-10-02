@@ -4,6 +4,8 @@ import (
 	"fmt"
 
 	"reviewparty/internal/configuration"
+	"reviewparty/internal/model"
+	"reviewparty/internal/subject"
 
 	"github.com/spf13/cobra"
 )
@@ -15,14 +17,28 @@ type doctorOptions struct {
 }
 
 type doctorResult struct {
-	Valid         bool                            `json:"valid"`
-	Validation    configurationValidationResult   `json:"validation"`
-	TemplateDrift []configuration.TemplateDrift   `json:"template_drift"`
-	Skipped       []configuration.SkippedTemplate `json:"skipped_templates"`
+	Valid              bool                            `json:"valid"`
+	Validation         configurationValidationResult   `json:"validation"`
+	TemplateDrift      []configuration.TemplateDrift   `json:"template_drift"`
+	Skipped            []configuration.SkippedTemplate `json:"skipped_templates"`
+	UnresolvedNames    []unresolvedName                `json:"unresolved_names"`
+	IntegrationGaps    []floorGap                      `json:"integration_gaps"`
+	ExemptionConflicts []exemptionConflict             `json:"exemption_conflicts"`
+	RecentWaivers      []model.CheckpointWaiver        `json:"recent_waivers"`
+	WaiversUnread      *waiversUnread                  `json:"waivers_unread,omitempty"`
+	invalid            error
 }
 
 func newDoctorCommand(streams commandIO) *cobra.Command {
-	cmd := &cobra.Command{Use: "doctor", Short: "Check configuration health and Template drift", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+	cmd := &cobra.Command{Use: "doctor", Short: "Check configuration health, Template drift, and Checkpoint setup", Long: `Check configuration health and Template drift, then report what the
+repository's declared Checkpoints still lack in this clone. Each finding is
+one line ending in the command that fixes it. Unresolved names, missing or
+edited team-floor Integrations, a stale agents-md block, and Markdown
+exemptions a selected documentation Profile reviews are listed, followed by
+the Waivers recorded here in the last 30 days.
+
+Doctor exits 1 only when the configuration is invalid. Findings exit 0, so
+the repository's instructions and the Caller decide whether one blocks.`, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		options := doctorOptions{repository: stringFlag(cmd, "repo"), format: stringFlag(cmd, "format"), configuration: stringFlag(cmd, "config")}
 		return commandResult(executeDoctor(options, streams))
 	}}
@@ -34,15 +50,9 @@ func newDoctorCommand(streams commandIO) *cobra.Command {
 
 func executeDoctor(options doctorOptions, streams commandIO) int {
 	return runConfigurationCommand(options.format, options.configuration, streams, func(manager *configuration.Manager) (int, error) {
-		validation, validationErr := validateConfiguration(manager, "", configuration.Repository(options.repository))
-		drift, driftErr := manager.TemplateDrift(configuration.Repository(options.repository))
-		if driftErr != nil {
-			return 0, driftErr
-		}
-		result := doctorResult{Valid: validationErr == nil, Validation: validation, TemplateDrift: drift, Skipped: manager.SkippedTemplates()}
-		result.Validation.Valid = validationErr == nil
-		if validationErr != nil {
-			result.Validation.Error = validationErr.Error()
+		result, err := options.inspect(manager)
+		if err != nil {
+			return 0, err
 		}
 		if options.format == "json" {
 			if err := writeJSON(streams.output, result); err != nil {
@@ -53,20 +63,56 @@ func executeDoctor(options doctorOptions, streams commandIO) int {
 			}
 			return 0, nil
 		}
-		if validationErr != nil {
-			return printFailure(streams.errors, validationErr), nil
+		if code := printConfigOutput(streams, result.writeText); code != 0 || result.invalid == nil {
+			return code, nil
 		}
-		return printConfigOutput(streams, result.writeText), nil
+		return printFailure(streams.errors, result.invalid), nil
 	})
 }
 
-func (result doctorResult) writeText(output *commandOutput) {
-	output.write("configuration is valid\n")
-	for _, item := range result.TemplateDrift {
-		output.write("%s\n", doctorTemplateDriftLine(item))
+// inspect checks the configuration of the repository's root, or of the
+// given path when it is not in a git repository, whose findings then cannot
+// be read.
+func (options doctorOptions) inspect(manager *configuration.Manager) (doctorResult, error) {
+	root, rootErr := subject.ResolveRepositoryRoot(options.repository)
+	repository := configuration.Repository(options.repository)
+	if rootErr == nil {
+		repository = configuration.Repository(root)
 	}
-	for _, item := range result.Skipped {
-		output.write("Template skipped: %s: %s\n", item.TemplateID, item.Reason)
+	validation, validationErr := validateConfiguration(manager, "", repository)
+	drift, err := manager.TemplateDrift(repository)
+	if err != nil {
+		return doctorResult{}, err
+	}
+	result := doctorResult{
+		Valid: validationErr == nil, Validation: validation, TemplateDrift: drift, Skipped: manager.SkippedTemplates(),
+		UnresolvedNames: []unresolvedName{}, IntegrationGaps: []floorGap{}, ExemptionConflicts: []exemptionConflict{}, RecentWaivers: []model.CheckpointWaiver{},
+		invalid: validationErr,
+	}
+	result.Validation.Valid = validationErr == nil
+	if validationErr != nil {
+		result.Validation.Error = validationErr.Error()
+	}
+	if rootErr != nil {
+		return result, nil
+	}
+	return result, doctorRepository{manager: manager, root: root, configuration: options.configuration}.addFindings(&result)
+}
+
+// writeText reports a valid configuration with its Template drift, then the
+// findings. An invalid configuration's error goes to stderr after them.
+func (result doctorResult) writeText(output *commandOutput) {
+	if result.invalid == nil {
+		output.write("configuration is valid\n")
+		for _, item := range result.TemplateDrift {
+			output.write("%s\n", doctorTemplateDriftLine(item))
+		}
+		for _, item := range result.Skipped {
+			output.write("Template skipped: %s: %s\n", item.TemplateID, item.Reason)
+		}
+	}
+	for _, line := range result.findingLines() {
+		output.write("%s\n", line)
 	}
 }
 

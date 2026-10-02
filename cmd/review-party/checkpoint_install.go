@@ -4,7 +4,9 @@ package main
 // git's hook tool or a Caller Agent's hook settings. They only add: existing
 // lines and entries are never altered, an installed entry is a no-op, and one
 // someone edited is reported and left alone. Configuration the installer
-// cannot extend safely gets a snippet to add by hand.
+// cannot extend safely gets a snippet to add by hand. The agents-md block is
+// the exception: it is generated text, so a stale one is replaced between its
+// markers.
 
 import (
 	"errors"
@@ -51,6 +53,7 @@ Configuration. Rerunning is safe.`,
 	for _, agent := range agentIntegrations {
 		install.AddCommand(newAgentInstallCommand(agent, streams))
 	}
+	install.AddCommand(newAgentsMDInstallCommand(streams))
 	return install
 }
 
@@ -80,7 +83,7 @@ func executeCheckpointInstall(options hookInstallOptions, streams commandIO) int
 		case !streams.interactive():
 			return false, errHookInstallUnconfirmed
 		}
-		confirmed, err := confirmPrompt(streams.input, streams.output, "Write these hooks?")
+		confirmed, err := confirmPrompt(streams.input, streams.output, "Write these files?")
 		if err == nil && !confirmed {
 			err = errHooksNotWritten
 		}
@@ -116,7 +119,7 @@ func installCheckpointHooks(target hookInstallTarget, manager *configuration.Man
 	}
 	return writeCommandOutput(output, func(output *commandOutput) {
 		if len(plan.writes) > 0 {
-			output.write("Wrote %d hook file(s).\n", len(plan.writes))
+			output.write("Wrote %d file(s).\n", len(plan.writes))
 		}
 		for _, line := range plan.followUp {
 			output.write("%s\n", line)
@@ -125,12 +128,16 @@ func installCheckpointHooks(target hookInstallTarget, manager *configuration.Man
 }
 
 func planIntegrationInstall(target hookInstallTarget, manager *configuration.Manager) (hookInstallPlan, error) {
-	if target.integration == configuration.IntegrationGit {
+	switch target.integration {
+	case configuration.IntegrationGit:
 		return planHookInstall(target, manager)
-	}
-	for _, agent := range agentIntegrations {
-		if agent.integration == target.integration {
-			return planAgentHookInstall(target, manager, agent)
+	case configuration.IntegrationAgentsMD:
+		return planAgentsMDInstall(target, manager)
+	case configuration.IntegrationClaudeCode, configuration.IntegrationCodex:
+		for _, agent := range agentIntegrations {
+			if agent.integration == target.integration {
+				return planAgentHookInstall(target, manager, agent)
+			}
 		}
 	}
 	return hookInstallPlan{}, fmt.Errorf("no installer for the %s Integration", target.integration)
@@ -147,6 +154,7 @@ const (
 	hookToolPlain     hookTool = "git hooks"
 	hookToolClaude    hookTool = "Claude Code"
 	hookToolCodex     hookTool = "Codex"
+	hookToolAgentsMD  hookTool = "agent instructions"
 )
 
 // hookOutcome is what the installer does for one Checkpoint.
@@ -165,6 +173,10 @@ const (
 	hookEntryAdded  hookOutcome = "add a PreToolUse entry to"
 	hookEntryShared hookOutcome = "share the PreToolUse entry added to"
 	hookEntryEdited hookOutcome = "edited review-party entry left unchanged in"
+	// The agents-md block is replaced when it no longer matches the
+	// declaration, and left alone when its markers do not delimit one block.
+	hookBlockStale     hookOutcome = "replace the stale review-party block in"
+	hookBlockMalformed hookOutcome = "fix the review-party markers by hand in"
 )
 
 type hookInstallStep struct {
@@ -331,7 +343,7 @@ func (plan *hookInstallPlan) planCheckpoint(name configuration.CheckpointName) (
 		return plan.planManagerSnippet(name, preCommitFrameworkSnippet(name))
 	case hookToolHusky, hookToolHooksPath, hookToolPlain:
 		return plan.planHookScript(name)
-	case hookToolClaude, hookToolCodex:
+	case hookToolClaude, hookToolCodex, hookToolAgentsMD:
 	}
 	return hookInstallStep{}, fmt.Errorf("unknown hook tool %q", plan.tool)
 }
@@ -382,7 +394,7 @@ func (plan *hookInstallPlan) planHookScript(name configuration.CheckpointName) (
 		}
 	case hookManual:
 		step.manual = hookScriptCall(name)
-	case hookCreated, hookNotExecutable, hookEntryAdded, hookEntryShared, hookEntryEdited:
+	case hookCreated, hookNotExecutable, hookEntryAdded, hookEntryShared, hookEntryEdited, hookBlockStale, hookBlockMalformed:
 	}
 	return step, nil
 }

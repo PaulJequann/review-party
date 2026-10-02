@@ -128,6 +128,16 @@ func (fake *coverageStore) RecordCheckpointWaiver(waiver model.CheckpointWaiver)
 	return nil
 }
 
+func (fake *coverageStore) CheckpointWaiversSince(repository string, since time.Time) ([]model.CheckpointWaiver, error) {
+	waivers := []model.CheckpointWaiver{}
+	for _, waiver := range slices.Backward(fake.waivers) {
+		if waiver.Repository == repository && !waiver.CreatedAt.Before(since) {
+			waivers = append(waivers, waiver)
+		}
+	}
+	return waivers, nil
+}
+
 func newCoverageConductor(t *testing.T, recordStore store.RecordStore, selection *configuration.ReviewSelection) (*Conductor, string) {
 	t.Helper()
 	repository := t.TempDir()

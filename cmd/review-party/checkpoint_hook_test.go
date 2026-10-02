@@ -176,7 +176,7 @@ func TestCheckpointInstallKeepsAnExistingPrePushHookAndItsInput(t *testing.T) {
 	installed := fixture.install("--yes")
 	want := "pre-push: add the review-party block to " + hookPath + " (git hooks)\n" +
 		"warning: review-party is not on PATH; the hooks warn and allow until it is\n" +
-		"Wrote 1 hook file(s).\n"
+		"Wrote 1 file(s).\n"
 	assertRun(t, installed, commandRun{stdout: want})
 	content := fixture.read(".git/hooks/pre-push")
 	if want := "#!/bin/sh\n" + checkpointHookBlock(configuration.CheckpointPrePush) + "# team hook\ncat > hook-saw\n"; content != want {
@@ -207,14 +207,14 @@ func TestCheckpointInstallKeepsAnExistingPrePushHookAndItsInput(t *testing.T) {
 func TestCheckpointInstallMakesAnEditedHookExecutableWithoutRewritingIt(t *testing.T) {
 	fixture := newHookInstallFixture(t, configuration.CheckpointPrePush)
 	fixture.provideStandIn()
-	assertRunContains(t, fixture.install("--yes"), commandRun{stdout: "Wrote 1 hook file(s)."})
+	assertRunContains(t, fixture.install("--yes"), commandRun{stdout: "Wrote 1 file(s)."})
 	hook := filepath.Join(fixture.repository, ".git", "hooks", "pre-push")
 	edited := strings.Replace(fixture.read(".git/hooks/pre-push"), "then exit 1; fi", "then exit 0; fi", 1)
 	fixture.writeFile(".git/hooks/pre-push", edited)
 	if err := os.Chmod(hook, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	assertRun(t, fixture.install("--yes"), commandRun{stdout: "pre-push: make executable " + hook + " (git hooks)\nWrote 1 hook file(s).\n"})
+	assertRun(t, fixture.install("--yes"), commandRun{stdout: "pre-push: make executable " + hook + " (git hooks)\nWrote 1 file(s).\n"})
 	if info, err := os.Stat(hook); err != nil || info.Mode().Perm() != 0o755 {
 		t.Fatalf("edited hook stat = %v, %v, want mode 0755", info, err)
 	}
@@ -225,7 +225,7 @@ func TestCheckpointInstallMakesAnEditedHookExecutableWithoutRewritingIt(t *testi
 
 func TestCheckpointHookShellBlocksOnlyOnARefusal(t *testing.T) {
 	fixture := newHookInstallFixture(t, configuration.CheckpointPreCommit)
-	assertRunContains(t, fixture.install("--yes"), commandRun{stdout: "Wrote 1 hook file(s)."})
+	assertRunContains(t, fixture.install("--yes"), commandRun{stdout: "Wrote 1 file(s)."})
 	hook := filepath.Join(fixture.repository, ".git", "hooks", "pre-commit")
 	guarded := hookCommand{configuration.CheckpointPreCommit, "review-party checkpoint hook git pre-commit"}.guarded()
 	warning := "review-party: warning: review-party exited 2; pre-commit Checkpoint not checked\n"
@@ -271,7 +271,7 @@ func TestCheckpointInstallCreatesMissingHooksWhereTheToolRunsThem(t *testing.T) 
 			fixture.provideStandIn()
 			test.setup(fixture)
 			result := fixture.install("--yes")
-			want := "pre-commit: create " + filepath.Join(fixture.repository, test.hook) + " (" + test.tool + ")\nWrote 1 hook file(s).\n"
+			want := "pre-commit: create " + filepath.Join(fixture.repository, test.hook) + " (" + test.tool + ")\nWrote 1 file(s).\n"
 			assertRun(t, result, commandRun{stdout: want})
 			info, err := os.Stat(filepath.Join(fixture.repository, test.hook))
 			if err != nil {
@@ -399,7 +399,7 @@ func activateHusky(fixture hookInstallFixture) {
 
 func TestCheckpointInstalledHookForwardsARemoteNamedLikeAnOption(t *testing.T) {
 	fixture := newHookInstallFixture(t, configuration.CheckpointPrePush)
-	assertRunContains(t, fixture.install("--yes"), commandRun{stdout: "Wrote 1 hook file(s)."})
+	assertRunContains(t, fixture.install("--yes"), commandRun{stdout: "Wrote 1 file(s)."})
 	hook := shellQuoteArgument(filepath.Join(fixture.repository, ".git", "hooks", "pre-push"))
 	if got, want := fixture.recordArguments(hook+" -origin url </dev/null"), "checkpoint\nhook\ngit\npre-push\n--\n-origin\nurl\n"; got != want {
 		t.Fatalf("hook arguments = %q, want %q", got, want)
@@ -487,7 +487,7 @@ func TestCheckpointInstallMakesAnExistingHookExecutable(t *testing.T) {
 	if err := os.Chmod(hook, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	assertRunContains(t, fixture.install("--yes"), commandRun{stdout: "Wrote 1 hook file(s)."})
+	assertRunContains(t, fixture.install("--yes"), commandRun{stdout: "Wrote 1 file(s)."})
 	info, err := os.Stat(hook)
 	if err != nil {
 		t.Fatal(err)
@@ -500,7 +500,7 @@ func TestCheckpointInstallMakesAnExistingHookExecutable(t *testing.T) {
 	if err := os.Chmod(hook, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	assertRun(t, fixture.install("--yes"), commandRun{stdout: "pre-push: make executable " + hook + " (git hooks)\nWrote 1 hook file(s).\n"})
+	assertRun(t, fixture.install("--yes"), commandRun{stdout: "pre-push: make executable " + hook + " (git hooks)\nWrote 1 file(s).\n"})
 	if info, err = os.Stat(hook); err != nil {
 		t.Fatal(err)
 	}
@@ -533,7 +533,7 @@ func (fixture hookInstallFixture) installThroughLink() {
 	if err := os.Symlink(filepath.Join("..", "..", "scripts", "pre-push"), hook); err != nil {
 		t.Fatal(err)
 	}
-	assertRunContains(t, fixture.install("--yes"), commandRun{stdout: "Wrote 1 hook file(s)."})
+	assertRunContains(t, fixture.install("--yes"), commandRun{stdout: "Wrote 1 file(s)."})
 	if info, err := os.Lstat(hook); err != nil || info.Mode()&fs.ModeSymlink == 0 {
 		t.Fatalf("hook is no longer a symlink: %v %v", info, err)
 	}

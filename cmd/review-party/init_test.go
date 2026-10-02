@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -60,12 +61,12 @@ func (fixture initFixture) run(t *testing.T, streams commandIO, arguments ...str
 	return exit, stdout.String(), stderr.String()
 }
 
-func (fixture initFixture) declareCheckpoints(t *testing.T, names ...configuration.CheckpointName) {
+func (fixture initFixture) declareCheckpoints(t *testing.T, integration configuration.IntegrationName, names ...configuration.CheckpointName) {
 	t.Helper()
 	intents := make([]configuration.Intent, 0, len(names))
 	for _, name := range names {
 		checkpoint := configuration.NewCheckpoint()
-		checkpoint.Integrations = []configuration.IntegrationName{configuration.IntegrationGit}
+		checkpoint.Integrations = []configuration.IntegrationName{integration}
 		intents = append(intents, configuration.SetCheckpoint{Name: name, Checkpoint: checkpoint})
 	}
 	plan, err := fixture.manager.Plan(configuration.Repository(fixture.repository), intents)
@@ -234,7 +235,7 @@ func TestInitWithoutATerminalNamesEachCheckpointWithoutItsGitHook(t *testing.T) 
 	if exit, _, stderr := fixture.run(t, commandIO{}, "--profile", "docs", "--yes"); exit != 0 {
 		t.Fatalf("setup exit = %d, stderr = %q", exit, stderr)
 	}
-	fixture.declareCheckpoints(t, configuration.CheckpointPrePush, configuration.CheckpointPreCommit)
+	fixture.declareCheckpoints(t, configuration.IntegrationGit, configuration.CheckpointPrePush, configuration.CheckpointPreCommit)
 	ready := "Repository is ready: review-party run --repo " + fixture.repository + "\n"
 	install := "review-party checkpoint install git --repo " + fixture.repository + "\n"
 
@@ -261,10 +262,10 @@ func TestInitWithoutATerminalNamesEachCheckpointWithoutItsGitHook(t *testing.T) 
 		t.Fatal(err)
 	}
 	_, stdout, _ = fixture.run(t, commandIO{})
-	want := ready + "Checkpoint pre-push has no git hook; add to " + lefthook + " (lefthook) by hand:\n" +
+	want := ready + "Checkpoint pre-push has no git hook, and lefthook needs it added to " + lefthook + " by hand:\n" +
 		"  " + strings.ReplaceAll(strings.TrimSuffix(lefthookPrePushEntry(), "\n"), "\n", "\n  ") + "\n" +
 		"Checkpoint pre-push git hook does not run until lefthook is active in this clone: lefthook install\n" +
-		"Checkpoint pre-commit has no git hook; add to " + lefthook + " (lefthook) by hand:\n" +
+		"Checkpoint pre-commit has no git hook, and lefthook needs it added to " + lefthook + " by hand:\n" +
 		"  pre-commit:\n    commands:\n      review-party-checkpoint:\n        run: '" + hookCommand{configuration.CheckpointPreCommit, "review-party checkpoint hook git pre-commit"}.guarded() + "'\n" +
 		"Checkpoint pre-commit git hook does not run until lefthook is active in this clone: lefthook install\n"
 	if stdout != want {
@@ -278,7 +279,7 @@ func TestInitWithoutATerminalNamesTheHuskyActivationStep(t *testing.T) {
 	if exit, _, stderr := fixture.run(t, commandIO{}, "--profile", "docs", "--yes"); exit != 0 {
 		t.Fatalf("setup exit = %d, stderr = %q", exit, stderr)
 	}
-	fixture.declareCheckpoints(t, configuration.CheckpointPrePush)
+	fixture.declareCheckpoints(t, configuration.IntegrationGit, configuration.CheckpointPrePush)
 	wrapper := filepath.Join(fixture.repository, ".husky", "_", "pre-push")
 	if err := os.MkdirAll(filepath.Dir(wrapper), 0o755); err != nil {
 		t.Fatal(err)
@@ -356,14 +357,55 @@ func TestInitWithoutATerminalNamesMissingAgentFloorHooks(t *testing.T) {
 	}
 }
 
+func TestInitWithoutATerminalNamesEachAgentsMDBlockGap(t *testing.T) {
+	fixture := newInitFixture(t)
+	fixture.profile(t, configuration.ScopeGlobal, "docs")
+	if exit, _, stderr := fixture.run(t, commandIO{}, "--profile", "docs", "--yes"); exit != 0 {
+		t.Fatalf("setup exit = %d, stderr = %q", exit, stderr)
+	}
+	fixture.declareCheckpoints(t, configuration.IntegrationAgentsMD, configuration.CheckpointPrePush)
+	ready := "Repository is ready: review-party run --repo " + fixture.repository + "\n"
+	install := "review-party checkpoint install agents-md --repo " + fixture.repository + "\n"
+	path := filepath.Join(fixture.repository, "AGENTS.md")
+
+	if _, stdout, _ := fixture.run(t, commandIO{}); stdout != ready+"Checkpoint pre-push has no agents-md block: "+install {
+		t.Fatalf("missing stdout = %q", stdout)
+	}
+	fixture.installHooks(t, configuration.IntegrationAgentsMD)
+	if _, stdout, _ := fixture.run(t, commandIO{}); stdout != ready {
+		t.Fatalf("installed stdout = %q, want %q", stdout, ready)
+	}
+
+	fixture.declareCheckpoints(t, configuration.IntegrationAgentsMD, configuration.CheckpointPrePush, configuration.CheckpointPreCommit)
+	stale := func(name string) string {
+		return "Checkpoint " + name + " agents-md block in " + path + " no longer matches the declared Checkpoints: " + install
+	}
+	if _, stdout, _ := fixture.run(t, commandIO{}); stdout != ready+stale("pre-push")+stale("pre-commit") {
+		t.Fatalf("stale stdout = %q", stdout)
+	}
+
+	if err := os.WriteFile(path, []byte(agentsMDBegin+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	malformed := func(name string) string {
+		return "Checkpoint " + name + " agents-md block in " + path + " has unbalanced or repeated markers to repair by hand:\n" +
+			fmt.Sprintf("  Found 1 %q and 0 %q lines; the block needs one begin line before one end line.\n", agentsMDBegin, agentsMDEnd) +
+			"  Delete the extra or misplaced marker lines, or both markers and the lines between them, then rerun the install.\n"
+	}
+	if _, stdout, _ := fixture.run(t, commandIO{}); stdout != ready+malformed("pre-push")+malformed("pre-commit") {
+		t.Fatalf("malformed stdout = %q", stdout)
+	}
+}
+
 func TestInitInATerminalDeclaresACheckpointAndInstallsItsHook(t *testing.T) {
 	fixture := newInitFixture(t)
 	fixture.profile(t, configuration.ScopeGlobal, "bugs")
 	pathWithOnlyGit(t)
 	streams := commandIO{
 		// bugs, publish, pre-push, no exemptions, 0 lines, human waivers,
-		// the git floor, publish, install, no personal agent hooks
-		input:    iotest.OneByteReader(strings.NewReader("1\ny\n1\n\n0\n1\n0\ny\ny\n0\n")),
+		// the git and agents-md floor, publish, install the git hook, write
+		// the agents-md block, no personal agent hooks
+		input:    iotest.OneByteReader(strings.NewReader("1\ny\n1\n\n0\n1\n0\ny\ny\ny\n0\n")),
 		terminal: func(any) bool { return true },
 	}
 
@@ -374,6 +416,10 @@ func TestInitInATerminalDeclaresACheckpointAndInstallsItsHook(t *testing.T) {
 	hook, err := os.ReadFile(filepath.Join(fixture.repository, ".git", "hooks", "pre-push"))
 	if err != nil || !strings.Contains(string(hook), "review-party checkpoint hook git pre-push") {
 		t.Fatalf("pre-push hook = %q, %v\n%s", hook, err, stdout)
+	}
+	instructions, err := os.ReadFile(filepath.Join(fixture.repository, "AGENTS.md"))
+	if err != nil || !strings.Contains(string(instructions), agentsMDBegin) {
+		t.Fatalf("AGENTS.md = %q, %v\n%s", instructions, err, stdout)
 	}
 	if !strings.HasSuffix(stdout, "Repository is ready: review-party run --repo "+fixture.repository+"\n") {
 		t.Fatalf("an installed hook still reported missing:\n%s", stdout)

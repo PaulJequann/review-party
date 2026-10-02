@@ -9,9 +9,11 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"reviewparty/internal/configuration"
 	"reviewparty/internal/model"
+	"reviewparty/internal/store"
 	"reviewparty/internal/subject"
 )
 
@@ -69,6 +71,7 @@ type CheckpointReport struct {
 type waiverLedger interface {
 	CheckpointWaiver(model.WaiverKey) (model.CheckpointWaiver, bool, error)
 	RecordCheckpointWaiver(model.CheckpointWaiver) error
+	CheckpointWaiversSince(repository string, since time.Time) ([]model.CheckpointWaiver, error)
 }
 
 // CheckCheckpoint decides one Checkpoint for the content.
@@ -272,4 +275,19 @@ func (conductor *Conductor) recordWaiver(key model.WaiverKey, request WaiverRequ
 		return model.CheckpointWaiver{}, ledgerStateError(err)
 	}
 	return waiver, nil
+}
+
+// RecentCheckpointWaivers lists the Waivers recorded from the repository root
+// within the window, newest first. A ledger that does not exist yet holds
+// none, and reading never creates one.
+func (conductor *Conductor) RecentCheckpointWaivers(repository string, window time.Duration) ([]model.CheckpointWaiver, error) {
+	ledger, ok := conductor.store.(waiverLedger)
+	if !ok {
+		return nil, errors.New("checkpoint waivers require the SQLite ledger")
+	}
+	waivers, err := ledger.CheckpointWaiversSince(repository, conductor.now().Add(-window))
+	if errors.Is(err, store.ErrReviewRecordStateNotInitialized) {
+		return []model.CheckpointWaiver{}, nil
+	}
+	return waivers, err
 }

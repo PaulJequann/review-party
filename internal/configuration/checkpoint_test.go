@@ -69,7 +69,7 @@ func writeRepositoryCheckpoints(t *testing.T, repository, checkpoints string) {
 
 func TestRepositoryCheckpointsDecodeWithDefaults(t *testing.T) {
 	repository := t.TempDir()
-	writeRepositoryCheckpoints(t, repository, `{"pre-push":{"requirement":"reviewed","exempt_paths":["*.md"],"integrations":["git","claude-code","codex"]}}`)
+	writeRepositoryCheckpoints(t, repository, `{"pre-push":{"requirement":"reviewed","exempt_paths":["*.md"],"integrations":["git","claude-code","codex","agents-md"]}}`)
 	manager := testManager(t, t.TempDir())
 
 	checkpoints, err := manager.Checkpoints(Repository(repository))
@@ -77,7 +77,7 @@ func TestRepositoryCheckpointsDecodeWithDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[CheckpointName]Checkpoint{CheckpointPrePush: {
-		Requirement: RequirementReviewed, ExemptPaths: []string{"*.md"}, Waivers: WaiversHuman, Integrations: []IntegrationName{IntegrationGit, IntegrationClaudeCode, IntegrationCodex},
+		Requirement: RequirementReviewed, ExemptPaths: []string{"*.md"}, Waivers: WaiversHuman, Integrations: []IntegrationName{IntegrationGit, IntegrationClaudeCode, IntegrationCodex, IntegrationAgentsMD},
 	}}
 	if !reflect.DeepEqual(checkpoints, want) {
 		t.Fatalf("checkpoints = %#v, want %#v", checkpoints, want)
@@ -94,7 +94,7 @@ func TestRepositoryCheckpointsRejectInvalidDeclarations(t *testing.T) {
 		{"missing requirement", `{"pre-push":{}}`, `checkpoints.pre-push.requirement: unknown requirement ""`},
 		{"unknown requirement", `{"pre-push":{"requirement":"judged"}}`, `unknown requirement "judged"`},
 		{"unknown policy", `{"pre-push":{"requirement":"reviewed","waivers":"robots"}}`, `checkpoints.pre-push.waivers: unknown waiver policy "robots"`},
-		{"unknown integration", `{"pre-push":{"requirement":"reviewed","integrations":["cursor"]}}`, `unknown integration "cursor"; expected git, claude-code, or codex`},
+		{"unknown integration", `{"pre-push":{"requirement":"reviewed","integrations":["cursor"]}}`, `unknown integration "cursor"; expected git, claude-code, codex, or agents-md`},
 		{"duplicate integration", `{"pre-push":{"requirement":"reviewed","integrations":["git","git"]}}`, `integration "git" is listed twice`},
 		{"negative size", `{"pre-push":{"requirement":"reviewed","small_change_lines":-1}}`, `small_change_lines: must not be negative`},
 		{"malformed pattern", `{"pre-push":{"requirement":"reviewed","exempt_paths":["/docs/**"]}}`, `exempt_paths: pattern "/docs/**" must be relative`},
