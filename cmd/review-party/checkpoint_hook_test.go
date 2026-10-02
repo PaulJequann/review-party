@@ -429,6 +429,10 @@ func TestCheckpointInstallCarriesTheCallersConfigurationOnlyIntoPerCloneHooks(t 
 			fixture.linkOutside(".githooks")
 			fixture.git("config", "core.hooksPath", ".githooks")
 		}},
+		{name: "gitignored hooksPath in the work tree", config: config, hook: ".githooks/pre-commit", carried: carried, stdout: wrote, setup: func(fixture hookInstallFixture) {
+			fixture.writeFile(".gitignore", ".githooks/\n")
+			fixture.git("config", "core.hooksPath", ".githooks")
+		}},
 		{name: "husky symlinked outside the work tree", config: config, hook: ".husky/pre-commit", carried: carried, stdout: wrote, setup: func(fixture hookInstallFixture) {
 			fixture.linkOutside(".husky")
 			activateHusky(fixture)

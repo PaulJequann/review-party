@@ -288,13 +288,23 @@ func (target hookInstallTarget) configArgument() (string, error) {
 }
 
 // committed reports whether the hooks live in files the team shares: a hook
-// tool's configuration or a core.hooksPath that resolves inside the work tree.
+// tool's configuration or a core.hooksPath that resolves inside the work tree
+// and that git does not ignore. git matches an ignored directory that does not
+// exist yet only through a path inside it, so a hooks directory is checked by
+// a hook file in it.
 func (target hookInstallTarget) committed(tool hookTool, location string) bool {
 	if tool == hookToolPlain {
 		return false
 	}
 	relative, err := filepath.Rel(resolvedPath(target.root), resolvedPath(location))
-	return err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
+	inside := err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
+	if !inside {
+		return false
+	}
+	if tool == hookToolHusky || tool == hookToolHooksPath {
+		relative = filepath.Join(relative, string(configuration.CheckpointPrePush))
+	}
+	return !subject.IgnoresPath(target.root, relative)
 }
 
 // resolvedPath resolves symlinks in the longest existing prefix of path, so a

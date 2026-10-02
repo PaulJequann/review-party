@@ -235,15 +235,16 @@ when git's hook is not an executable file that pre-commit generated. A symlinked
 target that does not exist yet, so the link survives. These edits go straight to disk after confirmation. They do not go
 through a configuration Plan, because hook files are not Review Party
 configuration. husky and lefthook files are committed, so their edit reaches
-the team when the Caller commits it. A hook in plain `.git/hooks` or in a
-`core.hooksPath` outside the work tree belongs to one clone, so it carries the
-installing Caller's `--config` as an absolute path, because git runs hooks
-from the work tree root. A committed hook never does, because each teammate
-loads their own configuration, and the installer warns when `--config` is
-dropped. A rerun with another `--config` regenerates a block the installer
-generated, and init reports such a block as loading another configuration. A
-block that differs in any other way counts as edited and is left alone. Installing into an existing hook script also makes it executable,
-since git skips one that is not.
+the team when the Caller commits it. A hook in plain `.git/hooks`, or in a
+`core.hooksPath` that is outside the work tree or ignored by git, belongs to
+one clone. It carries the installing Caller's `--config` as an absolute path,
+because git runs hooks from the work tree root. A committed hook never does,
+because each teammate loads their own configuration, and the installer warns
+when `--config` is dropped. A rerun with another `--config` regenerates a
+block the installer generated, and init reports such a block as loading
+another configuration. A block that differs in any other way counts as edited
+and is left alone. Installing into an existing hook script also makes it
+executable, since git skips one that is not.
 
 ## Open questions
 
