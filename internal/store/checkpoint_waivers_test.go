@@ -10,7 +10,7 @@ import (
 
 func waiverFixture(id model.WaiverID, key model.WaiverKey, minute int) model.CheckpointWaiver {
 	created := time.Date(2026, 10, 1, 12, minute, 0, 0, time.UTC)
-	return model.CheckpointWaiver{ID: id, Key: key, Reason: "hotfix " + string(id), WaivedBy: model.WaivedByTerminal, CreatedAt: created}
+	return model.CheckpointWaiver{ID: id, Key: key, Repository: "/work/repo", Reason: "hotfix " + string(id), WaivedBy: model.WaivedByTerminal, CreatedAt: created}
 }
 
 func TestCheckpointWaiverMatchesOnlyItsKey(t *testing.T) {

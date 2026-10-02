@@ -20,11 +20,12 @@ type WaiverKey struct {
 }
 
 // CheckpointWaiver records that one exact content change passed a Checkpoint
-// without Coverage.
+// without Coverage, in the repository root it was recorded from.
 type CheckpointWaiver struct {
-	ID        WaiverID  `json:"id"`
-	Key       WaiverKey `json:"key"`
-	Reason    string    `json:"reason"`
-	WaivedBy  WaivedBy  `json:"waived_by"`
-	CreatedAt time.Time `json:"created_at"`
+	ID         WaiverID  `json:"id"`
+	Key        WaiverKey `json:"key"`
+	Repository string    `json:"repository"`
+	Reason     string    `json:"reason"`
+	WaivedBy   WaivedBy  `json:"waived_by"`
+	CreatedAt  time.Time `json:"created_at"`
 }

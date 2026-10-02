@@ -267,7 +267,7 @@ func (conductor *Conductor) recordWaiver(key model.WaiverKey, request WaiverRequ
 	if err != nil {
 		return model.CheckpointWaiver{}, err
 	}
-	waiver := model.CheckpointWaiver{ID: model.WaiverID(id), Key: key, Reason: strings.TrimSpace(request.Reason), WaivedBy: request.WaivedBy, CreatedAt: conductor.now().UTC()}
+	waiver := model.CheckpointWaiver{ID: model.WaiverID(id), Key: key, Repository: request.Checkpoint.Repository, Reason: strings.TrimSpace(request.Reason), WaivedBy: request.WaivedBy, CreatedAt: conductor.now().UTC()}
 	if err := ledger.RecordCheckpointWaiver(waiver); err != nil {
 		return model.CheckpointWaiver{}, ledgerStateError(err)
 	}

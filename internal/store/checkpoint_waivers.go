@@ -10,8 +10,8 @@ import (
 
 // RecordCheckpointWaiver stores one Checkpoint Waiver.
 func (s *LedgerRecordStore) RecordCheckpointWaiver(waiver model.CheckpointWaiver) error {
-	_, err := s.db.Exec(`INSERT INTO checkpoint_waivers(id,checkpoint,content_digest,reason,waived_by,created_at) VALUES(?,?,?,?,?,?)`,
-		waiver.ID, waiver.Key.Checkpoint, waiver.Key.ContentDigest, waiver.Reason, waiver.WaivedBy, waiver.CreatedAt.UTC())
+	_, err := s.db.Exec(`INSERT INTO checkpoint_waivers(id,checkpoint,content_digest,repository,reason,waived_by,created_at) VALUES(?,?,?,?,?,?,?)`,
+		waiver.ID, waiver.Key.Checkpoint, waiver.Key.ContentDigest, waiver.Repository, waiver.Reason, waiver.WaivedBy, waiver.CreatedAt.UTC())
 	if err != nil {
 		return fmt.Errorf("record checkpoint waiver %q: %w", waiver.ID, err)
 	}
@@ -24,10 +24,10 @@ func (s *LedgerRecordStore) RecordCheckpointWaiver(waiver model.CheckpointWaiver
 // one too.
 func (s *LedgerRecordStore) CheckpointWaiver(key model.WaiverKey) (model.CheckpointWaiver, bool, error) {
 	waiver := model.CheckpointWaiver{Key: key}
-	err := s.db.QueryRow(`SELECT id,reason,waived_by,created_at FROM checkpoint_waivers
+	err := s.db.QueryRow(`SELECT id,repository,reason,waived_by,created_at FROM checkpoint_waivers
 		WHERE checkpoint = ? AND content_digest = ? ORDER BY waived_by = ? DESC, created_at DESC, id DESC LIMIT 1`,
 		key.Checkpoint, key.ContentDigest, model.WaivedByTerminal).
-		Scan(&waiver.ID, &waiver.Reason, &waiver.WaivedBy, &waiver.CreatedAt)
+		Scan(&waiver.ID, &waiver.Repository, &waiver.Reason, &waiver.WaivedBy, &waiver.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.CheckpointWaiver{}, false, nil
 	}

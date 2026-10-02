@@ -230,8 +230,8 @@ func TestAWaiverPassesOnlyTheContentItWaived(t *testing.T) {
 	assertOutcome(t, checkPrePush(t, conductor, repository, CoverageSubject{Changes: coverageWhole}), checkpointOutcome{State: CheckpointMissing, Declared: true})
 
 	assertOutcome(t, mustWaive(t, conductor, repository, content), waived)
-	if len(fake.waivers) != 1 {
-		t.Fatalf("waiving twice recorded %d waivers", len(fake.waivers))
+	if len(fake.waivers) != 1 || fake.waivers[0].Repository != repository {
+		t.Fatalf("waiving twice recorded %#v, want one waiver from %s", fake.waivers, repository)
 	}
 }
 
