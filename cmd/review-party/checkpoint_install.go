@@ -279,7 +279,7 @@ func (plan *hookInstallPlan) planCheckpoint(name configuration.CheckpointName) (
 	case hookToolLefthook:
 		return plan.planLefthook(name)
 	case hookToolPreCommit:
-		return hookInstallStep{checkpoint: name, path: plan.location, outcome: hookManual, manual: preCommitFrameworkSnippet(name)}, nil
+		return hookInstallStep{checkpoint: name, path: plan.location, outcome: hookManual, manual: plan.preCommitFrameworkSnippet(name)}, nil
 	case hookToolHusky, hookToolHooksPath, hookToolPlain:
 		return plan.planHookScript(name)
 	}
@@ -413,12 +413,12 @@ func runsInPosixShell(shebang []string) bool {
 // https://lefthook.dev/configuration/: run executes through sh with {1} and
 // {2} as the hook's arguments (https://lefthook.dev/configuration/run/), and
 // use_stdin passes git's ref lines through (https://lefthook.dev/configuration/use_stdin/).
-func lefthookCommand(name configuration.CheckpointName) string {
+func (plan *hookInstallPlan) lefthookCommand(name configuration.CheckpointName) string {
 	if name == configuration.CheckpointPreCommit {
-		run := hookCommand{name, "review-party checkpoint hook git pre-commit"}.guarded()
+		run := hookCommand{name, "review-party checkpoint hook git pre-commit" + plan.config}.guarded()
 		return "pre-commit:\n  commands:\n    review-party-checkpoint:\n      run: " + yamlSingleQuoted(run) + "\n"
 	}
-	run := hookCommand{name, "review-party checkpoint hook git pre-push {1} {2}"}.guarded()
+	run := hookCommand{name, "review-party checkpoint hook git pre-push {1} {2}" + plan.config}.guarded()
 	return "pre-push:\n  commands:\n    review-party-checkpoint:\n      run: " + yamlSingleQuoted(run) + "\n      use_stdin: true\n"
 }
 
@@ -457,7 +457,7 @@ func yamlSingleQuoted(value string) string {
 func (plan *hookInstallPlan) planLefthook(name configuration.CheckpointName) (hookInstallStep, error) {
 	path := plan.location
 	step := hookInstallStep{checkpoint: name, path: path}
-	command := lefthookCommand(name)
+	command := plan.lefthookCommand(name)
 	content, _, err := plan.pending(path)
 	if err != nil {
 		return step, err
@@ -507,12 +507,12 @@ func lefthookResistsAppend(yaml string, name configuration.CheckpointName) bool 
 // preCommitFrameworkSnippet is a local hook for .pre-commit-config.yaml. The
 // framework sets PRE_COMMIT_* variables for pre-push hooks instead of passing
 // git's ref lines (https://pre-commit.com/), so the entry rebuilds one line.
-func preCommitFrameworkSnippet(name configuration.CheckpointName) []string {
+func (plan *hookInstallPlan) preCommitFrameworkSnippet(name configuration.CheckpointName) []string {
 	command := "review-party checkpoint hook git pre-commit"
 	if name == configuration.CheckpointPrePush {
 		command = `printf "%s %s %s %s\n" "$PRE_COMMIT_LOCAL_BRANCH" "$PRE_COMMIT_TO_REF" "$PRE_COMMIT_REMOTE_BRANCH" "$PRE_COMMIT_FROM_REF" | review-party checkpoint hook git pre-push "$PRE_COMMIT_REMOTE_NAME"`
 	}
-	entry := yamlSingleQuoted("sh -c '" + hookCommand{name, command}.guarded() + "'")
+	entry := yamlSingleQuoted("sh -c " + shellQuoteArgument(hookCommand{name, command + plan.config}.guarded()))
 	return []string{
 		"- repo: local",
 		"  hooks:",

@@ -197,6 +197,15 @@ func TestCheckpointPrePushMissingPrintsRunCommand(t *testing.T) {
 	if strings.Contains(stdout, "wait:") {
 		t.Fatalf("missing coverage should not suggest waiting:\n%s", stdout)
 	}
+
+	absolute, err := filepath.Abs("relative.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, stdout, _ = fixture.check("pre-push", "--base", fixture.base, "--config", "relative.json")
+	if line := " --repo " + shellQuoteArgument(fixture.repository) + " --config " + shellQuoteArgument(absolute) + "\n"; !strings.Contains(stdout, line) {
+		t.Fatalf("a relative --config should be suggested as %q:\n%s", line, stdout)
+	}
 }
 
 func TestCheckpointPrePushRunningPrintsWait(t *testing.T) {

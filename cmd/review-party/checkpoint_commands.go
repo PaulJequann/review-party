@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -121,7 +122,14 @@ func checkpointOptionsFromCommand(cmd *cobra.Command, args []string) (checkpoint
 	if options.name == configuration.CheckpointPreCommit && options.base+options.head != "" {
 		return checkpointOptions{}, errors.New("--base and --head apply only to pre-push")
 	}
-	return options, nil
+	if options.configuration == "" {
+		return options, nil
+	}
+	// Suggested commands carry --config, so it must name the same file
+	// wherever the Caller runs them.
+	var err error
+	options.configuration, err = filepath.Abs(options.configuration)
+	return options, err
 }
 
 type checkpointReport struct {
@@ -452,7 +460,11 @@ func (options checkpointWaiveOptions) confirm(by model.WaivedBy, streams command
 		return nil
 	}
 	question := fmt.Sprintf("Waive the %s Checkpoint for this exact change, reason %q?", options.name, options.reason)
-	confirmed, err := confirmPrompt(streams.input, streams.output, question)
+	prompt := streams.output
+	if options.format == "json" {
+		prompt = streams.errors
+	}
+	confirmed, err := confirmPrompt(streams.input, prompt, question)
 	if err == nil && !confirmed {
 		err = errors.New("waiver cancelled")
 	}

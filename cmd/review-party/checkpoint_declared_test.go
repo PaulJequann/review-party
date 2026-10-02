@@ -68,12 +68,12 @@ func fragmentOf(text, fragment string) string {
 	return text
 }
 
-// decodeCheckpointReport reads the JSON report a command printed after any
-// prompt text.
+// decodeCheckpointReport reads the JSON report a command printed, which must
+// be all of its standard output.
 func decodeCheckpointReport(t *testing.T, result commandRun) checkpointReport {
 	t.Helper()
 	var report checkpointReport
-	if err := json.Unmarshal([]byte(result.stdout[strings.Index(result.stdout, "{"):]), &report); err != nil {
+	if err := json.Unmarshal([]byte(result.stdout), &report); err != nil {
 		t.Fatalf("decode %+v: %v", result, err)
 	}
 	return report
@@ -178,6 +178,7 @@ func TestCheckpointWaiverPolicies(t *testing.T) {
 	assertRunContains(t, waive("n\n", true, "--reason", "hotfix", "--yes"), commandRun{exit: 1, stderr: "waiver cancelled"})
 
 	confirmed := waive("y\n", true, "--reason", "hotfix", "--format", "json")
+	assertRunContains(t, confirmed, commandRun{stdout: confirmed.stdout, stderr: "Waive the pre-push Checkpoint for this exact change"})
 	report := decodeCheckpointReport(t, confirmed)
 	if report.Waiver == nil {
 		t.Fatalf("confirmed human waiver = %+v", confirmed)

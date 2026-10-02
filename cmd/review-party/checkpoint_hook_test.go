@@ -362,6 +362,29 @@ func TestCheckpointInstallCarriesTheCallersConfigurationOnlyIntoPerCloneHooks(t 
 	}
 }
 
+func TestCheckpointInstallCarriesTheCallersConfigurationIntoPerCloneManagerFiles(t *testing.T) {
+	config := filepath.Join(t.TempDir(), "my config.json")
+	for _, file := range []string{"lefthook.yml", ".pre-commit-config.yaml"} {
+		t.Run(file, func(t *testing.T) {
+			fixture := newHookInstallFixture(t, configuration.CheckpointPrePush)
+			outside := filepath.Join(t.TempDir(), file)
+			if err := os.WriteFile(outside, nil, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(outside, filepath.Join(fixture.repository, file)); err != nil {
+				t.Fatal(err)
+			}
+			result := fixture.install("--yes", "--config", config)
+			if strings.Contains(result.stdout, "shared with the team") {
+				t.Fatalf("a %s outside the work tree was treated as shared: %+v", file, result)
+			}
+			if got := result.stdout + fixture.read(file); !strings.Contains(got, config) {
+				t.Fatalf("install = %+v, %s = %q, want --config %s", result, file, fixture.read(file), config)
+			}
+		})
+	}
+}
+
 // linkOutside makes name in the work tree a symlink to a new directory
 // outside it.
 func (fixture hookInstallFixture) linkOutside(name string) {
