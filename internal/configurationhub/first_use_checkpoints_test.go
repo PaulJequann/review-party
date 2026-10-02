@@ -3,6 +3,7 @@ package configurationhub
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -11,17 +12,20 @@ import (
 	"reviewparty/internal/configuration"
 )
 
-// recordingInstaller stands in for the git hook installer: it asks for
-// confirmation as the real one does when hooks are pending.
+// recordingInstaller stands in for the hook installers: it asks for
+// confirmation as the real ones do when hooks are pending, and records each
+// install as "<integration> team|personal <confirmed>".
 type recordingInstaller struct {
-	calls     int
-	confirmed []bool
+	installs []string
 }
 
-func (installer *recordingInstaller) install(confirm func() (bool, error)) error {
-	installer.calls++
+func (installer *recordingInstaller) install(integration configuration.IntegrationName, personal bool, confirm func() (bool, error)) error {
 	confirmed, err := confirm()
-	installer.confirmed = append(installer.confirmed, confirmed)
+	target := "team"
+	if personal {
+		target = "personal"
+	}
+	installer.installs = append(installer.installs, fmt.Sprintf("%s %s %t", integration, target, confirmed))
 	return err
 }
 
@@ -31,6 +35,7 @@ type checkpointJourney struct {
 	manager    *configuration.Manager
 	repository configuration.Repository
 	installer  recordingInstaller
+	onPath     []configuration.IntegrationName
 }
 
 func newCheckpointJourney(t *testing.T, profile string) *checkpointJourney {
@@ -49,7 +54,7 @@ func (journey *checkpointJourney) run(t *testing.T, script ...string) string {
 	defer cancel()
 	var output bytes.Buffer
 	err := RunFirstUse(journey.manager, RunOptions{
-		Context: ctx, Repository: journey.repository, Accessible: true, InstallCheckpointHooks: journey.installer.install,
+		Context: ctx, Repository: journey.repository, Accessible: true, InstallCheckpointHooks: journey.installer.install, AgentsOnPath: journey.onPath,
 		Input: newHoldingInput(strings.Join(script, "\n") + "\n"), Output: &output,
 	})
 	if err != nil {
@@ -66,8 +71,10 @@ func TestFirstUseDeclaresACheckpointThenOffersItsHooks(t *testing.T) {
 		"*.md docs/**", // exemptions
 		"5",            // small-change lines
 		"",             // waivers: human, the default
+		"0",            // team floor: git, preselected
 		"y",            // publish
-		"",             // install the hooks: default yes
+		"",             // install the git hooks: default yes
+		"0",            // no personal agent hooks
 	)
 
 	declared, err := journey.manager.Checkpoints(journey.repository)
@@ -77,8 +84,8 @@ func TestFirstUseDeclaresACheckpointThenOffersItsHooks(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(declared, map[configuration.CheckpointName]configuration.Checkpoint{configuration.CheckpointPrePush: want}) {
 		t.Fatalf("declared = %#v, %v\noutput:\n%s", declared, err, output)
 	}
-	if !reflect.DeepEqual(journey.installer.confirmed, []bool{true}) {
-		t.Fatalf("installer confirmations = %v", journey.installer.confirmed)
+	if !reflect.DeepEqual(journey.installer.installs, []string{"git team true"}) {
+		t.Fatalf("installs = %q", journey.installer.installs)
 	}
 	if strings.Contains(output, "warning: exempting *.md") {
 		t.Fatalf("warned without a documentation Profile:\n%s", output)
@@ -93,6 +100,7 @@ func TestFirstUseWarnsWhenMarkdownExemptionsSkipADocumentationProfile(t *testing
 		"*.md", // exemptions
 		"0",    // small-change lines
 		"2",    // waivers: anyone
+		"0",    // team floor: git, preselected
 		"n",    // do not publish
 	)
 
@@ -103,8 +111,8 @@ func TestFirstUseWarnsWhenMarkdownExemptionsSkipADocumentationProfile(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if outcome := [2]int{len(declared), journey.installer.calls}; outcome != [2]int{} {
-		t.Fatalf("declined plan declared %#v, installer calls %d", declared, journey.installer.calls)
+	if len(declared) != 0 || len(journey.installer.installs) != 0 {
+		t.Fatalf("declined plan declared %#v, installs %q", declared, journey.installer.installs)
 	}
 }
 
@@ -112,6 +120,7 @@ func TestFirstUseSummarizesDeclaredCheckpointsWithoutAskingAgain(t *testing.T) {
 	journey := newCheckpointJourney(t, "bugs")
 	declared := configuration.NewCheckpoint()
 	declared.Waivers = configuration.WaiversNone
+	declared.Integrations = []configuration.IntegrationName{configuration.IntegrationGit}
 	plan, err := journey.manager.Plan(journey.repository, []configuration.Intent{configuration.SetCheckpoint{Name: configuration.CheckpointPreCommit, Checkpoint: declared}})
 	if err != nil {
 		t.Fatal(err)
@@ -120,12 +129,65 @@ func TestFirstUseSummarizesDeclaredCheckpointsWithoutAskingAgain(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	output := journey.run(t, "n")
+	output := journey.run(t, "n", "0")
 
-	if !strings.Contains(output, "Checkpoint pre-commit: reviewed, waivers none\n") || strings.Contains(output, "Which Review Checkpoint") {
+	if !strings.Contains(output, "Checkpoint pre-commit: reviewed, waivers none, integrations git\n") || strings.Contains(output, "Which Review Checkpoint") {
 		t.Fatalf("output:\n%s", output)
 	}
-	if !reflect.DeepEqual(journey.installer.confirmed, []bool{false}) {
-		t.Fatalf("installer confirmations = %v", journey.installer.confirmed)
+	if !reflect.DeepEqual(journey.installer.installs, []string{"git team false"}) {
+		t.Fatalf("installs = %q", journey.installer.installs)
+	}
+}
+
+func TestFirstUsePreselectsAgentsOnPathInTheFloor(t *testing.T) {
+	journey := newCheckpointJourney(t, "bugs")
+	journey.onPath = []configuration.IntegrationName{configuration.IntegrationCodex}
+
+	output := journey.run(t,
+		"",  // pre-push
+		"",  // no exemptions
+		"0", // small-change lines
+		"",  // waivers: human
+		"0", // team floor: git and codex, preselected
+		"y", // publish
+		"",  // install the git hooks
+		"",  // install the codex hook
+		"0", // claude-code is not on PATH, so not preselected
+	)
+
+	declared, err := journey.manager.Checkpoints(journey.repository)
+	want := []configuration.IntegrationName{configuration.IntegrationGit, configuration.IntegrationCodex}
+	if err != nil || !reflect.DeepEqual(declared[configuration.CheckpointPrePush].Integrations, want) {
+		t.Fatalf("declared = %#v, %v\noutput:\n%s", declared, err, output)
+	}
+	if !reflect.DeepEqual(journey.installer.installs, []string{"git team true", "codex team true"}) {
+		t.Fatalf("installs = %q", journey.installer.installs)
+	}
+}
+
+func TestFirstUseOffersAgentsOutsideTheFloorAsPersonalHooks(t *testing.T) {
+	journey := newCheckpointJourney(t, "bugs")
+	journey.onPath = []configuration.IntegrationName{configuration.IntegrationClaudeCode, configuration.IntegrationCodex}
+	declared := configuration.NewCheckpoint()
+	declared.Integrations = []configuration.IntegrationName{configuration.IntegrationCodex}
+	plan, err := journey.manager.Plan(journey.repository, []configuration.Intent{configuration.SetCheckpoint{Name: configuration.CheckpointPrePush, Checkpoint: declared}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := journey.manager.Publish(plan); err != nil {
+		t.Fatal(err)
+	}
+
+	output := journey.run(t,
+		"y", // install the codex team hook
+		"0", // personal: claude-code, preselected
+		"n", // decline its write
+	)
+
+	if strings.Contains(output, "git hooks now") {
+		t.Fatalf("offered git outside the floor:\n%s", output)
+	}
+	if !reflect.DeepEqual(journey.installer.installs, []string{"codex team true", "claude-code personal false"}) {
+		t.Fatalf("installs = %q\noutput:\n%s", journey.installer.installs, output)
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os/exec"
 
 	"reviewparty/internal/configuration"
 	"reviewparty/internal/configurationhub" //nolint:depguard // Cobra is the terminal composition root for the dedicated Hub adapter.
@@ -154,9 +155,14 @@ func runFirstUseJourney(parent context.Context, manager *configuration.Manager, 
 	ctx, stop := configurationHubContext(parent)
 	defer stop()
 	options := hub.runOptions(ctx, manager, streams)
-	options.InstallCheckpointHooks = func(confirm func() (bool, error)) error {
-		target := hookInstallTarget{root: hub.repository, configuration: hub.configuration}
+	options.InstallCheckpointHooks = func(integration configuration.IntegrationName, personal bool, confirm func() (bool, error)) error {
+		target := hookInstallTarget{root: hub.repository, configuration: hub.configuration, integration: integration, personal: personal}
 		return installCheckpointHooks(target, manager, streams.output, confirm)
+	}
+	for _, agent := range agentIntegrations {
+		if _, err := exec.LookPath(agent.binary); err == nil {
+			options.AgentsOnPath = append(options.AgentsOnPath, agent.integration)
+		}
 	}
 	if err := configurationhub.RunFirstUse(manager, options); err != nil {
 		return fmt.Errorf("run first-use journey: %w", err)

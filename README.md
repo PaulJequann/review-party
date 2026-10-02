@@ -88,14 +88,19 @@ members stay Global Profile references, so teammates bind Profiles rather than
 invent the Party's members. Each step publishes through its own reviewed Plan,
 so a cancelled `init` loses nothing a rerun cannot finish. Pass `--accessible`
 for non-redrawing prompts. After the selection, the journey shows each declared
-Review Checkpoint, or offers to declare one, and then offers to install its git
-hook. The journey ends with one line for each piece still missing.
+Review Checkpoint, or offers to declare one with the Integrations every
+contributor installs. It then offers to install the Integrations those
+Checkpoints list, and offers the Caller Agent hooks they do not list as
+personal hooks, preselecting the agents found on `PATH`. The journey ends with
+one line for each piece still missing.
 
 Without a terminal, `init` writes no configuration. It prints each missing
 piece on one line with the command that adds it, or
 `Repository is ready: review-party run --repo PATH`. A declared Checkpoint
-without its git hook gets its own line naming `review-party checkpoint install
-git`, or the snippet to add by hand when the hook tool needs one.
+without a hook its Integrations list gets its own line naming `review-party
+checkpoint install <integration>`, or the snippet to add by hand when the git
+hook tool needs one. When a Checkpoint lists `codex`, a line names the Codex
+`/hooks` approval step.
 
 `--profile NAME` and `--party NAME` add names to the Review selection without
 the journey. Each is repeatable. An unqualified name resolves Repository before
@@ -651,7 +656,49 @@ The hook refuses an uncovered change with one line that names the Checkpoint
 and the next command. It mentions waivers only under `anyone`. When the hook
 cannot decide, because `review-party` is not on `PATH`, the configuration does
 not load, or git cannot name a base, it warns on one line and allows the push
-or commit. See
+or commit.
+
+Claude Code and Codex get the same Checkpoints from a `PreToolUse` hook that
+runs before the agent's shell runs `git push` or `git commit`:
+
+```sh
+review-party checkpoint install claude-code
+review-party checkpoint install codex
+```
+
+Each writes to the team file, which is `.claude/settings.json` or
+`.codex/hooks.json`. Each agent gets one entry that every declared Checkpoint
+shares. The Claude Code entry's `if` rule, `Bash(git *)`, starts the hook only
+for git commands. `--personal` writes your own
+file instead, which is `.claude/settings.local.json` or
+`$CODEX_HOME/hooks.json` (`~/.codex/hooks.json` by default). The installer
+appends to the file and keeps every existing byte. An installed entry is left
+as is, and an edited review-party entry is reported and left alone. Both
+entries fail open: while `review-party` is not on `PATH`, Claude Code shows a
+one-line warning and Codex stays silent, and no exit status from
+`review-party` blocks a command.
+`--integration claude-code` or `--integration codex` on `config checkpoint set`
+lists an agent in the team floor.
+
+The hook reads the shell command the agent is about to run. `git push` decides
+pre-push and `git commit` decides pre-commit, in the repository the command
+runs in. A refusal reaches the agent as a JSON deny whose reason is the same
+one line the git hook prints. The hook also refuses two forms it cannot check,
+and names the command to run instead:
+
+- A `git push` or `git commit` chained after another command, as in
+  `git add -A && git commit -m x`. Run it as its own command. A plain `cd`
+  before it, as in `cd app && git push`, is not another command: the hook
+  decides the push in `app`.
+- A `git commit` of paths or picked hunks, such as `git commit file.go` or
+  `git commit -p`. Stage the change and commit without paths. `git commit -a`
+  is checked against the tracked working-tree changes.
+
+Codex runs a new or changed hook only after you trust it. Open Codex in the
+repository and run `/hooks`. Codex also runs the hook before every shell
+command, not only git ones, and starts a login shell to do it. On the machine
+measured, every Codex shell command waits about 70 ms more, most of it that
+login shell. Under Claude Code, each git command waits about 19 ms more. See
 [`docs/design/review-checkpoints-v1.md`](docs/design/review-checkpoints-v1.md).
 
 ## Operational Review Records

@@ -112,12 +112,25 @@ func StagedContentChanges(repository string) ([]model.ContentChange, error) {
 	return contentChangeSet(entries), nil
 }
 
-// WorkingContentChanges compares the working tree, including untracked
-// files, with HEAD, or with the empty tree before the first commit.
-func WorkingContentChanges(repository string) ([]model.ContentChange, error) {
-	untracked, err := untrackedPaths(repository)
-	if err != nil {
-		return nil, err
+// WorkingFiles chooses which working-tree files WorkingContentChanges reads.
+type WorkingFiles int
+
+const (
+	// TrackedFiles reads the files git tracks: what git commit -a commits.
+	TrackedFiles WorkingFiles = iota
+	// AllFiles adds the untracked files git does not ignore.
+	AllFiles
+)
+
+// WorkingContentChanges compares the working tree's files with HEAD, or with
+// the empty tree before the first commit.
+func WorkingContentChanges(repository string, files WorkingFiles) ([]model.ContentChange, error) {
+	var untracked []string
+	if files == AllFiles {
+		var err error
+		if untracked, err = untrackedPaths(repository); err != nil {
+			return nil, err
+		}
 	}
 	return repositoryRoot(repository).workingContentChanges(revisionName(workingChangesBase(repository)), untracked)
 }

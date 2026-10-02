@@ -998,9 +998,12 @@ type RunOptions struct {
 	// Receipts supplies per-profile execution aggregates for display.
 	// Nil renders profiles exactly as before.
 	Receipts ReceiptProvider
-	// InstallCheckpointHooks lets the first-use journey install the git
-	// Integration. Nil skips the Integrations step.
+	// InstallCheckpointHooks lets the first-use journey install Checkpoint
+	// Integrations. Nil skips the Integrations step.
 	InstallCheckpointHooks HookInstaller
+	// AgentsOnPath lists the Caller Agent Integrations whose agent is on
+	// PATH, which the journey preselects.
+	AgentsOnPath []configuration.IntegrationName
 }
 
 // Run opens the terminal shell over a read-only Manager snapshot.

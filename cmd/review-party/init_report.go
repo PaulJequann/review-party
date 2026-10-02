@@ -63,23 +63,42 @@ func (report initReport) lines() ([]string, error) {
 	return lines, nil
 }
 
-// checkpointLines names each Checkpoint that lists the git Integration as team
-// floor but has no git hook in place, with the command that installs it or the
-// snippet a hook tool needs by hand. A block someone edited counts as in place.
+// checkpointLines names each Checkpoint that lists an Integration as team
+// floor but has no hook for it in the team's files, with the command that
+// installs it or the snippet a hook tool needs by hand, then the Codex
+// approval step when any floor lists codex. A hook someone edited counts as
+// in place.
 func (report initReport) checkpointLines() ([]string, error) {
 	declared, err := report.manager.Checkpoints(report.repository)
 	if err != nil {
 		return nil, err
 	}
-	plan, err := planHookInstall(hookInstallTarget{root: string(report.repository), configuration: report.configuration}, report.manager)
+	var lines []string
+	for _, integration := range configuration.IntegrationNames() {
+		gaps, err := report.integrationGapLines(declared, integration)
+		if err != nil {
+			return nil, err
+		}
+		lines = append(lines, gaps...)
+	}
+	if configuration.FloorIntegrates(declared, configuration.IntegrationCodex) {
+		lines = append(lines, codexApprovalStep)
+	}
+	return lines, nil
+}
+
+// integrationGapLines reports each declared Checkpoint that lists integration
+// as team floor and lacks its hook in the team's files.
+func (report initReport) integrationGapLines(declared map[configuration.CheckpointName]configuration.Checkpoint, integration configuration.IntegrationName) ([]string, error) {
+	plan, err := planIntegrationInstall(hookInstallTarget{root: string(report.repository), configuration: report.configuration, integration: integration}, report.manager)
 	if err != nil {
 		return nil, err
 	}
-	install := "review-party checkpoint install git --repo " + shellWord(string(report.repository)) + report.config
+	install := "review-party checkpoint install " + string(integration) + " --repo " + shellWord(string(report.repository)) + report.config
 	var lines []string
 	for _, step := range plan.steps {
-		if declared[step.checkpoint].Integrates(configuration.IntegrationGit) {
-			lines = append(lines, hookGapLines(step, plan.tool, install)...)
+		if declared[step.checkpoint].Integrates(integration) {
+			lines = append(lines, hookGapLines(step, integration, plan.tool, install)...)
 		}
 	}
 	return lines, nil
@@ -89,23 +108,23 @@ func (report initReport) checkpointLines() ([]string, error) {
 // the snippet when it must be added by hand, the install command when the
 // installer can add it, and the command that activates a hook tool git does
 // not run in this clone.
-func hookGapLines(step hookInstallStep, tool hookTool, install string) []string {
-	checkpoint := "Checkpoint " + string(step.checkpoint)
+func hookGapLines(step hookInstallStep, integration configuration.IntegrationName, tool hookTool, install string) []string {
+	checkpoint, hook := "Checkpoint "+string(step.checkpoint), string(integration)+" hook"
 	var lines []string
 	switch step.outcome {
 	case hookManual:
-		lines = append(lines, checkpoint+" has no git hook; add to "+step.path+" ("+string(tool)+") by hand:")
+		lines = append(lines, checkpoint+" has no "+hook+"; add to "+step.path+" ("+string(tool)+") by hand:")
 		for _, line := range step.manual {
 			lines = append(lines, "  "+line)
 		}
-	case hookCreated, hookInserted:
-		lines = append(lines, checkpoint+" has no git hook: "+install)
+	case hookCreated, hookInserted, hookEntryAdded, hookEntryShared:
+		lines = append(lines, checkpoint+" has no "+hook+": "+install)
 	case hookNotExecutable:
-		lines = append(lines, checkpoint+" git hook "+step.path+" is not executable, so git skips it: "+install)
-	case hookInstalled, hookEdited:
+		lines = append(lines, checkpoint+" "+hook+" "+step.path+" is not executable, so git skips it: "+install)
+	case hookInstalled, hookEdited, hookEntryEdited:
 	}
 	if step.activate != "" {
-		lines = append(lines, checkpoint+" git hook does not run until "+string(tool)+" is active in this clone: "+step.activate)
+		lines = append(lines, checkpoint+" "+hook+" does not run until "+string(tool)+" is active in this clone: "+step.activate)
 	}
 	return lines
 }

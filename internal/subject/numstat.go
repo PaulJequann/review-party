@@ -62,6 +62,12 @@ func StagedLineCounts(repository string) (LineCounts, error) {
 	return gitLineCounts(repository, "diff", "--numstat", "-z", "--no-renames", "--cached", workingChangesBase(repository), "--")
 }
 
+// TrackedLineCounts counts lines the working tree's tracked files change over
+// HEAD, or over the empty tree before the first commit.
+func TrackedLineCounts(repository string) (LineCounts, error) {
+	return gitLineCounts(repository, "diff", "--numstat", "-z", "--no-renames", workingChangesBase(repository), "--")
+}
+
 func gitLineCounts(repository string, args ...string) (LineCounts, error) {
 	output, err := gitOutput(repository, args...)
 	if err != nil {
