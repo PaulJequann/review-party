@@ -1,6 +1,6 @@
 # Guided initialization v1
 
-Status: accepted on 2026-10-01; not implemented. Slice 1 of
+Status: implemented on 2026-10-01. Slice 1 of
 [Review Checkpoints v1](review-checkpoints-v1.md).
 
 ## Problem
@@ -31,7 +31,7 @@ same focused forms.
 |---|---|
 | `review-party init` in a terminal | Prepares state, then runs the first-use journey. |
 | `review-party init` without a terminal | Prepares state, then reports each missing piece with the exact flagged command that adds it. Writes nothing else. |
-| `review-party init` with any setup flag | Applies only the flags given, without prompting. Pieces the flags do not name stay unchanged. Without a terminal, writes need `--yes`. |
+| `review-party init` with any setup flag | Applies only the flags given, without the journey, through one Plan. A terminal confirms that Plan as other `config` mutations do. Without a terminal, writes need `--yes`. Pieces the flags do not name stay unchanged. |
 
 Setup flags in this slice are `--profile NAME` and `--party NAME`, each
 repeatable. An unqualified name resolves Repository before Global, the same as
@@ -75,6 +75,9 @@ references Global Profiles commits the composition and leaves only Profile
 names to bind. Recommendation: in a repository without a selection, the
 journey offers to save the chosen Global Party's composition as a Repository
 Party, so that teammates bind Profiles, not Parties.
+
+Implemented as the default: the offer is preselected, and the journey reports
+when it applied it. Declining selects the Global Party unchanged.
 
 ## Out of scope
 

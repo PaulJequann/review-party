@@ -69,13 +69,39 @@ completion reads saved executable definitions from local configuration and
 returns no Profile or Party names when none are saved. Reviewer completion is available for Eval experiment flags. Completion never
 launches an Agent Harness.
 
-Initialize Review Party once for the repository before the first Review. This
-prepares managed per-user state without creating repository files or Profile
-copies. Supplying `--state-dir` also records that advanced choice in Global
-Configuration:
+Initialize Review Party once for the repository before the first Review.
+`init` prepares managed per-user state and then brings the repository to a
+runnable state. Supplying `--state-dir` also records that advanced choice in
+Global Configuration:
 
 ```sh
 review-party init --repo .
+```
+
+In a terminal, `init` runs the first-use journey with the Configuration Hub's
+forms. When the repository's Review selection names Global Profiles or Parties
+that your Global Configuration lacks, it offers to create each one. A missing
+Profile starts from the Template of the same name when one exists. When the
+repository has no selection, it offers your existing Profiles and Parties, or
+Profile Creation. A chosen Global Party is offered as a Repository Party whose
+members stay Global Profile references, so teammates bind Profiles rather than
+invent the Party's members. Each step publishes through its own reviewed Plan,
+so a cancelled `init` loses nothing a rerun cannot finish. Pass `--accessible`
+for non-redrawing prompts. The journey ends with one line for each piece still
+missing.
+
+Without a terminal, `init` writes no configuration. It prints each missing
+piece on one line with the command that adds it, or
+`Repository is ready: review-party run --repo PATH`.
+
+`--profile NAME` and `--party NAME` add names to the Review selection without
+the journey. Each is repeatable. An unqualified name resolves Repository before
+Global, like `run`, and joins the selection group of that scope. A name already
+selected changes nothing. The writes go through one Plan, which a terminal
+confirms and which needs `--yes` without one:
+
+```sh
+review-party init --repo . --profile bugs --party global:crew --yes
 ```
 
 Advanced callers may select a state location during initialization with

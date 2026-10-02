@@ -1,8 +1,6 @@
 package configurationhub
 
 import (
-	"fmt"
-	"strconv"
 	"strings"
 
 	"charm.land/huh/v2"
@@ -17,28 +15,14 @@ type partyFormDraft struct {
 
 func (e *editor) createParty() error {
 	draft := &e.draftSet().party
-	if err := e.form(
-		huh.NewSelect[string]().Title("Configuration scope").Options(scopeOptions()...).Value(&draft.scope),
-		huh.NewInput().Title("Party name").Value(&draft.name),
-		huh.NewInput().Title("Description").Value(&draft.description),
-		huh.NewMultiSelect[string]().Title("Profiles").Options(e.profileReferenceOptions()...).Value(&draft.profileRefs),
-		huh.NewInput().Title("Concurrency limit").Value(&draft.limit),
-	); err != nil {
+	if err := e.form(e.partyFields(draft)...); err != nil {
 		return err
 	}
-	limit, err := strconv.Atoi(strings.TrimSpace(draft.limit))
+	party, err := partyDraftFromForm(*draft)
 	if err != nil {
-		return fmt.Errorf("invalid concurrency limit: %w", err)
+		return err
 	}
-	refs := make([]configuration.ProfileReference, 0)
-	for _, raw := range strings.Fields(draft.profiles) {
-		refScope, name := configuration.ParseScopedReference(raw)
-		if refScope == "" {
-			refScope = configuration.Scope(draft.scope)
-		}
-		refs = append(refs, configuration.ProfileReference{Scope: refScope, Profile: name})
-	}
-	plan, err := e.manager.PlanPartyCreation(e.Repository, configuration.PartyDraft{Target: configuration.Scope(draft.scope), Name: draft.name, Description: draft.description, ConcurrencyLimit: limit, Profiles: refs})
+	plan, err := e.manager.PlanPartyCreation(e.Repository, party)
 	if err != nil {
 		return err
 	}
@@ -47,4 +31,37 @@ func (e *editor) createParty() error {
 		e.draftSet().party = partyFormDraft{}
 	}
 	return err
+}
+
+// partyFields asks only for what the draft does not already hold. A Global
+// Party may reference only Global Profiles, so a seeded Global draft offers
+// no others. Members are chosen before the scope field exists because a huh
+// Select writes its first option into an empty bound value.
+func (e *editor) partyFields(draft *partyFormDraft) []huh.Field {
+	members := e.profileReferenceOptions()
+	if draft.scope == string(configuration.ScopeGlobal) {
+		members = globalProfileOptions(members)
+	}
+	fields := make([]huh.Field, 0, 5)
+	if draft.scope == "" {
+		fields = append(fields, huh.NewSelect[string]().Title("Configuration scope").Options(scopeOptions()...).Value(&draft.scope))
+	}
+	if draft.name == "" {
+		fields = append(fields, huh.NewInput().Title("Party name").Value(&draft.name))
+	}
+	return append(fields,
+		huh.NewInput().Title("Description").Value(&draft.description),
+		huh.NewMultiSelect[string]().Title("Profiles").Options(members...).Value(&draft.profileRefs),
+		huh.NewInput().Title("Concurrency limit").Value(&draft.limit),
+	)
+}
+
+func globalProfileOptions(options []huh.Option[string]) []huh.Option[string] {
+	global := make([]huh.Option[string], 0, len(options))
+	for _, option := range options {
+		if strings.HasPrefix(option.Value, string(configuration.ScopeGlobal)+":") {
+			global = append(global, option)
+		}
+	}
+	return global
 }

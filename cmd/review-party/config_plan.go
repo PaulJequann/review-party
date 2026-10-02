@@ -41,7 +41,7 @@ func confirmConfigurationPlanIfNeeded(options configurationMutationOptions, plan
 	if options.format == "json" {
 		return errors.New("JSON mutations require --yes")
 	}
-	if !isTerminalInput(streams.input) {
+	if !streams.isTerminal(streams.input) {
 		return errors.New("configuration mutation requires --yes when stdin is not a terminal")
 	}
 	if err := printHumanPlan(streams.output, plan); err != nil {
@@ -141,10 +141,7 @@ func confirmConfigurationPlan(input io.Reader, output io.Writer) (bool, error) {
 	return answer == "y" || answer == "yes", nil
 }
 
-func isTerminalInput(input io.Reader) bool {
-	file, ok := input.(*os.File)
-	if !ok {
-		return false
-	}
-	return isatty.IsTerminal(file.Fd()) || isatty.IsCygwinTerminal(file.Fd())
+func isTerminalStream(stream any) bool {
+	file, ok := stream.(*os.File)
+	return ok && (isatty.IsTerminal(file.Fd()) || isatty.IsCygwinTerminal(file.Fd()))
 }

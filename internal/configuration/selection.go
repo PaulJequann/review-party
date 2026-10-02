@@ -245,8 +245,7 @@ func (resolver selectionResolver) resolve(repository Repository, request RunRequ
 // resolveExplicitProfile resolves --profile NAME to exactly one scoped
 // identity. Unqualified names prefer Repository Configuration before Global.
 func (resolver selectionResolver) resolveExplicitProfile(repository Repository, value string) (ResolvedReviews, error) {
-	qualified, unqualified := ParseScopedReference(value)
-	profileScope, err := resolver.explicitProfileScope(repository, qualified, unqualified)
+	profileScope, unqualified, err := resolver.definitionScope(repository, ItemProfile, value)
 	if err != nil {
 		return ResolvedReviews{}, err
 	}
@@ -260,10 +259,13 @@ func (resolver selectionResolver) requireFound(reference selectionReference, fou
 	if found {
 		return nil
 	}
-	available := resolver.availableNames(reference.kind, reference.scope)
+	return resolver.unresolved(reference)
+}
+
+func (resolver selectionResolver) unresolved(reference selectionReference) UnresolvedReferenceError {
 	return UnresolvedReferenceError{
 		Kind: reference.kind, Name: reference.name, Scope: reference.scope,
-		SelectedBy: reference.selectedBy, Available: available,
+		SelectedBy: reference.selectedBy, Available: resolver.availableNames(reference.kind, reference.scope),
 	}
 }
 
@@ -295,29 +297,46 @@ func inventoryNames(manager *Manager, repository Repository, scope Scope, kind A
 	}
 }
 
-// explicitProfileScope returns the winning scope for an explicit reference,
-// loading the exact scoped name when qualified.
-func (resolver selectionResolver) explicitProfileScope(repository Repository, qualified Scope, unqualified string) (Scope, error) {
-	if qualified != "" {
-		_, found, err := resolver.lookup.profileAt(qualified, unqualified)
+// definitionScope returns the scope that owns one possibly qualified Profile
+// or Party name. A qualified name checks only its scope; an unqualified name
+// prefers Repository Configuration before Global.
+func (resolver selectionResolver) definitionScope(repository Repository, kind AuthoredItemKind, value string) (Scope, string, error) {
+	qualified, name := ParseScopedReference(value)
+	candidates := []Scope{qualified}
+	if qualified == "" {
+		candidates = []Scope{ScopeRepository, ScopeGlobal}
+	}
+	for _, scope := range candidates {
+		if scope == ScopeRepository && repository == "" {
+			continue
+		}
+		found, err := resolver.exists(kind, scope, name)
 		if err != nil {
-			return "", err
+			return "", "", err
 		}
-		if err := resolver.requireFound(selectionReference{scope: qualified, kind: ItemProfile, name: unqualified}, found); err != nil {
-			return "", err
+		if found {
+			return scope, name, nil
 		}
-		return qualified, nil
 	}
-	profileScope, err := resolver.unqualifiedProfileScope(repository, unqualified)
-	if err != nil {
-		return "", err
+	return "", "", resolver.requireFound(selectionReference{scope: qualified, kind: kind, name: name}, false)
+}
+
+func (resolver selectionResolver) exists(kind AuthoredItemKind, scope Scope, name string) (bool, error) {
+	if kind == ItemParty {
+		_, found, err := resolver.lookup.partyAt(scope, name)
+		return found, err
 	}
-	return profileScope, nil
+	_, found, err := resolver.lookup.profileAt(scope, name)
+	return found, err
 }
 
 // resolveExplicitParty resolves --party NAME and expands its flat member order.
 func (resolver selectionResolver) resolveExplicitParty(repository Repository, value string) (ResolvedReviews, error) {
-	party, scope, err := resolver.selectionParty(repository, value, "")
+	scope, name, err := resolver.definitionScope(repository, ItemParty, value)
+	if err != nil {
+		return ResolvedReviews{}, err
+	}
+	party, _, err := resolver.selectionPartyAt(repository, scope, name, "")
 	if err != nil {
 		return ResolvedReviews{}, err
 	}
@@ -359,17 +378,9 @@ func (resolver selectionResolver) resolveDefaultSelection(repository Repository,
 // missing or invalid Party fails during resolution instead of during planning.
 func (resolver selectionResolver) defaultEntries(repository Repository, selection ReviewSelection) ([]authoredEntry, error) {
 	entries := make([]authoredEntry, 0, len(selection.Global)+len(selection.Repository))
-	groups := []struct {
-		name  string
-		scope Scope
-		items []SelectionItem
-	}{
-		{"reviews.global", ScopeGlobal, selection.Global},
-		{"reviews.repository", ScopeRepository, selection.Repository},
-	}
-	for _, group := range groups {
+	for _, group := range selectionGroups(selection) {
 		for index, item := range group.items {
-			entry, err := resolver.selectedEntry(repository, group.scope, fmt.Sprintf("%s[%d]", group.name, index), item)
+			entry, err := resolver.selectedEntry(repository, group.scope, group.origin(index), item)
 			if err != nil {
 				return nil, err
 			}
@@ -377,6 +388,25 @@ func (resolver selectionResolver) defaultEntries(repository Repository, selectio
 		}
 	}
 	return entries, nil
+}
+
+// authoredGroup is one reviews array in authored order. Its name owns the
+// scope of every item it selects.
+type authoredGroup struct {
+	name  string
+	scope Scope
+	items []SelectionItem
+}
+
+func (group authoredGroup) origin(index int) string {
+	return fmt.Sprintf("%s[%d]", group.name, index)
+}
+
+func selectionGroups(selection ReviewSelection) []authoredGroup {
+	return []authoredGroup{
+		{"reviews.global", ScopeGlobal, selection.Global},
+		{"reviews.repository", ScopeRepository, selection.Repository},
+	}
 }
 
 func (resolver selectionResolver) selectedEntry(repository Repository, scope Scope, origin string, item SelectionItem) (authoredEntry, error) {
@@ -424,32 +454,6 @@ func partyEntry(name string, scope Scope, origin string, party Party) authoredEn
 	}
 }
 
-// selectionParty loads one possibly qualified Party for a run selection,
-// preferring Repository Configuration before Global for unqualified names.
-func (resolver selectionResolver) selectionParty(repository Repository, value, origin string) (Party, Scope, error) {
-	qualified, unqualified := ParseScopedReference(value)
-	if qualified != "" {
-		return resolver.selectionPartyAt(repository, qualified, unqualified, origin)
-	}
-	if repository != "" {
-		party, found, err := resolver.lookup.partyAt(ScopeRepository, unqualified)
-		if err != nil {
-			return Party{}, "", err
-		}
-		if found {
-			return party, ScopeRepository, nil
-		}
-	}
-	party, found, err := resolver.lookup.partyAt(ScopeGlobal, unqualified)
-	if err != nil {
-		return Party{}, "", err
-	}
-	if err := resolver.requireFound(selectionReference{scope: ScopeGlobal, kind: ItemParty, name: unqualified, selectedBy: origin}, found); err != nil {
-		return Party{}, "", err
-	}
-	return party, ScopeGlobal, nil
-}
-
 func (resolver selectionResolver) selectionPartyAt(repository Repository, scope Scope, name, origin string) (Party, Scope, error) {
 	party, found, err := resolver.lookup.partyAt(scope, name)
 	if err != nil {
@@ -459,26 +463,6 @@ func (resolver selectionResolver) selectionPartyAt(repository Repository, scope 
 		return Party{}, "", err
 	}
 	return party, scope, nil
-}
-
-func (resolver selectionResolver) unqualifiedProfileScope(repository Repository, name string) (Scope, error) {
-	if repository != "" {
-		_, found, err := resolver.lookup.profileAt(ScopeRepository, name)
-		if err != nil {
-			return "", err
-		}
-		if found {
-			return ScopeRepository, nil
-		}
-	}
-	_, found, err := resolver.lookup.profileAt(ScopeGlobal, name)
-	if err != nil {
-		return "", err
-	}
-	if err := resolver.requireFound(selectionReference{kind: ItemProfile, name: name}, found); err != nil {
-		return "", err
-	}
-	return ScopeGlobal, nil
 }
 
 func (manager *Manager) selectionLookup(repository Repository) selectionLookup {

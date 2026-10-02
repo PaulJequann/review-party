@@ -6,6 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"reviewparty/internal/configuration"
 	"reviewparty/internal/engine"
 	"reviewparty/internal/model"
 	"reviewparty/internal/store"
@@ -171,19 +172,35 @@ func newConfigCommand(streams commandIO) *cobra.Command {
 }
 
 func newInitCommand(streams commandIO) *cobra.Command {
+	var setup []setupTarget
 	cmd := &cobra.Command{
-		Use: "init", Short: "Prepare managed state for a repository", Example: "  review-party init --repo .", Args: cobra.NoArgs,
+		Use:   "init",
+		Short: "Bring a repository to a runnable state",
+		Long: "Prepare managed state, then make sure the repository's Review selection names Profiles and Parties that exist.\n\n" +
+			"In a terminal, init opens the first-use journey. Without a terminal, it prints each missing piece with the command that adds it. " +
+			"--profile and --party add names to the selection without the journey; an unqualified name resolves Repository before Global.",
+		Example: "  review-party init\n  review-party init --profile bugs --yes\n  review-party init --party crew --profile global:docs",
+		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			options := initOptions{repository: stringFlag(cmd, "repo"), stateDirectory: stringFlag(cmd, "state-dir"), configuration: stringFlag(cmd, "config"), backup: boolFlag(cmd, "backup-incompatible"), fresh: boolFlag(cmd, "fresh"), yes: boolFlag(cmd, "yes")}
-			return commandResult(executeInit(options, streams.output, streams.errors))
+			options := initOptions{
+				repository: stringFlag(cmd, "repo"), stateDirectory: stringFlag(cmd, "state-dir"), configuration: stringFlag(cmd, "config"),
+				backup: boolFlag(cmd, "backup-incompatible"), fresh: boolFlag(cmd, "fresh"), yes: boolFlag(cmd, "yes"),
+				accessible: boolFlag(cmd, "accessible"), setup: setup, discoveryService: defaultConfigurationDependencies().discoveryService,
+			}
+			return commandResult(executeInit(cmd.Context(), options, streams))
 		},
 	}
 	addRepositoryFlag(cmd, "Git repository to initialize")
 	cmd.Flags().String("state-dir", "", "Advanced per-user state location")
 	cmd.Flags().Bool("backup-incompatible", false, "Back up an incompatible ledger and SQLite sidecars without initializing")
 	cmd.Flags().Bool("fresh", false, "Initialize fresh state after a separately confirmed backup")
-	cmd.Flags().Bool("yes", false, "Confirm this recovery step")
+	cmd.Flags().Var(setupTargetFlag{kind: configuration.ItemProfile, targets: &setup}, "profile", "Add a Profile to the Review selection; repeatable")
+	cmd.Flags().Var(setupTargetFlag{kind: configuration.ItemParty, targets: &setup}, "party", "Add a Party to the Review selection; repeatable")
+	cmd.Flags().Bool("yes", false, "Confirm setup writes and recovery steps")
+	cmd.Flags().Bool("accessible", false, "Use non-redrawing accessible forms in the first-use journey")
 	cmd.MarkFlagsMutuallyExclusive("backup-incompatible", "fresh")
+	cmd.MarkFlagsMutuallyExclusive("backup-incompatible", "profile")
+	cmd.MarkFlagsMutuallyExclusive("backup-incompatible", "party")
 	addConfigurationFlag(cmd)
 	return cmd
 }

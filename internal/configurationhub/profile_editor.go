@@ -10,18 +10,26 @@ import (
 )
 
 func (e *editor) createProfile() error {
+	_, err := e.publishNewProfile("")
+	return err
+}
+
+// publishNewProfile completes the Profile draft and returns the published
+// Profile. A non-empty suggestedTemplate is preselected, not fixed, when the
+// Caller chooses the instruction source.
+func (e *editor) publishNewProfile(suggestedTemplate string) (configuration.ProfileReference, error) {
 	if err := e.ensureProfileFlow(); err != nil {
-		return err
+		return configuration.ProfileReference{}, err
 	}
 	draft := &e.draftSet().profile
 	// Field order matches the interactive forms: execution fields first, then
 	// the instruction source once the rest of the draft is known.
 	if err := e.editProfileFields(draft); err != nil {
-		return err
+		return configuration.ProfileReference{}, err
 	}
 	if profileNeedsSource(*draft) {
-		if err := e.chooseProfileSource(draft); err != nil {
-			return err
+		if err := e.chooseProfileSource(draft, suggestedTemplate); err != nil {
+			return configuration.ProfileReference{}, err
 		}
 	}
 	return e.completeProfile(draft)
@@ -34,32 +42,37 @@ func profileNeedsSource(draft configuration.ProfileDraft) bool {
 	return strings.TrimSpace(draft.Instructions) == ""
 }
 
-func (e *editor) completeProfile(draft *configuration.ProfileDraft) error {
+func (e *editor) completeProfile(draft *configuration.ProfileDraft) (configuration.ProfileReference, error) {
 	for {
-		// Re-ask only the fields still empty, matching the interactive forms'
-		// reopen-with-prefilled-values behavior on revision.
-		if err := e.editProfileFields(draft); err != nil {
-			return err
-		}
-		plan, err := e.planProfile(*draft)
+		published, err := e.attemptProfile(draft)
 		if err != nil {
-			if reviseErr := e.reviseProfileAfterError(draft, err); reviseErr != nil {
-				return reviseErr
-			}
-			continue
+			return configuration.ProfileReference{}, err
 		}
-		published, err := e.reviewAndPublish(plan, func() error { return e.manager.Publish(plan) })
 		if published {
-			e.draftSet().profile = configuration.ProfileDraft{}
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		if err := e.reviseProfile(draft); err != nil {
-			return err
+			reference := configuration.ProfileReference{Scope: draft.Target, Profile: draft.Name}
+			*draft = configuration.ProfileDraft{}
+			return reference, nil
 		}
 	}
+}
+
+// attemptProfile plans and reviews the draft once. A planning failure or a
+// declined review leads into one revision before the next attempt.
+func (e *editor) attemptProfile(draft *configuration.ProfileDraft) (bool, error) {
+	// Re-ask only the fields still empty, matching the interactive forms'
+	// reopen-with-prefilled-values behavior on revision.
+	if err := e.editProfileFields(draft); err != nil {
+		return false, err
+	}
+	plan, err := e.planProfile(*draft)
+	if err != nil {
+		return false, e.reviseProfileAfterError(draft, err)
+	}
+	published, err := e.reviewAndPublish(plan, func() error { return e.manager.Publish(plan) })
+	if published || err != nil {
+		return published, err
+	}
+	return false, e.reviseProfile(draft)
 }
 
 func (e *editor) ensureProfileFlow() error {
@@ -175,14 +188,14 @@ func profileTemplateOptions(templates []configuration.Template) []huh.Option[str
 	return options
 }
 
-func (e *editor) chooseProfileSource(draft *configuration.ProfileDraft) error {
+func (e *editor) chooseProfileSource(draft *configuration.ProfileDraft, suggestedTemplate string) error {
 	var source string
 	if err := e.form(huh.NewSelect[string]().Title("Instruction source").Options(huh.NewOption("Template", "template"), huh.NewOption("Blank", "blank")).Value(&source)); err != nil {
 		return err
 	}
 	switch source {
 	case "template":
-		return e.chooseProfileTemplate(draft)
+		return e.chooseProfileTemplate(draft, suggestedTemplate)
 	case "blank":
 		return e.chooseBlankProfileInstructions(draft)
 	default:
@@ -190,12 +203,12 @@ func (e *editor) chooseProfileSource(draft *configuration.ProfileDraft) error {
 	}
 }
 
-func (e *editor) chooseProfileTemplate(draft *configuration.ProfileDraft) error {
+func (e *editor) chooseProfileTemplate(draft *configuration.ProfileDraft, suggestedTemplate string) error {
 	templates := profileTemplateOptions(e.manager.Templates())
 	if len(templates) == 0 {
 		return fmt.Errorf("no Review Profile Templates are available; choose blank instructions")
 	}
-	var templateID string
+	templateID := suggestedTemplate
 	if err := e.form(huh.NewSelect[string]().Title("Template").Options(templates...).Value(&templateID)); err != nil {
 		return err
 	}

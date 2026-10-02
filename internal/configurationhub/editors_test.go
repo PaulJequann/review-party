@@ -408,11 +408,12 @@ func TestProfileFlowChangingBlankToTemplateClearsStaleInstructions(t *testing.T)
 	manager := configuration.NewManager(configuration.Options{Templates: []configuration.Template{{ID: "bugs", Revision: "v1", Instructions: "template instructions"}}})
 	draft := configuration.ProfileDraft{Target: configuration.ScopeGlobal, Instructions: "old blank instructions"}
 	editor := editor{manager: manager, RunOptions: RunOptions{Input: newLineInput("1\nn\n"), Output: &bytes.Buffer{}, Accessible: true}}
-	if err := editor.chooseProfileTemplate(&draft); err != nil {
+	if err := editor.chooseProfileTemplate(&draft, ""); err != nil {
 		t.Fatal(err)
 	}
-	if draft.Instructions != "" || draft.TemplateID != "bugs" || draft.TemplateRevision != "v1" {
-		t.Fatalf("draft = %#v", draft)
+	want := configuration.ProfileDraft{Target: configuration.ScopeGlobal, TemplateID: "bugs", TemplateRevision: "v1"}
+	if draft != want {
+		t.Fatalf("draft = %#v, want %#v", draft, want)
 	}
 }
 

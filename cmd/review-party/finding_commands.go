@@ -97,7 +97,7 @@ func parseFindingRecordRequest(cmd *cobra.Command, id string, input io.Reader) (
 	if err != nil {
 		return engine.VerdictRequest{}, nil, err
 	}
-	if isTerminalInput(input) {
+	if isTerminalStream(input) {
 		return engine.VerdictRequest{}, nil, errors.New(`finding record reads "N accept|reject|defer REASON" lines from stdin; pipe them in`)
 	}
 	judgments, lines, err := parseJudgmentLines(input)

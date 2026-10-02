@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 )
 
 // PartyDraft contains the complete authored Party.
@@ -112,13 +113,13 @@ func DefaultReviewSelection() ReviewSelection {
 	return ReviewSelection{ConcurrencyLimit: 1}
 }
 
-// AddReviewSelection returns a typed replacement intent with one item appended.
+// AddReviewSelection returns a typed replacement intent with one item appended
+// to its group. Adding an item the group already selects changes nothing.
 func AddReviewSelection(current ReviewSelection, group Scope, item SelectionItem) SetReviewSelection {
 	updated := cloneReviewSelection(current)
-	if group == ScopeGlobal {
-		updated.Global = append(updated.Global, item)
-	} else {
-		updated.Repository = append(updated.Repository, item)
+	items := selectionGroup(&updated, group)
+	if !slices.Contains(*items, item) {
+		*items = append(*items, item)
 	}
 	return SetReviewSelection{Selection: updated}
 }

@@ -22,17 +22,29 @@ func (e *editor) editReviews() error {
 	).Value(&draft.operation)); err != nil {
 		return err
 	}
-	selection, _, err := e.manager.EffectiveReviewSelection(e.Repository)
+	selection, err := e.currentReviewSelection()
 	if err != nil {
 		return err
-	}
-	if selection.ConcurrencyLimit == 0 {
-		selection = configuration.DefaultReviewSelection()
 	}
 	intent, err := e.reviewIntent(draft.operation, selection)
 	if err != nil {
 		return err
 	}
+	return e.publishReviewSelection(intent)
+}
+
+func (e *editor) currentReviewSelection() (configuration.ReviewSelection, error) {
+	selection, _, err := e.manager.EffectiveReviewSelection(e.Repository)
+	if err != nil {
+		return configuration.ReviewSelection{}, err
+	}
+	if selection.ConcurrencyLimit == 0 {
+		selection = configuration.DefaultReviewSelection()
+	}
+	return selection, nil
+}
+
+func (e *editor) publishReviewSelection(intent configuration.SetReviewSelection) error {
 	plan, err := e.manager.Plan(e.Repository, []configuration.Intent{intent})
 	if err != nil {
 		return err
