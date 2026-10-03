@@ -117,12 +117,14 @@ func newRootCommand(streams commandIO) *cobra.Command {
 		Short:         "Run bounded code reviews through coding agents",
 		Long:          "Review Party resolves one repository's review selection into bounded agent runs and stores validated review records.",
 		Example:       "  review-party run --repo .\n  review-party run --profile code-quality --repo .\n  review-party config\n  review-party history --format json",
+		Version:       humanVersion(currentRuntimeProvenance()),
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return cmd.Help()
 		},
 	}
+	root.SetVersionTemplate("{{.Version}}")
 	root.SetIn(streams.input)
 	root.SetOut(streams.output)
 	root.SetErr(streams.errors)

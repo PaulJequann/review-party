@@ -18,6 +18,7 @@ Build and atomically install the current checkout into
 
 ```sh
 ./scripts/install-local.sh
+review-party --version
 review-party version
 ```
 
