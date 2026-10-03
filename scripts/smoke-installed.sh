@@ -18,7 +18,7 @@ git -C "$work/repository" commit -qm 'smoke fixture'
   cd "$work/repository"
   XDG_CONFIG_HOME="$work/config" XDG_STATE_HOME="$work/state" "$binary" --help >/dev/null
   XDG_CONFIG_HOME="$work/config" XDG_STATE_HOME="$work/state" "$binary" version --format json
-  XDG_CONFIG_HOME="$work/config" XDG_STATE_HOME="$work/state" "$binary" init --repo .
+  XDG_CONFIG_HOME="$work/config" XDG_STATE_HOME="$work/state" "$binary" init --repo . </dev/null
 )
 
 printf 'Installed-binary smoke test passed outside the source repository.\n'
