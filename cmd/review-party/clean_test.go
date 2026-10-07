@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -117,16 +118,27 @@ func TestCleanExitsOneAndNamesWhatItCouldNotRemove(t *testing.T) {
 }
 
 func TestCleanYesNeverRemovesAStateDirectoryUnderTheHostTemp(t *testing.T) {
-	fixture := newHostFixture(t)
-	t.Setenv("XDG_STATE_HOME", fixture.host.temp)
-	ledger := filepath.Join(fixture.host.temp, "review-party", "ledger.sqlite")
-	fixture.write(ledger, "ledger")
-	fixture.age(filepath.Dir(ledger))
+	for _, symlinked := range []bool{false, true} {
+		t.Run(fmt.Sprintf("symlinked temp %t", symlinked), func(t *testing.T) {
+			fixture := newHostFixture(t)
+			t.Setenv("XDG_STATE_HOME", fixture.host.temp)
+			ledger := filepath.Join(fixture.host.temp, "review-party", "ledger.sqlite")
+			fixture.write(ledger, "ledger")
+			fixture.age(filepath.Dir(ledger))
+			if symlinked {
+				link := fixture.host.temp + "-link"
+				if err := os.Symlink(fixture.host.temp, link); err != nil {
+					t.Skipf("cannot create a symlink: %v", err)
+				}
+				fixture.host.temp = link
+			}
 
-	result := decodeInto[cleanResult](t, fixture.run("clean", "--yes", "--format", "json"), 0)
+			result := decodeInto[cleanResult](t, fixture.run("clean", "--yes", "--format", "json"), 0)
 
-	assertLabels(t, "pending", result.Pending, "ledger ledger.sqlite")
-	fixture.assertOnDisk([]string{ledger}, nil)
+			assertLabels(t, "pending", result.Pending, "ledger ledger.sqlite")
+			fixture.assertOnDisk([]string{ledger}, nil)
+		})
+	}
 }
 
 func TestCleanYesKeepsAnOldTempTreeChangedInside(t *testing.T) {

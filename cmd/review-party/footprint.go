@@ -197,7 +197,7 @@ func takeFootprint(host hostDirectories, configurationPath string) footprint {
 		result.Locations.Cache = cache
 		result.collect(cache, cacheItems)
 	}
-	owned := []string{result.Locations.State, result.Locations.Cache}
+	owned := ownedDirectories(result.Locations.State, result.Locations.Cache)
 	result.collect(host.temp, func(temp string) ([]footprintItem, error) { return legacyItems(temp, owned) })
 	result.judge()
 	return result
@@ -319,11 +319,29 @@ func cacheItems(directory string) ([]footprintItem, error) {
 	return []footprintItem{newFootprintItem(directory, kindCache, bytes, err)}, nil
 }
 
+// ownedDirectories are the owned locations and every existing directory
+// above them. They are matched by identity, not spelling, because a
+// symlinked host temp directory spells the same directory differently.
+func ownedDirectories(locations ...string) []fs.FileInfo {
+	var owned []fs.FileInfo
+	for _, location := range locations {
+		for path := location; path != ""; path = filepath.Dir(path) {
+			if info, err := os.Stat(path); err == nil {
+				owned = append(owned, info)
+			}
+			if filepath.Dir(path) == path {
+				break
+			}
+		}
+	}
+	return owned
+}
+
 // legacyItems are what releases before the runtime root left directly in
 // the host temp directory, such as review-party-worktrees. An entry that is
 // or holds one of the owned locations, such as a state directory configured
 // under the host temp directory, is never legacy.
-func legacyItems(temp string, owned []string) ([]footprintItem, error) {
+func legacyItems(temp string, owned []fs.FileInfo) ([]footprintItem, error) {
 	entries, err := os.ReadDir(temp)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
@@ -331,7 +349,7 @@ func legacyItems(temp string, owned []string) ([]footprintItem, error) {
 	var items []footprintItem
 	for _, entry := range entries {
 		path := filepath.Join(temp, entry.Name())
-		if !isLegacyEntry(entry) || slices.ContainsFunc(owned, func(location string) bool { return holds(path, location) }) {
+		if !isLegacyEntry(entry) || holdsOwned(path, owned) {
 			continue
 		}
 		bytes, changed, sizeErr := legacyUsage(path)
@@ -340,13 +358,9 @@ func legacyItems(temp string, owned []string) ([]footprintItem, error) {
 	return items, err
 }
 
-// holds reports whether location is parent or lies inside it.
-func holds(parent, location string) bool {
-	if location == "" {
-		return false
-	}
-	relative, err := filepath.Rel(parent, location)
-	return err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
+func holdsOwned(path string, owned []fs.FileInfo) bool {
+	info, err := os.Lstat(path)
+	return err == nil && slices.ContainsFunc(owned, func(directory fs.FileInfo) bool { return os.SameFile(info, directory) })
 }
 
 // legacyUsage sizes an entry and finds its newest change anywhere inside,
