@@ -60,12 +60,26 @@ func TestEvalRetryPublishesArtifactsUnderTheRetryAttemptNumber(t *testing.T) {
 
 func assertArtifactsLiveUnderTheirAttemptNumber(t *testing.T, review model.ReviewRecord) {
 	t.Helper()
-	for index, attempt := range review.Passes[0].Attempts {
-		wantDirectory := filepath.Join("artifacts", string(review.ID), fmt.Sprint(index+1))
-		for _, reference := range attempt.Artifacts {
-			if filepath.Dir(reference.Path) != wantDirectory {
-				t.Fatalf("attempt %d artifact %q is outside %q", index+1, reference.Path, wantDirectory)
-			}
+	attempts := review.Passes[0].Attempts
+	if len(attempts) != 2 {
+		t.Fatalf("attempts = %d, want the transient attempt and its retry", len(attempts))
+	}
+	for index, attempt := range attempts {
+		assertAttemptArtifactsUnder(t, attempt, index+1, filepath.Join("artifacts", string(review.ID), fmt.Sprint(index+1)))
+	}
+}
+
+func assertAttemptArtifactsUnder(t *testing.T, attempt model.AttemptRecord, number int, directory string) {
+	t.Helper()
+	if attempt.Number != number {
+		t.Fatalf("attempt %d records number %d", number, attempt.Number)
+	}
+	if len(attempt.Artifacts) == 0 {
+		t.Fatalf("attempt %d published no artifacts", number)
+	}
+	for _, reference := range attempt.Artifacts {
+		if filepath.Dir(reference.Path) != directory {
+			t.Fatalf("attempt %d artifact %q is outside %q", number, reference.Path, directory)
 		}
 	}
 }
