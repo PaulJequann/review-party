@@ -85,6 +85,7 @@ func executeClean(ctx context.Context, request cleanRequest, streams commandIO) 
 	result.reap(ctx, streams.host.withDefaults().runtimeRoot)
 	after := takeFootprint(streams.host, request.configuration)
 	result.Unreadable = append(result.Unreadable, after.Unreadable...)
+	result.Unreadable = append(result.Unreadable, after.itemProblems()...)
 	for _, item := range after.Items {
 		result.settle(item, request)
 	}

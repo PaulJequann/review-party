@@ -115,3 +115,48 @@ func TestCleanExitsOneAndNamesWhatItCouldNotRemove(t *testing.T) {
 		t.Fatalf("left behind = %+v, want a permission error", left)
 	}
 }
+
+func TestCleanYesNeverRemovesAStateDirectoryUnderTheHostTemp(t *testing.T) {
+	fixture := newHostFixture(t)
+	t.Setenv("XDG_STATE_HOME", fixture.host.temp)
+	ledger := filepath.Join(fixture.host.temp, "review-party", "ledger.sqlite")
+	fixture.write(ledger, "ledger")
+	fixture.age(filepath.Dir(ledger))
+
+	result := decodeInto[cleanResult](t, fixture.run("clean", "--yes", "--format", "json"), 0)
+
+	assertLabels(t, "pending", result.Pending, "ledger ledger.sqlite")
+	fixture.assertOnDisk([]string{ledger}, nil)
+}
+
+func TestCleanYesKeepsAnOldTempTreeChangedInside(t *testing.T) {
+	fixture := newHostFixture(t)
+	worktrees := filepath.Join(fixture.host.temp, "review-party-worktrees")
+	fixture.write(filepath.Join(worktrees, "abc", "file"), "old")
+	fixture.age(worktrees)
+	fixture.write(filepath.Join(worktrees, "abc", "file"), "in use")
+
+	result := decodeInto[cleanResult](t, fixture.run("clean", "--yes", "--format", "json"), 0)
+
+	assertLabels(t, "kept", result.Kept, "recent-temp review-party-worktrees")
+	fixture.assertOnDisk([]string{worktrees}, nil)
+}
+
+func TestCleanExitsOneWhenAnItemIsOnlyPartlyRead(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("needs a directory this user cannot read")
+	}
+	fixture := newHostFixture(t)
+	sealed := filepath.Join(fixture.state, "artifacts", "sealed")
+	fixture.write(filepath.Join(sealed, ".artifact-1.tmp"), "partial")
+	if err := os.Chmod(sealed, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(sealed, 0o700) }) //nolint:errcheck // Restoring the mode only lets TempDir cleanup succeed.
+
+	run := fixture.run("clean", "--yes")
+
+	if run.exit != 1 || !strings.Contains(run.stderr, "could not read "+filepath.Join(fixture.state, "artifacts")+": ") {
+		t.Fatalf("clean of partly unreadable artifacts = %+v; want exit 1 naming the artifacts", run)
+	}
+}

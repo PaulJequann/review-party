@@ -74,13 +74,19 @@ func (fixture hostFixture) write(path, content string) {
 	}
 }
 
-// age backdates paths past legacyQuietPeriod, as leftovers of an earlier
-// release would be.
-func (fixture hostFixture) age(paths ...string) {
+// age backdates every path in each tree past legacyQuietPeriod, as
+// leftovers of an earlier release would be.
+func (fixture hostFixture) age(trees ...string) {
 	fixture.t.Helper()
 	old := time.Now().Add(-2 * legacyQuietPeriod)
-	for _, path := range paths {
-		if err := os.Chtimes(path, old, old); err != nil {
+	for _, tree := range trees {
+		err := filepath.WalkDir(tree, func(path string, _ fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			return os.Chtimes(path, old, old)
+		})
+		if err != nil {
 			fixture.t.Fatal(err)
 		}
 	}

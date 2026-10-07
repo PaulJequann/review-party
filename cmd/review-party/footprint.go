@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -196,7 +197,8 @@ func takeFootprint(host hostDirectories, configurationPath string) footprint {
 		result.Locations.Cache = cache
 		result.collect(cache, cacheItems)
 	}
-	result.collect(host.temp, legacyItems)
+	owned := []string{result.Locations.State, result.Locations.Cache}
+	result.collect(host.temp, func(temp string) ([]footprintItem, error) { return legacyItems(temp, owned) })
 	result.judge()
 	return result
 }
@@ -318,27 +320,61 @@ func cacheItems(directory string) ([]footprintItem, error) {
 }
 
 // legacyItems are what releases before the runtime root left directly in
-// the host temp directory, such as review-party-worktrees.
-func legacyItems(temp string) ([]footprintItem, error) {
+// the host temp directory, such as review-party-worktrees. An entry that is
+// or holds one of the owned locations, such as a state directory configured
+// under the host temp directory, is never legacy.
+func legacyItems(temp string, owned []string) ([]footprintItem, error) {
 	entries, err := os.ReadDir(temp)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	}
 	var items []footprintItem
 	for _, entry := range entries {
-		if !isLegacyEntry(entry) {
+		path := filepath.Join(temp, entry.Name())
+		if !isLegacyEntry(entry) || slices.ContainsFunc(owned, func(location string) bool { return holds(path, location) }) {
 			continue
 		}
-		path := filepath.Join(temp, entry.Name())
-		bytes, sizeErr := hostrun.DiskUsage(path)
-		items = append(items, newFootprintItem(path, legacyKind(entry), bytes, sizeErr))
+		bytes, changed, sizeErr := legacyUsage(path)
+		items = append(items, newFootprintItem(path, legacyKind(changed, sizeErr), bytes, sizeErr))
 	}
 	return items, err
 }
 
-func legacyKind(entry fs.DirEntry) footprintKind {
-	info, err := entry.Info()
-	if err != nil || time.Since(info.ModTime()) < legacyQuietPeriod {
+// holds reports whether location is parent or lies inside it.
+func holds(parent, location string) bool {
+	if location == "" {
+		return false
+	}
+	relative, err := filepath.Rel(parent, location)
+	return err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
+}
+
+// legacyUsage sizes an entry and finds its newest change anywhere inside,
+// because writing deep in a tree leaves the top entry's time alone.
+func legacyUsage(path string) (bytes int64, changed time.Time, err error) {
+	err = filepath.WalkDir(path, func(_ string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if info.Mode().IsRegular() {
+			bytes += info.Size()
+		}
+		if info.ModTime().After(changed) {
+			changed = info.ModTime()
+		}
+		return nil
+	})
+	return bytes, changed, err
+}
+
+// legacyKind keeps an entry it could not fully read, since an unread part
+// may be in use.
+func legacyKind(changed time.Time, err error) footprintKind {
+	if err != nil || time.Since(changed) < legacyQuietPeriod {
 		return kindRecentTemp
 	}
 	return kindLegacy
