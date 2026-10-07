@@ -55,8 +55,11 @@ func New(config Config) (*Conductor, error) {
 	if err != nil {
 		return nil, err
 	}
-	stateDirectory := firstNonempty(configuredState.Value, defaultStateDirectory())
-	store, err := store.NewDeferredLedgerRecordStore(stateDirectory)
+	stateDirectory, err := requiredStateDirectory(statePath(configuredState.Value))
+	if err != nil {
+		return nil, err
+	}
+	store, err := store.NewDeferredLedgerRecordStore(string(stateDirectory))
 	if err != nil {
 		return nil, err
 	}
@@ -67,7 +70,7 @@ func New(config Config) (*Conductor, error) {
 	if err != nil {
 		return nil, err
 	}
-	conductor.artifacts, err = artifact.NewStore(stateDirectory)
+	conductor.artifacts, err = artifact.NewStore(string(stateDirectory))
 	if err != nil {
 		return nil, err
 	}
@@ -281,13 +284,25 @@ func (conductor *Conductor) VerifyArtifacts(record model.ReviewRecord) error {
 	return conductor.getRunner().VerifyArtifacts(record)
 }
 
-func defaultStateDirectory() string {
+var errStateDirectoryRequired = errors.New("Review Party needs a durable state directory: set XDG_STATE_HOME, a home directory, or state_directory in the global Configuration")
+
+// requiredStateDirectory is the configured state directory, else the XDG
+// default. There is no fallback under the host temp directory: durable state
+// in a directory the host may wipe is a loss, not a degraded mode.
+func requiredStateDirectory(configured statePath) (statePath, error) {
+	if configured != "" {
+		return configured, nil
+	}
+	return defaultStateDirectory()
+}
+
+func defaultStateDirectory() (statePath, error) {
 	if stateHome := os.Getenv("XDG_STATE_HOME"); stateHome != "" {
-		return filepath.Join(stateHome, "review-party")
+		return statePath(filepath.Join(stateHome, "review-party")), nil
 	}
 	home, err := os.UserHomeDir()
-	if err == nil {
-		return filepath.Join(home, ".local", "state", "review-party")
+	if err != nil {
+		return "", errStateDirectoryRequired
 	}
-	return filepath.Join(os.TempDir(), "review-party")
+	return statePath(filepath.Join(home, ".local", "state", "review-party")), nil
 }

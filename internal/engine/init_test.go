@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,5 +24,15 @@ func TestInitializationRejectsCombinedRecoveryActions(t *testing.T) {
 	_, err := InitializeReviewParty(ReviewPartyInitialization{BackupIncompatible: true, Fresh: true})
 	if err == nil || !strings.Contains(err.Error(), "separate requests") {
 		t.Fatalf("combined recovery error = %v", err)
+	}
+}
+
+func TestStateDirectoryIsRequiredWithoutAHomeOrConfiguration(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", "")
+	t.Setenv("HOME", "")
+	t.Setenv("USERPROFILE", "")
+	_, err := New(Config{UserConfigurationPath: filepath.Join(t.TempDir(), "config.toml")})
+	if !errors.Is(err, errStateDirectoryRequired) {
+		t.Fatalf("New without a state directory = %v, want %v", err, errStateDirectoryRequired)
 	}
 }

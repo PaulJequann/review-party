@@ -112,7 +112,10 @@ func selectInitializationState(request ReviewPartyInitialization, configuredStat
 	if configuredStateDirectory != "" {
 		return selectConfiguredState(configuredStateDirectory, explicit)
 	}
-	defaultDirectory := statePath(defaultStateDirectory())
+	defaultDirectory, err := defaultStateDirectory()
+	if err != nil {
+		return initializationStateSelection{}, err
+	}
 	if explicit == "" || explicit == defaultDirectory {
 		return initializationStateSelection{directory: defaultDirectory}, nil
 	}
