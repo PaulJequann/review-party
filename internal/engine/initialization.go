@@ -84,8 +84,11 @@ func prepareExistingInitializationState(manager *configuration.Manager, selectio
 	if err := store.PrepareReviewRecordState(string(selection.directory)); err != nil {
 		return false, err
 	}
+	// The sweep runs only when the ledger was not ready. No Review runs
+	// against a missing, outdated, or maintenance-pending ledger, so no
+	// unreferenced file can be one a Review has published but not recorded.
 	if !alreadyReady {
-		if err := trimEvidence(selection.directory); err != nil {
+		if err := completeMaintenance(selection.directory); err != nil {
 			return false, err
 		}
 	}
@@ -95,7 +98,7 @@ func prepareExistingInitializationState(manager *configuration.Manager, selectio
 	return alreadyReady, nil
 }
 
-func trimEvidence(directory statePath) (returnErr error) {
+func completeMaintenance(directory statePath) (returnErr error) {
 	ledger, err := store.NewLedgerRecordStore(string(directory))
 	if err != nil {
 		return err
@@ -114,7 +117,10 @@ func trimEvidence(directory statePath) (returnErr error) {
 	if err != nil {
 		return err
 	}
-	return artifacts.RemoveUnreferenced(referenced)
+	if err := artifacts.RemoveUnreferenced(referenced); err != nil {
+		return err
+	}
+	return ledger.CompleteMaintenance()
 }
 
 func rememberInitializedState(manager *configuration.Manager, selection initializationStateSelection) error {

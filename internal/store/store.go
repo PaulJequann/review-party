@@ -433,7 +433,7 @@ func (s *LedgerRecordStore) requirePreparedSchema() error {
 	if version != currentLedgerSchemaVersion {
 		return fmt.Errorf("%w: review ledger schema %d requires state preparation for schema %d", ErrReviewRecordStateRequiresPreparation, version, currentLedgerSchemaVersion)
 	}
-	return nil
+	return s.requireNoPendingMaintenance()
 }
 
 func (s *LedgerRecordStore) restrictPermissions() error {
@@ -463,51 +463,30 @@ func (s *LedgerRecordStore) configure() error {
 // obsoleteLedgerTables lists every table a replaced pre-release ledger could own,
 // ordered so foreign-key children are dropped before their parents.
 var obsoleteLedgerTables = []string{
-	"checkpoint_waivers", "finding_verdicts", "misses", "artifacts", "findings", "attempts", "passes",
+	"pending_maintenance", "checkpoint_waivers", "finding_verdicts", "misses", "artifacts", "findings", "attempts", "passes",
 	"eval_runs", "adjudication_revisions", "review_bundles",
 	"eval_suite_runs", "review_content_changes", "reviews", "schema_migrations",
 }
 
-func (s *LedgerRecordStore) migrate() error {
-	upgraded, err := s.applyMigrations()
-	if err != nil || !upgraded {
-		return err
-	}
-	return s.compact()
-}
-
-func (s *LedgerRecordStore) applyMigrations() (upgraded bool, returnErr error) {
+func (s *LedgerRecordStore) migrate() (returnErr error) {
 	if _, err := s.db.Exec("CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY)"); err != nil {
-		return false, fmt.Errorf("create migration table: %w", err)
+		return fmt.Errorf("create migration table: %w", err)
 	}
 	tx, err := s.db.Begin()
 	if err != nil {
-		return false, err
+		return err
 	}
 	defer func() {
 		returnErr = errors.Join(returnErr, rollbackTransaction(tx))
 	}()
 	version, err := currentMigrationVersion(tx)
 	if err != nil {
-		return false, err
+		return err
 	}
 	if err := upgradeLedgerSchema(tx, version); err != nil {
-		return false, err
+		return err
 	}
-	upgraded = upgradableLedgerVersion(version) && version < currentLedgerSchemaVersion
-	return upgraded, tx.Commit()
-}
-
-// compact returns the pages an in-place upgrade freed to the filesystem.
-// VACUUM cannot run inside the migration transaction, and it rewrites the
-// database through the write-ahead log, so the log is truncated afterwards.
-func (s *LedgerRecordStore) compact() error {
-	for _, statement := range []string{"VACUUM", "PRAGMA wal_checkpoint(TRUNCATE)"} {
-		if _, err := s.db.Exec(statement); err != nil {
-			return fmt.Errorf("compact review ledger: %w", err)
-		}
-	}
-	return nil
+	return tx.Commit()
 }
 
 func upgradeLedgerSchema(tx *sql.Tx, version int) error {
@@ -518,9 +497,12 @@ func upgradeLedgerSchema(tx *sql.Tx, version int) error {
 		if err := dropObsoleteLedgerTables(tx, version); err != nil {
 			return err
 		}
-		version = 0
+		return applyLedgerMigrationsAfter(tx, 0)
 	}
-	return applyLedgerMigrationsAfter(tx, version)
+	if err := applyLedgerMigrationsAfter(tx, version); err != nil || version == currentLedgerSchemaVersion {
+		return err
+	}
+	return recordPendingMaintenance(tx)
 }
 
 // dropObsoleteLedgerTables clears every table a replaced pre-release ledger

@@ -15,3 +15,7 @@ DELETE FROM artifacts WHERE EXISTS (
     AND attempts.outcome = 'completed'
     AND reviews.lifecycle = 'completed'
 );
+
+CREATE TABLE pending_maintenance (
+  id INTEGER PRIMARY KEY CHECK (id = 1)
+);

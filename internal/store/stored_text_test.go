@@ -3,6 +3,7 @@ package store
 import (
 	"bytes"
 	"database/sql"
+	"errors"
 	"maps"
 	"os"
 	"path/filepath"
@@ -115,7 +116,19 @@ func ledgerFiles(t *testing.T, directory string) []byte {
 	return contents
 }
 
-func TestPrepareCompactsStoredTextAndKeepsHistory(t *testing.T) {
+func completeTestMaintenance(t *testing.T, directory string) {
+	t.Helper()
+	ledger, err := NewLedgerRecordStore(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeTestResource(t, ledger.Close)
+	if err := ledger.CompleteMaintenance(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestUpgradeMaintenanceCompactsStoredTextAndKeepsHistory(t *testing.T) {
 	directory := t.TempDir()
 	completed := writeLedgerAtSchema(t, directory, 14)
 	seedSchemaFourteenText(t, openTestLedgerDB(t, directory), completed.ID)
@@ -125,6 +138,7 @@ func TestPrepareCompactsStoredTextAndKeepsHistory(t *testing.T) {
 	if err := PrepareReviewRecordState(directory); err != nil {
 		t.Fatal(err)
 	}
+	completeTestMaintenance(t, directory)
 
 	stored := ledgerFiles(t, directory)
 	if bytes.Contains(stored, []byte(storedTextSentinel)) || len(stored) > before/8 {
@@ -140,5 +154,28 @@ func TestPrepareCompactsStoredTextAndKeepsHistory(t *testing.T) {
 	columns := queryTestStrings(t, upgraded, "SELECT name FROM pragma_table_info('reviews') UNION ALL SELECT name FROM pragma_table_info('attempts')")
 	if slices.Contains(columns, "result_raw") || slices.Contains(columns, "raw_output") {
 		t.Fatalf("columns = %v, want result_raw and raw_output dropped", columns)
+	}
+}
+
+func TestUpgradedLedgerRequiresInitUntilMaintenanceCompletes(t *testing.T) {
+	directory := t.TempDir()
+	writeLedgerAtSchema(t, directory, 14)
+
+	for range 2 {
+		if err := PrepareReviewRecordState(directory); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := ReviewRecordStatePrepared(directory); !errors.Is(err, ErrReviewRecordStateRequiresPreparation) || !strings.Contains(err.Error(), "run review-party init") {
+			t.Fatalf("readiness with pending maintenance = %v, want a direction to run review-party init", err)
+		}
+	}
+	if _, err := BackupIncompatibleReviewRecordState(directory); err == nil {
+		t.Fatal("backup of a ledger with pending maintenance succeeded")
+	}
+
+	completeTestMaintenance(t, directory)
+
+	if ready, err := ReviewRecordStatePrepared(directory); err != nil || !ready {
+		t.Fatalf("readiness after maintenance = %t, %v", ready, err)
 	}
 }

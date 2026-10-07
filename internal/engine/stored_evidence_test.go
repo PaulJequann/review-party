@@ -226,18 +226,6 @@ func TestPreparingTheLedgerRemovesEvidenceItDoesNotName(t *testing.T) {
 	}
 }
 
-func TestInitializingAReadyLedgerKeepsUnrecordedEvidence(t *testing.T) {
-	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	state := initializeTestState(t)
-	orphan := writeOrphanEvidence(t, state)
-
-	initializeTestState(t)
-
-	if files := artifactFiles(t, state); !slices.Equal(files, []string{filepath.Join(orphan, "constructed-prompt.txt")}) {
-		t.Fatalf("artifact files = %v, want the unrecorded file kept", files)
-	}
-}
-
 type keepAllEvidence struct {
 	store.RecordStore
 }
@@ -277,7 +265,7 @@ func failedReviewsWithoutExpiry(t *testing.T, state string, count int) []model.R
 	return reviews
 }
 
-func forgetStoredTextUpgrade(t *testing.T, state string) {
+func execLedger(t *testing.T, state string, statements ...string) {
 	t.Helper()
 	db, err := sql.Open("sqlite", filepath.Join(state, "ledger.sqlite"))
 	if err != nil {
@@ -288,15 +276,21 @@ func forgetStoredTextUpgrade(t *testing.T, state string) {
 			t.Error(err)
 		}
 	}()
-	for _, statement := range []string{
-		"ALTER TABLE reviews ADD COLUMN result_raw BLOB",
-		"ALTER TABLE attempts ADD COLUMN raw_output BLOB",
-		"DELETE FROM schema_migrations WHERE version = 15",
-	} {
+	for _, statement := range statements {
 		if _, err := db.Exec(statement); err != nil {
 			t.Fatal(err)
 		}
 	}
+}
+
+func forgetStoredTextUpgrade(t *testing.T, state string) {
+	t.Helper()
+	execLedger(t, state,
+		"ALTER TABLE reviews ADD COLUMN result_raw BLOB",
+		"ALTER TABLE attempts ADD COLUMN raw_output BLOB",
+		"DROP TABLE pending_maintenance",
+		"DELETE FROM schema_migrations WHERE version = 15",
+	)
 }
 
 func TestUpgradingTheLedgerKeepsOnlyTheNewestFailureEvidence(t *testing.T) {
@@ -307,15 +301,121 @@ func TestUpgradingTheLedgerKeepsOnlyTheNewestFailureEvidence(t *testing.T) {
 
 	initializeTestState(t)
 
+	if kept, want := reviewsWithEvidence(t, state), reviews[2:]; !slices.Equal(kept, want) {
+		t.Fatalf("reviews with evidence after upgrade = %v, want the newest %v", kept, want)
+	}
+}
+
+func reviewsWithEvidence(t *testing.T, state string) []model.ReviewID {
+	t.Helper()
 	entries, err := os.ReadDir(filepath.Join(state, artifact.Directory))
 	if err != nil {
 		t.Fatal(err)
 	}
-	kept := []model.ReviewID{}
+	reviews := []model.ReviewID{}
 	for _, entry := range entries {
-		kept = append(kept, model.ReviewID(entry.Name()))
+		reviews = append(reviews, model.ReviewID(entry.Name()))
 	}
-	if want := reviews[2:]; !slices.Equal(kept, want) {
-		t.Fatalf("reviews with evidence after upgrade = %v, want the newest %v", kept, want)
+	return reviews
+}
+
+func freeLedgerPages(t *testing.T, state string) int {
+	t.Helper()
+	db, err := sql.Open("sqlite", filepath.Join(state, "ledger.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	var pages int
+	if err := db.QueryRow("PRAGMA freelist_count").Scan(&pages); err != nil {
+		t.Fatal(err)
+	}
+	return pages
+}
+
+var fragmentLedger = []string{
+	"CREATE TABLE filler(data BLOB)",
+	"INSERT INTO filler SELECT randomblob(4096) FROM (WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i < 256) SELECT i FROM n)",
+	"DROP TABLE filler",
+}
+
+func initializeAgain(t *testing.T) ReviewPartyInitializationResult {
+	t.Helper()
+	result, err := InitializeReviewParty(ReviewPartyInitialization{Repository: testRepository(t)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return result
+}
+
+func TestInitializingAfterAnInterruptedUpgradeFinishesItsMaintenance(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	state := initializeTestState(t)
+	reviews := failedReviewsWithoutExpiry(t, state, retainedFailureEvidence+2)
+	writeOrphanEvidence(t, state)
+	execLedger(t, state, append(fragmentLedger, "INSERT INTO pending_maintenance VALUES(1)")...)
+
+	if initializeAgain(t).AlreadyReady {
+		t.Fatal("init reported a ledger with pending maintenance as already ready")
+	}
+
+	if pages := freeLedgerPages(t, state); pages != 0 {
+		t.Fatalf("free ledger pages = %d, want the ledger compacted", pages)
+	}
+	if kept, want := reviewsWithEvidence(t, state), reviews[2:]; !slices.Equal(kept, want) {
+		t.Fatalf("reviews with evidence = %v, want only the newest %v", kept, want)
+	}
+	if !initializeAgain(t).AlreadyReady {
+		t.Fatal("maintenance is still pending after it completed")
+	}
+}
+
+func TestInitializingAReadyLedgerLeavesItAlone(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	state := initializeTestState(t)
+	reviews := failedReviewsWithoutExpiry(t, state, retainedFailureEvidence+2)
+	orphan := writeOrphanEvidence(t, state)
+	execLedger(t, state, fragmentLedger...)
+	free := freeLedgerPages(t, state)
+
+	if !initializeAgain(t).AlreadyReady {
+		t.Fatal("init did not report the ready ledger as ready")
+	}
+
+	if pages := freeLedgerPages(t, state); pages != free || pages == 0 {
+		t.Fatalf("free ledger pages = %d, want the %d left before init", pages, free)
+	}
+	want := append(slices.Clone(reviews), model.ReviewID(filepath.Base(filepath.Dir(orphan))))
+	slices.Sort(want)
+	if kept := reviewsWithEvidence(t, state); !slices.Equal(kept, want) {
+		t.Fatalf("reviews with evidence = %v, want every recorded and unrecorded one %v", kept, want)
+	}
+}
+
+func TestInitializingAfterAFailedSweepRetriesItsMaintenance(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	state := initializeTestState(t)
+	orphan := writeOrphanEvidence(t, state)
+	execLedger(t, state, "INSERT INTO pending_maintenance VALUES(1)")
+	if err := os.Chmod(orphan, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := InitializeReviewParty(ReviewPartyInitialization{Repository: testRepository(t)}); err == nil {
+		t.Fatal("init succeeded although the sweep could not remove an unreferenced file")
+	}
+	if err := os.Chmod(orphan, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	if initializeAgain(t).AlreadyReady {
+		t.Fatal("a failed sweep cleared the pending maintenance")
+	}
+
+	if files := artifactFiles(t, state); len(files) != 0 {
+		t.Fatalf("artifact files = %v, want the retried sweep to remove them", files)
 	}
 }
