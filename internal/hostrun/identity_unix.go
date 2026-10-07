@@ -6,11 +6,6 @@ import "syscall"
 
 func sameBoot(a, b string) bool { return a == b }
 
-func (id Identity) alive() bool {
-	current, err := identify(id.PID)
-	return err == nil && id.sameAs(current)
-}
-
 func killProcess(id Identity) {
 	if !id.alive() {
 		return

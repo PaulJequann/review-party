@@ -186,6 +186,11 @@ func removeIfPresent(path string) error {
 	return err
 }
 
+// A sentinel whose owner died is still sweeping descendants that left the
+// Reviewer's group, so it gets longer than its own sweep budget to finish
+// before it is killed.
+const sentinelSweepWait = 3 * time.Second
+
 func killRecorded(records []ProcessRecord) {
 	boot, err := bootID()
 	if err != nil {
@@ -199,6 +204,7 @@ func killRecorded(records []ProcessRecord) {
 			killGroup(record.Group, record.Reviewer)
 		}
 		killProcess(record.Reviewer)
+		record.Sentinel.awaitExit(sentinelSweepWait)
 		killProcess(record.Sentinel)
 	}
 }

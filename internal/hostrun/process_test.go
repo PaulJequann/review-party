@@ -186,3 +186,14 @@ func TestStartFailsWhenTheSentinelDoesNotReportInTime(t *testing.T) {
 		t.Fatalf("the run is unusable after a sentinel timeout: %v", err)
 	}
 }
+
+func TestReapRightAfterOwnerDeathLeavesNoSurvivor(t *testing.T) {
+	root := testRoot(t)
+	tree := killOwner(t, root)
+	everything := append(slices.Clone(tree.pids), tree.sentinel)
+	killLater(t, everything)
+	openRun(t, root, nil).Reap()
+	waitFor(t, 2*time.Second, "the Reviewer tree and sentinel to die", func() bool {
+		return len(survivors(everything)) == 0
+	})
+}
