@@ -73,14 +73,14 @@ func assertPushedRefBase(t *testing.T, repository string, ref PushedRef, want st
 func TestResolveHookLocations(t *testing.T) {
 	repository := testRepository(t)
 	locations, err := ResolveHookLocations(repository)
-	if err != nil || locations != (HookLocations{Directory: filepath.Join(repository, ".git", "hooks")}) {
+	if err != nil || locations != (HookLocations{Directory: filepath.Join(repository, ".git", "hooks"), Common: filepath.Join(repository, ".git")}) {
 		t.Fatalf("plain hooks = %#v, %v", locations, err)
 	}
 
 	for _, hooksPath := range []string{".githooks", " spaced hooks "} {
 		runTestCommand(t, repository, "git", "config", "core.hooksPath", hooksPath)
 		locations, err = ResolveHookLocations(repository)
-		if err != nil || locations != (HookLocations{Directory: filepath.Join(repository, hooksPath), HooksPath: hooksPath}) {
+		if err != nil || locations != (HookLocations{Directory: filepath.Join(repository, hooksPath), HooksPath: hooksPath, Common: filepath.Join(repository, ".git")}) {
 			t.Fatalf("core.hooksPath %q = %#v, %v", hooksPath, locations, err)
 		}
 	}
@@ -89,7 +89,7 @@ func TestResolveHookLocations(t *testing.T) {
 	runTestCommand(t, repository, "git", "config", "--unset", "core.hooksPath")
 	runTestCommand(t, repository, "git", "worktree", "add", "--quiet", "-b", "linked", worktree)
 	locations, err = ResolveHookLocations(worktree)
-	if err != nil || locations.Directory != filepath.Join(repository, ".git", "hooks") {
+	if err != nil || locations != (HookLocations{Directory: filepath.Join(repository, ".git", "hooks"), Common: filepath.Join(repository, ".git")}) {
 		t.Fatalf("linked worktree hooks = %#v, %v", locations, err)
 	}
 }

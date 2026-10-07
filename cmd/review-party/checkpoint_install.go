@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -76,19 +77,7 @@ func executeCheckpointInstall(options hookInstallOptions, streams commandIO) int
 	if err != nil {
 		return printCommandError(streams.errors, usageExitCode, err)
 	}
-	confirm := func() (bool, error) {
-		switch {
-		case options.yes:
-			return true, nil
-		case !streams.interactive():
-			return false, errHookInstallUnconfirmed
-		}
-		confirmed, err := confirmPrompt(streams.input, streams.output, "Write these files?")
-		if err == nil && !confirmed {
-			err = errHooksNotWritten
-		}
-		return confirmed, err
-	}
+	confirm := streams.confirmation(options.yes, "Write these files?", errHookInstallUnconfirmed, errHooksNotWritten)
 	target := hookInstallTarget{root: root, configuration: options.configuration, integration: options.integration, personal: options.personal}
 	err = installCheckpointHooks(target, streams.configurationManager(options.configuration), streams.output, confirm)
 	switch {
@@ -98,6 +87,25 @@ func executeCheckpointInstall(options hookInstallOptions, streams commandIO) int
 		return printFailure(streams.errors, err)
 	}
 	return 0
+}
+
+// confirmation is the question a file-writing command asks before it writes.
+// --yes answers it; without a terminal the command stops with unconfirmed,
+// and a declined prompt stops it with declined.
+func (streams commandIO) confirmation(yes bool, question string, unconfirmed, declined error) func() (bool, error) {
+	return func() (bool, error) {
+		switch {
+		case yes:
+			return true, nil
+		case !streams.interactive():
+			return false, unconfirmed
+		}
+		confirmed, err := confirmPrompt(streams.input, streams.output, question)
+		if err == nil && !confirmed {
+			err = declined
+		}
+		return confirmed, err
+	}
 }
 
 // installCheckpointHooks prints what installing one Integration for every
@@ -114,7 +122,7 @@ func installCheckpointHooks(target hookInstallTarget, manager *configuration.Man
 	if err := writeCommandOutput(output, plan.render); err != nil {
 		return err
 	}
-	if proceed, err := plan.applyConfirmed(confirm); err != nil || !proceed {
+	if proceed, err := plan.applyConfirmed(target.root, confirm); err != nil || !proceed {
 		return err
 	}
 	return writeCommandOutput(output, func(output *commandOutput) {
@@ -609,7 +617,7 @@ func (plan hookInstallPlan) render(output *commandOutput) {
 
 // applyConfirmed writes the plan's files when it has any and confirm agrees.
 // It reports false when the Caller declined.
-func (plan hookInstallPlan) applyConfirmed(confirm func() (bool, error)) (bool, error) {
+func (plan hookInstallPlan) applyConfirmed(root string, confirm func() (bool, error)) (bool, error) {
 	if len(plan.writes) == 0 {
 		return true, nil
 	}
@@ -617,11 +625,18 @@ func (plan hookInstallPlan) applyConfirmed(confirm func() (bool, error)) (bool, 
 	if err != nil || !confirmed {
 		return false, err
 	}
-	return true, plan.apply()
+	return true, plan.apply(root)
 }
 
-func (plan hookInstallPlan) apply() error {
-	for path, content := range plan.writes {
+// apply records the files it is about to create in root's clone, then
+// writes every file.
+func (plan hookInstallPlan) apply(root string) error {
+	paths := slices.Sorted(maps.Keys(plan.writes))
+	if err := recordCreations(root, paths); err != nil {
+		return err
+	}
+	for _, path := range paths {
+		content := plan.writes[path]
 		mode := plan.fileMode
 		if info, err := os.Stat(path); err == nil {
 			mode = info.Mode().Perm()

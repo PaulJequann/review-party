@@ -1,0 +1,120 @@
+package main
+
+// The install record lists the files a Checkpoint installer created in a
+// clone, with the directories it created to hold them. Uninstall deletes a
+// file only when the record lists it and nothing but what the installer
+// would have created around its content is left, so a file the Caller had
+// before install is never deleted. The record lives in the git directory, so
+// it goes with the clone, and is deleted once it lists nothing.
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"slices"
+
+	"reviewparty/internal/subject"
+)
+
+const installRecordName = "review-party-created.json"
+
+type installRecord struct {
+	path    string
+	Created []createdFile `json:"created"`
+}
+
+// createdFile is a file an installer created. Directories are the ones it
+// created to hold the file, deepest first.
+type createdFile struct {
+	Path        string   `json:"path"`
+	Directories []string `json:"directories,omitempty"`
+}
+
+func readInstallRecord(root string) (installRecord, error) {
+	locations, err := subject.ResolveHookLocations(root)
+	if err != nil {
+		return installRecord{}, err
+	}
+	record := installRecord{path: filepath.Join(locations.Common, installRecordName)}
+	content, err := os.ReadFile(record.path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return record, nil
+	}
+	if err == nil {
+		err = json.Unmarshal(content, &record)
+	}
+	if err != nil {
+		return installRecord{}, fmt.Errorf("read %s: %w", record.path, err)
+	}
+	return record, nil
+}
+
+// recordCreations adds each path that does not exist yet to the clone's
+// record. It runs before the writes, so a failed write leaves a record of a
+// missing file, which uninstall forgets, rather than an unrecorded file.
+func recordCreations(root string, paths []string) error {
+	var created []createdFile
+	for _, path := range paths {
+		if _, err := os.Lstat(path); errors.Is(err, fs.ErrNotExist) {
+			created = append(created, createdFile{Path: path, Directories: missingDirectories(filepath.Dir(path))})
+		}
+	}
+	if len(created) == 0 {
+		return nil
+	}
+	record, err := readInstallRecord(root)
+	if err != nil {
+		return err
+	}
+	for _, file := range created {
+		record.forget(file.Path)
+		record.Created = append(record.Created, file)
+	}
+	return record.save()
+}
+
+// missingDirectories lists directory and each parent that does not exist,
+// deepest first.
+func missingDirectories(directory string) []string {
+	var missing []string
+	for {
+		if _, err := os.Lstat(directory); !errors.Is(err, fs.ErrNotExist) {
+			return missing
+		}
+		missing = append(missing, directory)
+		parent := filepath.Dir(directory)
+		if parent == directory {
+			return missing
+		}
+		directory = parent
+	}
+}
+
+func (record installRecord) created(path string) (createdFile, bool) {
+	index := slices.IndexFunc(record.Created, func(file createdFile) bool { return file.Path == path })
+	if index < 0 {
+		return createdFile{}, false
+	}
+	return record.Created[index], true
+}
+
+func (record *installRecord) forget(path string) {
+	record.Created = slices.DeleteFunc(record.Created, func(file createdFile) bool { return file.Path == path })
+}
+
+func (record installRecord) save() error {
+	if len(record.Created) > 0 {
+		content, err := json.MarshalIndent(record, "", "  ")
+		if err != nil {
+			return err
+		}
+		return replaceFile(record.path, append(content, '\n'), 0o644)
+	}
+	if err := os.Remove(record.path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	return nil
+}

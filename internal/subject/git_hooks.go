@@ -64,14 +64,16 @@ func PushedRefBase(repository string, ref PushedRef) (string, error) {
 
 // HookLocations says where git runs hooks for a clone. Directory is absolute
 // and shared by linked worktrees; HooksPath is core.hooksPath as configured,
-// empty when unset.
+// empty when unset. Common is the absolute git directory linked worktrees
+// share, whose hooks directory git runs while core.hooksPath is unset.
 type HookLocations struct {
 	Directory string
 	HooksPath string
+	Common    string
 }
 
 func ResolveHookLocations(repository string) (HookLocations, error) {
-	directory, err := gitOutput(repository, "rev-parse", "--git-path", "hooks")
+	directories, err := gitOutput(repository, "rev-parse", "--git-path", "hooks", "--git-common-dir")
 	if err != nil {
 		return HookLocations{}, fmt.Errorf("find the hooks directory: %w", err)
 	}
@@ -79,9 +81,17 @@ func ResolveHookLocations(repository string) (HookLocations, error) {
 	if err != nil {
 		return HookLocations{}, fmt.Errorf("read core.hooksPath: %w", err)
 	}
-	location := strings.TrimSuffix(string(directory), "\n")
-	if !filepath.IsAbs(location) {
-		location = filepath.Join(repository, location)
+	directory, common, _ := strings.Cut(strings.TrimSuffix(string(directories), "\n"), "\n")
+	return HookLocations{
+		Directory: absoluteIn(repository, directory),
+		HooksPath: strings.TrimSuffix(string(hooksPath), "\n"),
+		Common:    absoluteIn(repository, common),
+	}, nil
+}
+
+func absoluteIn(repository, path string) string {
+	if filepath.IsAbs(path) {
+		return path
 	}
-	return HookLocations{Directory: location, HooksPath: strings.TrimSuffix(string(hooksPath), "\n")}, nil
+	return filepath.Join(repository, path)
 }
