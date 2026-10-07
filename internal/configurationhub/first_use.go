@@ -326,10 +326,11 @@ func (e *editor) firstReviewOptions() ([]huh.Option[firstReview], error) {
 	if err != nil {
 		return nil, err
 	}
-	options, parties, err := e.offerBaseline(baseline, parties)
+	options, err := e.offerBaseline(baseline)
 	if err != nil {
 		return nil, err
 	}
+	parties = baseline.OtherParties(parties)
 	for _, scope := range []configuration.Scope{configuration.ScopeGlobal, configuration.ScopeRepository} {
 		options = appendReviewOptions(options, scope, configuration.ItemParty, parties)
 		options = appendReviewOptions(options, scope, configuration.ItemProfile, profiles)
@@ -338,20 +339,16 @@ func (e *editor) firstReviewOptions() ([]huh.Option[firstReview], error) {
 }
 
 // offerBaseline opens the first-review choices with the Review Party
-// baseline, which stands in for the Global Party baseline, or reports why the
-// baseline is blocked.
-func (e *editor) offerBaseline(baseline configuration.Baseline, parties []configuration.Definition[configuration.Party]) ([]huh.Option[firstReview], []configuration.Definition[configuration.Party], error) {
+// baseline, or reports why the baseline is blocked.
+func (e *editor) offerBaseline(baseline configuration.Baseline) ([]huh.Option[firstReview], error) {
 	if !baseline.Offered() {
-		return nil, parties, nil
+		return nil, nil
 	}
 	if blocked := baseline.Blocked(); blocked != nil {
-		return nil, parties, e.reportBaselineBlocked(blocked)
+		return nil, e.reportBaselineBlocked(blocked)
 	}
 	label := "Review Party baseline (" + strings.Join(configuration.BaselineNames(baseline.Members), ", ") + ")"
-	parties = slices.DeleteFunc(parties, func(party configuration.Definition[configuration.Party]) bool {
-		return party.Scope == configuration.ScopeGlobal && party.Name == configuration.BaselinePartyName
-	})
-	return []huh.Option[firstReview]{huh.NewOption(label, firstReview{baseline: true}).Selected(true)}, parties, nil
+	return []huh.Option[firstReview]{huh.NewOption(label, firstReview{baseline: true}).Selected(true)}, nil
 }
 
 func appendReviewOptions[T any](options []huh.Option[firstReview], scope configuration.Scope, kind configuration.AuthoredItemKind, definitions []configuration.Definition[T]) []huh.Option[firstReview] {

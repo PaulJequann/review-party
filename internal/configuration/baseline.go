@@ -201,6 +201,18 @@ func (baseline Baseline) Selected(selection ReviewSelection) bool {
 	return baseline.Offered() && slices.Contains(selection.Global, SelectionItem{Party: BaselinePartyName})
 }
 
+// OtherParties drops the Global Party baseline from Party choices while
+// Templates belong to the baseline, so that name is chosen only as the
+// baseline itself, never while the baseline is blocked.
+func (baseline Baseline) OtherParties(parties []Definition[Party]) []Definition[Party] {
+	if !baseline.Offered() {
+		return parties
+	}
+	return slices.DeleteFunc(slices.Clone(parties), func(party Definition[Party]) bool {
+		return party.Scope == ScopeGlobal && party.Name == BaselinePartyName
+	})
+}
+
 // SelectionBlocked reports why a Review selection holding the baseline Party
 // cannot run the baseline, or nil when it does not hold it or can.
 func (baseline Baseline) SelectionBlocked(selection ReviewSelection) error {

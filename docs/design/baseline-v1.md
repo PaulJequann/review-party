@@ -67,7 +67,8 @@ Ready, Differs, or Broken.
 - A Broken member or Party does not load. It blocks every baseline write.
 - A Party that Differs references other Profiles. It blocks the Party and
   selection steps, since selecting it would run a different composition under
-  the baseline name. A repository that already selects it is reported as
+  the baseline name. The journey and the report never offer it as an
+  ordinary Party. A repository that already selects it is reported as
   blocked rather than ready. The message names the Party file, because V1 has
   no Party edit or delete command.
 

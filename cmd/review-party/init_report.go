@@ -209,7 +209,7 @@ func (report initReport) selectionLines(baseline configuration.Baseline) ([]stri
 		return nil, err
 	}
 	add := "Missing Review selection: review-party init --repo " + shellWord(string(report.repository)) + report.config + " --profile <name>"
-	profileNames, partyNames := definitionNames(profiles), definitionNames(parties)
+	profileNames, partyNames := definitionNames(profiles), definitionNames(baseline.OtherParties(parties))
 	if len(profileNames) == 0 {
 		create := "Missing Review Profile: review-party config profile create <name> --scope global" + report.config +
 			" --template <template>" + profileExecutionPlaceholders

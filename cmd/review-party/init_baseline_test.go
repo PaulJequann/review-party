@@ -341,3 +341,17 @@ func TestInitReportsASelectedDifferingBaselineAsBlockedNotReady(t *testing.T) {
 		t.Fatalf("exit = %d, stdout = %q", exit, stdout)
 	}
 }
+
+func TestInitDoesNotSuggestABlockedBaselinePartyForTheSelection(t *testing.T) {
+	fixture := newBaselineInitFixture(t)
+	fixture.differingBaselineParty(t)
+
+	exit, stdout, _ := fixture.run(t, commandIO{})
+
+	want := "Review Party baseline blocked: Global Party \"baseline\" at " + filepath.Join(fixture.globalRoot, "parties", "baseline.json") +
+		" composes Profiles other than bugs, docs; edit or remove that file to use the baseline\n" +
+		"Missing Review selection: review-party init --repo " + fixture.repository + " --profile <name> (Profiles: bugs)\n"
+	if exit != 0 || stdout != want {
+		t.Fatalf("exit = %d, stdout = %q", exit, stdout)
+	}
+}

@@ -166,12 +166,20 @@ func TestFirstUseReportsABlockedBaselineInsteadOfOfferingIt(t *testing.T) {
 	}
 
 	output := runFirstUse(t, manager, repository,
-		"2", // first review: Global Profile bugs
+		"1", // first review: Global Profile bugs
 		"y", // publish the selection
 		"3", // no Checkpoint
 	)
 
-	if !strings.Contains(output, "Review Party baseline blocked: Global Party \"baseline\" at ") || strings.Contains(output, "Review Party baseline (") {
-		t.Fatalf("output:\n%s", output)
+	if !strings.Contains(output, "Review Party baseline blocked: Global Party \"baseline\" at ") {
+		t.Fatalf("output lacks the blocked reason:\n%s", output)
+	}
+	for _, offer := range []string{"Review Party baseline (", "Global Party baseline"} {
+		if strings.Contains(output, offer) {
+			t.Fatalf("output offers %q:\n%s", offer, output)
+		}
+	}
+	if selection := selectionOf(t, manager, repository); !slices.Equal(selection.Global, []configuration.SelectionItem{{Profile: "bugs"}}) {
+		t.Fatalf("selection = %#v, want only Global Profile bugs", selection)
 	}
 }
