@@ -87,3 +87,43 @@ func mustNewStore(t *testing.T, root string) *Store {
 	}
 	return store
 }
+
+func TestRemoveLeavesNoEmptyDirectoryBehind(t *testing.T) {
+	root := t.TempDir()
+	store := mustNewStore(t, root)
+	id := model.ReviewID("rp_1723200000000_0123456789abcdef")
+	first, err := store.Publish(id, 1, AssistantText, []byte("first"), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := store.Publish(id, 2, AssistantText, []byte("second"), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.Remove(first); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Dir(filepath.Join(root, first.Path))); !os.IsNotExist(err) {
+		t.Fatalf("emptied attempt directory remains: %v", err)
+	}
+	if err := store.Remove(second); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(filepath.Join(root, Directory))
+	if err != nil {
+		t.Fatalf("artifacts directory itself must stay: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("artifacts directory holds %d entries, want the emptied review directory gone", len(entries))
+	}
+}
+
+func TestPublishAcceptsOnlyFailureEvidenceKinds(t *testing.T) {
+	store := mustNewStore(t, t.TempDir())
+	for _, kind := range []string{"constructed-prompt", "native-stdout", "native-stderr"} {
+		if _, err := store.Publish(model.ReviewID("rp_1723200000000_0123456789abcdef"), 1, kind, []byte("x"), false); err == nil {
+			t.Errorf("published retired kind %q", kind)
+		}
+	}
+}

@@ -116,6 +116,8 @@ func (store *Store) Read(reference model.ArtifactReference) ([]byte, error) {
 	return contents, nil
 }
 
+// Remove deletes an artifact and then each directory above it, up to the
+// artifacts directory, that the removal left empty.
 func (store *Store) Remove(reference model.ArtifactReference) error {
 	path, err := store.resolve(reference.Path)
 	if err != nil {
@@ -123,6 +125,23 @@ func (store *Store) Remove(reference model.ArtifactReference) error {
 	}
 	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return fmt.Errorf("remove artifact %q: %w", reference.Path, err)
+	}
+	return store.pruneEmptyDirectories(reference)
+}
+
+func (store *Store) pruneEmptyDirectories(reference model.ArtifactReference) error {
+	for directory := filepath.Dir(reference.Path); directory != Directory && directory != "."; directory = filepath.Dir(directory) {
+		path := filepath.Join(store.root, directory)
+		entries, err := os.ReadDir(path)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil || len(entries) > 0 {
+			return err
+		}
+		if err := os.Remove(path); err != nil {
+			return fmt.Errorf("remove empty artifact directory: %w", err)
+		}
 	}
 	return nil
 }

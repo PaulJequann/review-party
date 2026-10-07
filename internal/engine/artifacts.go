@@ -26,15 +26,21 @@ type artifactInput struct {
 	truncated bool
 }
 
+// publishAttemptArtifacts keeps the raw output of a failed attempt. Empty
+// streams leave no file.
 func (publisher *artifactPublisher) publishAttemptArtifacts(id model.ReviewID, number int, execution attemptExecution) ([]model.ArtifactReference, error) {
+	if publisher == nil || publisher.store == nil {
+		return nil, nil
+	}
 	inputs := []artifactInput{
 		{kind: artifact.AssistantText, contents: []byte(execution.AssistantText), truncated: execution.ArtifactTruncated || len(execution.AssistantText) > maxHarnessStdout},
+		{kind: artifact.ReviewerNoise, contents: []byte(execution.ReviewerNoise), truncated: len(execution.ReviewerNoise) > maxHarnessStdout},
 	}
-	if execution.ReviewerNoise != "" {
-		inputs = append(inputs, artifactInput{kind: artifact.ReviewerNoise, contents: []byte(execution.ReviewerNoise), truncated: len(execution.ReviewerNoise) > maxHarnessStdout})
-	}
-	references := make([]model.ArtifactReference, 0, len(inputs))
+	var references []model.ArtifactReference
 	for _, input := range inputs {
+		if len(input.contents) == 0 {
+			continue
+		}
 		contents := boundedArtifactContents(input.contents)
 		reference, err := publisher.store.Publish(id, number, input.kind, contents, input.truncated)
 		if err != nil {

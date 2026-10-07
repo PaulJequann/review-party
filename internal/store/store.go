@@ -63,6 +63,7 @@ var migrationFiles embed.FS
 type RecordStore interface {
 	Save(model.ReviewRecord) error
 	Load(model.ReviewID) (model.ReviewRecord, error)
+	ExpireEvidence(keep int) ([]model.ArtifactReference, error)
 }
 
 type EvalRunStore interface {
@@ -155,6 +156,14 @@ func (s *DeferredLedgerRecordStore) Save(record model.ReviewRecord) error {
 		return err
 	}
 	return ledger.Save(record)
+}
+
+func (s *DeferredLedgerRecordStore) ExpireEvidence(keep int) ([]model.ArtifactReference, error) {
+	ledger, err := s.openExisting()
+	if err != nil {
+		return nil, err
+	}
+	return ledger.ExpireEvidence(keep)
 }
 
 func (s *DeferredLedgerRecordStore) RequirePrepared() error {

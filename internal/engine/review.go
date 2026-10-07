@@ -180,6 +180,7 @@ func (runner *reviewRunner) executePass(ctx context.Context, pass passExecution)
 		candidate: pass.profile.reviewer.candidate,
 		execution: execution,
 		outcome:   outcome,
+		failed:    record.Lifecycle != model.LifecycleCompleted,
 		started:   started,
 		completed: completed,
 	})
@@ -192,7 +193,28 @@ func (runner *reviewRunner) executePass(ctx context.Context, pass passExecution)
 		cleanupErr := runner.publisher.removeArtifacts(attempt.Artifacts)
 		return record, errors.Join(err, cleanupErr)
 	}
+	if len(attempt.Artifacts) > 0 {
+		runner.expireEvidence()
+	}
 	return record, nil
+}
+
+// retainedFailureEvidence bounds how many failed attempts keep their raw
+// output on disk. Each holds at most two capped streams, and a party run that
+// fails tends to fail several members at once, so ten covers the latest
+// failing run or two without letting evidence accumulate.
+const retainedFailureEvidence = 10
+
+// expireEvidence removes failure evidence beyond the retention bound. The
+// Review is already saved, so a failure here is a warning, not an error.
+func (runner *reviewRunner) expireEvidence() {
+	expired, err := runner.store.ExpireEvidence(retainedFailureEvidence)
+	if err == nil {
+		err = runner.publisher.removeArtifacts(expired)
+	}
+	if err != nil && runner.warn != nil {
+		runner.warn("could not expire old failure evidence: " + err.Error())
+	}
 }
 
 func applyAttemptResult(record *model.ReviewRecord, result model.ReviewResult, execution attemptExecution, parseErr error) model.AttemptOutcome {
@@ -289,6 +311,7 @@ type attemptDraft struct {
 	candidate reviewerCandidate
 	execution attemptExecution
 	outcome   model.AttemptOutcome
+	failed    bool
 	started   time.Time
 	completed time.Time
 }
@@ -304,7 +327,7 @@ func (runner *reviewRunner) buildAttempt(draft attemptDraft) (model.AttemptRecor
 		StartedAt:    draft.started,
 		CompletedAt:  draft.completed,
 	}
-	if runner.publisher == nil || runner.publisher.store == nil {
+	if !draft.failed {
 		return attempt, nil
 	}
 	references, err := runner.publisher.publishAttemptArtifacts(draft.reviewID, attempt.Number, execution)

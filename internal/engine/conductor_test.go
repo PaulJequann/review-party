@@ -175,7 +175,7 @@ func TestRecordSaveFailureRemovesPublishedAttemptArtifacts(t *testing.T) {
 func TestOverflowedExecutionMarksAssistantArtifactTruncated(t *testing.T) {
 	publisher := newArtifactPublisher(mustNewArtifactStore(t, t.TempDir()))
 	runner := &reviewRunner{publisher: publisher}
-	attempt, err := runner.buildAttempt(attemptDraft{reviewID: "rp_1723200000000_0123456789abcdef", number: 1, execution: attemptExecution{AssistantText: "captured prefix", ArtifactTruncated: true}, outcome: model.AttemptInvalidResult})
+	attempt, err := runner.buildAttempt(attemptDraft{reviewID: "rp_1723200000000_0123456789abcdef", number: 1, execution: attemptExecution{AssistantText: "captured prefix", ArtifactTruncated: true}, outcome: model.AttemptInvalidResult, failed: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,6 +199,10 @@ func (store *failFinalRecordStore) Save(model.ReviewRecord) error {
 
 func (*failFinalRecordStore) Load(model.ReviewID) (model.ReviewRecord, error) {
 	return model.ReviewRecord{}, errors.New("not found")
+}
+
+func (*failFinalRecordStore) ExpireEvidence(int) ([]model.ArtifactReference, error) {
+	return nil, nil
 }
 
 func mustNewArtifactStore(t *testing.T, root string) *artifact.Store {

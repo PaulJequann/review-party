@@ -106,13 +106,17 @@ func projectedResult(result *model.ReviewResult) (status, summary any, count int
 }
 
 func replaceReviewChildren(tx *sql.Tx, record model.ReviewRecord) error {
+	evidence, err := savedEvidence(tx, record.ID)
+	if err != nil {
+		return err
+	}
 	for _, table := range []string{"artifacts", "findings", "attempts", "passes"} {
 		if _, err := tx.Exec("DELETE FROM "+table+" WHERE review_id = ?", record.ID); err != nil {
 			return err
 		}
 	}
 	for passOrdinal, pass := range record.Passes {
-		if err := insertPass(tx, record.ID, passOrdinal, pass); err != nil {
+		if err := insertPass(tx, evidence, attemptIdentity{reviewID: record.ID, passOrdinal: passOrdinal}, pass); err != nil {
 			return err
 		}
 	}
@@ -134,12 +138,16 @@ func insertFindings(tx *sql.Tx, id model.ReviewID, result *model.ReviewResult) e
 	return nil
 }
 
-func insertPass(tx *sql.Tx, id model.ReviewID, passOrdinal int, pass model.PassRecord) error {
-	if _, err := tx.Exec("INSERT INTO passes(review_id,ordinal,name,required) VALUES(?,?,?,?)", id, passOrdinal, pass.Name, pass.Required); err != nil {
+func insertPass(tx *sql.Tx, evidence map[attemptIdentity][]model.ArtifactReference, identity attemptIdentity, pass model.PassRecord) error {
+	if _, err := tx.Exec("INSERT INTO passes(review_id,ordinal,name,required) VALUES(?,?,?,?)", identity.reviewID, identity.passOrdinal, pass.Name, pass.Required); err != nil {
 		return err
 	}
 	for attemptOrdinal, attempt := range pass.Attempts {
-		if err := insertAttempt(tx, attemptIdentity{id, passOrdinal, attemptOrdinal}, attempt); err != nil {
+		identity.attemptOrdinal = attemptOrdinal
+		if saved, ok := evidence[identity]; ok {
+			attempt.Artifacts = saved
+		}
+		if err := insertAttempt(tx, identity, attempt); err != nil {
 			return err
 		}
 	}

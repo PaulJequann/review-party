@@ -124,11 +124,11 @@ func TestStderrOnlyFailureStillExplainsTheAttempt(t *testing.T) {
 	}
 }
 
-func TestReviewerNoiseIsPublishedAsAnAttemptArtifact(t *testing.T) {
+func TestFailedAttemptPublishesReviewerNoiseAsAnArtifact(t *testing.T) {
 	publisher := newArtifactPublisher(mustNewArtifactStore(t, t.TempDir()))
 	runner := &reviewRunner{publisher: publisher}
 
-	attempt, err := runner.buildAttempt(attemptDraft{reviewID: "rp_1723200000000_0123456789abcdef", number: 1, execution: attemptExecution{AssistantText: cleanReview, ReviewerNoise: codexWebsocketNoise}, outcome: model.AttemptCompleted})
+	attempt, err := runner.buildAttempt(attemptDraft{reviewID: "rp_1723200000000_0123456789abcdef", number: 1, execution: attemptExecution{AssistantText: cleanReview, ReviewerNoise: codexWebsocketNoise}, outcome: model.AttemptInvalidResult, failed: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,10 +149,10 @@ func TestReviewerNoiseIsPublishedAsAnAttemptArtifact(t *testing.T) {
 	}
 }
 
-func TestQuietAttemptPublishesNoNoiseArtifact(t *testing.T) {
+func TestQuietFailedAttemptPublishesNoNoiseArtifact(t *testing.T) {
 	runner := &reviewRunner{publisher: newArtifactPublisher(mustNewArtifactStore(t, t.TempDir()))}
 
-	attempt, err := runner.buildAttempt(attemptDraft{reviewID: "rp_1723200000000_0123456789abcdef", number: 1, execution: attemptExecution{AssistantText: cleanReview}, outcome: model.AttemptCompleted})
+	attempt, err := runner.buildAttempt(attemptDraft{reviewID: "rp_1723200000000_0123456789abcdef", number: 1, execution: attemptExecution{AssistantText: cleanReview}, outcome: model.AttemptInvalidResult, failed: true})
 	if err != nil {
 		t.Fatal(err)
 	}
