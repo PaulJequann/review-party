@@ -7,16 +7,12 @@ import (
 	"reviewparty/internal/model"
 )
 
-// expiredEvidence selects the artifact rows of every attempt older than the
-// newest ? attempts that still hold evidence.
 const expiredEvidence = `FROM artifacts WHERE (review_id,pass_ordinal,attempt_ordinal) NOT IN (
 	SELECT artifacts.review_id,artifacts.pass_ordinal,artifacts.attempt_ordinal FROM artifacts
 	JOIN attempts ON attempts.review_id=artifacts.review_id AND attempts.pass_ordinal=artifacts.pass_ordinal AND attempts.ordinal=artifacts.attempt_ordinal
 	GROUP BY artifacts.review_id,artifacts.pass_ordinal,artifacts.attempt_ordinal
 	ORDER BY MAX(attempts.completed_at) DESC LIMIT ?)`
 
-// ExpireEvidence drops the artifact rows of all but the newest keep attempts
-// that hold evidence and returns them, so the caller can remove the files.
 func (s *LedgerRecordStore) ExpireEvidence(keep int) (expired []model.ArtifactReference, returnErr error) {
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -56,10 +52,6 @@ func queryExpiredEvidence(tx *sql.Tx, keep int) (expired []model.ArtifactReferen
 	return expired, rows.Err()
 }
 
-// savedEvidence maps each attempt the ledger already holds for a Review to its
-// artifact rows. Evidence is written once with its attempt, so a re-save keeps
-// these rows rather than the caller's copy, which may still name evidence that
-// expiry has since removed.
 func savedEvidence(tx *sql.Tx, id model.ReviewID) (evidence map[attemptIdentity][]model.ArtifactReference, returnErr error) {
 	rows, err := tx.Query(`SELECT attempts.pass_ordinal,attempts.ordinal,artifacts.kind,artifacts.path,artifacts.size,artifacts.digest,artifacts.truncated
 		FROM attempts LEFT JOIN artifacts ON artifacts.review_id=attempts.review_id AND artifacts.pass_ordinal=attempts.pass_ordinal AND artifacts.attempt_ordinal=attempts.ordinal
@@ -88,7 +80,6 @@ func savedEvidence(tx *sql.Tx, id model.ReviewID) (evidence map[attemptIdentity]
 	return evidence, rows.Err()
 }
 
-// EvidencePaths lists the path of every artifact the ledger references.
 func (s *LedgerRecordStore) EvidencePaths() (paths []string, returnErr error) {
 	rows, err := s.db.Query("SELECT path FROM artifacts")
 	if err != nil {

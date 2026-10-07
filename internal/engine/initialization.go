@@ -84,8 +84,10 @@ func prepareExistingInitializationState(manager *configuration.Manager, selectio
 	if err := store.PrepareReviewRecordState(string(selection.directory)); err != nil {
 		return false, err
 	}
-	if err := removeUnreferencedEvidence(selection.directory, alreadyReady); err != nil {
-		return false, err
+	if !alreadyReady {
+		if err := removeUnreferencedEvidence(selection.directory); err != nil {
+			return false, err
+		}
 	}
 	if err := rememberInitializedState(manager, selection); err != nil {
 		return false, err
@@ -93,15 +95,7 @@ func prepareExistingInitializationState(manager *configuration.Manager, selectio
 	return alreadyReady, nil
 }
 
-// removeUnreferencedEvidence deletes the artifact files no ledger row names,
-// such as the prompts and completed-attempt text that earlier versions kept.
-// It runs only when preparation created or upgraded the ledger: no Review could
-// run against the state before that, so no unreferenced file can be one that a
-// Review has published and is about to record.
-func removeUnreferencedEvidence(directory statePath, alreadyReady bool) (returnErr error) {
-	if alreadyReady {
-		return nil
-	}
+func removeUnreferencedEvidence(directory statePath) (returnErr error) {
 	ledger, err := store.NewLedgerRecordStore(string(directory))
 	if err != nil {
 		return err

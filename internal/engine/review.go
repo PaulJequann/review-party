@@ -199,14 +199,8 @@ func (runner *reviewRunner) executePass(ctx context.Context, pass passExecution)
 	return record, nil
 }
 
-// retainedFailureEvidence bounds how many failed attempts keep their raw
-// output on disk. Each holds at most two capped streams, and a party run that
-// fails tends to fail several members at once, so ten covers the latest
-// failing run or two without letting evidence accumulate.
 const retainedFailureEvidence = 10
 
-// expireEvidence removes failure evidence beyond the retention bound. The
-// Review is already saved, so a failure here is a warning, not an error.
 func (runner *reviewRunner) expireEvidence() {
 	expired, err := runner.store.ExpireEvidence(retainedFailureEvidence)
 	if err == nil {
@@ -330,7 +324,7 @@ func (runner *reviewRunner) buildAttempt(draft attemptDraft) (model.AttemptRecor
 	if !draft.failed {
 		return attempt, nil
 	}
-	references, err := runner.publisher.publishAttemptArtifacts(draft.reviewID, attempt.Number, execution)
+	references, err := runner.publisher.publishFailureEvidence(draft.reviewID, attempt.Number, execution)
 	if err != nil {
 		return model.AttemptRecord{}, err
 	}

@@ -97,7 +97,6 @@ func TestReviewFreezesWorkingChangesBeforeExecution(t *testing.T) {
 	}
 }
 
-// promptPatch is the patch section of a constructed Review prompt.
 func promptPatch(t *testing.T, prompt string) string {
 	t.Helper()
 	_, patch, found := strings.Cut(prompt, "--- PATCH ---\n")

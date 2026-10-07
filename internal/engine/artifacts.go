@@ -20,9 +20,7 @@ func newArtifactPublisher(store *artifact.Store) *artifactPublisher {
 	return &artifactPublisher{store: store}
 }
 
-// publishAttemptArtifacts keeps the raw output of a failed attempt. Empty
-// streams leave no file.
-func (publisher *artifactPublisher) publishAttemptArtifacts(id model.ReviewID, number int, execution attemptExecution) ([]model.ArtifactReference, error) {
+func (publisher *artifactPublisher) publishFailureEvidence(id model.ReviewID, number int, execution attemptExecution) ([]model.ArtifactReference, error) {
 	if publisher == nil || publisher.store == nil {
 		return nil, nil
 	}

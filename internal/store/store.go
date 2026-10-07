@@ -17,10 +17,6 @@ import (
 
 const ledgerFilename = "ledger.sqlite"
 
-// currentLedgerSchemaVersion is the newest step in ledgerMigrations. State
-// preparation upgrades a ledger at schema 10 or later in place, preserving its
-// review history, and replaces anything older without preserving it. The numbering
-// continued past the last released migration so no obsolete ledger can collide.
 const currentLedgerSchemaVersion = 15
 
 var ledgerMigrations = []struct {
@@ -480,7 +476,6 @@ func (s *LedgerRecordStore) migrate() error {
 	return s.compact()
 }
 
-// applyMigrations reports whether it upgraded an existing ledger in place.
 func (s *LedgerRecordStore) applyMigrations() (upgraded bool, returnErr error) {
 	if _, err := s.db.Exec("CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY)"); err != nil {
 		return false, fmt.Errorf("create migration table: %w", err)
@@ -520,8 +515,6 @@ func upgradeLedgerSchema(tx *sql.Tx, version int) error {
 		return fmt.Errorf("review ledger schema %d is newer than supported schema %d", version, currentLedgerSchemaVersion)
 	}
 	if !upgradableLedgerVersion(version) {
-		// A version outside the upgrade chain (zero for a fresh database) is an
-		// obsolete pre-release ledger: replace it rather than preserve it.
 		if err := dropObsoleteLedgerTables(tx, version); err != nil {
 			return err
 		}

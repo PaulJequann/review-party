@@ -18,8 +18,6 @@ import (
 
 const patchSentinel = "PATCH-SENTINEL-4f1c"
 
-// hostStateConductor wires the ledger and the artifact store into one state
-// directory, as New does, so a test can inspect everything a Review leaves.
 func hostStateConductor(t *testing.T, executor attemptExecutor) (*Conductor, string) {
 	t.Helper()
 	state := t.TempDir()
@@ -49,7 +47,6 @@ func sentinelRepository(t *testing.T) string {
 	return repository
 }
 
-// filesHolding lists the files under root whose bytes contain needle.
 func filesHolding(t *testing.T, root, needle string) []string {
 	t.Helper()
 	var holding []string
@@ -75,8 +72,6 @@ func filesHolding(t *testing.T, root, needle string) []string {
 	return holding
 }
 
-// The patch and the prompt that carries it are rebuilt from the repository on
-// demand, so neither the ledger nor the artifact store may hold them.
 func TestReviewLeavesNoPatchInHostState(t *testing.T) {
 	repository := sentinelRepository(t)
 	executor := successfulExecutor(cleanReview)
@@ -146,8 +141,6 @@ func TestIncompleteReviewKeepsItsRawOutput(t *testing.T) {
 	}
 }
 
-// steppingClock moves a minute per reading so every attempt completes at a
-// distinct, ordered time.
 func steppingClock() func() time.Time {
 	current := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	return func() time.Time {
@@ -200,7 +193,6 @@ func artifactFiles(t *testing.T, state string) []string {
 	return files
 }
 
-// writeOrphanEvidence leaves an artifact file that no ledger row names.
 func writeOrphanEvidence(t *testing.T, state string) string {
 	t.Helper()
 	directory := filepath.Join(state, artifact.Directory, "rp_1_orphan", "1")
@@ -233,8 +225,6 @@ func TestPreparingTheLedgerRemovesEvidenceItDoesNotName(t *testing.T) {
 	}
 }
 
-// Once the ledger is ready a Review may have published a file it has not yet
-// recorded, so a later init must leave unreferenced files alone.
 func TestInitializingAReadyLedgerKeepsUnrecordedEvidence(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	state := initializeTestState(t)

@@ -17,9 +17,6 @@ import (
 
 const emptyGitTree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
-// Subject owns the correspondence between a durable ReviewSubject and the
-// material needed to prepare one Reviewer execution. Patch feeds the identity
-// hash and the prompt but is never persisted. The repository can regenerate it.
 type Subject struct {
 	model.ReviewSubject
 	Patch          string

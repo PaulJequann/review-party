@@ -260,15 +260,13 @@ func TestLedgerMissRemovalWithAnUnknownIDChangesNothing(t *testing.T) {
 	}
 }
 
+const storedTextSchema = 15
+
 // writeLedgerAtSchema writes a ledger migrated only up to version, as an older
 // release left it, holding one completed review.
 // writeLedgerAtSchema saves the fixture through today's projection, which
 // writes tables later migrations add, so it builds the full schema and then
 // removes whatever the requested version did not yet have.
-// storedTextSchema drops columns rather than adding tables, so a fixture older
-// than it keeps the columns of its own schema.
-const storedTextSchema = 15
-
 func writeLedgerAtSchema(t *testing.T, directory string, version int) model.ReviewRecord {
 	t.Helper()
 	db, err := sql.Open("sqlite", filepath.Join(directory, ledgerFilename))

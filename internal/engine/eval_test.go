@@ -283,8 +283,6 @@ func assertSyntheticSubject(t *testing.T, index int, subject model.ReviewSubject
 	}
 }
 
-// assertNoPromptPatchMentions proves corpus authority, such as the suite path
-// or an expected Finding, never reaches the patch a reviewer reads.
 func assertNoPromptPatchMentions(t *testing.T, prompts []string, authority string) {
 	t.Helper()
 	for index, prompt := range prompts {

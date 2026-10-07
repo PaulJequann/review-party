@@ -17,8 +17,6 @@ import (
 	"reviewparty/internal/store"
 )
 
-// reportChangedPathSentinel is a changed path no Finding names, so it appears
-// only where a report carries the Subject's changed paths.
 const reportChangedPathSentinel = "internal/file24.go"
 
 func reportRecord(id model.ReviewID, profile string, findings int) model.ReviewRecord {

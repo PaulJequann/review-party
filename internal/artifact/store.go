@@ -25,14 +25,11 @@ func IsTemporary(entry fs.DirEntry) bool {
 	return err == nil && matched && entry.Type().IsRegular()
 }
 
-// The kinds of evidence an Attempt may publish.
 const (
 	AssistantText = "assistant-text"
 	ReviewerNoise = "reviewer-noise"
 )
 
-// Evidence is one stream of an Attempt's raw output, already bounded by the
-// caller, which reports whether it cut the stream short.
 type Evidence struct {
 	Kind      string
 	Contents  []byte
@@ -125,8 +122,6 @@ func (store *Store) Read(reference model.ArtifactReference) ([]byte, error) {
 	return contents, nil
 }
 
-// Remove deletes an artifact and then each directory above it, up to the
-// artifacts directory, that the removal left empty.
 func (store *Store) Remove(reference model.ArtifactReference) error {
 	path, err := store.resolve(reference.Path)
 	if err != nil {
@@ -166,8 +161,6 @@ func validKind(kind string) bool {
 	return kind == AssistantText || kind == ReviewerNoise
 }
 
-// RemoveUnreferenced deletes every file under the artifacts directory whose
-// path is not in referenced, and each directory that leaves empty.
 func (store *Store) RemoveUnreferenced(referenced []string) error {
 	keep := map[string]bool{}
 	for _, path := range referenced {

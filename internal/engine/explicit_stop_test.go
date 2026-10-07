@@ -8,8 +8,6 @@ import (
 	"reviewparty/internal/model"
 )
 
-// artifactFailureConductor returns a conductor whose failed Attempt cannot
-// publish its evidence, a hard error raised after the Review is saved running.
 func artifactFailureConductor(t *testing.T, recorder *runProgressRecorder) *Conductor {
 	t.Helper()
 	conductor := testPartyConductor(t, map[string]attemptExecutor{defaultReviewer: successfulExecutor("not a result contract")})

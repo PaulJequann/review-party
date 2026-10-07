@@ -42,8 +42,6 @@ func execTestStatements(t *testing.T, db *sql.DB, statements []testStatement) {
 	}
 }
 
-// seedSchemaFourteenText gives a schema 14 ledger the text it used to store, a
-// failed Review beside the completed one, and one row of each kind of history.
 func seedSchemaFourteenText(t *testing.T, db *sql.DB, completed model.ReviewID) {
 	t.Helper()
 	failed := ledgerFixture(model.LifecycleIncomplete)
@@ -104,7 +102,6 @@ func queryTestStrings(t *testing.T, db *sql.DB, query string) []string {
 	return values
 }
 
-// ledgerFiles reads the database and its write-ahead log as the host stores them.
 func ledgerFiles(t *testing.T, directory string) []byte {
 	t.Helper()
 	var contents []byte
