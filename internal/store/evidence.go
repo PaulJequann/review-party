@@ -13,25 +13,30 @@ const expiredEvidence = `FROM artifacts WHERE (review_id,pass_ordinal,attempt_or
 	GROUP BY artifacts.review_id,artifacts.pass_ordinal,artifacts.attempt_ordinal
 	ORDER BY MAX(attempts.completed_at) DESC LIMIT ?)`
 
-func (s *LedgerRecordStore) ExpireEvidence(keep int) (expired []model.ArtifactReference, returnErr error) {
+// ExpireEvidence removes the files before committing the forgotten rows, so a
+// failed removal leaves the rows for the next expiry to retry.
+func (s *LedgerRecordStore) ExpireEvidence(keep int, remove func([]model.ArtifactReference) error) (returnErr error) {
 	tx, err := s.db.Begin()
 	if err != nil {
-		return nil, fmt.Errorf("begin evidence expiry: %w", err)
+		return fmt.Errorf("begin evidence expiry: %w", err)
 	}
 	defer func() {
 		returnErr = errors.Join(returnErr, rollbackTransaction(tx))
 	}()
-	expired, err = queryExpiredEvidence(tx, keep)
+	expired, err := queryExpiredEvidence(tx, keep)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if _, err := tx.Exec("DELETE "+expiredEvidence, keep); err != nil {
-		return nil, fmt.Errorf("expire evidence: %w", err)
+		return fmt.Errorf("expire evidence: %w", err)
+	}
+	if err := remove(expired); err != nil {
+		return err
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("commit evidence expiry: %w", err)
+		return fmt.Errorf("commit evidence expiry: %w", err)
 	}
-	return expired, nil
+	return nil
 }
 
 func queryExpiredEvidence(tx *sql.Tx, keep int) (expired []model.ArtifactReference, returnErr error) {

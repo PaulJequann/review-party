@@ -55,7 +55,7 @@ func recorded(source, id string, lifecycle model.Lifecycle, changes ...[]model.C
 
 func (*coverageStore) Save(model.ReviewRecord) error { return nil }
 
-func (*coverageStore) ExpireEvidence(int) ([]model.ArtifactReference, error) { return nil, nil }
+func (*coverageStore) ExpireEvidence(int, func([]model.ArtifactReference) error) error { return nil }
 
 func (fake *coverageStore) Load(id model.ReviewID) (model.ReviewRecord, error) {
 	fake.loads++

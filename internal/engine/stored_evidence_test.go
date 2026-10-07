@@ -230,8 +230,8 @@ type keepAllEvidence struct {
 	store.RecordStore
 }
 
-func (keepAllEvidence) ExpireEvidence(int) ([]model.ArtifactReference, error) {
-	return nil, nil
+func (keepAllEvidence) ExpireEvidence(int, func([]model.ArtifactReference) error) error {
+	return nil
 }
 
 func failedReviewsWithoutExpiry(t *testing.T, state string, count int) []model.ReviewID {
@@ -417,5 +417,32 @@ func TestInitializingAfterAFailedSweepRetriesItsMaintenance(t *testing.T) {
 
 	if files := artifactFiles(t, state); len(files) != 0 {
 		t.Fatalf("artifact files = %v, want the retried sweep to remove them", files)
+	}
+}
+
+func TestFreshStateLeavesTheReplacedLedgersEvidenceInItsBackup(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	state := initializeTestState(t)
+	orphan := writeOrphanEvidence(t, state)
+	writeTestFile(t, filepath.Join(state, "ledger.sqlite"), "not a ledger")
+	repository := testRepository(t)
+
+	backedUp, err := InitializeReviewParty(ReviewPartyInitialization{Repository: repository, BackupIncompatible: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := InitializeReviewParty(ReviewPartyInitialization{Repository: repository, Fresh: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	relative, err := filepath.Rel(state, orphan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(backedUp.Backup.Directory, relative)); err != nil {
+		t.Fatalf("the backup lost the replaced ledger's evidence: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(state, artifact.Directory)); !os.IsNotExist(err) {
+		t.Fatalf("fresh state kept the replaced ledger's evidence: %v", err)
 	}
 }

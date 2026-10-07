@@ -153,8 +153,9 @@ review-party init --repo . --backup-incompatible --yes
 review-party init --repo . --fresh --yes
 ```
 
-The first command moves the old bytes under the state root's `backups/`
-directory and records that fresh initialization is pending. It does not claim
+The first command moves the old ledger, its sidecars, and the `artifacts/`
+evidence it references under the state root's `backups/` directory and records
+that fresh initialization is pending. It does not claim
 a migration or create a new ledger. Repeat the
 same `--state-dir` and `--config` options on both commands when using either
 advanced selector.

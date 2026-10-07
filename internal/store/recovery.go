@@ -14,90 +14,118 @@ type StateBackup struct {
 	Files     []string `json:"files"`
 }
 
-// BackupIncompatibleReviewRecordState moves an unusable ledger and every
-// present SQLite sidecar together. It never prepares or migrates new state.
-func BackupIncompatibleReviewRecordState(directory string) (StateBackup, error) {
+// BackupIncompatibleReviewRecordState moves an unusable ledger, every present
+// SQLite sidecar, and evidence, the state subdirectory holding the files that
+// ledger references, together. It never prepares or migrates new state.
+func BackupIncompatibleReviewRecordState(directory, evidence string) (StateBackup, error) {
+	recovery := stateRecovery{directory: directory, evidence: evidence}
 	if pending, err := ReviewRecordStateRecoveryPending(directory); err != nil {
 		return StateBackup{}, err
 	} else if pending {
-		return resumeStateBackup(directory)
+		return recovery.resume()
 	}
-	ready, checkErr := ReviewRecordStatePrepared(directory)
-	if ready {
-		return StateBackup{}, errors.New("review ledger is compatible; backup recovery is not required")
-	}
-	ledger := filepath.Join(directory, ledgerFilename)
-	if _, err := os.Lstat(ledger); err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return StateBackup{}, errors.New("incompatible review ledger was not found")
-		}
+	if err := requireRecoverableLedger(directory); err != nil {
 		return StateBackup{}, err
 	}
-	if checkErr == nil {
-		return StateBackup{}, errors.New("review ledger is not known to be incompatible")
-	}
-	if !recoverableIncompatibility(checkErr) {
-		return StateBackup{}, checkErr
-	}
-	backup := filepath.Join(directory, BackupDirectory, time.Now().UTC().Format("20060102T150405.000000000Z"))
-	if err := os.MkdirAll(backup, 0o700); err != nil {
-		return StateBackup{}, fmt.Errorf("create review state backup: %w", err)
-	}
-	result := StateBackup{Directory: backup}
-	marker := filepath.Join(directory, recoveryMarker)
-	if err := os.WriteFile(marker, []byte(backup+"\n"), 0o600); err != nil {
-		return StateBackup{}, fmt.Errorf("record pending fresh initialization: %w", err)
-	}
-	for _, suffix := range []string{"", "-wal", "-shm", "-journal"} {
-		name := ledgerFilename + suffix
-		source := filepath.Join(directory, name)
-		if _, err := os.Lstat(source); errors.Is(err, os.ErrNotExist) {
-			continue
-		} else if err != nil {
-			return StateBackup{}, rollbackStateBackup(directory, result, marker, fmt.Errorf("inspect review state file %q: %w", source, err))
-		}
-		target := filepath.Join(backup, name)
-		if err := os.Rename(source, target); err != nil {
-			return StateBackup{}, rollbackStateBackup(directory, result, marker, fmt.Errorf("back up review state file %q: %w", source, err))
-		}
-		result.Files = append(result.Files, target)
-	}
-	return result, nil
+	return recovery.begin()
 }
 
-func resumeStateBackup(directory string) (StateBackup, error) {
-	payload, err := os.ReadFile(filepath.Join(directory, recoveryMarker))
+type stateRecovery struct {
+	directory string
+	evidence  string
+}
+
+func requireRecoverableLedger(directory string) error {
+	ready, checkErr := ReviewRecordStatePrepared(directory)
+	if ready {
+		return errors.New("review ledger is compatible; backup recovery is not required")
+	}
+	if _, err := os.Lstat(filepath.Join(directory, ledgerFilename)); errors.Is(err, os.ErrNotExist) {
+		return errors.New("incompatible review ledger was not found")
+	} else if err != nil {
+		return err
+	}
+	if checkErr == nil {
+		return errors.New("review ledger is not known to be incompatible")
+	}
+	if !recoverableIncompatibility(checkErr) {
+		return checkErr
+	}
+	return nil
+}
+
+func (recovery stateRecovery) begin() (StateBackup, error) {
+	backup := StateBackup{Directory: filepath.Join(recovery.directory, BackupDirectory, time.Now().UTC().Format("20060102T150405.000000000Z"))}
+	if err := os.MkdirAll(backup.Directory, 0o700); err != nil {
+		return StateBackup{}, fmt.Errorf("create review state backup: %w", err)
+	}
+	if err := os.WriteFile(recovery.marker(), []byte(backup.Directory+"\n"), 0o600); err != nil {
+		return StateBackup{}, fmt.Errorf("record pending fresh initialization: %w", err)
+	}
+	if err := recovery.collect(&backup); err != nil {
+		return StateBackup{}, recovery.rollback(backup, err)
+	}
+	return backup, nil
+}
+
+func (recovery stateRecovery) marker() string {
+	return filepath.Join(recovery.directory, recoveryMarker)
+}
+
+// collect moves the ledger, its sidecars, and the evidence into the backup.
+// An entry already in the backup is one an interrupted backup moved.
+func (recovery stateRecovery) collect(backup *StateBackup) error {
+	var names []string
+	for _, suffix := range ledgerSuffixes {
+		names = append(names, ledgerFilename+suffix)
+	}
+	for _, name := range append(names, recovery.evidence) {
+		source, target := filepath.Join(recovery.directory, name), filepath.Join(backup.Directory, name)
+		if _, err := os.Lstat(target); err == nil {
+			backup.Files = append(backup.Files, target)
+			continue
+		}
+		if _, err := os.Lstat(source); errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err := os.Rename(source, target); err != nil {
+			return fmt.Errorf("back up review state file %q: %w", source, err)
+		}
+		backup.Files = append(backup.Files, target)
+	}
+	return nil
+}
+
+func (recovery stateRecovery) resume() (StateBackup, error) {
+	payload, err := os.ReadFile(recovery.marker())
 	if err != nil {
 		return StateBackup{}, err
 	}
-	backup := strings.TrimSpace(string(payload))
-	if filepath.Dir(filepath.Dir(backup)) != directory || filepath.Base(filepath.Dir(backup)) != BackupDirectory {
+	backup := StateBackup{Directory: strings.TrimSpace(string(payload))}
+	if filepath.Dir(filepath.Dir(backup.Directory)) != recovery.directory || filepath.Base(filepath.Dir(backup.Directory)) != BackupDirectory {
 		return StateBackup{}, errors.New("invalid pending recovery backup path")
 	}
-	result := StateBackup{Directory: backup}
-	for _, suffix := range []string{"", "-wal", "-shm", "-journal"} {
-		name := ledgerFilename + suffix
-		source, target := filepath.Join(directory, name), filepath.Join(backup, name)
-		if _, err := os.Lstat(target); err == nil {
-			result.Files = append(result.Files, target)
-			continue
-		} else if !errors.Is(err, os.ErrNotExist) {
-			return StateBackup{}, err
-		}
-		if _, err := os.Lstat(source); errors.Is(err, os.ErrNotExist) {
-			continue
-		} else if err != nil {
-			return StateBackup{}, err
-		}
-		if err := os.Rename(source, target); err != nil {
-			return StateBackup{}, err
-		}
-		result.Files = append(result.Files, target)
+	if err := recovery.collect(&backup); err != nil {
+		return StateBackup{}, err
 	}
-	if len(result.Files) == 0 {
+	if len(backup.Files) == 0 {
 		return StateBackup{}, errors.New("pending recovery contains no backed-up ledger files")
 	}
-	return result, nil
+	return backup, nil
+}
+
+func (recovery stateRecovery) rollback(backup StateBackup, cause error) error {
+	var rollbackErrs []error
+	for index := len(backup.Files) - 1; index >= 0; index-- {
+		path := backup.Files[index]
+		if err := os.Rename(path, filepath.Join(recovery.directory, filepath.Base(path))); err != nil {
+			rollbackErrs = append(rollbackErrs, fmt.Errorf("restore %q: %w", path, err))
+		}
+	}
+	if err := os.Remove(recovery.marker()); err != nil && !errors.Is(err, os.ErrNotExist) {
+		rollbackErrs = append(rollbackErrs, err)
+	}
+	return errors.Join(append([]error{cause}, rollbackErrs...)...)
 }
 
 func recoverableIncompatibility(err error) bool {
@@ -107,20 +135,6 @@ func recoverableIncompatibility(err error) bool {
 	return errors.Is(err, ErrReviewRecordStateRequiresPreparation) ||
 		strings.Contains(err.Error(), "newer than supported schema") ||
 		strings.Contains(err.Error(), "is corrupt")
-}
-
-func rollbackStateBackup(directory string, backup StateBackup, marker string, cause error) error {
-	var rollbackErrs []error
-	for index := len(backup.Files) - 1; index >= 0; index-- {
-		path := backup.Files[index]
-		if err := os.Rename(path, filepath.Join(directory, filepath.Base(path))); err != nil {
-			rollbackErrs = append(rollbackErrs, fmt.Errorf("restore %q: %w", path, err))
-		}
-	}
-	if err := os.Remove(marker); err != nil && !errors.Is(err, os.ErrNotExist) {
-		rollbackErrs = append(rollbackErrs, err)
-	}
-	return errors.Join(append([]error{cause}, rollbackErrs...)...)
 }
 
 func ReviewRecordStateRecoveryPending(directory string) (bool, error) {
@@ -142,36 +156,32 @@ func PrepareFreshReviewRecordState(directory string) error {
 	if !pending {
 		return errors.New("fresh initialization requires a preceding incompatible-ledger backup")
 	}
-	for _, suffix := range []string{"", "-wal", "-shm", "-journal"} {
-		path := filepath.Join(directory, ledgerFilename+suffix)
-		if _, err := os.Lstat(path); err == nil {
-			// A prepared state beside a pending marker is an interrupted
-			// completion (prepared usable state, then exited before the
-			// marker was dropped, including a failed marker removal). It
-			// cannot be the backed-up original, which was unusable by
-			// definition, so dropping the marker completes the retry.
-			// Anything else could be unrestored originals: refuse and
-			// direct the operator to --backup first.
-			ready, prepErr := ReviewRecordStatePrepared(directory)
-			if prepErr != nil {
-				return fmt.Errorf("fresh initialization refused while review state file %q remains outside backup", path)
-			}
-			if !ready {
-				return fmt.Errorf("fresh initialization refused while review state file %q remains outside backup", path)
-			}
-			if err := os.Remove(filepath.Join(directory, recoveryMarker)); err != nil {
-				return fmt.Errorf("complete fresh initialization: %w", err)
-			}
-			return nil
-		} else if !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
-	}
-	if err := PrepareReviewRecordState(directory); err != nil {
+	if err := prepareFreshLedger(directory); err != nil {
 		return err
 	}
 	if err := os.Remove(filepath.Join(directory, recoveryMarker)); err != nil {
 		return fmt.Errorf("complete fresh initialization: %w", err)
 	}
 	return nil
+}
+
+// prepareFreshLedger prepares a ledger where the backup left none. A prepared
+// ledger beside a pending marker is an interrupted completion (prepared usable
+// state, then exited before the marker was dropped, including a failed marker
+// removal). It cannot be the backed-up original, which was unusable by
+// definition, so it is kept. Any other ledger file could be an unrestored
+// original: refuse and direct the operator to --backup first.
+func prepareFreshLedger(directory string) error {
+	for _, suffix := range ledgerSuffixes {
+		path := filepath.Join(directory, ledgerFilename+suffix)
+		if _, err := os.Lstat(path); err == nil {
+			if ready, err := ReviewRecordStatePrepared(directory); err != nil || !ready {
+				return fmt.Errorf("fresh initialization refused while review state file %q remains outside backup", path)
+			}
+			return nil
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	return PrepareReviewRecordState(directory)
 }

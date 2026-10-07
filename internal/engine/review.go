@@ -202,10 +202,7 @@ func (runner *reviewRunner) executePass(ctx context.Context, pass passExecution)
 const retainedFailureEvidence = 10
 
 func (runner *reviewRunner) expireEvidence() {
-	expired, err := runner.store.ExpireEvidence(retainedFailureEvidence)
-	if err == nil {
-		err = runner.publisher.removeArtifacts(expired)
-	}
+	err := runner.store.ExpireEvidence(retainedFailureEvidence, runner.publisher.removeArtifacts)
 	if err != nil && runner.warn != nil {
 		runner.warn("could not expire old failure evidence: " + err.Error())
 	}

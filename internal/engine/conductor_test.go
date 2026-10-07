@@ -200,8 +200,8 @@ func (*failFinalRecordStore) Load(model.ReviewID) (model.ReviewRecord, error) {
 	return model.ReviewRecord{}, errors.New("not found")
 }
 
-func (*failFinalRecordStore) ExpireEvidence(int) ([]model.ArtifactReference, error) {
-	return nil, nil
+func (*failFinalRecordStore) ExpireEvidence(int, func([]model.ArtifactReference) error) error {
+	return nil
 }
 
 func mustNewArtifactStore(t *testing.T, root string) *artifact.Store {

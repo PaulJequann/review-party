@@ -106,14 +106,14 @@ func completeMaintenance(directory statePath) (returnErr error) {
 	defer func() {
 		returnErr = errors.Join(returnErr, ledger.Close())
 	}()
-	if _, err := ledger.ExpireEvidence(retainedFailureEvidence); err != nil {
-		return err
-	}
-	referenced, err := ledger.EvidencePaths()
+	artifacts, err := artifact.NewStore(string(directory))
 	if err != nil {
 		return err
 	}
-	artifacts, err := artifact.NewStore(string(directory))
+	if err := ledger.ExpireEvidence(retainedFailureEvidence, newArtifactPublisher(artifacts).removeArtifacts); err != nil {
+		return err
+	}
+	referenced, err := ledger.EvidencePaths()
 	if err != nil {
 		return err
 	}

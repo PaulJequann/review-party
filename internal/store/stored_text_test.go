@@ -169,7 +169,7 @@ func TestUpgradedLedgerRequiresInitUntilMaintenanceCompletes(t *testing.T) {
 			t.Fatalf("readiness with pending maintenance = %v, want a direction to run review-party init", err)
 		}
 	}
-	if _, err := BackupIncompatibleReviewRecordState(directory); err == nil {
+	if _, err := BackupIncompatibleReviewRecordState(directory, testEvidenceDirectory); err == nil {
 		t.Fatal("backup of a ledger with pending maintenance succeeded")
 	}
 
