@@ -346,14 +346,18 @@ func gitInputOutput(repository string, input []byte, args ...string) ([]byte, er
 		command.Stdin = bytes.NewReader(input)
 	}
 	output, err := command.Output()
-	if err == nil {
-		return output, nil
+	if err != nil {
+		return nil, gitCommandError(args, err)
 	}
+	return output, nil
+}
+
+func gitCommandError(args []string, err error) error {
 	var exitError *exec.ExitError
 	if errors.As(err, &exitError) {
-		return nil, fmt.Errorf("git %s: %s", strings.Join(args, " "), strings.TrimSpace(string(exitError.Stderr)))
+		return fmt.Errorf("git %s: %s", strings.Join(args, " "), strings.TrimSpace(string(exitError.Stderr)))
 	}
-	return nil, err
+	return err
 }
 
 func splitNUL(value []byte) []string {

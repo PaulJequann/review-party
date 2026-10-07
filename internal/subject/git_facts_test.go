@@ -1,6 +1,7 @@
 package subject
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -64,7 +65,7 @@ func TestCapturedSubjectKeepsMaterializationOpaqueAndPathIndependent(t *testing.
 
 }
 
-func TestCapturedSubjectExecutionCleansItsCheckout(t *testing.T) {
+func TestCapturedSubjectCopiesItsHeadIntoAView(t *testing.T) {
 	base := t.TempDir()
 	head := t.TempDir()
 	writeTestFile(t, filepath.Join(base, "review.go"), "package demo\n\nconst state = \"base\"\n")
@@ -73,19 +74,35 @@ func TestCapturedSubjectExecutionCleansItsCheckout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	checkout, err := resolved.PrepareExecution("captured-test")
+	if _, inPlace := resolved.InPlace(); inPlace {
+		t.Fatal("captured change reported as reviewed in place")
+	}
+	if resolved.ViewKey() != "captured:"+resolved.Identity {
+		t.Fatalf("view key = %q", resolved.ViewKey())
+	}
+	view := t.TempDir()
+	if err := resolved.BuildView(context.Background(), view); err != nil {
+		t.Fatal(err)
+	}
+	content, err := os.ReadFile(filepath.Join(view, "review.go"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	path := checkout.Repository
-	if _, err := os.Stat(filepath.Join(path, "review.go")); err != nil {
+	if !strings.Contains(string(content), "head") {
+		t.Fatalf("view content = %q", content)
+	}
+}
+
+func TestWorkingChangesAreReviewedInPlace(t *testing.T) {
+	repository := testRepository(t)
+	writeTestFile(t, filepath.Join(repository, "review.go"), "package demo\n\nconst state = \"edited\"\n")
+	resolved, err := ResolveSubject(repository, model.WorkingChanges())
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := checkout.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Fatalf("captured checkout remains: %v", err)
+	path, inPlace := resolved.InPlace()
+	if !inPlace || path != repository {
+		t.Fatalf("in place = %q, %v", path, inPlace)
 	}
 }
 
