@@ -127,3 +127,33 @@ func TestPublishAcceptsOnlyFailureEvidenceKinds(t *testing.T) {
 		}
 	}
 }
+
+func TestRemoveUnreferencedKeepsOnlyReferencedEvidence(t *testing.T) {
+	root := t.TempDir()
+	store := mustNewStore(t, root)
+	kept, err := store.Publish("rp_1723200000000_0123456789abcdef", 1, Evidence{Kind: AssistantText, Contents: []byte("kept")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dropped, err := store.Publish("rp_1723200000001_0123456789abcdef", 1, Evidence{Kind: ReviewerNoise, Contents: []byte("dropped")})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.RemoveUnreferenced([]string{kept.Path}); err != nil {
+		t.Fatal(err)
+	}
+
+	if contents, err := store.Read(kept); err != nil || string(contents) != "kept" {
+		t.Fatalf("referenced evidence = %q, %v", contents, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, Directory, "rp_1723200000001_0123456789abcdef")); !os.IsNotExist(err) {
+		t.Fatalf("unreferenced evidence %s remains: %v", dropped.Path, err)
+	}
+}
+
+func TestRemoveUnreferencedWithoutAnArtifactsDirectory(t *testing.T) {
+	if err := mustNewStore(t, t.TempDir()).RemoveUnreferenced(nil); err != nil {
+		t.Fatalf("RemoveUnreferenced = %v, want nothing to do", err)
+	}
+}

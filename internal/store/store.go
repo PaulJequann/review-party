@@ -18,10 +18,10 @@ import (
 const ledgerFilename = "ledger.sqlite"
 
 // currentLedgerSchemaVersion is the newest step in ledgerMigrations. State
-// preparation upgrades a ledger at schema 10 or later additively, preserving its
-// records, and replaces anything older without preserving it. The numbering
+// preparation upgrades a ledger at schema 10 or later in place, preserving its
+// review history, and replaces anything older without preserving it. The numbering
 // continued past the last released migration so no obsolete ledger can collide.
-const currentLedgerSchemaVersion = 14
+const currentLedgerSchemaVersion = 15
 
 var ledgerMigrations = []struct {
 	version int
@@ -32,6 +32,7 @@ var ledgerMigrations = []struct {
 	{12, "migrations/finding_verdicts.sql"},
 	{13, "migrations/content_changes.sql"},
 	{14, "migrations/checkpoint_waivers.sql"},
+	{15, "migrations/stored_text.sql"},
 }
 
 var ErrReviewRecordStateNotInitialized = errors.New("Review Party is not initialized")
@@ -471,25 +472,47 @@ var obsoleteLedgerTables = []string{
 	"eval_suite_runs", "review_content_changes", "reviews", "schema_migrations",
 }
 
-func (s *LedgerRecordStore) migrate() (returnErr error) {
+func (s *LedgerRecordStore) migrate() error {
+	upgraded, err := s.applyMigrations()
+	if err != nil || !upgraded {
+		return err
+	}
+	return s.compact()
+}
+
+// applyMigrations reports whether it upgraded an existing ledger in place.
+func (s *LedgerRecordStore) applyMigrations() (upgraded bool, returnErr error) {
 	if _, err := s.db.Exec("CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY)"); err != nil {
-		return fmt.Errorf("create migration table: %w", err)
+		return false, fmt.Errorf("create migration table: %w", err)
 	}
 	tx, err := s.db.Begin()
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer func() {
 		returnErr = errors.Join(returnErr, rollbackTransaction(tx))
 	}()
 	version, err := currentMigrationVersion(tx)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if err := upgradeLedgerSchema(tx, version); err != nil {
-		return err
+		return false, err
 	}
-	return tx.Commit()
+	upgraded = upgradableLedgerVersion(version) && version < currentLedgerSchemaVersion
+	return upgraded, tx.Commit()
+}
+
+// compact returns the pages an in-place upgrade freed to the filesystem.
+// VACUUM cannot run inside the migration transaction, and it rewrites the
+// database through the write-ahead log, so the log is truncated afterwards.
+func (s *LedgerRecordStore) compact() error {
+	for _, statement := range []string{"VACUUM", "PRAGMA wal_checkpoint(TRUNCATE)"} {
+		if _, err := s.db.Exec(statement); err != nil {
+			return fmt.Errorf("compact review ledger: %w", err)
+		}
+	}
+	return nil
 }
 
 func upgradeLedgerSchema(tx *sql.Tx, version int) error {
@@ -497,7 +520,7 @@ func upgradeLedgerSchema(tx *sql.Tx, version int) error {
 		return fmt.Errorf("review ledger schema %d is newer than supported schema %d", version, currentLedgerSchemaVersion)
 	}
 	if !upgradableLedgerVersion(version) {
-		// A version outside the additive chain (zero for a fresh database) is an
+		// A version outside the upgrade chain (zero for a fresh database) is an
 		// obsolete pre-release ledger: replace it rather than preserve it.
 		if err := dropObsoleteLedgerTables(tx, version); err != nil {
 			return err

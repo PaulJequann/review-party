@@ -165,3 +165,39 @@ func (store *Store) resolve(relative string) (string, error) {
 func validKind(kind string) bool {
 	return kind == AssistantText || kind == ReviewerNoise
 }
+
+// RemoveUnreferenced deletes every file under the artifacts directory whose
+// path is not in referenced, and each directory that leaves empty.
+func (store *Store) RemoveUnreferenced(referenced []string) error {
+	keep := map[string]bool{}
+	for _, path := range referenced {
+		keep[filepath.Clean(path)] = true
+	}
+	orphans, err := store.unreferencedFiles(keep)
+	if err != nil {
+		return err
+	}
+	for _, orphan := range orphans {
+		if err := store.Remove(orphan); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (store *Store) unreferencedFiles(keep map[string]bool) (orphans []model.ArtifactReference, err error) {
+	err = filepath.WalkDir(filepath.Join(store.root, Directory), func(path string, entry fs.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return err
+		}
+		relative, err := filepath.Rel(store.root, path)
+		if err == nil && !keep[relative] {
+			orphans = append(orphans, model.ArtifactReference{Path: relative})
+		}
+		return err
+	})
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	return orphans, err
+}

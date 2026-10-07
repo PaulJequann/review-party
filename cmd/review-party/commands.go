@@ -229,7 +229,7 @@ func addFormatFlag(cmd *cobra.Command) {
 }
 
 func addFullFlag(cmd *cobra.Command) {
-	cmd.Flags().Bool("full", false, "Include the complete review record under record in JSON output; human output adds raw output, artifacts, changed paths, and patch")
+	cmd.Flags().Bool("full", false, "Include the complete review record under record in JSON output; human output adds artifact references and changed paths")
 }
 
 func addSubjectFlags(cmd *cobra.Command) {

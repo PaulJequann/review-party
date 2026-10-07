@@ -265,6 +265,10 @@ func TestLedgerMissRemovalWithAnUnknownIDChangesNothing(t *testing.T) {
 // writeLedgerAtSchema saves the fixture through today's projection, which
 // writes tables later migrations add, so it builds the full schema and then
 // removes whatever the requested version did not yet have.
+// storedTextSchema drops columns rather than adding tables, so a fixture older
+// than it keeps the columns of its own schema.
+const storedTextSchema = 15
+
 func writeLedgerAtSchema(t *testing.T, directory string, version int) model.ReviewRecord {
 	t.Helper()
 	db, err := sql.Open("sqlite", filepath.Join(directory, ledgerFilename))
@@ -274,8 +278,9 @@ func writeLedgerAtSchema(t *testing.T, directory string, version int) model.Revi
 	defer closeTestResource(t, db.Close)
 	execLedgerMigrations(t, db, "CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY);", func(migration int) bool { return migration <= version })
 	tables := ledgerTables(t, db)
-	execLedgerMigrations(t, db, "", func(migration int) bool { return migration > version })
+	execLedgerMigrations(t, db, "", func(migration int) bool { return migration > version && migration < storedTextSchema })
 	review := ledgerFixture(model.LifecycleCompleted)
+	review.Passes[0].Attempts[0].Artifacts = nil
 	if err := (reviewRecordProjection{db: db}).save(review); err != nil {
 		t.Fatal(err)
 	}

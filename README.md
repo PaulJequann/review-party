@@ -262,9 +262,10 @@ the Bundle exists; a member the Bundle stopped before it finished is
 `id`, has lifecycle `unreadable`, and carries the cause in `read_error`; the
 other members still print, and the command exits with status 1. With
 `--format json`, `--full` includes each complete Review Record under `record`:
-the raw result, patch, changed paths, passes, attempts, and artifact
-references. Human `--full` output adds the raw result, artifact references,
-changed paths, and patch. `run` and `replay` exit with status 2 when the Review
+changed paths, passes, attempts, and artifact references. Human `--full` output
+adds artifact references and changed paths. The ledger keeps neither the patch
+nor the raw result. `replay` rebuilds the patch from the repository. `run` and
+`replay` exit with status 2 when the Review
 or Bundle is incomplete.
 
 While it runs, `run` prints a lifecycle heartbeat on stderr. The first line
@@ -821,17 +822,23 @@ the limit. Review Records are persisted in the managed SQLite ledger at
 `$XDG_STATE_HOME/review-party/ledger.sqlite` (or the corresponding
 `$HOME/.local/state` fallback). The CLI intentionally exposes no storage-path
 selector; isolate tests and experiments with `XDG_STATE_HOME`. The ledger
-schema is the pre-release initial schema plus additive migrations that
-`review-party init` applies. Review Party fails on retired or colliding state
+schema is the pre-release initial schema plus migrations that
+`review-party init` applies in place. Schema 15 removes stored patches, raw
+results, constructed prompts, and completed-Attempt evidence, deletes their
+files, and compacts the ledger. Reviews, Findings, verdicts, content changes,
+misses, and waivers survive. Review Party fails on retired or colliding state
 instead of importing or rewriting it.
 
 ## Artifact evidence
 
-New Attempts keep bounded constructed prompts and decoded assistant text as
-private files under the Review Party state root, while their Review Record holds
-only relative paths, byte counts, SHA-256 digests, and truncation state. Use
+Only a failed or incomplete Attempt keeps evidence: its bounded assistant text
+and reviewer noise, as private files under the Review Party state root. A
+completed Attempt keeps none, and Review Party never stores the constructed
+prompt. Evidence is kept for the 10 newest Attempts that have it; each new
+failure removes older evidence beyond that. The Review Record holds only
+relative paths, byte counts, SHA-256 digests, and truncation state. Use
 `inspect --full --format json` for automation or `inspect --full` to see
-references. Without `--full`, `inspect` omits the patch and artifact references.
+references. Without `--full`, `inspect` omits artifact references.
 Add `--verify-artifacts` to reopen and validate every referenced file. Artifact
 contents are intentionally not printed. The filesystem artifact store rejects
 paths outside its configured root and reports missing or digest-mismatched files

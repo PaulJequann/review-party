@@ -87,3 +87,22 @@ func savedEvidence(tx *sql.Tx, id model.ReviewID) (evidence map[attemptIdentity]
 	}
 	return evidence, rows.Err()
 }
+
+// EvidencePaths lists the path of every artifact the ledger references.
+func (s *LedgerRecordStore) EvidencePaths() (paths []string, returnErr error) {
+	rows, err := s.db.Query("SELECT path FROM artifacts")
+	if err != nil {
+		return nil, fmt.Errorf("read evidence paths: %w", err)
+	}
+	defer func() {
+		returnErr = errors.Join(returnErr, rows.Close())
+	}()
+	for rows.Next() {
+		var path string
+		if err := rows.Scan(&path); err != nil {
+			return nil, err
+		}
+		paths = append(paths, path)
+	}
+	return paths, rows.Err()
+}

@@ -180,3 +180,65 @@ func TestFailureEvidenceKeepsOnlyTheNewestAttempts(t *testing.T) {
 		t.Fatalf("artifact directories = %d, want %d", len(entries), retainedFailureEvidence)
 	}
 }
+
+func artifactFiles(t *testing.T, state string) []string {
+	t.Helper()
+	files := []string{}
+	err := filepath.WalkDir(filepath.Join(state, artifact.Directory), func(path string, entry fs.DirEntry, err error) error {
+		if err == nil && !entry.IsDir() {
+			files = append(files, path)
+		}
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return files
+}
+
+// writeOrphanEvidence leaves an artifact file that no ledger row names.
+func writeOrphanEvidence(t *testing.T, state string) string {
+	t.Helper()
+	directory := filepath.Join(state, artifact.Directory, "rp_1_orphan", "1")
+	if err := os.MkdirAll(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, filepath.Join(directory, "constructed-prompt.txt"), "prompt")
+	return directory
+}
+
+func initializeTestState(t *testing.T) string {
+	t.Helper()
+	if _, err := InitializeReviewParty(ReviewPartyInitialization{Repository: testRepository(t)}); err != nil {
+		t.Fatal(err)
+	}
+	return filepath.Join(os.Getenv("XDG_STATE_HOME"), "review-party")
+}
+
+func TestPreparingTheLedgerRemovesEvidenceItDoesNotName(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	orphan := writeOrphanEvidence(t, filepath.Join(os.Getenv("XDG_STATE_HOME"), "review-party"))
+
+	state := initializeTestState(t)
+
+	if files := artifactFiles(t, state); len(files) != 0 {
+		t.Fatalf("artifact files = %v, want none", files)
+	}
+	if _, err := os.Stat(filepath.Dir(orphan)); !os.IsNotExist(err) {
+		t.Fatalf("emptied artifact directory remains: %v", err)
+	}
+}
+
+// Once the ledger is ready a Review may have published a file it has not yet
+// recorded, so a later init must leave unreferenced files alone.
+func TestInitializingAReadyLedgerKeepsUnrecordedEvidence(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	state := initializeTestState(t)
+	orphan := writeOrphanEvidence(t, state)
+
+	initializeTestState(t)
+
+	if files := artifactFiles(t, state); !slices.Equal(files, []string{filepath.Join(orphan, "constructed-prompt.txt")}) {
+		t.Fatalf("artifact files = %v, want the unrecorded file kept", files)
+	}
+}
