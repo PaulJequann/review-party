@@ -3,7 +3,9 @@ package engine
 import (
 	"context"
 	"errors"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"reviewparty/internal/hostrun"
 	"reviewparty/internal/model"
 	"testing"
@@ -169,9 +171,13 @@ func TestCommandRunnerReturnsAfterCancellation(t *testing.T) {
 }
 
 func TestCommandRunnerRefusesToStartWithoutARun(t *testing.T) {
-	run := runCommand(context.Background(), exec.Command("sh", "-c", "true"))
+	marker := filepath.Join(t.TempDir(), "started")
+	run := runCommand(context.Background(), exec.Command("sh", "-c", ": > \"$0\"", marker))
 	if !errors.Is(run.StartErr, hostrun.ErrNoRun) {
 		t.Fatalf("start error = %v, want %v", run.StartErr, hostrun.ErrNoRun)
+	}
+	if _, err := os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the Reviewer ran without a hostrun: %v", err)
 	}
 }
 

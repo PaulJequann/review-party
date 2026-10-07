@@ -255,9 +255,13 @@ func helperEnvironment(value string) []string {
 }
 
 func TestRunnerRefusesToStartWithoutARun(t *testing.T) {
-	run := NewDefaultRunner().Run(context.Background(), Command{Args: []string{"true"}, Environment: environmentFor("true")})
+	marker := filepath.Join(t.TempDir(), "started")
+	run := NewDefaultRunner().Run(context.Background(), Command{Args: []string{"sh", "-c", ": > \"$0\"", marker}, Environment: environmentFor("sh")})
 	if !errors.Is(run.Err, hostrun.ErrNoRun) {
 		t.Fatalf("run without a hostrun = %#v, want %v", run, hostrun.ErrNoRun)
+	}
+	if _, err := os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the command ran without a hostrun: %v", err)
 	}
 }
 
