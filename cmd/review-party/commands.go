@@ -48,6 +48,8 @@ type commandExitError struct {
 func (err commandExitError) Error() string { return "command failed" }
 
 func execute(ctx context.Context, arguments []string, streams commandIO) int {
+	ctx, closeRun := openRun(ctx, arguments, streams.errors)
+	defer closeRun()
 	root := newRootCommand(streams)
 	root.SetArgs(arguments)
 	if err := root.ExecuteContext(ctx); err != nil {
