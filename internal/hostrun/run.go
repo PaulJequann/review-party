@@ -14,6 +14,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sync"
@@ -143,12 +144,8 @@ func (r *Run) ensureDir() (string, error) {
 }
 
 func (r *Run) createRunDir() (id, dir string, lease *lockFile, err error) {
-	id, err = newRunID()
+	id, dir, err = r.mkdirRunID()
 	if err != nil {
-		return "", "", nil, err
-	}
-	dir = filepath.Join(r.root, id)
-	if err := os.Mkdir(dir, 0o700); err != nil {
 		return "", "", nil, err
 	}
 	self, _ := identify(os.Getpid()) //nolint:errcheck // The owner record is advisory; an unknown identity stays zero.
@@ -172,6 +169,23 @@ func (r *Run) createRunDir() (id, dir string, lease *lockFile, err error) {
 		return "", "", nil, err
 	}
 	return id, dir, lease, nil
+}
+
+// Ids from the same second share 65536 suffixes, so a live run can already
+// hold the one drawn.
+const runIDAttempts = 8
+
+func (r *Run) mkdirRunID() (id, dir string, err error) {
+	for range runIDAttempts {
+		if id, err = newRunID(); err != nil {
+			return "", "", err
+		}
+		dir = filepath.Join(r.root, id)
+		if err = os.Mkdir(dir, 0o700); !errors.Is(err, fs.ErrExist) {
+			return id, dir, err
+		}
+	}
+	return "", "", err
 }
 
 func populateRunDir(dir string, lease *lockFile, record OwnerRecord) error {
