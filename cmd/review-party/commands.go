@@ -26,6 +26,7 @@ type commandIO struct {
 	// terminal reports whether a stream is an interactive terminal. Nil uses
 	// the real check; tests substitute it to reach terminal-only paths.
 	terminal func(stream any) bool
+	host     hostDirectories
 }
 
 func (streams commandIO) isTerminal(stream any) bool {
@@ -47,11 +48,18 @@ type commandExitError struct {
 
 func (err commandExitError) Error() string { return "command failed" }
 
+// withoutRun marks a command that must not open a run, because opening one
+// creates the runtime root and removes dead runs.
+const withoutRun = "review-party/without-run"
+
 func execute(ctx context.Context, arguments []string, streams commandIO) int {
-	ctx, closeRun := openRun(ctx, arguments, streams.errors)
-	defer closeRun()
 	root := newRootCommand(streams)
 	root.SetArgs(arguments)
+	if target, _, err := root.Find(arguments); err != nil || target.Annotations[withoutRun] == "" {
+		var closeRun func()
+		ctx, closeRun = openRun(ctx, arguments, streams)
+		defer closeRun()
+	}
 	if err := root.ExecuteContext(ctx); err != nil {
 		var exitErr commandExitError
 		if errors.As(err, &exitErr) {
@@ -148,6 +156,7 @@ func newRootCommand(streams commandIO) *cobra.Command {
 		newEvalCommand(streams),
 		newConfigCommand(streams),
 		newInitCommand(streams), newDoctorCommand(streams),
+		newFootprintCommand(streams), newCleanCommand(streams),
 		newVersionCommand(streams),
 	)
 	return root
