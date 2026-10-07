@@ -80,7 +80,7 @@ func seedState(t *testing.T, directory string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	reference, err := artifacts.Publish(model.ReviewID("rp_1723200000000_0123456789abcdef"), 1, "assistant-text", []byte("published"), false)
+	reference, err := artifacts.Publish(model.ReviewID("rp_1723200000000_0123456789abcdef"), 1, artifact.Evidence{Kind: artifact.AssistantText, Contents: []byte("published")})
 	if err != nil {
 		t.Fatal(err)
 	}

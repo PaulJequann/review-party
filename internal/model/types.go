@@ -710,6 +710,17 @@ type ReviewRecord struct {
 	UpdatedAt       time.Time          `json:"updated_at"`
 }
 
+// Artifacts lists the evidence of every Attempt in pass and attempt order.
+func (r ReviewRecord) Artifacts() []ArtifactReference {
+	var references []ArtifactReference
+	for _, pass := range r.Passes {
+		for _, attempt := range pass.Attempts {
+			references = append(references, attempt.Artifacts...)
+		}
+	}
+	return references
+}
+
 func (r ReviewRecord) AttemptCount() int {
 	count := 0
 	for _, pass := range r.Passes {

@@ -20,29 +20,23 @@ func newArtifactPublisher(store *artifact.Store) *artifactPublisher {
 	return &artifactPublisher{store: store}
 }
 
-type artifactInput struct {
-	kind      string
-	contents  []byte
-	truncated bool
-}
-
 // publishAttemptArtifacts keeps the raw output of a failed attempt. Empty
 // streams leave no file.
 func (publisher *artifactPublisher) publishAttemptArtifacts(id model.ReviewID, number int, execution attemptExecution) ([]model.ArtifactReference, error) {
 	if publisher == nil || publisher.store == nil {
 		return nil, nil
 	}
-	inputs := []artifactInput{
-		{kind: artifact.AssistantText, contents: []byte(execution.AssistantText), truncated: execution.ArtifactTruncated || len(execution.AssistantText) > maxHarnessStdout},
-		{kind: artifact.ReviewerNoise, contents: []byte(execution.ReviewerNoise), truncated: len(execution.ReviewerNoise) > maxHarnessStdout},
+	streams := []artifact.Evidence{
+		{Kind: artifact.AssistantText, Contents: []byte(execution.AssistantText), Truncated: execution.ArtifactTruncated || len(execution.AssistantText) > maxHarnessStdout},
+		{Kind: artifact.ReviewerNoise, Contents: []byte(execution.ReviewerNoise), Truncated: len(execution.ReviewerNoise) > maxHarnessStdout},
 	}
 	var references []model.ArtifactReference
-	for _, input := range inputs {
-		if len(input.contents) == 0 {
+	for _, evidence := range streams {
+		if len(evidence.Contents) == 0 {
 			continue
 		}
-		contents := boundedArtifactContents(input.contents)
-		reference, err := publisher.store.Publish(id, number, input.kind, contents, input.truncated)
+		evidence.Contents = boundedArtifactContents(evidence.Contents)
+		reference, err := publisher.store.Publish(id, number, evidence)
 		if err != nil {
 			cleanupErr := publisher.removeArtifacts(references)
 			return nil, errors.Join(err, cleanupErr)
@@ -67,13 +61,9 @@ func (publisher *artifactPublisher) verifyArtifacts(record model.ReviewRecord) e
 	if publisher.store == nil {
 		return nil
 	}
-	for _, pass := range record.Passes {
-		for _, attempt := range pass.Attempts {
-			for _, reference := range attempt.Artifacts {
-				if _, err := publisher.store.Read(reference); err != nil {
-					return err
-				}
-			}
+	for _, reference := range record.Artifacts() {
+		if _, err := publisher.store.Read(reference); err != nil {
+			return err
 		}
 	}
 	return nil

@@ -346,12 +346,24 @@ func loadArtifacts(tx *sql.Tx, record *model.ReviewRecord) (returnErr error) {
 		if err := rows.Scan(&passOrdinal, &attemptOrdinal, &artifact.Kind, &artifact.Path, &artifact.Size, &artifact.Digest, &artifact.Truncated); err != nil {
 			return err
 		}
-		if passOrdinal < 0 || passOrdinal >= len(record.Passes) || attemptOrdinal < 0 || attemptOrdinal >= len(record.Passes[passOrdinal].Attempts) {
+		attempt := attemptAt(record, passOrdinal, attemptOrdinal)
+		if attempt == nil {
 			return fmt.Errorf("read review artifact: attempt %d in pass %d is missing", attemptOrdinal, passOrdinal)
 		}
-		record.Passes[passOrdinal].Attempts[attemptOrdinal].Artifacts = append(record.Passes[passOrdinal].Attempts[attemptOrdinal].Artifacts, artifact)
+		attempt.Artifacts = append(attempt.Artifacts, artifact)
 	}
 	return rows.Err()
+}
+
+func attemptAt(record *model.ReviewRecord, passOrdinal, attemptOrdinal int) *model.AttemptRecord {
+	if passOrdinal < 0 || passOrdinal >= len(record.Passes) {
+		return nil
+	}
+	attempts := record.Passes[passOrdinal].Attempts
+	if attemptOrdinal < 0 || attemptOrdinal >= len(attempts) {
+		return nil
+	}
+	return &attempts[attemptOrdinal]
 }
 
 func loadFindings(tx *sql.Tx, id model.ReviewID, result *model.ReviewResult) (returnErr error) {

@@ -31,6 +31,14 @@ const (
 	ReviewerNoise = "reviewer-noise"
 )
 
+// Evidence is one stream of an Attempt's raw output, already bounded by the
+// caller, which reports whether it cut the stream short.
+type Evidence struct {
+	Kind      string
+	Contents  []byte
+	Truncated bool
+}
+
 type Store struct{ root string }
 
 func NewStore(root string) (*Store, error) {
@@ -40,7 +48,8 @@ func NewStore(root string) (*Store, error) {
 	return &Store{root: filepath.Clean(root)}, nil
 }
 
-func (store *Store) Publish(reviewID model.ReviewID, attempt int, kind string, contents []byte, truncated bool) (reference model.ArtifactReference, returnErr error) {
+func (store *Store) Publish(reviewID model.ReviewID, attempt int, evidence Evidence) (reference model.ArtifactReference, returnErr error) {
+	kind, contents := evidence.Kind, evidence.Contents
 	if attempt < 1 || !validKind(kind) {
 		return model.ArtifactReference{}, errors.New("invalid artifact identity")
 	}
@@ -67,7 +76,7 @@ func (store *Store) Publish(reviewID model.ReviewID, attempt int, kind string, c
 		return model.ArtifactReference{}, fmt.Errorf("publish artifact: %w", err)
 	}
 	digest := sha256.Sum256(contents)
-	return model.ArtifactReference{Kind: kind, Path: relative, Size: int64(len(contents)), Digest: hex.EncodeToString(digest[:]), Truncated: truncated}, nil
+	return model.ArtifactReference{Kind: kind, Path: relative, Size: int64(len(contents)), Digest: hex.EncodeToString(digest[:]), Truncated: evidence.Truncated}, nil
 }
 
 func writeTemporaryArtifact(file *os.File, contents []byte) error {

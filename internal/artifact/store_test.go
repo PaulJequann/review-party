@@ -11,7 +11,7 @@ import (
 
 func TestPublishedArtifactReopensWithRecordedIntegrity(t *testing.T) {
 	store := mustNewStore(t, t.TempDir())
-	reference, err := store.Publish(model.ReviewID("rp_1723200000000_0123456789abcdef"), 1, "assistant-text", []byte("decoded result"), false)
+	reference, err := store.Publish(model.ReviewID("rp_1723200000000_0123456789abcdef"), 1, Evidence{Kind: "assistant-text", Contents: []byte("decoded result")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -27,7 +27,7 @@ func TestPublishedArtifactReopensWithRecordedIntegrity(t *testing.T) {
 func TestReadRejectsTamperedOrEscapingArtifact(t *testing.T) {
 	root := t.TempDir()
 	store := mustNewStore(t, root)
-	reference, err := store.Publish(model.ReviewID("rp_1723200000000_0123456789abcdef"), 1, "assistant-text", []byte("original"), false)
+	reference, err := store.Publish(model.ReviewID("rp_1723200000000_0123456789abcdef"), 1, Evidence{Kind: "assistant-text", Contents: []byte("original")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +44,7 @@ func TestReadRejectsTamperedOrEscapingArtifact(t *testing.T) {
 
 func TestIsTemporaryMatchesOnlyUnpublishedWrites(t *testing.T) {
 	root := t.TempDir()
-	reference, err := mustNewStore(t, root).Publish(model.ReviewID("rp_1723200000000_0123456789abcdef"), 1, "assistant-text", []byte("x"), false)
+	reference, err := mustNewStore(t, root).Publish(model.ReviewID("rp_1723200000000_0123456789abcdef"), 1, Evidence{Kind: "assistant-text", Contents: []byte("x")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,11 +92,11 @@ func TestRemoveLeavesNoEmptyDirectoryBehind(t *testing.T) {
 	root := t.TempDir()
 	store := mustNewStore(t, root)
 	id := model.ReviewID("rp_1723200000000_0123456789abcdef")
-	first, err := store.Publish(id, 1, AssistantText, []byte("first"), false)
+	first, err := store.Publish(id, 1, Evidence{Kind: AssistantText, Contents: []byte("first")})
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := store.Publish(id, 2, AssistantText, []byte("second"), false)
+	second, err := store.Publish(id, 2, Evidence{Kind: AssistantText, Contents: []byte("second")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +122,7 @@ func TestRemoveLeavesNoEmptyDirectoryBehind(t *testing.T) {
 func TestPublishAcceptsOnlyFailureEvidenceKinds(t *testing.T) {
 	store := mustNewStore(t, t.TempDir())
 	for _, kind := range []string{"constructed-prompt", "native-stdout", "native-stderr"} {
-		if _, err := store.Publish(model.ReviewID("rp_1723200000000_0123456789abcdef"), 1, kind, []byte("x"), false); err == nil {
+		if _, err := store.Publish(model.ReviewID("rp_1723200000000_0123456789abcdef"), 1, Evidence{Kind: kind, Contents: []byte("x")}); err == nil {
 			t.Errorf("published retired kind %q", kind)
 		}
 	}
