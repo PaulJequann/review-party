@@ -81,7 +81,7 @@ func decodeCheckpointReport(t *testing.T, result commandRun) checkpointReport {
 
 func TestCheckpointSetPublishesTheDeclaration(t *testing.T) {
 	fixture := newCheckpointFixture(t)
-	fixture.declare("pre-push", "--exempt", "*.md", "--exempt", "docs/**", "--small-change-lines", "3", "--waivers", "anyone", "--integration", "git")
+	fixture.declare("pre-push", "--exempt", "*.md", "--exempt", "docs/**", "--unreviewed-lines", "3", "--review-budget", "2", "--waivers", "anyone", "--integration", "git")
 
 	payload, err := os.ReadFile(filepath.Join(fixture.repository, ".reviewparty", "config.json"))
 	if err != nil {
@@ -94,7 +94,7 @@ func TestCheckpointSetPublishesTheDeclaration(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string]any{"pre-push": map[string]any{
-		"requirement": "reviewed", "exempt_paths": []any{"*.md", "docs/**"}, "small_change_lines": float64(3),
+		"requirement": "reviewed", "exempt_paths": []any{"*.md", "docs/**"}, "unreviewed_lines": float64(3), "review_budget": float64(2),
 		"waivers": "anyone", "integrations": []any{"git"},
 	}}
 	if !reflect.DeepEqual(config.Checkpoints, want) {
@@ -140,20 +140,104 @@ func TestCheckpointExemptPathsLeaveBothSides(t *testing.T) {
 	}
 }
 
-func TestCheckpointSmallChangePassesAndLargeChangeNamesTheLimit(t *testing.T) {
+func TestCheckpointAllowanceAndBudgetDecideAfterAReview(t *testing.T) {
 	fixture := newCheckpointFixture(t)
-	fixture.declare("pre-push", "--small-change-lines", "2")
-	small := fixture.commit("app.go", "package app\n\nconst one = 1\n")
-
+	fixture.declare("pre-push", "--unreviewed-lines", "1", "--review-budget", "1")
+	reviewed := fixture.commit("one.go", "package app\n\nconst one = 1\n")
 	exit, stdout, _ := fixture.check("pre-push", "--base", fixture.base)
-	if exit != 0 || !strings.Contains(stdout, "exempt: small change of 2 lines, at most 2 pass\n") {
-		t.Fatalf("small change exit = %d, stdout = %q", exit, stdout)
+	if exit != 1 || !strings.Contains(stdout, "bugs (repository): missing, 3 unreviewed lines in one.go; 0 of 1 Reviews spent\n") {
+		t.Fatalf("unreviewed exit = %d, stdout = %q", exit, stdout)
 	}
 
-	fixture.commit("app.go", "package app\n\nconst one = 1\nconst two = 2\n")
+	changes := fixture.rangeChanges(reviewed).Changes
+	fixture.saveReview(judgedBugs, "bugs", model.LifecycleCompleted, changes)
+	fixture.saveReview(judgedDocs, "docs", model.LifecycleCompleted, changes)
+	fixture.commit("one.go", "package app\n\nconst one = 1\nconst two = 2\n")
 	exit, stdout, _ = fixture.check("pre-push", "--base", fixture.base)
-	if exit != 1 || !strings.Contains(stdout, "changed lines: 3, over the small-change limit of 2\n") {
-		t.Fatalf("large change from %s exit = %d, stdout = %q", small, exit, stdout)
+	if exit != 0 || !strings.Contains(stdout, "bugs (repository): residual, 1 unreviewed line in one.go; 1 of 1 Reviews spent; after "+string(judgedBugs)+"\n") {
+		t.Fatalf("residual exit = %d, stdout = %q", exit, stdout)
+	}
+
+	fixture.commit("one.go", "package app\n\nconst one = 1\nconst two = 2\nconst three = 3\n")
+	exit, stdout, _ = fixture.check("pre-push", "--base", fixture.base)
+	if exit != 1 || !strings.HasSuffix(stdout, "stop: 2 unreviewed lines exceed 1 after 1 of 1 Reviews; ask a person\n") || strings.Contains(stdout, "review-party run") {
+		t.Fatalf("spent exit = %d, stdout = %q", exit, stdout)
+	}
+}
+
+func TestCheckpointFallsBackWhenAReviewedBlobIsGone(t *testing.T) {
+	fixture := newCheckpointFixture(t)
+	fixture.declare("pre-push", "--unreviewed-lines", "1", "--review-budget", "3")
+	head := fixture.commit("one.go", "package app\n\nconst one = 1\n")
+	changes := fixture.rangeChanges(head).Changes
+	pruned := []model.ContentChange{{Path: "one.go", Before: changes[0].Before, After: strings.Repeat("ab", 20)}}
+	fixture.saveReview("rp_1725192000000_00000000000000e5", "bugs", model.LifecycleCompleted, pruned)
+	fixture.saveReview("rp_1725192000000_00000000000000e6", "docs", model.LifecycleCompleted, changes)
+
+	got := fixture.runWith("", false, "checkpoint", "check", "pre-push", "--base", fixture.base, "--repo", fixture.repository)
+	assertRunContains(t, got, commandRun{exit: 1, stdout: "bugs (repository): missing, 3 unreviewed lines in one.go; 1 of 3 Reviews spent\n"})
+	if got.stderr != "" {
+		t.Fatalf("pruned stderr = %q", got.stderr)
+	}
+}
+
+// TestCheckpointCountsAGitlinkLikeAnyPath bumps a nested repository whose
+// commits this repository never holds, so the gitlink is measured, reviewed,
+// and credited by its pointer alone.
+func TestCheckpointCountsAGitlinkLikeAnyPath(t *testing.T) {
+	fixture := newCheckpointFixture(t)
+	fixture.declare("pre-push", "--unreviewed-lines", "0", "--review-budget", "3")
+	fixture.declare("pre-commit", "--unreviewed-lines", "0", "--review-budget", "3")
+	nested, added := fixture.commitNestedRepository("nested")
+	fixture.saveReview("rp_1725192000000_00000000000000f1", "bugs", model.LifecycleCompleted, fixture.rangeChanges(added).Changes)
+	fixture.saveReview("rp_1725192000000_00000000000000f2", "docs", model.LifecycleCompleted, fixture.rangeChanges(added).Changes)
+	bumped := nested.commitBump()
+
+	got := fixture.runWith("", false, "checkpoint", "check", "pre-push", "--base", fixture.base, "--repo", fixture.repository)
+	assertRunContains(t, got, commandRun{exit: 1, stdout: "bugs (repository): missing, 2 unreviewed lines in nested; 1 of 3 Reviews spent; after rp_1725192000000_00000000000000f1\n"})
+	if got.stderr != "" {
+		t.Fatalf("bump stderr = %q", got.stderr)
+	}
+
+	fixture.saveReview("rp_1725192000000_00000000000000f3", "bugs", model.LifecycleCompleted, fixture.rangeChanges(bumped).Changes)
+	fixture.saveReview("rp_1725192000000_00000000000000f4", "docs", model.LifecycleCompleted, fixture.rangeChanges(bumped).Changes)
+	if exit, stdout, stderr := fixture.check("pre-push", "--base", fixture.base); exit != 0 {
+		t.Fatalf("reviewed bump exit = %d, stdout = %q, stderr = %q", exit, stdout, stderr)
+	}
+
+	nested.stageBump()
+	got = fixture.runWith("", false, "checkpoint", "check", "pre-commit", "--repo", fixture.repository)
+	assertRunContains(t, got, commandRun{exit: 1, stdout: "bugs (repository): missing, 2 unreviewed lines in nested; 0 of 3 Reviews spent\n"})
+}
+
+// TestCheckpointOffersTheWaiveCommandOnlyOnASpentBudget declares anyone may
+// waive, then checks a missing Review and a spent budget on the same range.
+func TestCheckpointOffersTheWaiveCommandOnlyOnASpentBudget(t *testing.T) {
+	fixture := newCheckpointFixture(t)
+	fixture.declare("pre-push", "--unreviewed-lines", "1", "--review-budget", "1", "--waivers", "anyone")
+	reviewed := fixture.commit("one.go", "package app\n\nconst one = 1\n")
+	rangeArgs := []string{"pre-push", "--base", fixture.base}
+
+	exit, stdout, _ := fixture.check(rangeArgs...)
+	if exit != 1 || !strings.HasSuffix(stdout, "next: review-party run --unreviewed --base "+fixture.base+" --head "+reviewed+" --repo "+shellQuoteArgument(fixture.repository)+"\n") {
+		t.Fatalf("missing exit = %d, stdout = %q", exit, stdout)
+	}
+	if report := decodeCheckpointReport(t, fixture.runWith("", false, append([]string{"checkpoint", "check"}, append(rangeArgs, "--format", "json", "--repo", fixture.repository)...)...)); report.WaiveCommand != "" {
+		t.Fatalf("missing report offers %q", report.WaiveCommand)
+	}
+
+	changes := fixture.rangeChanges(reviewed).Changes
+	fixture.saveReview(judgedBugs, "bugs", model.LifecycleCompleted, changes)
+	fixture.saveReview(judgedDocs, "docs", model.LifecycleCompleted, changes)
+	head := fixture.commit("one.go", "package app\n\nconst one = 1\nconst two = 2\nconst three = 3\n")
+	waiveCommand := "review-party checkpoint waive pre-push --base " + fixture.base + " --head " + head + " --repo " + shellQuoteArgument(fixture.repository) + ` --reason "<why>"`
+
+	exit, stdout, _ = fixture.check(rangeArgs...)
+	if exit != 1 || !strings.HasSuffix(stdout, "stop: 2 unreviewed lines exceed 1 after 1 of 1 Reviews; ask a person\nwaive: "+waiveCommand+"\n") {
+		t.Fatalf("spent exit = %d, stdout = %q", exit, stdout)
+	}
+	if report := decodeCheckpointReport(t, fixture.runWith("", false, append([]string{"checkpoint", "check"}, append(rangeArgs, "--format", "json", "--repo", fixture.repository)...)...)); report.WaiveCommand != waiveCommand {
+		t.Fatalf("spent report offers %q, want %q", report.WaiveCommand, waiveCommand)
 	}
 }
 
@@ -207,16 +291,10 @@ func TestCheckpointHumanWaiverInJSONPromptsAPersonWhileStdoutIsPiped(t *testing.
 	}
 }
 
-func TestCheckpointAnyonePolicyWaivesWithoutATerminalAndOffersTheCommand(t *testing.T) {
+func TestCheckpointAnyonePolicyWaivesWithoutATerminal(t *testing.T) {
 	fixture := newCheckpointFixture(t)
 	fixture.declare("pre-push", "--waivers", "anyone")
-	head := fixture.commit("one.go", "package app\n\nconst one = 1\n")
-
-	exit, stdout, _ := fixture.check("pre-push", "--base", fixture.base)
-	waiveLine := "waive: review-party checkpoint waive pre-push --base " + fixture.base + " --head " + head + " --repo " + shellQuoteArgument(fixture.repository) + ` --reason "<why>"` + "\n"
-	if exit != 1 || !strings.HasSuffix(stdout, waiveLine) {
-		t.Fatalf("uncovered anyone check exit = %d, stdout = %q", exit, stdout)
-	}
+	fixture.commit("one.go", "package app\n\nconst one = 1\n")
 
 	result := fixture.waive("", false, "pre-push", "--base", fixture.base, "--reason", "generated code")
 	if result.exit != 0 || !strings.Contains(result.stdout, "(non-interactive): generated code\n") {

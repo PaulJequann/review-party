@@ -34,6 +34,8 @@ func ResolveSubject(repository string, reference model.SubjectReference) (Subjec
 		return Subject{ReviewSubject: resolved}, err
 	case model.SubjectCapturedChange:
 		return resolveCapturedChange(reference)
+	case model.SubjectUnreviewedDelta:
+		return Subject{}, fmt.Errorf("%s subjects are measured from reviewed state by run --unreviewed, not resolved from a reference", reference.Kind)
 	default:
 		return Subject{}, fmt.Errorf("unsupported review subject %q", reference.Kind)
 	}
@@ -287,6 +289,28 @@ func ResolveRepositoryRoot(repository string) (string, error) {
 		return "", fmt.Errorf("make repository root absolute: %w", err)
 	}
 	return repositoryRoot, nil
+}
+
+// Push range sources name where DefaultPushBase found the base of the range
+// a push would publish.
+const (
+	PushBaseUpstream   = "upstream"
+	PushBaseRemoteHead = "remote-head"
+)
+
+var ErrNoDefaultPushBase = errors.New("no upstream branch and no origin/HEAD to compare with")
+
+// DefaultPushBase is the merge base of HEAD and the current branch's
+// upstream, else of HEAD and origin/HEAD. A merge base keeps a diverged
+// upstream's own commits out of the range.
+func DefaultPushBase(repository string) (base, source string, err error) {
+	if output, err := gitOutput(repository, "merge-base", "HEAD", "@{upstream}"); err == nil {
+		return strings.TrimSpace(string(output)), PushBaseUpstream, nil
+	}
+	if output, err := gitOutput(repository, "merge-base", "HEAD", "refs/remotes/origin/HEAD"); err == nil {
+		return strings.TrimSpace(string(output)), PushBaseRemoteHead, nil
+	}
+	return "", "", ErrNoDefaultPushBase
 }
 
 // readGitConfig returns the clone's configuration keyed as git config --list

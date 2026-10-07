@@ -29,8 +29,9 @@ completed Review examined exactly the Checkpoint's content changes.
   part. Rewording a commit, pushing from a worktree, or rebasing over upstream
   commits that do not touch the changed files keeps Coverage. Partial staging
   and a rebase that changes a file's starting content lose it.
-- A push range is covered when one Review covers the whole range, or when each
-  commit in the range is covered by its own Review.
+- A push range is covered when a chain of completed Reviews reaches the head
+  content of every path from the base, so a Review of working changes and a
+  later Review of the unreviewed delta combine.
 - Profiles match by scoped name, at any Profile Revision.
 - An Incomplete Review never covers.
 
@@ -42,9 +43,10 @@ A **Checkpoint Exemption** treats a change as needing no Coverage:
 
 - `exempt_paths` removes matching paths from the requirement. A change whose
   paths are all exempt passes.
-- `small_change_lines` passes a change whose total added and deleted lines do
-  not exceed the limit. Size is measured over the whole Checkpoint change, so
-  splitting a push into small commits does not pass each commit separately.
+- `small_change_lines` was replaced by `unreviewed_lines` and
+  `review_budget`, which bound the Review loop after a Review instead of
+  exempting a whole change by size. The README's "Review Checkpoints" section
+  describes the current declaration.
 
 A **Checkpoint Waiver** records that one exact content change passed without
 Coverage, with a required reason. It is keyed like Coverage, so it never
@@ -65,7 +67,8 @@ The team declares Checkpoints in the committed Repository Configuration:
 		"pre-push": {
 			"requirement": "reviewed",
 			"exempt_paths": ["*.md", "docs/**"],
-			"small_change_lines": 0,
+			"unreviewed_lines": 0,
+			"review_budget": 3,
 			"waivers": "human",
 			"integrations": ["git", "claude-code", "codex", "agents-md"]
 		}
@@ -108,12 +111,14 @@ existing hook lines are never overwritten or reordered:
 When Coverage is missing, the hook refuses with one line that names the
 Checkpoint and the next command:
 
-- No Review: `review-party run --base <base> --head <head>` with refs filled in.
+- Unreviewed lines: `review-party run --unreviewed --base <base> --head <head>`
+  with refs filled in. A spent budget names no command: a person decides.
 - A Review still running: `review-party wait <id>`.
 - Unjudged Findings, under `judged`: `review-party finding record <id>`.
 
-The refusal never calls the change bad. It mentions waivers only when
-`waivers` is `anyone`.
+The refusal never calls the change bad. Only the spent budget mentions
+waivers, and only when `waivers` is `anyone`: every other refusal is one
+line and its one command.
 
 ### Missing binary
 
@@ -487,12 +492,13 @@ the covering Review changed, which Coverage already leaves out of its
 comparison. A location without that shape, one that names more than one file,
 or a path the exemptions do not match still needs a verdict. The match errs
 toward asking, because a misread location must not let an unjudged Finding
-pass. A small change passes before Coverage is checked, so it is never judged.
+pass. Verdicts are read only for a Profile within its allowance of unreviewed
+lines, so a Profile that still needs a Review is never judged.
 
 **Refusal wording.** The refusal reads `pre-push Checkpoint needs a verdict on
 Findings 1, 2 of <id> for <base>..<head>; judge: review-party finding record
 <id>`. With more than one unjudged Review it adds `; 2 more Reviews need
-verdicts`, and under `anyone` it ends with the waive command as before. It
+verdicts`, and never the waive command, which only a spent budget offers. It
 names one Review, the first in selection order, because each Review takes its
 own `finding record` command, and two or more full commands would not fit a
 short line. The count says more remain, and `checkpoint check` lists every

@@ -5,7 +5,6 @@ import (
 
 	"reviewparty/internal/configuration"
 	"reviewparty/internal/model"
-	"reviewparty/internal/subject"
 )
 
 func judgedCheckpoint() *configuration.Checkpoint {
@@ -43,13 +42,13 @@ func TestJudgedCountsOnlyCurrentVerdicts(t *testing.T) {
 		{
 			name: "every verdict kind counts", findings: findingsAt("a.go:1", "a.go:2", "a.go:3"),
 			verdicts: []model.FindingVerdict{verdict("rp_code", 1, model.VerdictAccepted), verdict("rp_code", 2, model.VerdictRejected), verdict("rp_code", 3, model.VerdictDeferred)},
-			want:     checkpointOutcome{State: CheckpointCovered, Declared: true, Exemption: exempted, ReviewIDs: []model.ReviewID{"rp_code"}},
+			want:     checkpointOutcome{State: CheckpointCovered, Declared: true, Exemption: exempted, ReviewIDs: []model.ReviewID{"rp_code"}, Spent: 1},
 		},
 		{
 			name: "one finding without a verdict", findings: findingsAt("a.go:1", "a.go:2"),
 			verdicts: []model.FindingVerdict{verdict("rp_code", 1, model.VerdictAccepted)},
 			want: checkpointOutcome{
-				State: CheckpointUnjudged, Declared: true, Exemption: exempted, ReviewIDs: []model.ReviewID{"rp_code"},
+				State: CheckpointUnjudged, Declared: true, Exemption: exempted, ReviewIDs: []model.ReviewID{"rp_code"}, Spent: 1,
 				Unjudged: []UnjudgedReview{{Review: "rp_code", Ordinals: []int{2}}},
 			},
 		},
@@ -57,23 +56,23 @@ func TestJudgedCountsOnlyCurrentVerdicts(t *testing.T) {
 			name: "a stale verdict", findings: findingsAt("a.go:1", "a.go:2"),
 			verdicts: []model.FindingVerdict{verdict("rp_code", 1, model.VerdictAccepted), staleVerdict("rp_code", 2)},
 			want: checkpointOutcome{
-				State: CheckpointUnjudged, Declared: true, Exemption: exempted, ReviewIDs: []model.ReviewID{"rp_code"},
+				State: CheckpointUnjudged, Declared: true, Exemption: exempted, ReviewIDs: []model.ReviewID{"rp_code"}, Spent: 1,
 				Unjudged: []UnjudgedReview{{Review: "rp_code", Ordinals: []int{2}}},
 			},
 		},
 		{
 			name: "zero findings", findings: findingsAt(),
-			want: checkpointOutcome{State: CheckpointCovered, Declared: true, Exemption: exempted, ReviewIDs: []model.ReviewID{"rp_code"}},
+			want: checkpointOutcome{State: CheckpointCovered, Declared: true, Exemption: exempted, ReviewIDs: []model.ReviewID{"rp_code"}, Spent: 1},
 		},
 		{
 			name: "a finding in an exempt path", findings: findingsAt("README.md:3", "a.go:1"),
 			verdicts: []model.FindingVerdict{verdict("rp_code", 2, model.VerdictAccepted)},
-			want:     checkpointOutcome{State: CheckpointCovered, Declared: true, Exemption: exempted, ReviewIDs: []model.ReviewID{"rp_code"}},
+			want:     checkpointOutcome{State: CheckpointCovered, Declared: true, Exemption: exempted, ReviewIDs: []model.ReviewID{"rp_code"}, Spent: 1},
 		},
 		{
 			name: "a location that is not one path and line", findings: findingsAt("README.md and a.go", "docs/README.md:1", "README.md:3 and a.go:5", "README.md"),
 			want: checkpointOutcome{
-				State: CheckpointUnjudged, Declared: true, Exemption: exempted, ReviewIDs: []model.ReviewID{"rp_code"},
+				State: CheckpointUnjudged, Declared: true, Exemption: exempted, ReviewIDs: []model.ReviewID{"rp_code"}, Spent: 1,
 				Unjudged: []UnjudgedReview{{Review: "rp_code", Ordinals: []int{1, 3, 4}}},
 			},
 		},
@@ -86,10 +85,10 @@ func TestJudgedCountsOnlyCurrentVerdicts(t *testing.T) {
 			}
 			conductor, repository := newCheckpointConductor(t, fake, judgedCheckpoint())
 
-			report := checkPrePush(t, conductor, repository, CoverageSubject{Changes: joined(coverageFirst, readmeNew)})
+			report := checkPrePush(t, conductor, repository, joined(coverageFirst, readmeNew))
 			assertOutcome(t, report, test.want)
-			if !report.Coverage.Covered {
-				t.Fatalf("Coverage = %+v, want covered whatever the verdicts", report.Coverage)
+			if len(report.Coverage.Unreviewed) != 0 {
+				t.Fatalf("unreviewed = %v, want nothing whatever the verdicts", report.Coverage.Unreviewed)
 			}
 		})
 	}
@@ -102,49 +101,69 @@ func TestJudgedSkipsFindingsInPathsOnlyTheReviewChanged(t *testing.T) {
 	}
 	conductor, repository := newCheckpointConductor(t, fake, judgedCheckpoint())
 
-	assertOutcome(t, checkPrePush(t, conductor, repository, CoverageSubject{Changes: coverageFirst}), checkpointOutcome{
-		State: CheckpointCovered, Declared: true, ReviewIDs: []model.ReviewID{"rp_code"},
+	assertOutcome(t, checkPrePush(t, conductor, repository, coverageFirst), checkpointOutcome{
+		State: CheckpointCovered, Declared: true, ReviewIDs: []model.ReviewID{"rp_code"}, Spent: 1,
 	})
 }
 
-func TestAnyFullyJudgedCoveringReviewPasses(t *testing.T) {
+func TestJudgedNeedsTheNewestOfParallelReviewsJudged(t *testing.T) {
 	fake := &coverageStore{
 		reviews: []recordedCoverage{
-			recorded(bugsSource, "rp_new", model.LifecycleCompleted, coverageFirst),
 			recorded(bugsSource, "rp_old", model.LifecycleCompleted, coverageFirst),
+			recorded(bugsSource, "rp_new", model.LifecycleCompleted, coverageFirst),
 		},
 		findings: map[model.ReviewID][]model.Finding{"rp_new": findingsAt("a.go:1"), "rp_old": findingsAt("a.go:1")},
+		verdicts: []model.FindingVerdict{verdict("rp_old", 1, model.VerdictRejected)},
 	}
 	conductor, repository := newCheckpointConductor(t, fake, judgedCheckpoint())
-	content := CoverageSubject{Changes: coverageFirst}
 
-	assertOutcome(t, checkPrePush(t, conductor, repository, content), checkpointOutcome{
-		State: CheckpointUnjudged, Declared: true, ReviewIDs: []model.ReviewID{"rp_new"},
+	assertOutcome(t, checkPrePush(t, conductor, repository, coverageFirst), checkpointOutcome{
+		State: CheckpointUnjudged, Declared: true, ReviewIDs: []model.ReviewID{"rp_new"}, Spent: 2,
 		Unjudged: []UnjudgedReview{{Review: "rp_new", Ordinals: []int{1}}},
 	})
 
-	fake.verdicts = []model.FindingVerdict{verdict("rp_old", 1, model.VerdictRejected)}
-	assertOutcome(t, checkPrePush(t, conductor, repository, content), checkpointOutcome{
-		State: CheckpointCovered, Declared: true, ReviewIDs: []model.ReviewID{"rp_old"},
+	fake.verdicts = append(fake.verdicts, verdict("rp_new", 1, model.VerdictAccepted))
+	assertOutcome(t, checkPrePush(t, conductor, repository, coverageFirst), checkpointOutcome{
+		State: CheckpointCovered, Declared: true, ReviewIDs: []model.ReviewID{"rp_new"}, Spent: 2,
 	})
 }
 
-func TestJudgedPerCommitNeedsEachCommitsReviewJudged(t *testing.T) {
+func TestJudgedNeedsEveryReviewOnTheChainJudged(t *testing.T) {
 	fake := &coverageStore{
 		reviews: []recordedCoverage{
-			recorded(bugsSource, "rp_first", model.LifecycleCompleted, coverageFirst),
-			recorded(bugsSource, "rp_second", model.LifecycleCompleted, coverageSecond),
+			recorded(bugsSource, "rp_first", model.LifecycleCompleted, aGo(model.ZeroObjectID, a1)),
+			recorded(bugsSource, "rp_second", model.LifecycleCompleted, aGo(a1, a2)),
 		},
-		findings: map[model.ReviewID][]model.Finding{"rp_first": findingsAt(), "rp_second": findingsAt("b.go:4", "b.go:9")},
+		findings: map[model.ReviewID][]model.Finding{"rp_first": findingsAt(), "rp_second": findingsAt("a.go:4", "a.go:9")},
 		verdicts: []model.FindingVerdict{verdict("rp_second", 2, model.VerdictAccepted)},
 	}
 	conductor, repository := newCheckpointConductor(t, fake, judgedCheckpoint())
-	content := CoverageSubject{Changes: coverageWhole, Commits: []subject.CommitContentChanges{{Commit: "c1", Changes: coverageFirst}, {Commit: "c2", Changes: coverageSecond}}}
 
-	assertOutcome(t, checkPrePush(t, conductor, repository, content), checkpointOutcome{
-		State: CheckpointUnjudged, Declared: true, ReviewIDs: []model.ReviewID{"rp_first", "rp_second"},
+	assertOutcome(t, checkPrePush(t, conductor, repository, aGo(model.ZeroObjectID, a2)), checkpointOutcome{
+		State: CheckpointUnjudged, Declared: true, ReviewIDs: []model.ReviewID{"rp_first", "rp_second"}, Spent: 2,
 		Unjudged: []UnjudgedReview{{Review: "rp_second", Ordinals: []int{1}}},
 	})
+}
+
+func TestJudgedIsDecidedBeforeASpentBudget(t *testing.T) {
+	checkpoint := judgedCheckpoint()
+	checkpoint.ReviewBudget = 1
+	fake := &coverageStore{
+		reviews:  []recordedCoverage{recorded(bugsSource, "rp_code", model.LifecycleCompleted, aGo(model.ZeroObjectID, a1))},
+		findings: map[model.ReviewID][]model.Finding{"rp_code": findingsAt("a.go:1")},
+	}
+	conductor, repository := newCheckpointConductor(t, fake, checkpoint)
+
+	if state := checkPrePush(t, conductor, repository, aGo(model.ZeroObjectID, a1)).State; state != CheckpointUnjudged {
+		t.Fatalf("state within the allowance = %s, want unjudged", state)
+	}
+	fake.loads = 0
+	if state := checkPrePush(t, conductor, repository, aGo(model.ZeroObjectID, a2)).State; state != CheckpointSpent {
+		t.Fatalf("state over the allowance = %s, want spent", state)
+	}
+	if fake.loads != 0 {
+		t.Fatalf("read %d Reviews for verdicts over the allowance, want none", fake.loads)
+	}
 }
 
 func TestAWaiverPassesAnUnjudgedChange(t *testing.T) {
@@ -155,28 +174,29 @@ func TestAWaiverPassesAnUnjudgedChange(t *testing.T) {
 		findings: map[model.ReviewID][]model.Finding{"rp_code": findingsAt("a.go:1")},
 	}
 	conductor, repository := newCheckpointConductor(t, fake, checkpoint)
-	content := CoverageSubject{Changes: coverageFirst}
 
-	if state := checkPrePush(t, conductor, repository, content).State; state != CheckpointUnjudged {
+	if state := checkPrePush(t, conductor, repository, coverageFirst).State; state != CheckpointUnjudged {
 		t.Fatalf("state before the waiver = %s, want unjudged", state)
 	}
-	mustWaive(t, conductor, repository, content)
-	if state := checkPrePush(t, conductor, repository, content).State; state != CheckpointWaived {
+	mustWaive(t, conductor, repository, coverageFirst)
+	if state := checkPrePush(t, conductor, repository, coverageFirst).State; state != CheckpointWaived {
 		t.Fatalf("state after the waiver = %s, want waived", state)
 	}
 }
 
-func TestVerdictsAreReadOnlyForJudgedCoveredProfiles(t *testing.T) {
+func TestVerdictsAreReadOnlyForJudgedProfilesWithinTheAllowance(t *testing.T) {
 	reviewed := exemptMarkdown()
 	for _, test := range []struct {
 		name       string
 		checkpoint *configuration.Checkpoint
 		lifecycle  model.Lifecycle
+		content    []model.ContentChange
 		state      CheckpointState
 	}{
-		{"reviewed ignores findings", reviewed, model.LifecycleCompleted, CheckpointCovered},
-		{"undeclared ignores findings", nil, model.LifecycleCompleted, CheckpointCovered},
-		{"judged waits for a running review", judgedCheckpoint(), model.LifecycleRunning, CheckpointRunning},
+		{"reviewed ignores findings", reviewed, model.LifecycleCompleted, coverageFirst, CheckpointCovered},
+		{"undeclared ignores findings", nil, model.LifecycleCompleted, coverageFirst, CheckpointCovered},
+		{"judged waits for a running review", judgedCheckpoint(), model.LifecycleRunning, coverageFirst, CheckpointRunning},
+		{"judged over the allowance needs a Review first", judgedCheckpoint(), model.LifecycleCompleted, aGo(model.ZeroObjectID, a2), CheckpointMissing},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			fake := &coverageStore{
@@ -185,7 +205,7 @@ func TestVerdictsAreReadOnlyForJudgedCoveredProfiles(t *testing.T) {
 			}
 			conductor, repository := newCheckpointConductor(t, fake, test.checkpoint)
 
-			if state := checkPrePush(t, conductor, repository, CoverageSubject{Changes: coverageFirst}).State; state != test.state {
+			if state := checkPrePush(t, conductor, repository, test.content).State; state != test.state {
 				t.Fatalf("state = %s, want %s", state, test.state)
 			}
 			if fake.loads != 0 {

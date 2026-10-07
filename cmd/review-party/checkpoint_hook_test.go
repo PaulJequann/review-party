@@ -39,8 +39,8 @@ func TestCheckpointHookRefusesAPushUntilReviewed(t *testing.T) {
 	head := fixture.commit("one.go", "package app\n\nconst one = 1\n")
 	refs := pushLine(head, fixture.base)
 
-	refusal := "review-party: pre-push Checkpoint has no completed Review of " + fixture.base[:12] + ".." + head[:12] +
-		"; next: review-party run --base " + fixture.base + " --head " + head + "\n"
+	refusal := "review-party: pre-push Checkpoint: 3 unreviewed lines in " + fixture.base[:12] + ".." + head[:12] +
+		"; next: review-party run --unreviewed --base " + fixture.base + " --head " + head + "\n"
 	assertRun(t, fixture.hook(refs, "pre-push", "origin", "url"), commandRun{exit: 1, stderr: refusal})
 	assertRun(t, fixture.hook(refs, "pre-push", "--", "-origin", "url"), commandRun{exit: 1, stderr: refusal})
 
@@ -56,6 +56,21 @@ func TestCheckpointHookRefusesAPushUntilReviewed(t *testing.T) {
 
 	fixture.saveReview("rp_1725192000000_00000000000000c2", "docs", model.LifecycleCompleted, changes)
 	assertRun(t, fixture.hook(refs, "pre-push", "origin", "url"), commandRun{})
+}
+
+func TestCheckpointHookStopsASpentBudgetWithoutACommand(t *testing.T) {
+	fixture := newCheckpointFixture(t)
+	fixture.declare("pre-push", "--unreviewed-lines", "1", "--review-budget", "1", "--waivers", "anyone")
+	reviewed := fixture.commit("one.go", "package app\n\nconst one = 1\n")
+	changes := fixture.rangeChanges(reviewed).Changes
+	fixture.saveReview("rp_1725192000000_00000000000000f1", "bugs", model.LifecycleCompleted, changes)
+	fixture.saveReview("rp_1725192000000_00000000000000f2", "docs", model.LifecycleCompleted, changes)
+	head := fixture.commit("one.go", "package app\n\nconst one = 1\nconst two = 2\nconst three = 3\n")
+
+	refusal := "review-party: pre-push Checkpoint: 2 unreviewed lines in " + fixture.base[:12] + ".." + head[:12] +
+		"; or waive: review-party checkpoint waive pre-push --base " + fixture.base + " --head " + head + ` --reason "<why>"` + "\n"
+	refusal = strings.Replace(refusal, "; or waive", " exceed 1 after 1 of 1 Reviews; stop and ask a person; or waive", 1)
+	assertRun(t, fixture.hook(pushLine(head, fixture.base), "pre-push", "origin", "url"), commandRun{exit: 1, stderr: refusal})
 }
 
 func TestCheckpointHookWarnsAndAllowsWithoutADecision(t *testing.T) {
@@ -83,14 +98,13 @@ func assertOneWarning(t *testing.T, result commandRun) {
 	}
 }
 
-func TestCheckpointHookPreCommitChecksStagedContentAndOffersAnyoneWaivers(t *testing.T) {
+func TestCheckpointHookPreCommitChecksStagedContentWithOneCommand(t *testing.T) {
 	fixture := newCheckpointFixture(t)
 	fixture.declare("pre-commit", "--waivers", "anyone")
 	fixture.writeFile("one.go", "package app\n")
 	fixture.git("add", "one.go")
 
-	refusal := "review-party: pre-commit Checkpoint has no completed Review of the staged changes; next: review-party run" +
-		`; or waive: review-party checkpoint waive pre-commit --reason "<why>"` + "\n"
+	refusal := "review-party: pre-commit Checkpoint: 1 unreviewed line in the staged changes; next: review-party run --unreviewed\n"
 	assertRun(t, fixture.hook("", "pre-commit"), commandRun{exit: 1, stderr: refusal})
 }
 

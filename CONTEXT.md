@@ -89,19 +89,27 @@ A point in a Caller's workflow, such as before commit or before push, at which a
 _Avoid_: Gate, Review Trigger, delivery decision
 
 **Coverage**:
-The fact that, for every Profile in the Review selection, a completed Review examined exactly the content changes at a Review Checkpoint. It is matched on what changed in each path rather than on commit identity, so rewording or rebasing commits that leave those changes intact keeps it. An Incomplete Review never provides Coverage.
+The fact that, for every Profile in the Review selection, a chain of completed Reviews reaches the current content of every path at a Review Checkpoint, leaving no unreviewed lines beyond the allowance. Each Review records, per path, the content it started from and the content it reached, so it is matched on content rather than on commit identity: rewording or rebasing commits that leave the content intact keeps it. An Incomplete Review never extends the chain.
 _Avoid_: Approval, clean result, reviewed commit
+
+**Unreviewed lines**:
+The lines between the newest content a Profile's Reviews reached on a path and the path's current content. A Checkpoint declares an allowance of unreviewed lines a fix after a Review may leave, so a small fix passes as residual without another Review. Binary content never fits the allowance.
+_Avoid_: Uncovered diff, small change
+
+**Review Budget**:
+The number of Reviews one change may spend at a Checkpoint, per Profile. A Review of any lifecycle that starts from reviewed content spends it. A change that has spent its budget while unreviewed lines remain is spent, and only a person decides what happens next.
+_Avoid_: Retry limit, loop guard
 
 **Checkpoint Integration**:
 An installed artifact that presents a Review Checkpoint to a Caller: project instructions, a Git hook, or a Caller Agent hook. Each Integration is advisory, warning and allowing, or blocking, refusing the action. The repository may declare a team floor of Integrations, and each Caller may add more of their own.
 _Avoid_: Enforcement policy, Review Trigger
 
 **Checkpoint Exemption**:
-A rule declared on a Review Checkpoint that treats some changes as needing no Coverage: changes confined to declared paths, or a whole Checkpoint change no larger than a declared number of lines. An exempt change passes by rule; nobody bypasses anything.
+A rule declared on a Review Checkpoint that treats changes confined to declared paths as needing no Coverage. An exempt change passes by rule; nobody bypasses anything.
 _Avoid_: Bypass, skip, Waiver
 
 **Checkpoint Waiver**:
-A recorded, reasoned decision that one exact content change may pass a Review Checkpoint without Coverage. The repository declares who may waive. A Waiver never carries over to a different change and stays visible in the review history.
+A recorded, reasoned decision that one exact unreviewed delta may pass a Review Checkpoint without Coverage. The repository declares who may waive. A Waiver never carries over to a different change and stays visible in the review history.
 _Avoid_: Bypass, override, Exemption
 
 **Profile Revision**:

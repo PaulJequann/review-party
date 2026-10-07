@@ -13,15 +13,22 @@ import (
 
 	"reviewparty/internal/configuration"
 	"reviewparty/internal/model"
-	"reviewparty/internal/subject"
 )
 
 var (
 	readmeOld = []model.ContentChange{{Path: "README.md", Before: model.ZeroObjectID, After: "3333333333333333333333333333333333333333"}}
 	readmeNew = []model.ContentChange{{Path: "README.md", Before: model.ZeroObjectID, After: "4444444444444444444444444444444444444444"}}
+	a1        = coverageFirst[0].After
+	a2        = strings.Repeat("a2", 20)
+	a3        = strings.Repeat("a3", 20)
+	b1        = strings.Repeat("b1", 20)
 )
 
 const bugsSource = "global:profiles/bugs"
+
+func aGo(before, after string) []model.ContentChange {
+	return []model.ContentChange{{Path: "a.go", Before: before, After: after}}
+}
 
 func joined(sets ...[]model.ContentChange) []model.ContentChange {
 	var all []model.ContentChange
@@ -61,7 +68,13 @@ func exemptMarkdown() *configuration.Checkpoint {
 	return &checkpoint
 }
 
-func checkPrePush(t *testing.T, conductor *Conductor, repository string, content CoverageSubject) CheckpointReport {
+func bounded(lines, budget int) *configuration.Checkpoint {
+	checkpoint := exemptMarkdown()
+	checkpoint.UnreviewedLines, checkpoint.ReviewBudget = lines, budget
+	return checkpoint
+}
+
+func checkPrePush(t *testing.T, conductor *Conductor, repository string, content []model.ContentChange) CheckpointReport {
 	t.Helper()
 	report, err := conductor.CheckCheckpoint(context.Background(), CheckpointRequest{Repository: repository, Name: configuration.CheckpointPrePush, Content: content})
 	if err != nil {
@@ -72,19 +85,22 @@ func checkPrePush(t *testing.T, conductor *Conductor, repository string, content
 
 // checkpointOutcome is the part of a CheckpointReport a Caller acts on.
 type checkpointOutcome struct {
-	State     CheckpointState
-	Declared  bool
-	Exemption *CheckpointExemption
-	ReviewIDs []model.ReviewID
-	Unjudged  []UnjudgedReview
-	Waiver    string
+	State      CheckpointState
+	Declared   bool
+	Exemption  *CheckpointExemption
+	ReviewIDs  []model.ReviewID
+	Spent      int
+	Unreviewed []model.ContentChange
+	Unjudged   []UnjudgedReview
+	Waiver     string
 }
 
 func outcomeOf(report CheckpointReport) checkpointOutcome {
-	outcome := checkpointOutcome{State: report.State, Declared: report.Declaration != nil, Exemption: report.Exemption}
+	outcome := checkpointOutcome{State: report.State, Declared: report.Declaration != nil, Exemption: report.Exemption, Unreviewed: report.Coverage.Unreviewed}
 	for _, profile := range report.Coverage.Profiles {
-		outcome.ReviewIDs = append(outcome.ReviewIDs, profile.ReviewIDs...)
+		outcome.ReviewIDs = append(outcome.ReviewIDs, profile.Reviews...)
 		outcome.Unjudged = append(outcome.Unjudged, profile.Unjudged...)
+		outcome.Spent += profile.Spent
 	}
 	if report.Waiver != nil {
 		outcome.Waiver = string(report.Waiver.WaivedBy) + ": " + report.Waiver.Reason
@@ -99,12 +115,12 @@ func assertOutcome(t *testing.T, report CheckpointReport, want checkpointOutcome
 	}
 }
 
-func TestUndeclaredCheckpointComparesWholeSets(t *testing.T) {
+func TestUndeclaredCheckpointAllowsNoUnreviewedLines(t *testing.T) {
 	fake := &coverageStore{reviews: []recordedCoverage{recorded(bugsSource, "rp_code", model.LifecycleCompleted, coverageFirst)}}
 	conductor, repository := newCheckpointConductor(t, fake, nil)
 
-	report := checkPrePush(t, conductor, repository, CoverageSubject{Changes: joined(coverageFirst, readmeNew)})
-	assertOutcome(t, report, checkpointOutcome{State: CheckpointMissing})
+	report := checkPrePush(t, conductor, repository, joined(coverageFirst, readmeNew))
+	assertOutcome(t, report, checkpointOutcome{State: CheckpointMissing, ReviewIDs: []model.ReviewID{"rp_code"}, Spent: 1, Unreviewed: readmeNew})
 }
 
 func TestExemptPathsFilterTheCheckpointAndTheReview(t *testing.T) {
@@ -120,9 +136,9 @@ func TestExemptPathsFilterTheCheckpointAndTheReview(t *testing.T) {
 			fake := &coverageStore{reviews: []recordedCoverage{recorded(bugsSource, "rp_code", model.LifecycleCompleted, test.review)}}
 			conductor, repository := newCheckpointConductor(t, fake, exemptMarkdown())
 
-			report := checkPrePush(t, conductor, repository, CoverageSubject{Changes: joined(coverageFirst, readmeNew)})
+			report := checkPrePush(t, conductor, repository, joined(coverageFirst, readmeNew))
 			assertOutcome(t, report, checkpointOutcome{
-				State: CheckpointCovered, Declared: true, ReviewIDs: []model.ReviewID{"rp_code"},
+				State: CheckpointCovered, Declared: true, ReviewIDs: []model.ReviewID{"rp_code"}, Spent: 1,
 				Exemption: &CheckpointExemption{ExemptPaths: []string{"README.md"}},
 			})
 		})
@@ -133,23 +149,9 @@ func TestExemptPathsNeverWidenAReviewThatMissedCode(t *testing.T) {
 	fake := &coverageStore{reviews: []recordedCoverage{recorded(bugsSource, "rp_docs_and_a", model.LifecycleCompleted, coverageFirst, readmeNew)}}
 	conductor, repository := newCheckpointConductor(t, fake, exemptMarkdown())
 
-	report := checkPrePush(t, conductor, repository, CoverageSubject{Changes: joined(coverageWhole, readmeNew)})
-	assertOutcome(t, report, checkpointOutcome{State: CheckpointMissing, Declared: true, Exemption: &CheckpointExemption{ExemptPaths: []string{"README.md"}}})
-}
-
-func TestExemptPathsFilterEachCommitAndDropEmptyCommits(t *testing.T) {
-	fake := &coverageStore{reviews: []recordedCoverage{
-		recorded(bugsSource, "rp_first", model.LifecycleCompleted, coverageFirst),
-		recorded(bugsSource, "rp_second", model.LifecycleCompleted, coverageSecond),
-	}}
-	conductor, repository := newCheckpointConductor(t, fake, exemptMarkdown())
-
-	report := checkPrePush(t, conductor, repository, CoverageSubject{
-		Changes: joined(coverageWhole, readmeNew),
-		Commits: []subject.CommitContentChanges{{Commit: "c1", Changes: coverageFirst}, {Commit: "c2", Changes: readmeNew}, {Commit: "c3", Changes: joined(coverageSecond, readmeNew)}},
-	})
+	report := checkPrePush(t, conductor, repository, joined(coverageWhole, readmeNew))
 	assertOutcome(t, report, checkpointOutcome{
-		State: CheckpointCovered, Declared: true, ReviewIDs: []model.ReviewID{"rp_first", "rp_second"},
+		State: CheckpointMissing, Declared: true, ReviewIDs: []model.ReviewID{"rp_docs_and_a"}, Spent: 1, Unreviewed: coverageSecond,
 		Exemption: &CheckpointExemption{ExemptPaths: []string{"README.md"}},
 	})
 }
@@ -158,42 +160,197 @@ func TestOnlyExemptPathsPassWithoutTheLedger(t *testing.T) {
 	fake := &coverageStore{}
 	conductor, repository := newCheckpointConductor(t, fake, exemptMarkdown())
 
-	report := checkPrePush(t, conductor, repository, CoverageSubject{Changes: readmeNew})
-	assertOutcome(t, report, checkpointOutcome{State: CheckpointExempt, Declared: true, Exemption: &CheckpointExemption{Reason: ExemptByPaths, ExemptPaths: []string{"README.md"}}})
+	report := checkPrePush(t, conductor, repository, readmeNew)
+	assertOutcome(t, report, checkpointOutcome{State: CheckpointExempt, Declared: true, Exemption: &CheckpointExemption{ExemptPaths: []string{"README.md"}}})
 	if fake.queries != 0 {
 		t.Fatalf("an exempt change made %d ledger queries", fake.queries)
 	}
 }
 
-func TestSmallChangesMeasureNonExemptLinesOfTheWholeChange(t *testing.T) {
-	limited := func(lines int) *configuration.Checkpoint {
-		checkpoint := exemptMarkdown()
-		checkpoint.SmallChangeLines = lines
-		return checkpoint
-	}
-	content := CoverageSubject{
-		Changes: joined(coverageWhole, readmeNew),
-		Commits: []subject.CommitContentChanges{{Commit: "c1", Changes: coverageFirst}, {Commit: "c2", Changes: coverageSecond}},
-		Lines:   subject.LineCounts{"a.go": {Added: 2}, "b.go": {Added: 1, Deleted: 2}, "README.md": {Added: 400}},
-	}
+func TestTheUnreviewedDeltaStartsFromTheNewestReviewedState(t *testing.T) {
 	for _, test := range []struct {
-		name      string
-		limit     int
-		lines     subject.LineCounts
-		state     CheckpointState
-		exemption *CheckpointExemption
+		name    string
+		reviews []recordedCoverage
+		content []model.ContentChange
+		want    checkpointOutcome
 	}{
-		{"at the limit", 5, content.Lines, CheckpointExempt, &CheckpointExemption{Reason: ExemptBySmallChange, ExemptPaths: []string{"README.md"}, ChangedLines: 5}},
-		{"over the limit", 4, content.Lines, CheckpointMissing, &CheckpointExemption{ExemptPaths: []string{"README.md"}, ChangedLines: 5}},
-		{"binary disqualifies", 100, subject.LineCounts{"a.go": {Added: 1}, "b.go": {Binary: true}}, CheckpointMissing, &CheckpointExemption{ExemptPaths: []string{"README.md"}}},
-		{"uncounted disqualifies", 100, nil, CheckpointMissing, &CheckpointExemption{ExemptPaths: []string{"README.md"}}},
+		{
+			name:    "a Review of the same blobs covers, from a working tree or a commit",
+			reviews: []recordedCoverage{recorded(bugsSource, "rp_1", model.LifecycleCompleted, aGo(model.ZeroObjectID, a1))},
+			content: aGo(model.ZeroObjectID, a1),
+			want:    checkpointOutcome{State: CheckpointCovered, ReviewIDs: []model.ReviewID{"rp_1"}, Spent: 1},
+		},
+		{
+			name:    "a squash or an unreviewed-delta Review chains through the middle state",
+			reviews: []recordedCoverage{recorded(bugsSource, "rp_1", model.LifecycleCompleted, aGo(model.ZeroObjectID, a1)), recorded(bugsSource, "rp_2", model.LifecycleCompleted, aGo(a1, a2))},
+			content: aGo(model.ZeroObjectID, a2),
+			want:    checkpointOutcome{State: CheckpointCovered, ReviewIDs: []model.ReviewID{"rp_1", "rp_2"}, Spent: 2},
+		},
+		{
+			name:    "an amended commit leaves the delta from the reviewed state",
+			reviews: []recordedCoverage{recorded(bugsSource, "rp_1", model.LifecycleCompleted, aGo(model.ZeroObjectID, a1))},
+			content: aGo(model.ZeroObjectID, a2),
+			want:    checkpointOutcome{State: CheckpointMissing, ReviewIDs: []model.ReviewID{"rp_1"}, Spent: 1, Unreviewed: aGo(a1, a2)},
+		},
+		{
+			name:    "a rebase onto a changed base counts the file in full",
+			reviews: []recordedCoverage{recorded(bugsSource, "rp_1", model.LifecycleCompleted, aGo(model.ZeroObjectID, a1))},
+			content: aGo(b1, a2),
+			want:    checkpointOutcome{State: CheckpointMissing, Unreviewed: aGo(b1, a2)},
+		},
+		{
+			name:    "a gap in the chain re-reviews from the last reached state",
+			reviews: []recordedCoverage{recorded(bugsSource, "rp_1", model.LifecycleCompleted, aGo(model.ZeroObjectID, a1)), recorded(bugsSource, "rp_2", model.LifecycleCompleted, aGo(a2, a3))},
+			content: aGo(model.ZeroObjectID, a3),
+			want:    checkpointOutcome{State: CheckpointMissing, ReviewIDs: []model.ReviewID{"rp_1"}, Spent: 1, Unreviewed: aGo(a1, a3)},
+		},
+		{
+			name:    "an incomplete Review spends and never credits",
+			reviews: []recordedCoverage{recorded(bugsSource, "rp_1", model.LifecycleIncomplete, aGo(model.ZeroObjectID, a1))},
+			content: aGo(model.ZeroObjectID, a1),
+			want:    checkpointOutcome{State: CheckpointMissing, Spent: 1, Unreviewed: aGo(model.ZeroObjectID, a1)},
+		},
+		{
+			name:    "the newest of parallel Reviews is the evidence",
+			reviews: []recordedCoverage{recorded(bugsSource, "rp_old", model.LifecycleCompleted, aGo(model.ZeroObjectID, a1)), recorded(bugsSource, "rp_new", model.LifecycleCompleted, aGo(model.ZeroObjectID, a1))},
+			content: aGo(model.ZeroObjectID, a1),
+			want:    checkpointOutcome{State: CheckpointCovered, ReviewIDs: []model.ReviewID{"rp_new"}, Spent: 2},
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			conductor, repository := newCheckpointConductor(t, &coverageStore{}, limited(test.limit))
-			measured := content
-			measured.Lines = test.lines
-			report := checkPrePush(t, conductor, repository, measured)
-			assertOutcome(t, report, checkpointOutcome{State: test.state, Declared: true, Exemption: test.exemption})
+			conductor, repository := newCheckpointConductor(t, &coverageStore{reviews: test.reviews}, bounded(0, 9))
+			test.want.Declared = true
+			assertOutcome(t, checkPrePush(t, conductor, repository, test.content), test.want)
+		})
+	}
+}
+
+func TestAReviewedStateWhoseBlobIsGoneIsUnreached(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		reviews []recordedCoverage
+		absent  map[string]bool
+		want    checkpointOutcome
+	}{
+		{
+			name:    "a pruned working-tree Review leaves the path unreviewed from the base",
+			reviews: []recordedCoverage{recorded(bugsSource, "rp_1", model.LifecycleCompleted, aGo(model.ZeroObjectID, a1))},
+			absent:  map[string]bool{a1: true},
+			want:    checkpointOutcome{State: CheckpointMissing, Declared: true, Spent: 1, Unreviewed: aGo(model.ZeroObjectID, a2)},
+		},
+		{
+			name:    "a pruned state in a chain falls back to the state before it",
+			reviews: []recordedCoverage{recorded(bugsSource, "rp_1", model.LifecycleCompleted, aGo(model.ZeroObjectID, a1)), recorded(bugsSource, "rp_2", model.LifecycleCompleted, aGo(a1, a3))},
+			absent:  map[string]bool{a3: true},
+			want:    checkpointOutcome{State: CheckpointMissing, Declared: true, ReviewIDs: []model.ReviewID{"rp_1"}, Spent: 2, Unreviewed: aGo(a1, a2)},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			conductor, repository := newCheckpointConductor(t, &coverageStore{reviews: test.reviews, absent: test.absent}, bounded(0, 9))
+			assertOutcome(t, checkPrePush(t, conductor, repository, aGo(model.ZeroObjectID, a2)), test.want)
+		})
+	}
+}
+
+// A gitlink's states are commits of the nested repository, so the repository
+// is never asked whether it has them.
+func TestAReviewedGitlinkStateIsReachedWithoutTheObject(t *testing.T) {
+	nested := []model.ContentChange{{Path: "nested", Before: model.ZeroObjectID, After: a1, AfterGitlink: true}}
+	reviews := []recordedCoverage{recorded(bugsSource, "rp_1", model.LifecycleCompleted, nested)}
+	conductor, repository := newCheckpointConductor(t, &coverageStore{reviews: reviews, absent: map[string]bool{a1: true}}, bounded(0, 9))
+	assertOutcome(t, checkPrePush(t, conductor, repository, nested), checkpointOutcome{State: CheckpointCovered, Declared: true, ReviewIDs: []model.ReviewID{"rp_1"}, Spent: 1})
+}
+
+// The kind of a reviewed state between a file and a gitlink is unknown, so a
+// path that changed kind stays unreviewed as a whole until its current
+// content is reviewed.
+func TestATypeChangedPathIsUnreviewedAsAWhole(t *testing.T) {
+	reviews := []recordedCoverage{recorded(bugsSource, "rp_1", model.LifecycleCompleted, []model.ContentChange{{Path: "vendored", Before: a1, After: a2}})}
+	conductor, repository := newCheckpointConductor(t, &coverageStore{reviews: reviews}, bounded(0, 9))
+	current := []model.ContentChange{{Path: "vendored", Before: a1, After: a3, AfterGitlink: true}}
+	report := checkPrePush(t, conductor, repository, current)
+	if report.State != CheckpointMissing || !reflect.DeepEqual(report.Coverage.Unreviewed, current) {
+		t.Fatalf("state = %s, unreviewed = %v, want missing with %v", report.State, report.Coverage.Unreviewed, current)
+	}
+}
+
+func TestTheAllowanceDecidesBetweenResidualAndMissing(t *testing.T) {
+	reviewed := []recordedCoverage{recorded(bugsSource, "rp_1", model.LifecycleCompleted, aGo(model.ZeroObjectID, a1))}
+	for _, test := range []struct {
+		name      string
+		allowance int
+		content   []model.ContentChange
+		binary    bool
+		state     CheckpointState
+	}{
+		{"at the allowance", 3, aGo(model.ZeroObjectID, a2), false, CheckpointResidual},
+		{"over the allowance", 2, aGo(model.ZeroObjectID, a2), false, CheckpointMissing},
+		{"a binary delta exceeds any allowance", 100, aGo(model.ZeroObjectID, a2), true, CheckpointMissing},
+		{"nothing unreviewed is covered, not residual", 3, aGo(model.ZeroObjectID, a1), false, CheckpointCovered},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			fake := &coverageStore{reviews: reviewed, lines: map[model.ContentChange]int{{Path: "a.go", Before: a1, After: a2}: 3}}
+			if test.binary {
+				fake.binary = map[string]bool{"a.go": true}
+			}
+			conductor, repository := newCheckpointConductor(t, fake, bounded(test.allowance, 9))
+			report := checkPrePush(t, conductor, repository, test.content)
+			if report.State != test.state {
+				t.Fatalf("state = %s, want %s", report.State, test.state)
+			}
+			if test.state == CheckpointResidual && !reflect.DeepEqual(report.Coverage.Unreviewed, aGo(a1, a2)) {
+				t.Fatalf("residual delta = %v, want %v", report.Coverage.Unreviewed, aGo(a1, a2))
+			}
+		})
+	}
+}
+
+func TestTheBudgetAndRunningReviewsDecideAnOverAllowanceProfile(t *testing.T) {
+	completed := recorded(bugsSource, "rp_1", model.LifecycleCompleted, aGo(model.ZeroObjectID, a1))
+	for _, test := range []struct {
+		name      string
+		reviews   []recordedCoverage
+		allowance int
+		content   []model.ContentChange
+		want      checkpointOutcome
+	}{
+		{
+			name:    "a running Review of the base is running",
+			reviews: []recordedCoverage{recorded(bugsSource, "rp_1", model.LifecycleRunning, aGo(model.ZeroObjectID, a1))},
+			content: aGo(model.ZeroObjectID, a1),
+			want:    checkpointOutcome{State: CheckpointRunning, Spent: 1, Unreviewed: aGo(model.ZeroObjectID, a1)},
+		},
+		{
+			name:    "the budget is spent after as many Reviews of any lifecycle",
+			reviews: []recordedCoverage{completed, recorded(bugsSource, "rp_2", model.LifecycleIncomplete, aGo(a1, a2))},
+			content: aGo(model.ZeroObjectID, a3),
+			want:    checkpointOutcome{State: CheckpointSpent, ReviewIDs: []model.ReviewID{"rp_1"}, Spent: 2, Unreviewed: aGo(a1, a3)},
+		},
+		{
+			name:    "a running Review is reported before a spent budget",
+			reviews: []recordedCoverage{completed, recorded(bugsSource, "rp_2", model.LifecycleRunning, aGo(a1, a2))},
+			content: aGo(model.ZeroObjectID, a3),
+			want:    checkpointOutcome{State: CheckpointRunning, ReviewIDs: []model.ReviewID{"rp_1"}, Spent: 2, Unreviewed: aGo(a1, a3)},
+		},
+		{
+			name:    "a Review from an unreached state spends nothing",
+			reviews: []recordedCoverage{completed, recorded(bugsSource, "rp_2", model.LifecycleCompleted, aGo(a2, a3))},
+			content: aGo(model.ZeroObjectID, a3),
+			want:    checkpointOutcome{State: CheckpointMissing, ReviewIDs: []model.ReviewID{"rp_1"}, Spent: 1, Unreviewed: aGo(a1, a3)},
+		},
+		{
+			name:      "within the allowance a spent budget still passes",
+			reviews:   []recordedCoverage{completed, recorded(bugsSource, "rp_2", model.LifecycleIncomplete, aGo(a1, a2))},
+			allowance: 5,
+			content:   aGo(model.ZeroObjectID, a2),
+			want:      checkpointOutcome{State: CheckpointResidual, ReviewIDs: []model.ReviewID{"rp_1"}, Spent: 2, Unreviewed: aGo(a1, a2)},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			fake := &coverageStore{reviews: test.reviews, lines: map[model.ContentChange]int{{Path: "a.go", Before: a1, After: a2}: 2}}
+			conductor, repository := newCheckpointConductor(t, fake, bounded(test.allowance, 2))
+			test.want.Declared = true
+			assertOutcome(t, checkPrePush(t, conductor, repository, test.content), test.want)
 		})
 	}
 }
@@ -204,7 +361,7 @@ func waivable(policy configuration.WaiverPolicy) *configuration.Checkpoint {
 	return checkpoint
 }
 
-func waive(conductor *Conductor, repository string, content CoverageSubject, by model.WaivedBy) (CheckpointReport, error) {
+func waive(conductor *Conductor, repository string, content []model.ContentChange, by model.WaivedBy) (CheckpointReport, error) {
 	return conductor.WaiveCheckpoint(context.Background(), WaiverRequest{
 		Checkpoint: CheckpointRequest{Repository: repository, Name: configuration.CheckpointPrePush, Content: content},
 		Reason:     "  hotfix for the outage  ",
@@ -212,7 +369,7 @@ func waive(conductor *Conductor, repository string, content CoverageSubject, by 
 	})
 }
 
-func mustWaive(t *testing.T, conductor *Conductor, repository string, content CoverageSubject) CheckpointReport {
+func mustWaive(t *testing.T, conductor *Conductor, repository string, content []model.ContentChange) CheckpointReport {
 	t.Helper()
 	report, err := waive(conductor, repository, content, model.WaivedByNonInteractive)
 	if err != nil {
@@ -221,28 +378,35 @@ func mustWaive(t *testing.T, conductor *Conductor, repository string, content Co
 	return report
 }
 
-func TestAWaiverPassesOnlyTheContentItWaived(t *testing.T) {
-	fake := &coverageStore{}
+func TestAWaiverPassesOnlyTheDeltaItWaived(t *testing.T) {
+	bGo := func(before, after string) []model.ContentChange {
+		return []model.ContentChange{{Path: "b.go", Before: before, After: after}}
+	}
+	b2 := coverageSecond[0].After
+	fake := &coverageStore{reviews: []recordedCoverage{recorded(bugsSource, "rp_1", model.LifecycleCompleted, coverageWhole)}}
 	conductor, repository := newCheckpointConductor(t, fake, waivable(configuration.WaiversAnyone))
-	content := CoverageSubject{Changes: joined(coverageFirst, readmeOld)}
+	content := joined(aGo(model.ZeroObjectID, a2), bGo(model.ZeroObjectID, b2), readmeOld)
 	exempted := &CheckpointExemption{ExemptPaths: []string{"README.md"}}
-	waived := checkpointOutcome{State: CheckpointWaived, Declared: true, Exemption: exempted, Waiver: "non-interactive: hotfix for the outage"}
+	waived := checkpointOutcome{State: CheckpointWaived, Declared: true, Exemption: exempted, ReviewIDs: []model.ReviewID{"rp_1"}, Spent: 1, Unreviewed: aGo(a1, a2), Waiver: "non-interactive: hotfix for the outage"}
 
 	assertOutcome(t, mustWaive(t, conductor, repository, content), waived)
-	assertOutcome(t, checkPrePush(t, conductor, repository, CoverageSubject{Changes: joined(coverageFirst, readmeNew)}), waived)
-	assertOutcome(t, checkPrePush(t, conductor, repository, CoverageSubject{Changes: coverageWhole}), checkpointOutcome{State: CheckpointMissing, Declared: true})
-
+	assertOutcome(t, checkPrePush(t, conductor, repository, joined(aGo(model.ZeroObjectID, a2), bGo(model.ZeroObjectID, b2), readmeNew)), waived)
 	assertOutcome(t, mustWaive(t, conductor, repository, content), waived)
 	if len(fake.waivers) != 1 || fake.waivers[0].Repository != repository {
 		t.Fatalf("waiving twice recorded %#v, want one waiver from %s", fake.waivers, repository)
 	}
+
+	fake.reviews = append(fake.reviews, recorded(bugsSource, "rp_2", model.LifecycleCompleted, bGo(b2, b1)))
+	waived.ReviewIDs, waived.Spent = []model.ReviewID{"rp_1", "rp_2"}, 2
+	assertOutcome(t, checkPrePush(t, conductor, repository, joined(aGo(model.ZeroObjectID, a2), bGo(model.ZeroObjectID, b1), readmeNew)), waived)
+	assertOutcome(t, checkPrePush(t, conductor, repository, joined(aGo(model.ZeroObjectID, a3), bGo(model.ZeroObjectID, b1))), checkpointOutcome{State: CheckpointMissing, Declared: true, ReviewIDs: []model.ReviewID{"rp_1", "rp_2"}, Spent: 2, Unreviewed: aGo(a1, a3)})
 }
 
 func TestRecentWaiversListOnlyThisRepositoryWithinTheWindow(t *testing.T) {
 	fake := &coverageStore{}
 	conductor, repository := newCheckpointConductor(t, fake, waivable(configuration.WaiversAnyone))
 	fake.waivers = append(fake.waivers, model.CheckpointWaiver{ID: "cw_old", Repository: repository, CreatedAt: time.Now().Add(-31 * 24 * time.Hour)})
-	waived := mustWaive(t, conductor, repository, CoverageSubject{Changes: coverageFirst})
+	waived := mustWaive(t, conductor, repository, coverageFirst)
 
 	if recent, want := recentWaivers(t, conductor, repository), []model.CheckpointWaiver{*waived.Waiver}; !reflect.DeepEqual(recent, want) || want[0].Repository != repository {
 		t.Fatalf("recent waivers = %#v, want %#v in %s", recent, want, repository)
@@ -267,7 +431,7 @@ func TestWaivingACoveredCheckpointRecordsNothingUnderAnyPolicy(t *testing.T) {
 			fake := &coverageStore{reviews: []recordedCoverage{recorded(bugsSource, "rp_code", model.LifecycleCompleted, coverageFirst)}}
 			conductor, repository := newCheckpointConductor(t, fake, waivable(policy))
 
-			assertOutcome(t, mustWaive(t, conductor, repository, CoverageSubject{Changes: coverageFirst}), checkpointOutcome{State: CheckpointCovered, Declared: true, ReviewIDs: []model.ReviewID{"rp_code"}})
+			assertOutcome(t, mustWaive(t, conductor, repository, coverageFirst), checkpointOutcome{State: CheckpointCovered, Declared: true, ReviewIDs: []model.ReviewID{"rp_code"}, Spent: 1})
 			if len(fake.waivers) != 0 {
 				t.Fatalf("waiving a covered Checkpoint recorded %d waivers", len(fake.waivers))
 			}
@@ -276,7 +440,6 @@ func TestWaivingACoveredCheckpointRecordsNothingUnderAnyPolicy(t *testing.T) {
 }
 
 func TestARecordedWaiverPassesOnlyWhileThePolicyWouldAllowIt(t *testing.T) {
-	content := CoverageSubject{Changes: coverageFirst}
 	for _, test := range []struct {
 		name  string
 		by    model.WaivedBy
@@ -291,11 +454,11 @@ func TestARecordedWaiverPassesOnlyWhileThePolicyWouldAllowIt(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			fake := &coverageStore{}
 			recording, repository := newCheckpointConductor(t, fake, waivable(configuration.WaiversAnyone))
-			if _, err := waive(recording, repository, content, test.by); err != nil {
+			if _, err := waive(recording, repository, coverageFirst, test.by); err != nil {
 				t.Fatal(err)
 			}
 			checking, repository := newCheckpointConductor(t, fake, waivable(test.now))
-			if report := checkPrePush(t, checking, repository, content); report.State != test.state {
+			if report := checkPrePush(t, checking, repository, coverageFirst); report.State != test.state {
 				t.Fatalf("state = %s, want %s", report.State, test.state)
 			}
 		})
@@ -303,7 +466,6 @@ func TestARecordedWaiverPassesOnlyWhileThePolicyWouldAllowIt(t *testing.T) {
 }
 
 func TestWaiverPolicy(t *testing.T) {
-	content := CoverageSubject{Changes: coverageFirst}
 	for _, test := range []struct {
 		name    string
 		policy  configuration.WaiverPolicy
@@ -319,7 +481,7 @@ func TestWaiverPolicy(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			fake := &coverageStore{}
 			conductor, repository := newCheckpointConductor(t, fake, waivable(test.policy))
-			if _, err := waive(conductor, repository, content, test.by); !errors.Is(err, test.want) {
+			if _, err := waive(conductor, repository, coverageFirst, test.by); !errors.Is(err, test.want) {
 				t.Fatalf("error = %v, want %v", err, test.want)
 			}
 			if len(fake.waivers) != test.waivers {
@@ -336,14 +498,14 @@ func TestWaiverPolicy(t *testing.T) {
 
 func TestWaivingNeedsAReasonAndADeclaration(t *testing.T) {
 	conductor, repository := newCheckpointConductor(t, &coverageStore{}, nil)
-	_, err := waive(conductor, repository, CoverageSubject{Changes: coverageFirst}, model.WaivedByTerminal)
+	_, err := waive(conductor, repository, coverageFirst, model.WaivedByTerminal)
 	if err == nil || !strings.Contains(err.Error(), "review-party config checkpoint set pre-push") {
 		t.Fatalf("undeclared waiver error = %v", err)
 	}
 
 	declared, declaredRepository := newCheckpointConductor(t, &coverageStore{}, waivable(configuration.WaiversAnyone))
 	_, err = declared.WaiveCheckpoint(context.Background(), WaiverRequest{
-		Checkpoint: CheckpointRequest{Repository: declaredRepository, Name: configuration.CheckpointPrePush, Content: CoverageSubject{Changes: coverageFirst}},
+		Checkpoint: CheckpointRequest{Repository: declaredRepository, Name: configuration.CheckpointPrePush, Content: coverageFirst},
 		Reason:     " ",
 		WaivedBy:   model.WaivedByTerminal,
 	})

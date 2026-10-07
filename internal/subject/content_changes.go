@@ -15,24 +15,14 @@ import (
 	"reviewparty/internal/model"
 )
 
-// RangeContentChanges is a committed range's whole content change set, the
-// set each commit in the range introduces over its first parent, and the
-// whole range's line counts per path.
+// RangeContentChanges is a committed range's whole content change set with
+// its resolved base and head commits.
 type RangeContentChanges struct {
 	Base    string
 	Head    string
 	Changes []model.ContentChange
-	Commits []CommitContentChanges
-	Lines   LineCounts
 }
 
-type CommitContentChanges struct {
-	Commit  string
-	Changes []model.ContentChange
-}
-
-// CommittedRangeContentChanges omits commits that change no content, because
-// they leave nothing a Review could cover.
 func CommittedRangeContentChanges(repository string, reference model.SubjectReference) (RangeContentChanges, error) {
 	root := repositoryRoot(repository)
 	baseObject, headObject, err := committedRangeResolver{repository: root}.resolveRange(revisionName(reference.Base), revisionName(reference.Head))
@@ -43,63 +33,7 @@ func CommittedRangeContentChanges(repository string, reference model.SubjectRefe
 	if err != nil {
 		return RangeContentChanges{}, err
 	}
-	commits, err := root.commitContentChanges(baseObject, headObject)
-	if err != nil {
-		return RangeContentChanges{}, err
-	}
-	lines, err := root.rangeLineCounts(baseObject, headObject)
-	if err != nil {
-		return RangeContentChanges{}, err
-	}
-	return RangeContentChanges{Base: string(baseObject), Head: string(headObject), Changes: changes, Commits: commits, Lines: lines}, nil
-}
-
-// Push range sources name where DefaultPushBase found the base of the range
-// a push would publish.
-const (
-	PushBaseUpstream   = "upstream"
-	PushBaseRemoteHead = "remote-head"
-)
-
-var ErrNoDefaultPushBase = errors.New("no upstream branch and no origin/HEAD to compare with")
-
-// DefaultPushBase is the merge base of HEAD and the current branch's
-// upstream, else of HEAD and origin/HEAD. A merge base keeps a diverged
-// upstream's own commits out of the range.
-func DefaultPushBase(repository string) (base, source string, err error) {
-	if output, err := gitOutput(repository, "merge-base", "HEAD", "@{upstream}"); err == nil {
-		return strings.TrimSpace(string(output)), PushBaseUpstream, nil
-	}
-	if output, err := gitOutput(repository, "merge-base", "HEAD", "refs/remotes/origin/HEAD"); err == nil {
-		return strings.TrimSpace(string(output)), PushBaseRemoteHead, nil
-	}
-	return "", "", ErrNoDefaultPushBase
-}
-
-func (root repositoryRoot) commitContentChanges(base, head commitObject) ([]CommitContentChanges, error) {
-	listing, err := gitOutput(string(root), "rev-list", "--reverse", "--parents", string(base)+".."+string(head))
-	if err != nil {
-		return nil, fmt.Errorf("list range commits: %w", err)
-	}
-	var commits []CommitContentChanges
-	for _, line := range strings.Split(strings.TrimSpace(string(listing)), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) == 0 {
-			continue
-		}
-		parent := revisionName(emptyGitTree)
-		if len(fields) > 1 {
-			parent = revisionName(fields[1])
-		}
-		changes, err := root.treeContentChanges(parent, revisionName(fields[0]))
-		if err != nil {
-			return nil, err
-		}
-		if len(changes) > 0 {
-			commits = append(commits, CommitContentChanges{Commit: fields[0], Changes: changes})
-		}
-	}
-	return commits, nil
+	return RangeContentChanges{Base: string(baseObject), Head: string(headObject), Changes: changes}, nil
 }
 
 // StagedContentChanges compares the index with HEAD, or with the empty tree
@@ -177,6 +111,9 @@ type rawDiffEntry struct {
 	inWorktree bool
 }
 
+// gitlinkMode is the mode git gives a nested repository's path.
+const gitlinkMode = "160000"
+
 // parseRawDiff reads `:<oldmode> <newmode> <before> <after> <status>\0<path>\0`
 // records, which --no-renames limits to one path each.
 func parseRawDiff(output []byte) ([]rawDiffEntry, error) {
@@ -187,7 +124,7 @@ func parseRawDiff(output []byte) ([]rawDiffEntry, error) {
 		if len(header) != 5 || !strings.HasPrefix(fields[index], ":") {
 			return nil, fmt.Errorf("parse raw diff record %q", fields[index])
 		}
-		change := model.ContentChange{Path: fields[index+1], Before: header[2], After: header[3]}
+		change := model.ContentChange{Path: fields[index+1], Before: header[2], After: header[3], BeforeGitlink: header[0] == gitlinkMode, AfterGitlink: header[1] == gitlinkMode}
 		deleted := header[1] == "000000"
 		entries = append(entries, rawDiffEntry{change: change, inWorktree: change.After == model.ZeroObjectID && !deleted})
 	}
@@ -212,8 +149,9 @@ func contentChangeSet(entries []rawDiffEntry) []model.ContentChange {
 }
 
 // hashWorktreeSides fills each working-tree After side with the object ID Git
-// would store for it, so a Working Changes Review matches the same content
-// once staged or committed.
+// stores for it, so a Working Changes Review matches the same content once
+// staged or committed. The objects are written so a later delta can be
+// measured from a reviewed working state.
 func (root repositoryRoot) hashWorktreeSides(entries []rawDiffEntry) error {
 	var batch []*rawDiffEntry
 	for index := range entries {
@@ -221,14 +159,13 @@ func (root repositoryRoot) hashWorktreeSides(entries []rawDiffEntry) error {
 		if !entry.inWorktree {
 			continue
 		}
-		object, batched, err := root.worktreeObject(entry.change)
+		batched, err := root.worktreeObject(entry)
 		if err != nil {
 			return fmt.Errorf("hash working tree path %q: %w", entry.change.Path, err)
 		}
 		if batched {
 			batch = append(batch, entry)
 		}
-		entry.change.After = object
 	}
 	return root.hashRegularFiles(batch)
 }
@@ -236,34 +173,36 @@ func (root repositoryRoot) hashWorktreeSides(entries []rawDiffEntry) error {
 // worktreeObject resolves what a regular file in the batch cannot share:
 // a missing path, a symlink, whose blob is its target text, and a nested
 // repository, whose gitlink is its HEAD commit.
-func (root repositoryRoot) worktreeObject(change model.ContentChange) (object string, batched bool, err error) {
-	repository, path := string(root), change.Path
+func (root repositoryRoot) worktreeObject(entry *rawDiffEntry) (batched bool, err error) {
+	repository, path := string(root), entry.change.Path
 	location := filepath.Join(repository, path)
 	info, err := os.Lstat(location)
+	var output []byte
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
-		return model.ZeroObjectID, false, nil
+		entry.change.After = model.ZeroObjectID
+		return false, nil
 	case err != nil:
-		return "", false, err
+		return false, err
 	case info.Mode()&fs.ModeSymlink != 0:
-		target, err := os.Readlink(location)
-		if err != nil {
-			return "", false, err
+		target, readErr := os.Readlink(location)
+		if readErr != nil {
+			return false, readErr
 		}
-		output, err := gitInputOutput(repository, []byte(target), "hash-object", "--stdin", "--no-filters")
-		return strings.TrimSpace(string(output)), false, err
+		output, err = gitInputOutput(repository, []byte(target), "hash-object", "-w", "--stdin", "--no-filters")
 	case info.IsDir():
 		if _, err := os.Lstat(filepath.Join(location, ".git")); err != nil {
-			return "", false, fmt.Errorf("directory is not a nested repository: %w", err)
+			return false, fmt.Errorf("directory is not a nested repository: %w", err)
 		}
-		output, err := gitOutput(location, "rev-parse", "--verify", "HEAD")
-		return strings.TrimSpace(string(output)), false, err
+		entry.change.AfterGitlink = true
+		output, err = gitOutput(location, "rev-parse", "--verify", "HEAD")
 	case strings.Contains(path, "\n"):
-		output, err := gitOutput(repository, "hash-object", "--", path)
-		return strings.TrimSpace(string(output)), false, err
+		output, err = gitOutput(repository, "hash-object", "-w", "--", path)
 	default:
-		return "", true, nil
+		return true, nil
 	}
+	entry.change.After = strings.TrimSpace(string(output))
+	return false, err
 }
 
 // hashRegularFiles feeds newline-separated paths to one hash-object process;
@@ -276,7 +215,7 @@ func (root repositoryRoot) hashRegularFiles(entries []*rawDiffEntry) error {
 	for _, entry := range entries {
 		input.WriteString(entry.change.Path + "\n")
 	}
-	output, err := gitInputOutput(string(root), []byte(input.String()), "hash-object", "--stdin-paths")
+	output, err := gitInputOutput(string(root), []byte(input.String()), "hash-object", "-w", "--stdin-paths")
 	if err != nil {
 		return fmt.Errorf("hash working tree files: %w", err)
 	}

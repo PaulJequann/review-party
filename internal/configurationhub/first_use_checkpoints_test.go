@@ -91,7 +91,8 @@ func TestFirstUseDeclaresACheckpointThenOffersItsHooks(t *testing.T) {
 		"",             // pre-push, the default
 		"2",            // requirement: judged
 		"*.md docs/**", // exemptions
-		"5",            // small-change lines
+		"5",            // unreviewed lines
+		"2",            // review budget
 		"",             // waivers: human, the default
 		"0",            // team floor: git and agents-md, preselected
 		"y",            // publish
@@ -103,7 +104,7 @@ func TestFirstUseDeclaresACheckpointThenOffersItsHooks(t *testing.T) {
 	declared, err := journey.manager.Checkpoints(journey.repository)
 	want := configuration.NewCheckpoint()
 	want.Requirement = configuration.RequirementJudged
-	want.ExemptPaths, want.SmallChangeLines = []string{"*.md", "docs/**"}, 5
+	want.ExemptPaths, want.UnreviewedLines, want.ReviewBudget = []string{"*.md", "docs/**"}, 5, 2
 	want.Integrations = []configuration.IntegrationName{configuration.IntegrationGit, configuration.IntegrationAgentsMD}
 	if err != nil || !reflect.DeepEqual(declared, map[configuration.CheckpointName]configuration.Checkpoint{configuration.CheckpointPrePush: want}) {
 		t.Fatalf("declared = %#v, %v\noutput:\n%s", declared, err, output)
@@ -123,7 +124,8 @@ func TestFirstUseWarnsWhenMarkdownExemptionsSkipADocumentationProfile(t *testing
 		"2",    // pre-commit
 		"",     // requirement: reviewed, the default
 		"*.md", // exemptions
-		"0",    // small-change lines
+		"0",    // unreviewed lines
+		"3",    // review budget
 		"2",    // waivers: anyone
 		"0",    // team floor: git and agents-md, preselected
 		"n",    // do not publish
@@ -166,7 +168,7 @@ func TestFirstUseSummarizesDeclaredCheckpointsWithoutAskingAgain(t *testing.T) {
 
 	output := journey.run(t, "n", "0")
 
-	if !strings.Contains(output, "Checkpoint pre-commit: reviewed, waivers none, integrations git\n") || strings.Contains(output, "Which Review Checkpoint") {
+	if !strings.Contains(output, "Checkpoint pre-commit: reviewed, waivers none, unreviewed lines 0, review budget 3, integrations git\n") || strings.Contains(output, "Which Review Checkpoint") {
 		t.Fatalf("output:\n%s", output)
 	}
 	if !reflect.DeepEqual(journey.installer.installs, []string{"git team false"}) {
@@ -182,7 +184,8 @@ func TestFirstUsePreselectsAgentsOnPathInTheFloor(t *testing.T) {
 		"",  // pre-push
 		"",  // requirement: reviewed, the default
 		"",  // no exemptions
-		"0", // small-change lines
+		"0", // unreviewed lines
+		"3", // review budget
 		"",  // waivers: human
 		"0", // team floor: git, codex, and agents-md, preselected
 		"y", // publish

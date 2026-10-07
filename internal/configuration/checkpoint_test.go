@@ -69,7 +69,7 @@ func writeRepositoryCheckpoints(t *testing.T, repository, checkpoints string) {
 
 func TestRepositoryCheckpointsDecodeWithDefaults(t *testing.T) {
 	repository := t.TempDir()
-	writeRepositoryCheckpoints(t, repository, `{"pre-push":{"requirement":"judged","exempt_paths":["*.md"],"integrations":["git","claude-code","codex","agents-md"]}}`)
+	writeRepositoryCheckpoints(t, repository, `{"pre-push":{"requirement":"judged","exempt_paths":["*.md"],"unreviewed_lines":40,"review_budget":2,"integrations":["git","claude-code","codex","agents-md"]}}`)
 	manager := testManager(t, t.TempDir())
 
 	checkpoints, err := manager.Checkpoints(Repository(repository))
@@ -77,7 +77,7 @@ func TestRepositoryCheckpointsDecodeWithDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[CheckpointName]Checkpoint{CheckpointPrePush: {
-		Requirement: RequirementJudged, ExemptPaths: []string{"*.md"}, Waivers: WaiversHuman, Integrations: []IntegrationName{IntegrationGit, IntegrationClaudeCode, IntegrationCodex, IntegrationAgentsMD},
+		Requirement: RequirementJudged, ExemptPaths: []string{"*.md"}, UnreviewedLines: 40, ReviewBudget: 2, Waivers: WaiversHuman, Integrations: []IntegrationName{IntegrationGit, IntegrationClaudeCode, IntegrationCodex, IntegrationAgentsMD},
 	}}
 	if !reflect.DeepEqual(checkpoints, want) {
 		t.Fatalf("checkpoints = %#v, want %#v", checkpoints, want)
@@ -90,15 +90,19 @@ func TestRepositoryCheckpointsRejectInvalidDeclarations(t *testing.T) {
 		checkpoints string
 		reason      string
 	}{
-		{"unknown name", `{"pre-merge":{"requirement":"reviewed"}}`, `unknown checkpoint "pre-merge"`},
-		{"missing requirement", `{"pre-push":{}}`, `checkpoints.pre-push.requirement: unknown requirement ""`},
-		{"unknown requirement", `{"pre-push":{"requirement":"approved"}}`, `unknown requirement "approved"; expected reviewed or judged`},
-		{"unknown policy", `{"pre-push":{"requirement":"reviewed","waivers":"robots"}}`, `checkpoints.pre-push.waivers: unknown waiver policy "robots"`},
-		{"unknown integration", `{"pre-push":{"requirement":"reviewed","integrations":["cursor"]}}`, `unknown integration "cursor"; expected git, claude-code, codex, or agents-md`},
-		{"duplicate integration", `{"pre-push":{"requirement":"reviewed","integrations":["git","git"]}}`, `integration "git" is listed twice`},
-		{"negative size", `{"pre-push":{"requirement":"reviewed","small_change_lines":-1}}`, `small_change_lines: must not be negative`},
-		{"malformed pattern", `{"pre-push":{"requirement":"reviewed","exempt_paths":["/docs/**"]}}`, `exempt_paths: pattern "/docs/**" must be relative`},
-		{"unknown field", `{"pre-push":{"requirement":"reviewed","bypass":true}}`, `unknown field "bypass"`},
+		{"unknown name", `{"pre-merge":{"requirement":"reviewed","unreviewed_lines":0,"review_budget":3}}`, `unknown checkpoint "pre-merge"`},
+		{"missing requirement", `{"pre-push":{"unreviewed_lines":0,"review_budget":3}}`, `checkpoints.pre-push.requirement: unknown requirement ""`},
+		{"unknown requirement", `{"pre-push":{"requirement":"approved","unreviewed_lines":0,"review_budget":3}}`, `unknown requirement "approved"; expected reviewed or judged`},
+		{"unknown policy", `{"pre-push":{"requirement":"reviewed","unreviewed_lines":0,"review_budget":3,"waivers":"robots"}}`, `checkpoints.pre-push.waivers: unknown waiver policy "robots"`},
+		{"unknown integration", `{"pre-push":{"requirement":"reviewed","unreviewed_lines":0,"review_budget":3,"integrations":["cursor"]}}`, `unknown integration "cursor"; expected git, claude-code, codex, or agents-md`},
+		{"duplicate integration", `{"pre-push":{"requirement":"reviewed","unreviewed_lines":0,"review_budget":3,"integrations":["git","git"]}}`, `integration "git" is listed twice`},
+		{"missing allowance", `{"pre-push":{"requirement":"reviewed","review_budget":3}}`, `unreviewed_lines is required`},
+		{"missing budget", `{"pre-push":{"requirement":"reviewed","unreviewed_lines":0}}`, `review_budget is required`},
+		{"negative allowance", `{"pre-push":{"requirement":"reviewed","unreviewed_lines":-1,"review_budget":3}}`, `unreviewed_lines: must not be negative`},
+		{"zero budget", `{"pre-push":{"requirement":"reviewed","unreviewed_lines":0,"review_budget":0}}`, `review_budget: must be between 1 and 9`},
+		{"budget over nine", `{"pre-push":{"requirement":"reviewed","unreviewed_lines":0,"review_budget":10}}`, `review_budget: must be between 1 and 9`},
+		{"malformed pattern", `{"pre-push":{"requirement":"reviewed","unreviewed_lines":0,"review_budget":3,"exempt_paths":["/docs/**"]}}`, `exempt_paths: pattern "/docs/**" must be relative`},
+		{"unknown field", `{"pre-push":{"requirement":"reviewed","unreviewed_lines":0,"review_budget":3,"bypass":true}}`, `unknown field "bypass"`},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			repository := t.TempDir()
@@ -158,7 +162,7 @@ func TestCheckpointPlansSetAndRemove(t *testing.T) {
 	plan := planCheckpoints(t, manager, repository, SetCheckpoint{Name: CheckpointPrePush, Checkpoint: checkpoint})
 	change := plan.Changes()[0]
 	got := [3]string{change.Field, strconv.FormatBool(change.HadBefore), change.After}
-	if want := [3]string{"checkpoints.pre-push", "false", `{"requirement":"reviewed","exempt_paths":["docs/**"],"waivers":"human","integrations":["git"]}`}; got != want {
+	if want := [3]string{"checkpoints.pre-push", "false", `{"requirement":"reviewed","exempt_paths":["docs/**"],"unreviewed_lines":0,"review_budget":3,"waivers":"human","integrations":["git"]}`}; got != want {
 		t.Fatalf("field, had before, after = %v, want %v", got, want)
 	}
 	publishPlan(t, manager, plan)

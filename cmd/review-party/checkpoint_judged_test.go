@@ -80,11 +80,11 @@ func TestCheckpointCheckReportsUnjudgedFindings(t *testing.T) {
 	}
 	report := decodeCheckpointReport(t, result)
 	want := []checkpointProfile{
-		{Scope: "repository", Name: "bugs", State: "covered", ReviewIDs: []model.ReviewID{judgedBugs}, Unjudged: []engine.UnjudgedReview{{Review: judgedBugs, Ordinals: []int{1}}}},
-		{Scope: "repository", Name: "docs", State: "covered", ReviewIDs: []model.ReviewID{judgedDocs}},
+		{Scope: "repository", Name: "bugs", State: "unjudged", Reviews: []model.ReviewID{judgedBugs}, BudgetSpent: 1, ReviewBudget: 3, Unjudged: []engine.UnjudgedReview{{Review: judgedBugs, Ordinals: []int{1}}}},
+		{Scope: "repository", Name: "docs", State: "covered", Reviews: []model.ReviewID{judgedDocs}, BudgetSpent: 1, ReviewBudget: 3},
 	}
-	if report.State != engine.CheckpointUnjudged || !report.Covered {
-		t.Fatalf("report = %+v, want unjudged and covered", report)
+	if report.State != engine.CheckpointUnjudged || report.UnreviewedLines != 0 {
+		t.Fatalf("report = %+v, want unjudged with nothing unreviewed", report)
 	}
 	if !reflect.DeepEqual(report.Profiles, want) {
 		t.Fatalf("profiles = %+v, want %+v", report.Profiles, want)
@@ -110,7 +110,7 @@ func TestCheckpointWaiverPassesAnUnjudgedPush(t *testing.T) {
 	refs := pushLine(head, fixture.base)
 
 	refused := fixture.hook(refs, "pre-push", "origin", "url")
-	assertRunContains(t, refused, commandRun{exit: 1, stderr: "; judge: review-party finding record " + string(judgedBugs) + "; or waive: review-party checkpoint waive pre-push"})
+	assertRunContains(t, refused, commandRun{exit: 1, stderr: "; judge: review-party finding record " + string(judgedBugs) + "\n"})
 	assertRunContains(t, fixture.waive("", false, "pre-push", "--base", fixture.base, "--reason", "hotfix"), commandRun{stdout: "waived by"})
 	assertRun(t, fixture.hook(refs, "pre-push", "origin", "url"), commandRun{})
 }
@@ -132,11 +132,13 @@ func TestAgentHookRefusesAnUnjudgedPushInEachAgentsForm(t *testing.T) {
 }
 
 func TestAgentsMDBlockAsksForVerdictsOnlyUnderJudged(t *testing.T) {
+	judged := configuration.NewCheckpoint()
+	judged.Requirement = configuration.RequirementJudged
 	declared := map[configuration.CheckpointName]configuration.Checkpoint{
-		configuration.CheckpointPreCommit: {Requirement: configuration.RequirementReviewed},
-		configuration.CheckpointPrePush:   {Requirement: configuration.RequirementJudged},
+		configuration.CheckpointPreCommit: configuration.NewCheckpoint(),
+		configuration.CheckpointPrePush:   judged,
 	}
-	want := "Before pushing, review the change with `review-party run --base <upstream> --head HEAD` and record a verdict for each Finding with `review-party finding record <id>`; the pre-push Checkpoint refuses a push until a completed Review covers it and every Finding has a verdict.\n" +
+	want := "Before pushing, review the change with `review-party run --base <upstream> --head HEAD` and record a verdict for each Finding with `review-party finding record <id>`; the pre-push Checkpoint refuses a push with more than 0 unreviewed lines or a Finding without a verdict. Every fix after a Review needs `review-party run --unreviewed --base <upstream> --head HEAD`. At most 3 Reviews per change; when the Checkpoint says stop, report the unreviewed lines and stop.\n" +
 		preCommitLine + helpLine
 	if got := agentsMDBody(declared, configuration.SortedCheckpointNames(declared)); got != want {
 		t.Fatalf("body =\n%s\nwant\n%s", got, want)

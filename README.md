@@ -617,10 +617,24 @@ review-party config checkpoint remove pre-push
 ```
 
 Both commands show the configuration Plan and confirm it in a terminal or with
-`--yes`. `--small-change-lines N` passes a change of at most N added and
-deleted lines, measured over the whole change, so splitting a push into small
-commits does not pass each one. A binary file never counts as small.
+`--yes`. `--unreviewed-lines N` (default 0) is the allowance: after a Review,
+a change with at most N unreviewed lines passes without another Review, so a
+small fix does not start another round. A binary file never fits the
+allowance. `--review-budget K` (default 3, at most 9) caps the Reviews one
+change may spend; a change that reaches it stops for a person. Both values
+are always written, and a declaration missing either is rejected. The budget
+counts per Profile and per Checkpoint, with no accounting across Checkpoints,
+so declare it on one Checkpoint, pre-push or pre-commit, not both.
 `--waivers` is `human` (the default), `anyone`, or `none`.
+
+A Checkpoint measures what each selected Profile has not reviewed. Every
+completed Review records, per path, the content it started from and the
+content it reached, as Git blob IDs. The Checkpoint follows those records from
+the change's base to the newest state each Profile reached and counts the
+lines from there to the current content: the unreviewed lines. Rewording,
+squashing, or rebasing commits that leave the content intact keeps the chain,
+a Review of working changes credits the commit that records them, and an
+Incomplete Review spends budget and credits nothing.
 
 `--requirement` is `reviewed` (the default) or `judged`. Under `judged`, the
 covering Reviews also need a current verdict on every Finding, recorded with
@@ -638,18 +652,23 @@ recorded change before they are compared. A change whose every path is exempt
 passes.
 
 `review-party checkpoint check pre-push` reports whether the change is
-covered, exempt, waived, unjudged, or still needs a Review, with the next
-command. `--format json` adds the exemption and waiver details, and lists the
-unjudged Finding ordinals of each covering Review. When a change should
+covered, residual (unreviewed lines within the allowance), exempt, waived,
+unjudged, running, spent, or missing a Review, with the next command. The
+next command for unreviewed lines is `review-party run --unreviewed`, which
+reviews only what each Profile has not reviewed yet, skips Profiles with
+nothing left, and exits 0 with one line when nothing is unreviewed. A spent
+budget prints no command: a person decides. `--format json` adds, per
+Profile, the Reviews in the chain, the unreviewed lines per path, and the
+budget spent, and lists the unjudged Finding ordinals. When a change should
 pass without its Reviews, record a waiver with a reason:
 
 ```sh
 review-party checkpoint waive pre-push --reason "revert of a reviewed change"
 ```
 
-A waiver applies to that exact content change only. Under `human`, a person
-confirms it in a terminal, and `--yes` does not stand in for that person.
-Under `none`, only Reviews pass the Checkpoint.
+A waiver applies to the exact unreviewed delta it was recorded for. Under
+`human`, a person confirms it in a terminal, and `--yes` does not stand in
+for that person. Under `none`, only Reviews pass the Checkpoint.
 
 `review-party checkpoint install git` adds the git hook through the hook tool
 the repository already uses. It checks for lefthook, husky, the pre-commit
@@ -663,8 +682,10 @@ another branch from an up-to-date `HEAD`. Installed hooks load each Caller's
 default Global Configuration, not `--config`. Rerunning the installer changes
 nothing, and a block someone edited is left alone.
 
-The hook refuses an uncovered or unjudged change with one line that names the
-Checkpoint and the next command. It mentions waivers only under `anyone`. When the hook
+The hook refuses a change with unreviewed lines beyond the allowance, a spent
+budget, or unjudged Findings, with one line that names the Checkpoint and the
+next command. Only a spent budget adds the waive command, and only under
+`anyone`. When the hook
 cannot decide, because `review-party` is not on `PATH`, the configuration does
 not load, or git cannot name a base, it warns on one line and allows the push
 or commit.

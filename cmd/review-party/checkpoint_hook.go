@@ -164,8 +164,9 @@ func decideHookContent(ctx context.Context, options checkpointOptions) hookDecis
 	return hookDecision{refusal: hookRefusal(report)}
 }
 
-// hookRefusal is the one line a refused hook prints. It names what is missing
-// and the next command, never a judgment of the change.
+// hookRefusal is the one line a refused hook prints. It names the unreviewed
+// lines and the one next command, never a judgment of the change. A spent
+// budget names no command: a person decides.
 func hookRefusal(report checkpointReport) string {
 	scope := "the staged changes"
 	switch {
@@ -180,8 +181,11 @@ func hookRefusal(report checkpointReport) string {
 		line = fmt.Sprintf("%s Checkpoint is waiting on a running Review of %s; wait: %s", report.Checkpoint, scope, report.NextCommand)
 	case "judge":
 		line = judgeRefusal(report, scope)
+	case "stop":
+		spent := spentProfile(report.Profiles)
+		line = fmt.Sprintf("%s Checkpoint: %s in %s exceed %d after %d of %d Reviews; stop and ask a person", report.Checkpoint, unreviewedLines(spent.UnreviewedLines, report.binary), scope, report.allowance, spent.BudgetSpent, spent.ReviewBudget)
 	default:
-		line = fmt.Sprintf("%s Checkpoint has no completed Review of %s; %s: %s", report.Checkpoint, scope, report.nextLabel, report.NextCommand)
+		line = fmt.Sprintf("%s Checkpoint: %s in %s; next: %s", report.Checkpoint, unreviewedLines(report.UnreviewedLines, report.binary), scope, report.NextCommand)
 	}
 	if report.WaiveCommand != "" {
 		line += "; or waive: " + report.WaiveCommand

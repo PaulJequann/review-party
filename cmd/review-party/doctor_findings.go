@@ -127,8 +127,11 @@ func (repository doctorRepository) checkpointSet(name configuration.CheckpointNa
 	for _, pattern := range checkpoint.ExemptPaths {
 		command = append(command, "--exempt", shellWord(pattern))
 	}
-	if checkpoint.SmallChangeLines > 0 {
-		command = append(command, "--small-change-lines", strconv.Itoa(checkpoint.SmallChangeLines))
+	if checkpoint.UnreviewedLines != configuration.DefaultUnreviewedLines {
+		command = append(command, "--unreviewed-lines", strconv.Itoa(checkpoint.UnreviewedLines))
+	}
+	if checkpoint.ReviewBudget != configuration.DefaultReviewBudget {
+		command = append(command, "--review-budget", strconv.Itoa(checkpoint.ReviewBudget))
 	}
 	if checkpoint.Waivers != configuration.WaiversHuman {
 		command = append(command, "--waivers", string(checkpoint.Waivers))

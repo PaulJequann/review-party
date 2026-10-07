@@ -21,10 +21,11 @@ func newConfigCheckpointCommand(streams commandIO) *cobra.Command {
 	cmd := &cobra.Command{Use: "checkpoint", Short: "Declare the Review Checkpoints this repository expects", Args: cobra.NoArgs, RunE: showCommandHelp}
 	set := newConfigLeafCommand("set <pre-push|pre-commit>", "Create or replace one Review Checkpoint", cobra.MatchAll(cobra.ExactArgs(1), cobra.OnlyValidArgs), func(cmd *cobra.Command, args []string) error {
 		checkpoint := configuration.Checkpoint{
-			Requirement:      configuration.CheckpointRequirement(stringFlag(cmd, "requirement")),
-			ExemptPaths:      stringArrayFlag(cmd, "exempt"),
-			SmallChangeLines: intFlag(cmd, "small-change-lines"),
-			Waivers:          configuration.WaiverPolicy(stringFlag(cmd, "waivers")),
+			Requirement:     configuration.CheckpointRequirement(stringFlag(cmd, "requirement")),
+			ExemptPaths:     stringArrayFlag(cmd, "exempt"),
+			UnreviewedLines: intFlag(cmd, "unreviewed-lines"),
+			ReviewBudget:    intFlag(cmd, "review-budget"),
+			Waivers:         configuration.WaiverPolicy(stringFlag(cmd, "waivers")),
 		}
 		for _, integration := range stringArrayFlag(cmd, "integration") {
 			checkpoint.Integrations = append(checkpoint.Integrations, configuration.IntegrationName(integration))
@@ -39,12 +40,16 @@ Omitted flags take their defaults, so set replaces the whole declaration.
 ? match within one path segment, ** as a whole segment matches any number of
 segments, and a pattern without / matches the file name at any depth.
 --requirement judged also needs a current verdict, recorded with review-party
-finding record, on every Finding of the covering Reviews.`
-	set.Example = "  review-party config checkpoint set pre-push --exempt '*.md' --exempt 'docs/**' --integration git\n  review-party config checkpoint set pre-push --requirement judged --yes\n  review-party config checkpoint set pre-commit --small-change-lines 10 --waivers anyone --yes"
+finding record, on every Finding of the Reviews that cover the change.
+--unreviewed-lines lets that many lines change after a Review without a new
+one. --review-budget caps the Reviews one change may spend before the
+Checkpoint asks a person to step in; declare it on one Checkpoint.`
+	set.Example = "  review-party config checkpoint set pre-push --exempt '*.md' --exempt 'docs/**' --integration git\n  review-party config checkpoint set pre-push --requirement judged --yes\n  review-party config checkpoint set pre-commit --unreviewed-lines 10 --review-budget 2 --waivers anyone --yes"
 	set.ValidArgs = checkpointNameArguments()
 	set.Flags().String("requirement", string(configuration.RequirementReviewed), "What the Checkpoint expects: reviewed, or judged for a verdict on every Finding too")
 	set.Flags().StringArray("exempt", nil, "Path pattern the Checkpoint does not require Reviews for; repeatable")
-	set.Flags().Int("small-change-lines", 0, "Pass changes of at most this many added plus deleted lines; 0 disables")
+	set.Flags().Int("unreviewed-lines", configuration.DefaultUnreviewedLines, "Added plus deleted lines that may follow a Review without a new one; 0 allows none")
+	set.Flags().Int("review-budget", configuration.DefaultReviewBudget, fmt.Sprintf("Reviews one change may spend before a person must step in, 1 to %d", configuration.MaxReviewBudget))
 	set.Flags().String("waivers", string(configuration.WaiversHuman), "Who may waive the Checkpoint: anyone, human, or none")
 	set.Flags().StringArray("integration", nil, "Integration the team installs for this Checkpoint: git, claude-code, codex, or agents-md; repeatable")
 	addConfigMutationFlags(set, false, false, "")

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 
 	"reviewparty/internal/engine"
 	"reviewparty/internal/model"
@@ -213,25 +214,26 @@ func (entry *reviewEntry) attachVerdicts(verdicts []model.FindingVerdict) {
 	}
 }
 
-// feedbackHint tells the Caller how to judge the report's findings while any
-// finding is unjudged. Bundle members number their findings separately, so a
-// bundle's hint leaves REVIEW for the Caller to name.
+// feedbackHint tells the Caller how to judge the report's findings: one
+// finding record command per Review with an unjudged finding, since bundle
+// members number their findings separately.
 func feedbackHint(report reviewReport, configuration string) string {
-	review := ""
+	var commands []string
 	for _, entry := range report.Reviews {
-		for _, finding := range entry.Findings {
-			if finding.Verdict == nil {
-				review = string(entry.ID)
-			}
+		if entry.hasUnjudgedFinding() {
+			commands = append(commands, "review-party finding record "+string(entry.ID)+configurationArgument(configuration)+" <<'EOF'\nN accept|reject|defer REASON\nEOF")
 		}
 	}
-	if review == "" {
-		return ""
+	return strings.Join(commands, "\n")
+}
+
+func (entry reviewEntry) hasUnjudgedFinding() bool {
+	for _, finding := range entry.Findings {
+		if finding.Verdict == nil {
+			return true
+		}
 	}
-	if report.Bundle != nil {
-		review = "REVIEW"
-	}
-	return "review-party finding record " + review + configurationArgument(configuration) + " <<'EOF'\nN accept|reject|defer REASON\nEOF"
+	return false
 }
 
 func printReport(output io.Writer, report reviewReport, options reportOptions) error {

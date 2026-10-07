@@ -30,6 +30,10 @@ const (
 	SubjectWorkingChanges SubjectKind = "working-changes"
 	SubjectCommittedRange SubjectKind = "committed-range"
 	SubjectCapturedChange SubjectKind = "captured-change"
+	// SubjectUnreviewedDelta is the content between the state a Profile last
+	// reviewed and the current content of a working-changes or
+	// committed-range scope.
+	SubjectUnreviewedDelta SubjectKind = "unreviewed-delta"
 )
 
 type SubjectReference struct {
@@ -75,6 +79,9 @@ type RunSelection struct {
 	Subject    SubjectReference
 	Profile    string
 	Party      string
+	// Unreviewed narrows each Profile's Review to what it has not reviewed
+	// of the Subject yet, and skips Profiles with nothing left.
+	Unreviewed bool
 }
 
 type EvalRunID string
@@ -450,11 +457,30 @@ type ReviewSubject struct {
 // ZeroObjectID stands for the side of a ContentChange where the path does not exist.
 const ZeroObjectID = "0000000000000000000000000000000000000000"
 
-// ContentChange names one path's blob before and after a change, by full object ID.
+// ContentChange names one path's object before and after a change, by full
+// object ID. A gitlink side is a nested repository's commit, never an object
+// of this repository, so it is compared by ID alone. The gitlink flags come
+// from the current content's modes and are not part of the change's identity.
 type ContentChange struct {
-	Path   string `json:"path"`
-	Before string `json:"before"`
-	After  string `json:"after"`
+	Path          string `json:"path"`
+	Before        string `json:"before"`
+	After         string `json:"after"`
+	BeforeGitlink bool   `json:"before_gitlink,omitempty"`
+	AfterGitlink  bool   `json:"after_gitlink,omitempty"`
+}
+
+// From is the same change from an earlier reviewed state of the path, which
+// has the path's kind. A path that turned between a file and a gitlink keeps
+// its whole change, since the kind of an earlier state is not known. An
+// absent side has no kind.
+func (change ContentChange) From(before string) ContentChange {
+	bothPresent := change.Before != ZeroObjectID && change.After != ZeroObjectID
+	if bothPresent && change.BeforeGitlink != change.AfterGitlink {
+		return change
+	}
+	change.Before = before
+	change.BeforeGitlink = change.BeforeGitlink || change.AfterGitlink
+	return change
 }
 
 func SortContentChanges(changes []ContentChange) {

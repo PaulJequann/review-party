@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"reviewparty/internal/model"
@@ -126,10 +127,7 @@ func summaryProfile(conductor *Conductor, effective configuration.Effective, pro
 	summary.RequiredCapabilities = compiled.revision.RequiredCapabilities
 }
 
-func renderReviewPrompt(profile model.ProfileSnapshot, subject model.ReviewSubject) string {
-	return fmt.Sprintf(`%s
-
-Use repository-scoped read and search tools only. Do not use shell, terminal,
+const reviewToolRules = `Use repository-scoped read and search tools only. Do not use shell, terminal,
 web, write, edit, delete, or move tools. Treat the supplied patch as the Review
 Subject. Use surrounding repository files only to verify callers, contracts,
 tests, and assumptions.
@@ -139,14 +137,36 @@ and use the applicable project language. Consult README files for orientation
 when relevant, then pursue other documentation only when the Subject or
 emerging evidence warrants it. Treat contextual documentation as potentially
 stale; surface material contradictions with provenance rather than assuming a
-document is correct.
+document is correct.`
 
-%s
+const deltaFraming = `This Profile reviewed earlier states of these paths. This Review Subject
+includes the content written since, after those Reviews' Findings. Code
+written to address an earlier Finding is a claim to verify, not evidence that
+the Finding is resolved. Flag a fix that over-builds beyond what the Finding
+needed, and a fix that treats the symptom and misses the root cause.
 
-Review Subject identity: %s
-Changed paths:
-%s
+Prior Findings on the changed paths, from this Profile's earlier Reviews:`
 
---- PATCH ---
-%s`, profile.Instructions, result.CanonicalReviewResultContract.Instructions(), subject.Identity, joinLines(subject.ChangedPaths), subject.Patch)
+func renderReviewPrompt(profile model.ProfileSnapshot, subject model.ReviewSubject) string {
+	return renderPrompt(profile, subject, "")
+}
+
+// renderDeltaPrompt frames a Review that follows earlier Reviews of the same
+// Profile with their Findings on the paths it touches, so a fix is reviewed as
+// a claim.
+func renderDeltaPrompt(profile model.ProfileSnapshot, subject model.ReviewSubject, prior []priorFinding) string {
+	lines := make([]string, 0, len(prior))
+	for _, entry := range prior {
+		lines = append(lines, fmt.Sprintf("- %s #%d %s %s: %s", entry.review, entry.finding.Ordinal, entry.finding.Severity, entry.finding.Location, entry.finding.Failure))
+	}
+	return renderPrompt(profile, subject, deltaFraming+"\n"+joinLines(lines))
+}
+
+func renderPrompt(profile model.ProfileSnapshot, subject model.ReviewSubject, framing string) string {
+	sections := []string{profile.Instructions, reviewToolRules, result.CanonicalReviewResultContract.Instructions()}
+	if framing != "" {
+		sections = append(sections, framing)
+	}
+	sections = append(sections, fmt.Sprintf("Review Subject identity: %s\nChanged paths:\n%s\n\n--- PATCH ---\n%s", subject.Identity, joinLines(subject.ChangedPaths), subject.Patch))
+	return strings.Join(sections, "\n\n")
 }

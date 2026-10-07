@@ -1,28 +1,32 @@
 package engine
 
-// A Checkpoint decision layers the declared Checkpoint over Coverage:
-// exemptions narrow the content first, then Coverage, under the judged
-// requirement the Verdicts on the covering Reviews' Findings, then a Waiver of
-// the exact remaining content. An undeclared Checkpoint is plain Coverage.
+// A Checkpoint decision layers the declared Checkpoint over Coverage: exempt
+// paths narrow the content first, then each Profile's reviewed state is
+// measured against the unreviewed-lines allowance and the review budget,
+// under the judged requirement the Verdicts on the chain's Findings, then a
+// Waiver of the exact unreviewed delta. An undeclared Checkpoint allows no
+// unreviewed lines and has no budget.
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
 	"reviewparty/internal/configuration"
 	"reviewparty/internal/model"
 	"reviewparty/internal/store"
-	"reviewparty/internal/subject"
 )
 
 type CheckpointState string
 
 const (
 	CheckpointCovered  CheckpointState = "covered"
+	CheckpointResidual CheckpointState = "residual"
 	CheckpointRunning  CheckpointState = "running"
+	CheckpointSpent    CheckpointState = "spent"
 	CheckpointMissing  CheckpointState = "missing"
 	CheckpointUnjudged CheckpointState = "unjudged"
 	CheckpointExempt   CheckpointState = "exempt"
@@ -31,35 +35,25 @@ const (
 
 // Passes reports whether the Checkpoint accepts the change in this state.
 func (state CheckpointState) Passes() bool {
-	return state == CheckpointCovered || state == CheckpointExempt || state == CheckpointWaived
+	return state == CheckpointCovered || state == CheckpointResidual || state == CheckpointExempt || state == CheckpointWaived
 }
 
-type ExemptionReason string
-
-const (
-	ExemptByPaths       ExemptionReason = "paths"
-	ExemptBySmallChange ExemptionReason = "small_change"
-)
-
-// CheckpointExemption explains which content the declared exemptions removed
-// and, when the change is small, how many lines it changes.
+// CheckpointExemption names the changed paths the declaration exempts.
 type CheckpointExemption struct {
-	Reason       ExemptionReason
-	ExemptPaths  []string
-	ChangedLines int
+	ExemptPaths []string
 }
 
 // CheckpointRequest names the Checkpoint and the content it is about to accept.
 type CheckpointRequest struct {
 	Repository string
 	Name       configuration.CheckpointName
-	Content    CoverageSubject
+	Content    []model.ContentChange
 }
 
 // CheckpointReport is the Checkpoint-level answer. Declaration is nil when the
 // repository declares no such Checkpoint. Exemption is set when exempt paths
-// removed content or the change passed as small. Waiver is set when state is
-// waived. Coverage is empty when exemptions alone decided the Checkpoint.
+// removed content. Waiver is set when state is waived. Coverage is empty when
+// exemptions alone decided the Checkpoint.
 type CheckpointReport struct {
 	Name        configuration.CheckpointName
 	Declaration *configuration.Checkpoint
@@ -87,10 +81,11 @@ func (conductor *Conductor) CheckCheckpoint(_ context.Context, request Checkpoin
 	if declared {
 		report.Declaration = &declaration
 	}
-	content, exemption := applyExemptions(declaration, request.Content)
-	report.Exemption = exemption
-	report.WaiverKey = model.WaiverKey{Checkpoint: string(request.Name), ContentDigest: model.ContentChangesDigest(content.Changes)}
-	if exemption != nil && exemption.Reason != "" {
+	content, exempt := partitionExempt(declaration, request.Content)
+	if len(exempt) > 0 {
+		report.Exemption = &CheckpointExemption{ExemptPaths: exempt}
+	}
+	if len(content) == 0 && len(exempt) > 0 {
 		report.State = CheckpointExempt
 		return report, nil
 	}
@@ -99,28 +94,45 @@ func (conductor *Conductor) CheckCheckpoint(_ context.Context, request Checkpoin
 		return CheckpointReport{}, err
 	}
 	report.State = checkpointStateOf(report.Coverage)
-	if !declared || report.State.Passes() {
-		return report, nil
-	}
+	report.WaiverKey = waiverKeyOf(request.Name, content, report.Coverage)
 	return conductor.applyWaiver(report)
 }
 
+// checkpointStateOf takes the first Profile state in refusal order: a Profile
+// over its allowance decides before one within it, so a Review still running
+// or a spent budget is reported before a Finding without a verdict.
 func checkpointStateOf(coverage CoverageReport) CheckpointState {
-	switch {
-	case coverage.Covered && !coverage.judged():
-		return CheckpointUnjudged
-	case coverage.Covered:
-		return CheckpointCovered
-	}
-	for _, profile := range coverage.Profiles {
-		if profile.State == CoverageMissing {
-			return CheckpointMissing
+	for _, state := range []CoverageState{CoverageRunning, CoverageSpent, CoverageMissing, CoverageUnjudged, CoverageResidual} {
+		if slices.ContainsFunc(coverage.Profiles, func(profile ProfileCoverage) bool { return profile.State == state }) {
+			return CheckpointState(state)
 		}
 	}
-	return CheckpointRunning
+	return CheckpointCovered
 }
 
+// waiverKeyOf keys a Waiver on the union of every Profile's unreviewed delta.
+// With nothing unreviewed, as under the judged requirement, it is keyed on the
+// reviewed content whose Findings the Waiver passes.
+func waiverKeyOf(name configuration.CheckpointName, content []model.ContentChange, coverage CoverageReport) model.WaiverKey {
+	var union []model.ContentChange
+	for _, profile := range coverage.Profiles {
+		union = append(union, profile.Unreviewed...)
+	}
+	model.SortContentChanges(union)
+	union = slices.Compact(union)
+	if len(union) == 0 {
+		union = content
+	}
+	return model.WaiverKey{Checkpoint: string(name), ContentDigest: model.ContentChangesDigest(union)}
+}
+
+// applyWaiver turns a declared Checkpoint's refusal into waived when a
+// recorded waiver matches the unreviewed delta. A pass or an undeclared
+// Checkpoint has nothing to waive.
 func (conductor *Conductor) applyWaiver(report CheckpointReport) (CheckpointReport, error) {
+	if report.Declaration == nil || report.State.Passes() {
+		return report, nil
+	}
 	ledger, ok := conductor.store.(waiverLedger)
 	if !ok {
 		return CheckpointReport{}, errors.New("checkpoint waivers require the SQLite ledger")
@@ -136,52 +148,6 @@ func (conductor *Conductor) applyWaiver(report CheckpointReport) (CheckpointRepo
 	return report, nil
 }
 
-// applyExemptions removes exempt paths from the whole set and from each
-// commit, dropping commits left empty. The exemption is nil when the
-// declaration has nothing to report for this content; a non-empty Reason
-// means the exemption alone passes the Checkpoint. Empty content needs no
-// exemption: Coverage already accepts it.
-func applyExemptions(declaration configuration.Checkpoint, content CoverageSubject) (CoverageSubject, *CheckpointExemption) {
-	if len(content.Changes) == 0 {
-		return content, nil
-	}
-	kept, exempt := partitionExempt(declaration, content.Changes)
-	filtered := CoverageSubject{Changes: kept}
-	for _, commit := range content.Commits {
-		if changes, _ := partitionExempt(declaration, commit.Changes); len(changes) > 0 {
-			filtered.Commits = append(filtered.Commits, subject.CommitContentChanges{Commit: commit.Commit, Changes: changes})
-		}
-	}
-	exemption := CheckpointExemption{ExemptPaths: exempt}
-	switch {
-	case len(filtered.Changes) == 0:
-		exemption.Reason = ExemptByPaths
-	case declaration.SmallChangeLines > 0:
-		exemption.measure(declaration.SmallChangeLines, filtered.Changes, content.Lines)
-	}
-	if !exemption.reportable() {
-		return filtered, nil
-	}
-	return filtered, &exemption
-}
-
-// measure records the size of the non-exempt change, and passes it when it
-// is within the limit. An unmeasurable change records nothing.
-func (exemption *CheckpointExemption) measure(limit int, changes []model.ContentChange, lines subject.LineCounts) {
-	total, measurable := changedLines(changes, lines)
-	if !measurable {
-		return
-	}
-	exemption.ChangedLines = total
-	if total <= limit {
-		exemption.Reason = ExemptBySmallChange
-	}
-}
-
-func (exemption CheckpointExemption) reportable() bool {
-	return len(exemption.ExemptPaths) > 0 || exemption.Reason != "" || exemption.ChangedLines > 0
-}
-
 // partitionExempt splits changes into those the Checkpoint still requires
 // Reviews for and the paths it exempts.
 func partitionExempt(declaration configuration.Checkpoint, changes []model.ContentChange) ([]model.ContentChange, []string) {
@@ -195,20 +161,6 @@ func partitionExempt(declaration configuration.Checkpoint, changes []model.Conte
 		kept = append(kept, change)
 	}
 	return kept, exempt
-}
-
-// changedLines totals added and deleted lines over the given paths. A binary
-// path, or a path git did not count, makes the change unmeasurable.
-func changedLines(changes []model.ContentChange, lines subject.LineCounts) (int, bool) {
-	total := 0
-	for _, change := range changes {
-		count, counted := lines[change.Path]
-		if !counted || count.Binary {
-			return 0, false
-		}
-		total += count.Added + count.Deleted
-	}
-	return total, true
 }
 
 // ErrWaiversNotAllowed reports a Checkpoint whose policy forbids Waivers.

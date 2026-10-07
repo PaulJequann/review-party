@@ -48,7 +48,7 @@ func TestContentChangesIgnoreCommitIdentity(t *testing.T) {
 	}
 }
 
-func TestCommittedRangeContentChangesSplitsCommits(t *testing.T) {
+func TestCommittedRangeContentChangesSpanTheWholeRange(t *testing.T) {
 	repository := testRepository(t)
 	root := gitText(t, repository, "rev-parse", "HEAD")
 	writeTestFile(t, filepath.Join(repository, "b.go"), "package demo\n")
@@ -76,32 +76,6 @@ func TestCommittedRangeContentChangesSplitsCommits(t *testing.T) {
 	}
 	if !reflect.DeepEqual(changes.Changes, wantWhole) {
 		t.Fatalf("whole range = %#v, want %#v", changes.Changes, wantWhole)
-	}
-	wantCommits := []CommitContentChanges{
-		{Commit: gitText(t, repository, "rev-parse", "HEAD~2"), Changes: wantWhole[1:2]},
-		{Commit: gitText(t, repository, "rev-parse", "HEAD"), Changes: []model.ContentChange{wantWhole[0], wantWhole[2]}},
-	}
-	if !reflect.DeepEqual(changes.Commits, wantCommits) {
-		t.Fatalf("commits = %#v, want %#v", changes.Commits, wantCommits)
-	}
-	wantLines := LineCounts{"a.go": {Added: 1}, "b.go": {Added: 1}, "review.go": {Deleted: 3}}
-	if !reflect.DeepEqual(changes.Lines, wantLines) {
-		t.Fatalf("lines = %#v, want %#v", changes.Lines, wantLines)
-	}
-}
-
-func TestRootCommitContentChangesUseEmptyTree(t *testing.T) {
-	repository := testRepository(t)
-	head := gitText(t, repository, "rev-parse", "HEAD")
-	commits, err := repositoryRoot(repository).commitContentChanges(commitObject(emptyGitTree), commitObject(head))
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := []CommitContentChanges{{Commit: head, Changes: []model.ContentChange{{
-		Path: "review.go", Before: model.ZeroObjectID, After: gitText(t, repository, "rev-parse", "HEAD:review.go"),
-	}}}}
-	if !reflect.DeepEqual(commits, want) {
-		t.Fatalf("root commit = %#v, want %#v", commits, want)
 	}
 }
 
@@ -191,25 +165,6 @@ func TestStagedContentChangesExcludeUnstagedEdits(t *testing.T) {
 	want := []model.ContentChange{{Path: "review.go", Before: gitText(t, repository, "rev-parse", "HEAD:review.go"), After: stagedBlob}}
 	if !reflect.DeepEqual(staged, want) {
 		t.Fatalf("staged = %#v, want %#v", staged, want)
-	}
-}
-
-func TestStagedLineCountsCountEachPathAndMarkBinaries(t *testing.T) {
-	repository := testRepository(t)
-	runTestCommand(t, repository, "git", "mv", "review.go", "moved.go")
-	if err := os.WriteFile(filepath.Join(repository, "image.bin"), []byte{0, 1, 2, 0, 3}, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	runTestCommand(t, repository, "git", "add", "image.bin")
-	writeTestFile(t, filepath.Join(repository, "unstaged.go"), "package demo\n")
-
-	lines, err := StagedLineCounts(repository)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := LineCounts{"image.bin": {Binary: true}, "moved.go": {Added: 3}, "review.go": {Deleted: 3}}
-	if !reflect.DeepEqual(lines, want) {
-		t.Fatalf("staged lines = %#v, want %#v", lines, want)
 	}
 }
 

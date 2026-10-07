@@ -41,57 +41,60 @@ func TestSaveAndLoadKeepContentChanges(t *testing.T) {
 
 	record.Subject.ContentChanges = coveredChanges[:1]
 	saveTestReviews(t, ledger, record)
-	stale, err := ledger.CoverageCandidates(CoverageQuery{ProfileSource: coverageSource, Changes: coveredChanges[1:]})
+	stale, err := ledger.ContentTransitions(TransitionQuery{ProfileSource: coverageSource, Paths: []string{"b.go"}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(stale) != 0 {
-		t.Fatalf("re-saved Review still matches its replaced set: %#v", stale)
+		t.Fatalf("re-saved Review still carries its replaced edge: %#v", stale)
 	}
 }
 
-func TestCoverageCandidatesShareAnEntryWithTheQueryForProfile(t *testing.T) {
+func TestContentTransitionsListEveryEdgeOnTheQueriedPathsForTheProfile(t *testing.T) {
 	ledger := newTestLedger(t, t.TempDir())
 	defer closeTestResource(t, ledger.Close)
 	extra := model.ContentChange{Path: "c.go", Before: model.ZeroObjectID, After: "4444444444444444444444444444444444444444"}
-	superset := []model.ContentChange{coveredChanges[0], coveredChanges[1], extra}
-	differentAfter := []model.ContentChange{coveredChanges[0], {Path: "b.go", Before: coveredChanges[1].Before, After: "5555555555555555555555555555555555555555"}}
+	fix := model.ContentChange{Path: "b.go", Before: coveredChanges[1].After, After: "5555555555555555555555555555555555555555"}
 	otherProfile := coverageFixture("rp_1723200000000_00000000000000b3", model.LifecycleCompleted, coveredChanges, 3)
 	otherProfile.ProfileRevision.Source = "global:profiles/bugs"
 	saveTestReviews(t, ledger,
 		coverageFixture("rp_1723200000000_00000000000000b1", model.LifecycleCompleted, coveredChanges, 1),
-		coverageFixture("rp_1723200000000_00000000000000b2", model.LifecycleIncomplete, coveredChanges, 2),
+		coverageFixture("rp_1723200000000_00000000000000b2", model.LifecycleIncomplete, []model.ContentChange{coveredChanges[1], extra}, 2),
 		otherProfile,
-		coverageFixture("rp_1723200000000_00000000000000b4", model.LifecycleCompleted, superset, 4),
-		coverageFixture("rp_1723200000000_00000000000000b5", model.LifecycleCompleted, coveredChanges[:1], 5),
-		coverageFixture("rp_1723200000000_00000000000000b6", model.LifecycleCompleted, differentAfter[1:], 6),
-		coverageFixture("rp_1723200000000_00000000000000b7", model.LifecycleCompleted, []model.ContentChange{extra}, 7),
+		coverageFixture("rp_1723200000000_00000000000000b4", model.LifecycleRunning, []model.ContentChange{fix}, 4),
+		coverageFixture("rp_1723200000000_00000000000000b5", model.LifecycleCompleted, []model.ContentChange{extra}, 5),
 	)
 
-	candidates, err := ledger.CoverageCandidates(CoverageQuery{ProfileSource: coverageSource, Changes: coveredChanges})
+	transitions, err := ledger.ContentTransitions(TransitionQuery{ProfileSource: coverageSource, Paths: []string{"b.go", "a.go"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []CoverageCandidate{
-		{ID: "rp_1723200000000_00000000000000b5", Lifecycle: model.LifecycleCompleted, Changes: coveredChanges[:1]},
-		{ID: "rp_1723200000000_00000000000000b4", Lifecycle: model.LifecycleCompleted, Changes: superset},
-		{ID: "rp_1723200000000_00000000000000b2", Lifecycle: model.LifecycleIncomplete, Changes: coveredChanges},
-		{ID: "rp_1723200000000_00000000000000b1", Lifecycle: model.LifecycleCompleted, Changes: coveredChanges},
+	want := []ContentTransition{
+		{Review: "rp_1723200000000_00000000000000b1", Lifecycle: model.LifecycleCompleted, Path: "a.go", Before: coveredChanges[0].Before, After: coveredChanges[0].After},
+		{Review: "rp_1723200000000_00000000000000b1", Lifecycle: model.LifecycleCompleted, Path: "b.go", Before: coveredChanges[1].Before, After: coveredChanges[1].After},
+		{Review: "rp_1723200000000_00000000000000b2", Lifecycle: model.LifecycleIncomplete, Path: "b.go", Before: coveredChanges[1].Before, After: coveredChanges[1].After},
+		{Review: "rp_1723200000000_00000000000000b4", Lifecycle: model.LifecycleRunning, Path: "b.go", Before: fix.Before, After: fix.After},
 	}
-	if got := withoutCreatedAt(candidates); !reflect.DeepEqual(got, want) {
-		t.Fatalf("candidates = %#v, want %#v", got, want)
+	if got := withoutCreatedAt(transitions); !reflect.DeepEqual(got, want) {
+		t.Fatalf("transitions = %#v, want %#v", got, want)
+	}
+	for index := 1; index < len(transitions); index++ {
+		previous, current := transitions[index-1], transitions[index]
+		if previous.Path == current.Path && current.CreatedAt.Before(previous.CreatedAt) {
+			t.Fatalf("transitions on %s are not in creation order: %v after %v", current.Path, current.CreatedAt, previous.CreatedAt)
+		}
 	}
 }
 
-func TestCoverageCandidatesRejectEmptyAndRepeatedSets(t *testing.T) {
+func TestContentTransitionsRequireAProfileAndPaths(t *testing.T) {
 	ledger := newTestLedger(t, t.TempDir())
 	defer closeTestResource(t, ledger.Close)
-	for name, changes := range map[string][]model.ContentChange{
-		"empty":    nil,
-		"repeated": {coveredChanges[0], coveredChanges[0]},
+	for name, query := range map[string]TransitionQuery{
+		"no profile": {Paths: []string{"a.go"}},
+		"no paths":   {ProfileSource: coverageSource},
 	} {
-		if _, err := ledger.CoverageCandidates(CoverageQuery{ProfileSource: coverageSource, Changes: changes}); err == nil {
-			t.Fatalf("%s set: coverage query succeeded", name)
+		if _, err := ledger.ContentTransitions(query); err == nil {
+			t.Fatalf("%s: transition query succeeded", name)
 		}
 	}
 }
@@ -116,20 +119,20 @@ func TestPrepareUpgradesSchemaTwelveLedgerToIndexContentChanges(t *testing.T) {
 	}
 	covered := coverageFixture("rp_1723200000000_00000000000000c1", model.LifecycleCompleted, coveredChanges, 1)
 	saveTestReviews(t, ledger, covered)
-	candidates, err := ledger.CoverageCandidates(CoverageQuery{ProfileSource: coverageSource, Changes: coveredChanges})
+	transitions, err := ledger.ContentTransitions(TransitionQuery{ProfileSource: coverageSource, Paths: []string{"a.go", "b.go"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(candidates) != 1 || candidates[0].ID != covered.ID {
-		t.Fatalf("candidates after upgrade = %#v", candidates)
+	if len(transitions) != 2 || transitions[0].Review != covered.ID {
+		t.Fatalf("transitions after upgrade = %#v", transitions)
 	}
 }
 
-func withoutCreatedAt(candidates []CoverageCandidate) []CoverageCandidate {
-	stripped := make([]CoverageCandidate, 0, len(candidates))
-	for _, candidate := range candidates {
-		candidate.CreatedAt = time.Time{}
-		stripped = append(stripped, candidate)
+func withoutCreatedAt(transitions []ContentTransition) []ContentTransition {
+	stripped := make([]ContentTransition, 0, len(transitions))
+	for _, transition := range transitions {
+		transition.CreatedAt = time.Time{}
+		stripped = append(stripped, transition)
 	}
 	return stripped
 }
