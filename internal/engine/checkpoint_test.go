@@ -252,6 +252,15 @@ func TestAReviewedStateWhoseBlobIsGoneIsUnreached(t *testing.T) {
 	}
 }
 
+// A gitlink's states are commits of the nested repository, so the repository
+// is never asked whether it has them.
+func TestAReviewedGitlinkStateIsReachedWithoutTheObject(t *testing.T) {
+	nested := []model.ContentChange{{Path: "nested", Before: model.ZeroObjectID, After: a1, Gitlink: true}}
+	reviews := []recordedCoverage{recorded(bugsSource, "rp_1", model.LifecycleCompleted, nested)}
+	conductor, repository := newCheckpointConductor(t, &coverageStore{reviews: reviews, absent: map[string]bool{a1: true}}, bounded(0, 9))
+	assertOutcome(t, checkPrePush(t, conductor, repository, nested), checkpointOutcome{State: CheckpointCovered, Declared: true, ReviewIDs: []model.ReviewID{"rp_1"}, Spent: 1})
+}
+
 func TestTheAllowanceDecidesBetweenResidualAndMissing(t *testing.T) {
 	reviewed := []recordedCoverage{recorded(bugsSource, "rp_1", model.LifecycleCompleted, aGo(model.ZeroObjectID, a1))}
 	for _, test := range []struct {

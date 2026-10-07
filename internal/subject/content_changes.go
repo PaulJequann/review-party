@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"reviewparty/internal/model"
@@ -111,8 +112,12 @@ type rawDiffEntry struct {
 	inWorktree bool
 }
 
+// gitlinkMode is the mode git gives a nested repository's path.
+const gitlinkMode = "160000"
+
 // parseRawDiff reads `:<oldmode> <newmode> <before> <after> <status>\0<path>\0`
-// records, which --no-renames limits to one path each.
+// records, which --no-renames limits to one path each. A path is a gitlink
+// when either side has the gitlink mode.
 func parseRawDiff(output []byte) ([]rawDiffEntry, error) {
 	fields := strings.Split(string(output), "\x00")
 	var entries []rawDiffEntry
@@ -121,7 +126,7 @@ func parseRawDiff(output []byte) ([]rawDiffEntry, error) {
 		if len(header) != 5 || !strings.HasPrefix(fields[index], ":") {
 			return nil, fmt.Errorf("parse raw diff record %q", fields[index])
 		}
-		change := model.ContentChange{Path: fields[index+1], Before: header[2], After: header[3]}
+		change := model.ContentChange{Path: fields[index+1], Before: header[2], After: header[3], Gitlink: slices.Contains(header[:2], gitlinkMode)}
 		deleted := header[1] == "000000"
 		entries = append(entries, rawDiffEntry{change: change, inWorktree: change.After == model.ZeroObjectID && !deleted})
 	}
@@ -156,14 +161,13 @@ func (root repositoryRoot) hashWorktreeSides(entries []rawDiffEntry) error {
 		if !entry.inWorktree {
 			continue
 		}
-		object, batched, err := root.worktreeObject(entry.change)
+		batched, err := root.worktreeObject(entry)
 		if err != nil {
 			return fmt.Errorf("hash working tree path %q: %w", entry.change.Path, err)
 		}
 		if batched {
 			batch = append(batch, entry)
 		}
-		entry.change.After = object
 	}
 	return root.hashRegularFiles(batch)
 }
@@ -171,34 +175,36 @@ func (root repositoryRoot) hashWorktreeSides(entries []rawDiffEntry) error {
 // worktreeObject resolves what a regular file in the batch cannot share:
 // a missing path, a symlink, whose blob is its target text, and a nested
 // repository, whose gitlink is its HEAD commit.
-func (root repositoryRoot) worktreeObject(change model.ContentChange) (object string, batched bool, err error) {
-	repository, path := string(root), change.Path
+func (root repositoryRoot) worktreeObject(entry *rawDiffEntry) (batched bool, err error) {
+	repository, path := string(root), entry.change.Path
 	location := filepath.Join(repository, path)
 	info, err := os.Lstat(location)
+	var output []byte
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
-		return model.ZeroObjectID, false, nil
+		entry.change.After = model.ZeroObjectID
+		return false, nil
 	case err != nil:
-		return "", false, err
+		return false, err
 	case info.Mode()&fs.ModeSymlink != 0:
-		target, err := os.Readlink(location)
-		if err != nil {
-			return "", false, err
+		target, readErr := os.Readlink(location)
+		if readErr != nil {
+			return false, readErr
 		}
-		output, err := gitInputOutput(repository, []byte(target), "hash-object", "-w", "--stdin", "--no-filters")
-		return strings.TrimSpace(string(output)), false, err
+		output, err = gitInputOutput(repository, []byte(target), "hash-object", "-w", "--stdin", "--no-filters")
 	case info.IsDir():
 		if _, err := os.Lstat(filepath.Join(location, ".git")); err != nil {
-			return "", false, fmt.Errorf("directory is not a nested repository: %w", err)
+			return false, fmt.Errorf("directory is not a nested repository: %w", err)
 		}
-		output, err := gitOutput(location, "rev-parse", "--verify", "HEAD")
-		return strings.TrimSpace(string(output)), false, err
+		entry.change.Gitlink = true
+		output, err = gitOutput(location, "rev-parse", "--verify", "HEAD")
 	case strings.Contains(path, "\n"):
-		output, err := gitOutput(repository, "hash-object", "-w", "--", path)
-		return strings.TrimSpace(string(output)), false, err
+		output, err = gitOutput(repository, "hash-object", "-w", "--", path)
 	default:
-		return "", true, nil
+		return true, nil
 	}
+	entry.change.After = strings.TrimSpace(string(output))
+	return false, err
 }
 
 // hashRegularFiles feeds newline-separated paths to one hash-object process;

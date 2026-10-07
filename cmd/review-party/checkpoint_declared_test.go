@@ -181,6 +181,35 @@ func TestCheckpointFallsBackWhenAReviewedBlobIsGone(t *testing.T) {
 	}
 }
 
+// TestCheckpointCountsAGitlinkLikeAnyPath bumps a nested repository whose
+// commits this repository never holds, so the gitlink is measured, reviewed,
+// and credited by its pointer alone.
+func TestCheckpointCountsAGitlinkLikeAnyPath(t *testing.T) {
+	fixture := newCheckpointFixture(t)
+	fixture.declare("pre-push", "--unreviewed-lines", "0", "--review-budget", "3")
+	fixture.declare("pre-commit", "--unreviewed-lines", "0", "--review-budget", "3")
+	nested, added := fixture.commitNestedRepository("nested")
+	fixture.saveReview("rp_1725192000000_00000000000000f1", "bugs", model.LifecycleCompleted, fixture.rangeChanges(added).Changes)
+	fixture.saveReview("rp_1725192000000_00000000000000f2", "docs", model.LifecycleCompleted, fixture.rangeChanges(added).Changes)
+	bumped := nested.commitBump()
+
+	got := fixture.runWith("", false, "checkpoint", "check", "pre-push", "--base", fixture.base, "--repo", fixture.repository)
+	assertRunContains(t, got, commandRun{exit: 1, stdout: "bugs (repository): missing, 2 unreviewed lines in nested; 1 of 3 Reviews spent; after rp_1725192000000_00000000000000f1\n"})
+	if got.stderr != "" {
+		t.Fatalf("bump stderr = %q", got.stderr)
+	}
+
+	fixture.saveReview("rp_1725192000000_00000000000000f3", "bugs", model.LifecycleCompleted, fixture.rangeChanges(bumped).Changes)
+	fixture.saveReview("rp_1725192000000_00000000000000f4", "docs", model.LifecycleCompleted, fixture.rangeChanges(bumped).Changes)
+	if exit, stdout, stderr := fixture.check("pre-push", "--base", fixture.base); exit != 0 {
+		t.Fatalf("reviewed bump exit = %d, stdout = %q, stderr = %q", exit, stdout, stderr)
+	}
+
+	nested.stageBump()
+	got = fixture.runWith("", false, "checkpoint", "check", "pre-commit", "--repo", fixture.repository)
+	assertRunContains(t, got, commandRun{exit: 1, stdout: "bugs (repository): missing, 2 unreviewed lines in nested; 0 of 3 Reviews spent\n"})
+}
+
 // TestCheckpointOffersTheWaiveCommandOnlyOnASpentBudget declares anyone may
 // waive, then checks a missing Review and a spent budget on the same range.
 func TestCheckpointOffersTheWaiveCommandOnlyOnASpentBudget(t *testing.T) {

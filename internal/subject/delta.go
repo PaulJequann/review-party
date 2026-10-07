@@ -1,9 +1,10 @@
 package subject
 
 // A delta is the content between the state a Profile last reviewed and the
-// current state, one blob pair per path. Both sides are written as temporary
-// trees so one git diff-tree measures or prints the whole delta, however many
-// paths it spans.
+// current state, one object pair per path. Both sides are written as
+// temporary trees so one git diff-tree measures or prints the whole delta,
+// however many paths it spans. A gitlink path is written by its pointer, as
+// git stores it, so a nested repository's commits are never needed here.
 
 import (
 	"bytes"
@@ -12,7 +13,6 @@ import (
 	"errors"
 	"fmt"
 	"iter"
-	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -33,8 +33,6 @@ type DeltaLines struct {
 func (lines DeltaLines) Exceeds(allowance int) bool {
 	return len(lines.Binary) > 0 || lines.Total > allowance
 }
-
-var ErrMissingObject = errors.New("content object is missing from the repository")
 
 // MeasureDelta counts the lines between each path's two blobs.
 func MeasureDelta(repository string, delta []model.ContentChange) (DeltaLines, error) {
@@ -98,10 +96,6 @@ func ResolveUnreviewedDelta(scope model.ReviewSubject, delta []model.ContentChan
 }
 
 func (root repositoryRoot) diffDeltaTrees(delta []model.ContentChange, options ...string) (output []byte, returnErr error) {
-	types, err := root.deltaObjectTypes(delta)
-	if err != nil {
-		return nil, err
-	}
 	scratch, err := os.MkdirTemp("", "review-party-delta-")
 	if err != nil {
 		return nil, err
@@ -114,7 +108,7 @@ func (root repositoryRoot) diffDeltaTrees(delta []model.ContentChange, options .
 		func(change model.ContentChange) string { return change.Before },
 		func(change model.ContentChange) string { return change.After },
 	} {
-		trees[side], err = writeDeltaTree(deltaIndex{repository: string(root), file: filepath.Join(scratch, fmt.Sprint("index-", side))}, delta, pick, types)
+		trees[side], err = writeDeltaTree(deltaIndex{repository: string(root), file: filepath.Join(scratch, fmt.Sprint("index-", side))}, delta, pick)
 		if err != nil {
 			return nil, err
 		}
@@ -127,79 +121,34 @@ func (root repositoryRoot) diffDeltaTrees(delta []model.ContentChange, options .
 	return output, nil
 }
 
-// MissingObjects is the set of the objects the repository no longer has,
-// such as a reviewed working-tree blob that git gc pruned.
+// MissingObjects is the set of the blobs the repository no longer has, such
+// as a reviewed working-tree blob that git gc pruned, in one cat-file call
+// however many are asked.
 func MissingObjects(repository string, objects iter.Seq[string]) (map[string]bool, error) {
-	types, err := repositoryRoot(repository).objectTypes(objects)
+	var input strings.Builder
+	for object := range objects {
+		input.WriteString(object + "\n")
+	}
+	missing := map[string]bool{}
+	if input.Len() == 0 {
+		return missing, nil
+	}
+	output, err := gitInputOutput(repository, []byte(input.String()), "cat-file", "--batch-check")
 	if err != nil {
 		return nil, fmt.Errorf("check reviewed objects: %w", err)
 	}
-	missing := map[string]bool{}
-	for object := range objects {
-		if _, present := types[object]; !present {
+	for line := range strings.SplitSeq(strings.TrimSpace(string(output)), "\n") {
+		if object, kind, found := strings.Cut(line, " "); found && kind == "missing" {
 			missing[object] = true
 		}
 	}
 	return missing, nil
 }
 
-// deltaObjectTypes checks every non-zero side exists and learns its type, so
-// a nested repository's commit is listed as a gitlink rather than a blob.
-func (root repositoryRoot) deltaObjectTypes(delta []model.ContentChange) (map[string]string, error) {
-	paths := deltaObjectPaths(delta)
-	types, err := root.objectTypes(maps.Keys(paths))
-	if err != nil {
-		return nil, fmt.Errorf("check delta objects: %w", err)
-	}
-	for object, path := range paths {
-		if _, present := types[object]; !present {
-			return nil, fmt.Errorf("%w: %s of %s", ErrMissingObject, object, path)
-		}
-	}
-	return types, nil
-}
-
-// objectTypes maps each object the repository has to its type, in one
-// cat-file call however many objects are asked.
-func (root repositoryRoot) objectTypes(objects iter.Seq[string]) (map[string]string, error) {
-	types := map[string]string{}
-	var input strings.Builder
-	for object := range objects {
-		input.WriteString(object + "\n")
-	}
-	if input.Len() == 0 {
-		return types, nil
-	}
-	output, err := gitInputOutput(string(root), []byte(input.String()), "cat-file", "--batch-check")
-	if err != nil {
-		return nil, err
-	}
-	for line := range strings.SplitSeq(strings.TrimSpace(string(output)), "\n") {
-		object, kind, found := strings.Cut(line, " ")
-		if !found || kind == "missing" {
-			continue
-		}
-		types[object] = strings.Fields(kind)[0]
-	}
-	return types, nil
-}
-
-// deltaObjectPaths maps every non-zero side of the delta to its path.
-func deltaObjectPaths(delta []model.ContentChange) map[string]string {
-	paths := map[string]string{}
-	for _, change := range delta {
-		for _, object := range []string{change.Before, change.After} {
-			if object != model.ZeroObjectID {
-				paths[object] = change.Path
-			}
-		}
-	}
-	return paths
-}
-
 // writeDeltaTree stages one side of the delta into a private index and
 // writes it as a tree. Paths whose side is the zero ID are absent from it.
-func writeDeltaTree(index deltaIndex, delta []model.ContentChange, pick func(model.ContentChange) string, types map[string]string) (string, error) {
+// write-tree names the path of a blob the repository lacks.
+func writeDeltaTree(index deltaIndex, delta []model.ContentChange, pick func(model.ContentChange) string) (string, error) {
 	var entries strings.Builder
 	for _, change := range delta {
 		object := pick(change)
@@ -207,7 +156,7 @@ func writeDeltaTree(index deltaIndex, delta []model.ContentChange, pick func(mod
 			continue
 		}
 		mode := "100644"
-		if types[object] == "commit" {
+		if change.Gitlink {
 			mode = "160000"
 		}
 		entries.WriteString(mode + " " + object + "\t" + change.Path + "\n")

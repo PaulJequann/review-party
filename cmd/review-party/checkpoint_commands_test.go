@@ -76,6 +76,39 @@ func (fixture checkpointFixture) commit(path, content string) string {
 	return fixture.git("rev-parse", "HEAD")
 }
 
+// nestedRepository is a repository inside the fixture's, committed there as
+// a gitlink. Its commits are never objects of the fixture's repository.
+type nestedRepository struct {
+	fixture checkpointFixture
+	path    string
+}
+
+// commitNestedRepository creates a nested repository at path and commits its
+// gitlink, returning it with the fixture's new HEAD.
+func (fixture checkpointFixture) commitNestedRepository(path string) (nestedRepository, string) {
+	fixture.t.Helper()
+	fixture.git("init", "--quiet", path)
+	fixture.git("-C", path, "config", "user.email", "review-party@example.invalid")
+	fixture.git("-C", path, "config", "user.name", "Review Party Test")
+	nested := nestedRepository{fixture: fixture, path: path}
+	return nested, nested.commitBump()
+}
+
+// stageBump advances the nested repository and stages the bumped gitlink.
+func (nested nestedRepository) stageBump() {
+	nested.fixture.t.Helper()
+	nested.fixture.git("-C", nested.path, "commit", "--quiet", "--allow-empty", "-m", "nested")
+	nested.fixture.git("add", nested.path)
+}
+
+// commitBump commits a bumped gitlink and returns the fixture's new HEAD.
+func (nested nestedRepository) commitBump() string {
+	nested.fixture.t.Helper()
+	nested.stageBump()
+	nested.fixture.git("commit", "--quiet", "-m", "bump "+nested.path)
+	return nested.fixture.git("rev-parse", "HEAD")
+}
+
 // saveReview records a Review of one repository Profile over exactly changes,
 // as a run of that Profile would.
 func (fixture checkpointFixture) saveReview(id model.ReviewID, profile string, lifecycle model.Lifecycle, changes []model.ContentChange) {

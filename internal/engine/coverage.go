@@ -154,16 +154,25 @@ func (check *coverageCheck) loadEdges(sources []string) (map[string][]store.Cont
 		edges[source] = transitions
 	}
 	var err error
-	check.absent, err = check.conductor.missingObjects(check.repository, maps.Keys(reachedStates(edges)))
+	check.absent, err = check.conductor.missingObjects(check.repository, maps.Keys(check.reachedBlobs(edges)))
 	return edges, err
 }
 
-// reachedStates is every blob a completed Review reached on the edges.
-func reachedStates(edges map[string][]store.ContentTransition) map[string]bool {
+// reachedBlobs is every blob a completed Review reached on the edges. A
+// gitlink path's states are commits of its nested repository, never objects
+// of this one, so they are left out.
+func (check *coverageCheck) reachedBlobs(edges map[string][]store.ContentTransition) map[string]bool {
+	gitlink := map[string]bool{}
+	for _, change := range check.content {
+		gitlink[change.Path] = change.Gitlink
+	}
 	reached := map[string]bool{}
 	for _, transitions := range edges {
 		for _, edge := range transitions {
-			if edge.Lifecycle == model.LifecycleCompleted && edge.After != model.ZeroObjectID {
+			if gitlink[edge.Path] || edge.Lifecycle != model.LifecycleCompleted {
+				continue
+			}
+			if edge.After != model.ZeroObjectID {
 				reached[edge.After] = true
 			}
 		}
@@ -359,7 +368,7 @@ func (tally *profileTally) add(state pathState, change model.ContentChange) {
 		tally.running[id] = true
 	}
 	if state.reviewed != change.After {
-		tally.unreviewed = append(tally.unreviewed, model.ContentChange{Path: change.Path, Before: state.reviewed, After: change.After})
+		tally.unreviewed = append(tally.unreviewed, change.From(state.reviewed))
 	}
 }
 
@@ -391,7 +400,7 @@ func commonDelta(content []model.ContentChange, participants []profileReach) []m
 	var delta []model.ContentChange
 	for _, change := range content {
 		if reviewed := newestReached(sharedReach(participants, change.Path), change.After); reviewed != change.After {
-			delta = append(delta, model.ContentChange{Path: change.Path, Before: reviewed, After: change.After})
+			delta = append(delta, change.From(reviewed))
 		}
 	}
 	return delta

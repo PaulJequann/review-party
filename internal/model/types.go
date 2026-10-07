@@ -457,11 +457,22 @@ type ReviewSubject struct {
 // ZeroObjectID stands for the side of a ContentChange where the path does not exist.
 const ZeroObjectID = "0000000000000000000000000000000000000000"
 
-// ContentChange names one path's blob before and after a change, by full object ID.
+// ContentChange names one path's object before and after a change, by full
+// object ID. A Gitlink path is a nested repository: its sides are commits of
+// that repository, never objects of this one, so they are compared by ID
+// alone. The flag comes from the current content's modes and is not part of
+// the change's identity.
 type ContentChange struct {
-	Path   string `json:"path"`
-	Before string `json:"before"`
-	After  string `json:"after"`
+	Path    string `json:"path"`
+	Before  string `json:"before"`
+	After   string `json:"after"`
+	Gitlink bool   `json:"gitlink,omitempty"`
+}
+
+// From is the same change from an earlier reviewed state of the path.
+func (change ContentChange) From(before string) ContentChange {
+	change.Before = before
+	return change
 }
 
 func SortContentChanges(changes []ContentChange) {

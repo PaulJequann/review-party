@@ -1,7 +1,6 @@
 package subject
 
 import (
-	"errors"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -65,17 +64,62 @@ func TestMeasureDeltaCountsLinesBetweenBlobsPerPath(t *testing.T) {
 
 func TestMeasureDeltaOfNothingIsZero(t *testing.T) {
 	lines, err := MeasureDelta(testRepository(t), nil)
-	if err != nil || lines.Total != 0 || len(lines.Binary) != 0 || lines.Exceeds(0) {
-		t.Fatalf("empty delta = %#v, %v", lines, err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(lines, DeltaLines{ByPath: map[string]int{}}) || lines.Exceeds(0) {
+		t.Fatalf("empty delta = %#v", lines)
 	}
 }
 
-func TestMeasureDeltaNamesAMissingObject(t *testing.T) {
+func TestMeasureDeltaNamesAMissingBlob(t *testing.T) {
 	repository := testRepository(t)
 	delta := []model.ContentChange{{Path: "lost.go", Before: model.ZeroObjectID, After: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}
 	_, err := MeasureDelta(repository, delta)
-	if !errors.Is(err, ErrMissingObject) || !strings.Contains(err.Error(), "lost.go") {
-		t.Fatalf("error = %v, want ErrMissingObject naming lost.go", err)
+	if err == nil || !strings.Contains(err.Error(), "lost.go") {
+		t.Fatalf("error = %v, want one naming lost.go", err)
+	}
+}
+
+// A nested repository's commits are never objects of this repository, so its
+// gitlink is carried, measured, and printed by its pointer alone.
+func TestAGitlinkIsMeasuredWithoutItsCommits(t *testing.T) {
+	repository := testRepository(t)
+	nested := filepath.Join(repository, "nested")
+	runTestCommand(t, repository, "git", "init", "--quiet", "nested")
+	runTestCommand(t, nested, "git", "config", "user.email", "review-party@example.invalid")
+	runTestCommand(t, nested, "git", "config", "user.name", "Review Party Test")
+	runTestCommand(t, nested, "git", "commit", "--quiet", "--allow-empty", "-m", "first")
+	first := gitText(t, nested, "rev-parse", "HEAD")
+	assertContentChanges(t, repository, []model.ContentChange{{Path: "nested", Before: model.ZeroObjectID, After: first, Gitlink: true}})
+	runTestCommand(t, repository, "git", "commit", "--quiet", "-m", "add nested")
+
+	runTestCommand(t, nested, "git", "commit", "--quiet", "--allow-empty", "-m", "second")
+	second := gitText(t, nested, "rev-parse", "HEAD")
+	bumped := []model.ContentChange{{Path: "nested", Before: first, After: second, Gitlink: true}}
+	assertContentChanges(t, repository, bumped)
+	lines, err := MeasureDelta(repository, bumped)
+	if err != nil || !reflect.DeepEqual(lines, DeltaLines{ByPath: map[string]int{"nested": 2}, Total: 2}) {
+		t.Fatalf("gitlink delta lines = %#v, %v", lines, err)
+	}
+	patch, err := DeltaPatch(repository, bumped)
+	if err != nil || !strings.Contains(string(patch), "-Subproject commit "+first+"\n+Subproject commit "+second+"\n") {
+		t.Fatalf("gitlink patch = %q, %v", patch, err)
+	}
+}
+
+// assertContentChanges checks the working tree and, once staged, the index
+// both carry want.
+func assertContentChanges(t *testing.T, repository string, want []model.ContentChange) {
+	t.Helper()
+	working, err := WorkingContentChanges(repository, AllFiles)
+	if err != nil || !reflect.DeepEqual(working, want) {
+		t.Fatalf("working changes = %#v, %v, want %#v", working, err, want)
+	}
+	runTestCommand(t, repository, "git", "add", "-A")
+	staged, err := StagedContentChanges(repository)
+	if err != nil || !reflect.DeepEqual(staged, want) {
+		t.Fatalf("staged changes = %#v, %v, want %#v", staged, err, want)
 	}
 }
 
