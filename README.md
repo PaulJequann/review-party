@@ -772,6 +772,34 @@ which a terminal confirms and which needs `--yes` without one. Unbalanced or
 repeated markers are left for you to fix by hand. `--integration agents-md` on
 `config checkpoint set` lists the block in the team floor.
 
+`review-party checkpoint uninstall` takes back out what the installers added,
+and nothing else:
+
+```sh
+review-party checkpoint uninstall
+review-party checkpoint uninstall --undeclared --yes
+```
+
+It removes the marked hook blocks, the `PreToolUse` entries, and the
+`agents-md` block, and keeps every other byte of each file. It deletes a file
+only when install created it in this clone and nothing else was added to it
+since. Install records the files it creates in
+`.git/review-party-created.json`, and uninstall deletes that record once it
+lists nothing. A file you had before install is only edited. A block or entry
+someone edited, unbalanced `agents-md` markers, and lefthook or pre-commit
+framework configuration are reported for you to remove by hand, and the
+command exits 1 while any of them is left. It prints what it will change
+before it changes anything, which a terminal confirms and which needs `--yes`
+without one. Rerunning it is safe, and a run with nothing left prints
+`Nothing to remove.` and exits 0.
+
+`--undeclared` removes only what no declared Checkpoint uses: the hook blocks
+of undeclared Checkpoints, and the agent entries and `agents-md` block once no
+Checkpoint is declared. `config checkpoint remove` offers that in a terminal
+and prints the command otherwise. `$CODEX_HOME/hooks.json` serves every
+repository on the machine, so uninstall only names it unless you pass
+`--shared`.
+
 `review-party doctor` reports what the declared Checkpoints still lack in this
 clone, one line per finding, each ending in `; fix: <command>`:
 
@@ -781,6 +809,9 @@ clone, one line per finding, each ending in `; fix: <command>`:
 - A stale or broken `agents-md` block.
 - A Markdown exemption on a Checkpoint whose repository selects a documentation
   Profile, since those files would pass the Checkpoint without that Review.
+- Installed hook blocks, agent entries, and `agents-md` blocks that no
+  declared Checkpoint uses, fixed by `review-party checkpoint uninstall
+  --undeclared`.
 - Waivers recorded in this repository in the last 30 days, which are records
   and carry no fix.
 
@@ -790,10 +821,11 @@ Checkpoint pre-push has no claude-code hook; fix: review-party checkpoint instal
 ```
 
 `--format json` returns the same findings in `unresolved_names`,
-`integration_gaps`, `exemption_conflicts`, and `recent_waivers`. Doctor exits 1
-only when the configuration is invalid. Findings exit 0, because whether one
-blocks delivery is for the repository's instructions and the Caller to decide.
-Doctor reads the ledger for Waivers but never creates state.
+`integration_gaps`, `exemption_conflicts`, `undeclared_integrations`, and
+`recent_waivers`. Doctor exits 1 only when the configuration is invalid.
+Findings exit 0, because whether one blocks delivery is for the repository's
+instructions and the Caller to decide. Doctor reads the ledger for Waivers but
+never creates state.
 
 ## Operational Review Records
 
