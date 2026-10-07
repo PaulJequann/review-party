@@ -28,11 +28,16 @@ func openTestLedgerDB(t *testing.T, directory string) *sql.DB {
 	return db
 }
 
-func execTestStatements(t *testing.T, db *sql.DB, statements [][]any) {
+type testStatement struct {
+	query string
+	args  []any
+}
+
+func execTestStatements(t *testing.T, db *sql.DB, statements []testStatement) {
 	t.Helper()
 	for _, statement := range statements {
-		if _, err := db.Exec(statement[0].(string), statement[1:]...); err != nil {
-			t.Fatalf("%s: %v", statement[0], err)
+		if _, err := db.Exec(statement.query, statement.args...); err != nil {
+			t.Fatalf("%s: %v", statement.query, err)
 		}
 	}
 }
@@ -48,16 +53,16 @@ func seedSchemaFourteenText(t *testing.T, db *sql.DB, completed model.ReviewID) 
 	}
 	text := strings.Repeat(storedTextSentinel, 1<<16)
 	evidence := "INSERT INTO artifacts(review_id,pass_ordinal,attempt_ordinal,ordinal,kind,path,size,digest,truncated) VALUES(?,0,0,?,?,?,1,'digest',0)"
-	execTestStatements(t, db, [][]any{
-		{"UPDATE reviews SET subject = CAST(json_set(subject, '$.patch', ?) AS BLOB), result_raw = ?", text, text},
-		{"UPDATE attempts SET raw_output = ?", text},
-		{evidence, completed, 0, "constructed-prompt", "artifacts/completed-prompt"},
-		{evidence, completed, 1, "assistant-text", "artifacts/completed-text"},
-		{evidence, failed.ID, 1, "constructed-prompt", "artifacts/failed-prompt"},
-		{"INSERT INTO review_content_changes VALUES(?, 'a.go', 'before', 'after')", completed},
-		{"INSERT INTO finding_verdicts(review_id,ordinal,finding_digest,verdict,reason,recorded_by,recorded_at) VALUES(?,1,'0123456789abcdef','accepted','fixed','tester',?)", completed, failed.CreatedAt},
-		{"INSERT INTO checkpoint_waivers VALUES('w1','pre-push','digest','/repo','reason','tester',?)", failed.CreatedAt},
-		{"INSERT INTO misses(id,review_id,path,source,description,recorded_by,recorded_at) VALUES('m1',?,'a.go','human','missed','tester',?)", completed, failed.CreatedAt},
+	execTestStatements(t, db, []testStatement{
+		{"UPDATE reviews SET subject = CAST(json_set(subject, '$.patch', ?) AS BLOB), result_raw = ?", []any{text, text}},
+		{"UPDATE attempts SET raw_output = ?", []any{text}},
+		{evidence, []any{completed, 0, "constructed-prompt", "artifacts/completed-prompt"}},
+		{evidence, []any{completed, 1, "assistant-text", "artifacts/completed-text"}},
+		{evidence, []any{failed.ID, 1, "constructed-prompt", "artifacts/failed-prompt"}},
+		{"INSERT INTO review_content_changes VALUES(?, 'a.go', 'before', 'after')", []any{completed}},
+		{"INSERT INTO finding_verdicts(review_id,ordinal,finding_digest,verdict,reason,recorded_by,recorded_at) VALUES(?,1,'0123456789abcdef','accepted','fixed','tester',?)", []any{completed, failed.CreatedAt}},
+		{"INSERT INTO checkpoint_waivers VALUES('w1','pre-push','digest','/repo','reason','tester',?)", []any{failed.CreatedAt}},
+		{"INSERT INTO misses(id,review_id,path,source,description,recorded_by,recorded_at) VALUES('m1',?,'a.go','human','missed','tester',?)", []any{completed, failed.CreatedAt}},
 	})
 }
 
@@ -80,7 +85,11 @@ func queryTestStrings(t *testing.T, db *sql.DB, query string) []string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer closeTestResource(t, rows.Close)
+	defer func() {
+		if err := rows.Close(); err != nil {
+			t.Errorf("close rows: %v", err)
+		}
+	}()
 	values := []string{}
 	for rows.Next() {
 		var value string

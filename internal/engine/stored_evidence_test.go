@@ -27,7 +27,11 @@ func hostStateConductor(t *testing.T, executor attemptExecutor) (*Conductor, str
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = ledger.Close() })
+	t.Cleanup(func() {
+		if err := ledger.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	manager := newTestConfigurationManagerWithDeadline(t, time.Second)
 	conductor, err := newConductorWithManager(ledger, catalogWithExecutors(map[string]attemptExecutor{defaultReviewer: executor}), manager, time.Second)
 	if err != nil {
