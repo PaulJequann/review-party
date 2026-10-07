@@ -14,10 +14,14 @@ import (
 func TestSeededEvalRunsThroughOrdinaryReviewWithDurableProvenance(t *testing.T) {
 	suite, sourceFile := writeSeededEvalTestSuite(t, seededTestCase{expectedFiles: []string{"service.go"}, patch: seededPatch(false)})
 	original := readTestFile(t, sourceFile)
-	conductor := testEvalConductor(t, successfulExecutor(findingsReview))
+	executor := successfulExecutor(findingsReview)
+	conductor := testEvalConductor(t, executor)
 	run, err := conductor.RunEvalSuite(testContext(t), evalSelection(suite))
 	if err != nil {
 		t.Fatal(err)
+	}
+	if patch := promptPatch(t, executor.attempts[0].Prompt); !strings.Contains(patch, "return nil") {
+		t.Fatalf("ordinary Review did not contain seed: %s", patch)
 	}
 	evalRun, err := conductor.InspectEvalRun(context.Background(), run.EvalRunIDs[0])
 	if err != nil {
@@ -100,9 +104,6 @@ func assertSeedRevision(t *testing.T, revision model.EvalCaseRevision) {
 
 func assertSeededReview(t *testing.T, review model.ReviewRecord) {
 	t.Helper()
-	if !strings.Contains(review.Subject.Patch, "return nil") {
-		t.Fatalf("ordinary Review did not contain seed: %s", review.Subject.Patch)
-	}
 	if review.Lifecycle != model.LifecycleCompleted {
 		t.Fatalf("review lifecycle = %s", review.Lifecycle)
 	}

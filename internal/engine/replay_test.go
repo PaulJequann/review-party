@@ -31,6 +31,9 @@ func TestReplayUsesFrozenProfileAndCreatesIndependentLineage(t *testing.T) {
 	if executor.attemptCount() != 2 {
 		t.Fatalf("attempts = %d", executor.attemptCount())
 	}
+	if originalPatch, replayPatch := promptPatch(t, executor.attempts[0].Prompt), promptPatch(t, executor.attempts[1].Prompt); originalPatch == "" || replayPatch != originalPatch {
+		t.Fatalf("replay reviewed patch %q, want the original %q regenerated from the repository", replayPatch, originalPatch)
+	}
 	page, err := conductor.History(context.Background(), store.HistoryQuery{Limit: 10})
 	if err != nil {
 		t.Fatal(err)

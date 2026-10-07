@@ -69,7 +69,7 @@ func parseReviewResult(assistantText string) (model.ReviewResult, error) {
 
 	switch body[0] {
 	case "status: clean":
-		return parseCleanReview(review, body)
+		return parseCleanReview(body)
 	case "status: findings":
 		return parseFindings(review, body)
 	default:
@@ -95,14 +95,14 @@ func reviewBody(review string) ([]string, error) {
 	return body, nil
 }
 
-func parseCleanReview(review string, body []string) (model.ReviewResult, error) {
+func parseCleanReview(body []string) (model.ReviewResult, error) {
 	if len(body) != 2 {
 		return model.ReviewResult{}, errors.New("clean review contains unexpected content")
 	}
 	if body[1] != "summary: No actionable findings." {
 		return model.ReviewResult{}, errors.New("clean review contains unexpected content")
 	}
-	return model.ReviewResult{Status: model.ResultClean, Summary: "No actionable findings.", Findings: []model.Finding{}, Raw: review}, nil
+	return model.ReviewResult{Status: model.ResultClean, Summary: "No actionable findings.", Findings: []model.Finding{}}, nil
 }
 
 // parseFindings validates a findings review strictly first. When strict
@@ -127,7 +127,6 @@ func parseFindings(review string, body []string) (model.ReviewResult, error) {
 			Status:   model.ResultFindings,
 			Summary:  fmt.Sprintf("%d actionable finding(s).", len(findings)),
 			Findings: findings,
-			Raw:      review,
 		}, nil
 	}
 	if len(findings) == 0 {
@@ -135,13 +134,13 @@ func parseFindings(review string, body []string) (model.ReviewResult, error) {
 		// preserve; the strict failure stands.
 		return model.ReviewResult{}, errors.New("findings review must contain one to eight findings")
 	}
-	return partialFindings(review, findings, salvage)
+	return partialFindings(findings, salvage)
 }
 
 // partialFindings builds the explicitly-partial result and the paired
 // incompleteness error. The error names every dropped section so no caller
 // can mistake the salvage for a fully clean parse.
-func partialFindings(review string, findings []model.Finding, salvage []salvageReason) (model.ReviewResult, error) {
+func partialFindings(findings []model.Finding, salvage []salvageReason) (model.ReviewResult, error) {
 	details := make([]string, 0, len(salvage))
 	for _, reason := range salvage {
 		details = append(details, fmt.Sprintf("section %d: %s", reason.sectionIndex+1, reason.cause.Error()))
@@ -150,7 +149,6 @@ func partialFindings(review string, findings []model.Finding, salvage []salvageR
 		Status:   model.ResultFindingsPartial,
 		Summary:  fmt.Sprintf("%d actionable finding(s); at least one finding section was malformed and dropped.", len(findings)),
 		Findings: findings,
-		Raw:      review,
 	}
 	return result, fmt.Errorf("review result is incomplete: dropped %d malformed finding section(s): %s", len(salvage), strings.Join(details, "; "))
 }

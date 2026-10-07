@@ -57,8 +57,8 @@ func writeReview(tx *sql.Tx, record model.ReviewRecord) error {
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(`INSERT INTO reviews(id,replays_review_id,lifecycle,subject,profile_revision,profile_snapshot,result_status,result_summary,result_raw,result_finding_count,termination,runtime,timings,created_at,updated_at)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET replays_review_id=excluded.replays_review_id, lifecycle=excluded.lifecycle, subject=excluded.subject, profile_revision=excluded.profile_revision, profile_snapshot=excluded.profile_snapshot, result_status=excluded.result_status, result_summary=excluded.result_summary, result_raw=excluded.result_raw, result_finding_count=excluded.result_finding_count, termination=excluded.termination, runtime=excluded.runtime, timings=excluded.timings, updated_at=excluded.updated_at`, values...)
+	_, err = tx.Exec(`INSERT INTO reviews(id,replays_review_id,lifecycle,subject,profile_revision,profile_snapshot,result_status,result_summary,result_finding_count,termination,runtime,timings,created_at,updated_at)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET replays_review_id=excluded.replays_review_id, lifecycle=excluded.lifecycle, subject=excluded.subject, profile_revision=excluded.profile_revision, profile_snapshot=excluded.profile_snapshot, result_status=excluded.result_status, result_summary=excluded.result_summary, result_finding_count=excluded.result_finding_count, termination=excluded.termination, runtime=excluded.runtime, timings=excluded.timings, updated_at=excluded.updated_at`, values...)
 	return err
 }
 
@@ -87,8 +87,8 @@ func projectionValues(record model.ReviewRecord) ([]any, error) {
 	if err != nil {
 		return nil, fmt.Errorf("encode review timings: %w", err)
 	}
-	status, summary, raw, count := projectedResult(record.Result)
-	return []any{string(record.ID), record.ReplaysReviewID, record.Lifecycle, subject, profile, snapshot, status, summary, raw, count, termination, runtime, timings, record.CreatedAt, record.UpdatedAt}, nil
+	status, summary, count := projectedResult(record.Result)
+	return []any{string(record.ID), record.ReplaysReviewID, record.Lifecycle, subject, profile, snapshot, status, summary, count, termination, runtime, timings, record.CreatedAt, record.UpdatedAt}, nil
 }
 
 func encodeNullable(value any) ([]byte, error) {
@@ -98,21 +98,25 @@ func encodeNullable(value any) ([]byte, error) {
 	return json.Marshal(value)
 }
 
-func projectedResult(result *model.ReviewResult) (status, summary, raw any, count int) {
+func projectedResult(result *model.ReviewResult) (status, summary any, count int) {
 	if result == nil {
-		return nil, nil, nil, 0
+		return nil, nil, 0
 	}
-	return result.Status, result.Summary, result.Raw, result.FindingCount()
+	return result.Status, result.Summary, result.FindingCount()
 }
 
 func replaceReviewChildren(tx *sql.Tx, record model.ReviewRecord) error {
+	evidence, err := savedEvidence(tx, record.ID)
+	if err != nil {
+		return err
+	}
 	for _, table := range []string{"artifacts", "findings", "attempts", "passes"} {
 		if _, err := tx.Exec("DELETE FROM "+table+" WHERE review_id = ?", record.ID); err != nil {
 			return err
 		}
 	}
 	for passOrdinal, pass := range record.Passes {
-		if err := insertPass(tx, record.ID, passOrdinal, pass); err != nil {
+		if err := insertPass(tx, evidence, attemptIdentity{reviewID: record.ID, passOrdinal: passOrdinal}, pass); err != nil {
 			return err
 		}
 	}
@@ -134,12 +138,16 @@ func insertFindings(tx *sql.Tx, id model.ReviewID, result *model.ReviewResult) e
 	return nil
 }
 
-func insertPass(tx *sql.Tx, id model.ReviewID, passOrdinal int, pass model.PassRecord) error {
-	if _, err := tx.Exec("INSERT INTO passes(review_id,ordinal,name,required) VALUES(?,?,?,?)", id, passOrdinal, pass.Name, pass.Required); err != nil {
+func insertPass(tx *sql.Tx, evidence map[attemptIdentity][]model.ArtifactReference, identity attemptIdentity, pass model.PassRecord) error {
+	if _, err := tx.Exec("INSERT INTO passes(review_id,ordinal,name,required) VALUES(?,?,?,?)", identity.reviewID, identity.passOrdinal, pass.Name, pass.Required); err != nil {
 		return err
 	}
 	for attemptOrdinal, attempt := range pass.Attempts {
-		if err := insertAttempt(tx, attemptIdentity{id, passOrdinal, attemptOrdinal}, attempt); err != nil {
+		identity.attemptOrdinal = attemptOrdinal
+		if saved, ok := evidence[identity]; ok {
+			attempt.Artifacts = saved
+		}
+		if err := insertAttempt(tx, identity, attempt); err != nil {
 			return err
 		}
 	}
@@ -156,7 +164,7 @@ func insertAttempt(tx *sql.Tx, identity attemptIdentity, attempt model.AttemptRe
 	if err != nil {
 		return fmt.Errorf("encode reviewer provenance: %w", err)
 	}
-	if _, err := tx.Exec("INSERT INTO attempts(review_id,pass_ordinal,ordinal,number,outcome,provenance,diagnostic,raw_output,retry_after_ms,started_at,completed_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)", identity.reviewID, identity.passOrdinal, identity.attemptOrdinal, attempt.Number, attempt.Outcome, provenance, attempt.Diagnostic, attempt.RawOutput, attempt.RetryAfterMS, attempt.StartedAt, attempt.CompletedAt); err != nil {
+	if _, err := tx.Exec("INSERT INTO attempts(review_id,pass_ordinal,ordinal,number,outcome,provenance,diagnostic,retry_after_ms,started_at,completed_at) VALUES(?,?,?,?,?,?,?,?,?,?)", identity.reviewID, identity.passOrdinal, identity.attemptOrdinal, attempt.Number, attempt.Outcome, provenance, attempt.Diagnostic, attempt.RetryAfterMS, attempt.StartedAt, attempt.CompletedAt); err != nil {
 		return err
 	}
 	for artifactOrdinal, reference := range attempt.Artifacts {
@@ -211,16 +219,16 @@ func (p reviewRecordProjection) load(id model.ReviewID) (record model.ReviewReco
 type reviewValues struct {
 	lifecycle                                                 model.Lifecycle
 	subject, profile, snapshot, termination, runtime, timings []byte
-	status, summary, raw                                      sql.NullString
+	status, summary                                           sql.NullString
 	findingCount                                              int
 	createdAt, updatedAt                                      time.Time
 	replaysReviewID                                           sql.NullString
 }
 
 func loadReviewValues(tx *sql.Tx, id model.ReviewID) (reviewValues, error) {
-	row := tx.QueryRow("SELECT lifecycle,subject,profile_revision,profile_snapshot,result_status,result_summary,result_raw,result_finding_count,termination,runtime,timings,created_at,updated_at,replays_review_id FROM reviews WHERE id = ?", id)
+	row := tx.QueryRow("SELECT lifecycle,subject,profile_revision,profile_snapshot,result_status,result_summary,result_finding_count,termination,runtime,timings,created_at,updated_at,replays_review_id FROM reviews WHERE id = ?", id)
 	var values reviewValues
-	if err := row.Scan(&values.lifecycle, &values.subject, &values.profile, &values.snapshot, &values.status, &values.summary, &values.raw, &values.findingCount, &values.termination, &values.runtime, &values.timings, &values.createdAt, &values.updatedAt, &values.replaysReviewID); err != nil {
+	if err := row.Scan(&values.lifecycle, &values.subject, &values.profile, &values.snapshot, &values.status, &values.summary, &values.findingCount, &values.termination, &values.runtime, &values.timings, &values.createdAt, &values.updatedAt, &values.replaysReviewID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return values, notFoundAs(string(id), err)
 		}
@@ -251,7 +259,7 @@ func (values reviewValues) record(id model.ReviewID) (model.ReviewRecord, error)
 		}
 	}
 	if values.status.Valid {
-		record.Result = &model.ReviewResult{Status: model.ResultStatus(values.status.String), Summary: values.summary.String, Raw: values.raw.String, Findings: []model.Finding{}}
+		record.Result = &model.ReviewResult{Status: model.ResultStatus(values.status.String), Summary: values.summary.String, Findings: []model.Finding{}}
 	}
 	return record, nil
 }
@@ -293,7 +301,7 @@ func loadPasses(tx *sql.Tx, record *model.ReviewRecord) (returnErr error) {
 }
 
 func loadAttempts(tx *sql.Tx, record *model.ReviewRecord) (returnErr error) {
-	rows, err := tx.Query("SELECT pass_ordinal,ordinal,number,outcome,provenance,diagnostic,raw_output,retry_after_ms,started_at,completed_at FROM attempts WHERE review_id=? ORDER BY pass_ordinal,ordinal", record.ID)
+	rows, err := tx.Query("SELECT pass_ordinal,ordinal,number,outcome,provenance,diagnostic,retry_after_ms,started_at,completed_at FROM attempts WHERE review_id=? ORDER BY pass_ordinal,ordinal", record.ID)
 	if err != nil {
 		return err
 	}
@@ -304,7 +312,7 @@ func loadAttempts(tx *sql.Tx, record *model.ReviewRecord) (returnErr error) {
 		var passOrdinal, ordinal int
 		var attempt model.AttemptRecord
 		var provenance []byte
-		if err := rows.Scan(&passOrdinal, &ordinal, &attempt.Number, &attempt.Outcome, &provenance, &attempt.Diagnostic, &attempt.RawOutput, &attempt.RetryAfterMS, &attempt.StartedAt, &attempt.CompletedAt); err != nil {
+		if err := rows.Scan(&passOrdinal, &ordinal, &attempt.Number, &attempt.Outcome, &provenance, &attempt.Diagnostic, &attempt.RetryAfterMS, &attempt.StartedAt, &attempt.CompletedAt); err != nil {
 			return err
 		}
 		if err := decodeProjectionValue(provenance, &attempt.Provenance); err != nil {
@@ -338,12 +346,24 @@ func loadArtifacts(tx *sql.Tx, record *model.ReviewRecord) (returnErr error) {
 		if err := rows.Scan(&passOrdinal, &attemptOrdinal, &artifact.Kind, &artifact.Path, &artifact.Size, &artifact.Digest, &artifact.Truncated); err != nil {
 			return err
 		}
-		if passOrdinal < 0 || passOrdinal >= len(record.Passes) || attemptOrdinal < 0 || attemptOrdinal >= len(record.Passes[passOrdinal].Attempts) {
+		attempt := attemptAt(record, passOrdinal, attemptOrdinal)
+		if attempt == nil {
 			return fmt.Errorf("read review artifact: attempt %d in pass %d is missing", attemptOrdinal, passOrdinal)
 		}
-		record.Passes[passOrdinal].Attempts[attemptOrdinal].Artifacts = append(record.Passes[passOrdinal].Attempts[attemptOrdinal].Artifacts, artifact)
+		attempt.Artifacts = append(attempt.Artifacts, artifact)
 	}
 	return rows.Err()
+}
+
+func attemptAt(record *model.ReviewRecord, passOrdinal, attemptOrdinal int) *model.AttemptRecord {
+	if passOrdinal < 0 || passOrdinal >= len(record.Passes) {
+		return nil
+	}
+	attempts := record.Passes[passOrdinal].Attempts
+	if attemptOrdinal < 0 || attemptOrdinal >= len(attempts) {
+		return nil
+	}
+	return &attempts[attemptOrdinal]
 }
 
 func loadFindings(tx *sql.Tx, id model.ReviewID, result *model.ReviewResult) (returnErr error) {

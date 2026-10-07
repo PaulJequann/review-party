@@ -17,14 +17,14 @@ import (
 	"reviewparty/internal/store"
 )
 
-const reportPatchSentinel = "PATCH_SENTINEL_LINE"
+const reportChangedPathSentinel = "internal/file24.go"
 
-func largePatchRecord(id model.ReviewID, profile string, findings int) model.ReviewRecord {
+func reportRecord(id model.ReviewID, profile string, findings int) model.ReviewRecord {
 	paths := make([]string, 25)
 	for index := range paths {
 		paths[index] = fmt.Sprintf("internal/file%02d.go", index)
 	}
-	result := &model.ReviewResult{Status: model.ResultClean, Summary: profile + " summary", Raw: "RAW_SENTINEL", Findings: []model.Finding{}}
+	result := &model.ReviewResult{Status: model.ResultClean, Summary: profile + " summary", Findings: []model.Finding{}}
 	for ordinal := 1; ordinal <= findings; ordinal++ {
 		result.Status = model.ResultFindings
 		result.Findings = append(result.Findings, model.Finding{
@@ -37,7 +37,7 @@ func largePatchRecord(id model.ReviewID, profile string, findings int) model.Rev
 		ID: id, Lifecycle: model.LifecycleCompleted,
 		Subject: model.ReviewSubject{
 			Kind: "working_changes", Repository: "/repo", Identity: "0123456789abcdef0123",
-			ChangedPaths: paths, Patch: strings.Repeat(reportPatchSentinel+" "+strings.Repeat("x", 80)+"\n", 512),
+			ChangedPaths: paths,
 		},
 		ProfileRevision: model.ProfileRevision{Name: profile, Revision: "rev-" + profile, Source: "global", ResultContract: "contract-v1"},
 		Passes: []model.PassRecord{{Attempts: []model.AttemptRecord{{
@@ -93,15 +93,11 @@ func marshalReport(t *testing.T, report reviewReport) string {
 	return string(encoded)
 }
 
-func TestRecordReportOmitsPatchUnlessFull(t *testing.T) {
-	record := largePatchRecord("rp_patch", "bugs", 6)
-	if len(record.Subject.Patch) < 50_000 {
-		t.Fatalf("fixture patch is %d bytes, want at least 50 KB", len(record.Subject.Patch))
-	}
-
+func TestRecordReportOmitsChangedPathsUnlessFull(t *testing.T) {
+	record := reportRecord("rp_patch", "bugs", 6)
 	compact := recordReport(record, false)
 	encoded := marshalReport(t, compact)
-	if strings.Contains(encoded, reportPatchSentinel) || strings.Contains(encoded, `"changed_paths"`) {
+	if strings.Contains(encoded, reportChangedPathSentinel) || strings.Contains(encoded, `"changed_paths"`) {
 		t.Fatalf("compact report carries subject content: %d bytes", len(encoded))
 	}
 	entry := compact.Reviews[0]
@@ -111,8 +107,8 @@ func TestRecordReportOmitsPatchUnlessFull(t *testing.T) {
 	}
 
 	full := marshalReport(t, recordReport(record, true))
-	if !strings.Contains(full, reportPatchSentinel) || !strings.Contains(full, `"changed_paths"`) {
-		t.Fatal("full report omitted the patch or changed paths")
+	if !strings.Contains(full, reportChangedPathSentinel) || !strings.Contains(full, `"changed_paths"`) {
+		t.Fatal("full report omitted the changed paths")
 	}
 }
 
@@ -124,7 +120,7 @@ func TestReportFindingsAreAnArrayEvenWithoutAResult(t *testing.T) {
 }
 
 func stoppedMemberRecord(id model.ReviewID, profile string) model.ReviewRecord {
-	record := largePatchRecord(id, profile, 0)
+	record := reportRecord(id, profile, 0)
 	record.Lifecycle, record.Result = model.LifecycleIncomplete, nil
 	record.Termination = &model.ReviewTermination{Category: model.TerminationCancelled, Phase: model.PhaseAvailabilityCheck, Message: "the Review Bundle stopped before this Review finished: context canceled"}
 	return record
@@ -142,8 +138,8 @@ func (loader fakeReviewLoader) Inspect(_ context.Context, id model.ReviewID) (mo
 
 func TestBundleReportInlinesEveryMembersFindings(t *testing.T) {
 	loader := fakeReviewLoader{
-		"rp_bugs":     largePatchRecord("rp_bugs", "bugs", 2),
-		"rp_quality":  largePatchRecord("rp_quality", "code-quality", 0),
+		"rp_bugs":     reportRecord("rp_bugs", "bugs", 2),
+		"rp_quality":  reportRecord("rp_quality", "code-quality", 0),
 		"rp_security": stoppedMemberRecord("rp_security", "security"),
 	}
 	bundle := model.ReviewBundle{
@@ -180,17 +176,17 @@ func TestBundleReportInlinesEveryMembersFindings(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("entries = %+v, want %+v", got, want)
 	}
-	if encoded := marshalReport(t, report); strings.Contains(encoded, reportPatchSentinel) {
-		t.Fatal("compact bundle report carries a member patch")
+	if encoded := marshalReport(t, report); strings.Contains(encoded, reportChangedPathSentinel) {
+		t.Fatal("compact bundle report carries member changed paths")
 	}
 }
 
-func TestPrintReportKeepsPatchRawAndArtifactsBehindFull(t *testing.T) {
-	record := largePatchRecord("rp_patch", "bugs", 1)
+func TestPrintReportKeepsChangedPathsAndArtifactsBehindFull(t *testing.T) {
+	record := reportRecord("rp_patch", "bugs", 1)
 	for _, format := range []string{"json", "human"} {
 		for _, full := range []bool{false, true} {
 			output := renderReport(t, recordReport(record, full), format)
-			for _, marker := range []string{reportPatchSentinel, "RAW_SENTINEL", "artifacts/rp_patch/assistant-text.txt"} {
+			for _, marker := range []string{reportChangedPathSentinel, "artifacts/rp_patch/assistant-text.txt"} {
 				if strings.Contains(output, marker) != full {
 					t.Errorf("%s output with full=%t: contains %q = %t", format, full, marker, !full)
 				}
@@ -205,8 +201,8 @@ func TestPrintReportKeepsPatchRawAndArtifactsBehindFull(t *testing.T) {
 func findingsBundleReport(t *testing.T) reviewReport {
 	t.Helper()
 	loader := fakeReviewLoader{
-		"rp_bugs":     largePatchRecord("rp_bugs", "bugs", 1),
-		"rp_security": largePatchRecord("rp_security", "security", 2),
+		"rp_bugs":     reportRecord("rp_bugs", "bugs", 1),
+		"rp_security": reportRecord("rp_security", "security", 2),
 	}
 	bundle := model.ReviewBundle{
 		ID: "rb_findings", Lifecycle: model.LifecycleCompleted, Revision: "bundle-revision",
@@ -256,8 +252,8 @@ func TestInspectBundleCommandInlinesMemberFindings(t *testing.T) {
 	stateHome := t.TempDir()
 	t.Setenv("XDG_STATE_HOME", stateHome)
 	members := []model.ReviewRecord{
-		largePatchRecord("rp_1723200000000_aaaaaaaaaaaaaaaa", "bugs", 1),
-		largePatchRecord("rp_1723200000000_bbbbbbbbbbbbbbbb", "security", 2),
+		reportRecord("rp_1723200000000_aaaaaaaaaaaaaaaa", "bugs", 1),
+		reportRecord("rp_1723200000000_bbbbbbbbbbbbbbbb", "security", 2),
 	}
 	saveInspectBundleFixture(t, stateHome, model.ReviewBundle{ID: "rb_1723200000000_cccccccccccccccc"}, members...)
 
@@ -273,8 +269,8 @@ func TestInspectBundleCommandInlinesMemberFindings(t *testing.T) {
 		if compact.Reviews[index].Record != nil {
 			t.Fatalf("review %s carries the full record without --full", member.ID)
 		}
-		if record := full.Reviews[index].Record; record == nil || record.Subject.Patch != member.Subject.Patch {
-			t.Fatalf("review %s with --full omitted the subject patch", member.ID)
+		if record := full.Reviews[index].Record; record == nil || !reflect.DeepEqual(record.Subject.ChangedPaths, member.Subject.ChangedPaths) {
+			t.Fatalf("review %s with --full omitted the changed paths", member.ID)
 		}
 	}
 }
@@ -322,7 +318,7 @@ func TestInspectBundleReportsAnUnreadableMemberBesideTheOthers(t *testing.T) {
 	bundle := model.ReviewBundle{ID: "rb_1723200000000_dddddddddddddddd", Members: []model.BundleMember{
 		{Scope: "global", Profile: "security", ReviewID: missing, Lifecycle: model.LifecycleCompleted, Status: "clean"},
 	}}
-	saveInspectBundleFixture(t, stateHome, bundle, largePatchRecord("rp_1723200000000_eeeeeeeeeeeeeeee", "bugs", 2))
+	saveInspectBundleFixture(t, stateHome, bundle, reportRecord("rp_1723200000000_eeeeeeeeeeeeeeee", "bugs", 2))
 
 	report := decodeReport(t, inspectWithReadFailure(t, bundle.ID, missing, "json"))
 	if got := findingCounts(report); !reflect.DeepEqual(got, []int{2, 0}) {

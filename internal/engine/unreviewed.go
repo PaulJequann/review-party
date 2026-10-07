@@ -167,7 +167,7 @@ func (conductor *Conductor) frameDeltaPrompts(members []boundMember, paths []str
 		}
 		profile := &members[index].slot.profile
 		snapshot := profile.snapshot
-		profile.buildPrompt = func(subject model.ReviewSubject) string { return renderDeltaPrompt(snapshot, subject, prior) }
+		profile.buildPrompt = func(subject subject.Subject) string { return renderDeltaPrompt(snapshot, subject, prior) }
 	}
 	return nil
 }

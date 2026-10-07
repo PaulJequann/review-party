@@ -90,18 +90,12 @@ func writeEntryProvenance(output *commandOutput, entry reviewEntry) {
 }
 
 func writeFullRecord(output *commandOutput, record model.ReviewRecord) {
-	if record.Result != nil && record.Result.Raw != "" {
-		output.write("raw:\n%s\n", strings.TrimRight(record.Result.Raw, "\n"))
-	}
 	writeArtifactReferences(output, record)
 	if len(record.Subject.ChangedPaths) > 0 {
 		output.write("changed paths:\n")
 		for _, path := range record.Subject.ChangedPaths {
 			output.write("  %s\n", path)
 		}
-	}
-	if record.Subject.Patch != "" {
-		output.write("patch:\n%s\n", strings.TrimRight(record.Subject.Patch, "\n"))
 	}
 }
 

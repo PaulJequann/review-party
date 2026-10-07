@@ -24,6 +24,7 @@ func TestEvalRetryPublishesArtifactsUnderTheRetryAttemptNumber(t *testing.T) {
 	suite := writeEvalTestSuite(t, []testEvalCase{{id: "retry"}})
 	executor := &scriptedEvalExecutor{executions: []attemptExecution{
 		{Outcome: model.AttemptTransientFailure, FailureCategory: model.TerminationTransportFailure, FailurePhase: model.PhaseReviewerExecution, Diagnostic: "temporary transport failure", AssistantText: "first attempt output"},
+		{Outcome: model.AttemptTransientFailure, FailureCategory: model.TerminationTransportFailure, FailurePhase: model.PhaseReviewerExecution, Diagnostic: "temporary transport failure", AssistantText: "second attempt output"},
 		{Outcome: model.AttemptCompleted, AssistantText: cleanReview},
 	}}
 	conductor := testEvalConductor(t, executor)
@@ -45,7 +46,7 @@ func TestEvalRetryPublishesArtifactsUnderTheRetryAttemptNumber(t *testing.T) {
 	}
 
 	assertArtifactsLiveUnderTheirAttemptNumber(t, review)
-	first := review.Passes[0].Attempts[0].Artifacts[1]
+	first := review.Passes[0].Attempts[0].Artifacts[0]
 	contents, err := conductor.artifacts.Read(first)
 	if err != nil {
 		t.Fatalf("attempt 1 assistant text no longer reads back: %v", err)
@@ -61,11 +62,14 @@ func TestEvalRetryPublishesArtifactsUnderTheRetryAttemptNumber(t *testing.T) {
 func assertArtifactsLiveUnderTheirAttemptNumber(t *testing.T, review model.ReviewRecord) {
 	t.Helper()
 	attempts := review.Passes[0].Attempts
-	if len(attempts) != 2 {
-		t.Fatalf("attempts = %d, want the transient attempt and its retry", len(attempts))
+	if len(attempts) != 3 {
+		t.Fatalf("attempts = %d, want two transient attempts and the successful retry", len(attempts))
 	}
-	for index, attempt := range attempts {
+	for index, attempt := range attempts[:2] {
 		assertAttemptArtifactsUnder(t, attempt, index+1, filepath.Join("artifacts", string(review.ID), fmt.Sprint(index+1)))
+	}
+	if succeeded := attempts[2]; len(succeeded.Artifacts) != 0 {
+		t.Fatalf("successful attempt kept evidence %v", succeeded.Artifacts)
 	}
 }
 

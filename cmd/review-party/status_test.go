@@ -104,7 +104,7 @@ func (fixture statusLedger) record(id model.ReviewID, lifecycle model.Lifecycle,
 	created := fixture.base.Add(time.Duration(minute) * time.Minute)
 	record := model.ReviewRecord{
 		SchemaVersion: model.CurrentReviewRecordSchemaVersion, ID: id, Lifecycle: lifecycle,
-		Subject:         model.ReviewSubject{Kind: model.SubjectWorkingChanges, Repository: fixture.root, Identity: "subject", ChangedPaths: []string{"a.go"}, Patch: "diff"},
+		Subject:         model.ReviewSubject{Kind: model.SubjectWorkingChanges, Repository: fixture.root, Identity: "subject", ChangedPaths: []string{"a.go"}},
 		ProfileRevision: model.ProfileRevision{Name: "bugs", ReviewerID: "grok", Model: "grok-4.5", ExecutionDeadline: "8m0s"},
 		ProfileSnapshot: model.ProfileSnapshot{Name: "bugs"},
 		Passes:          []model.PassRecord{{Name: "review", Required: true, Attempts: []model.AttemptRecord{}}},
@@ -117,7 +117,7 @@ func (fixture statusLedger) record(id model.ReviewID, lifecycle model.Lifecycle,
 	switch lifecycle {
 	case model.LifecyclePending, model.LifecycleRunning:
 	case model.LifecycleCompleted:
-		record.Result = &model.ReviewResult{Status: model.ResultFindings, Summary: "two findings", Raw: "raw result", Findings: []model.Finding{{Ordinal: 1}, {Ordinal: 2}}}
+		record.Result = &model.ReviewResult{Status: model.ResultFindings, Summary: "two findings", Findings: []model.Finding{{Ordinal: 1}, {Ordinal: 2}}}
 	case model.LifecycleIncomplete:
 		record.Termination = &model.ReviewTermination{Category: model.TerminationDeadlineExceeded, Phase: model.PhaseReviewerExecution, Message: "attempt exceeded 8m0s"}
 	}

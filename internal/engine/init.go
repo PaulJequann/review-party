@@ -3,6 +3,7 @@ package engine
 import (
 	"errors"
 
+	"reviewparty/internal/artifact"
 	"reviewparty/internal/store"
 )
 
@@ -36,7 +37,7 @@ func InitializeReviewParty(request ReviewPartyInitialization) (ReviewPartyInitia
 		return ReviewPartyInitializationResult{}, err
 	}
 	if request.BackupIncompatible {
-		backup, err := store.BackupIncompatibleReviewRecordState(string(resolved.selection.directory))
+		backup, err := store.BackupIncompatibleReviewRecordState(string(resolved.selection.directory), artifact.Directory)
 		if err != nil {
 			return ReviewPartyInitializationResult{}, err
 		}

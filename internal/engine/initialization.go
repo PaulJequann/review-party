@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reviewparty/internal/subject"
 
+	"reviewparty/internal/artifact"
 	"reviewparty/internal/configuration"
 	"reviewparty/internal/store"
 )
@@ -66,7 +67,7 @@ func refuseUnconfirmedRecovery(directory statePath, fresh bool) error {
 }
 
 func prepareFreshInitializationState(manager *configuration.Manager, selection initializationStateSelection) error {
-	if err := store.PrepareFreshReviewRecordState(string(selection.directory)); err != nil {
+	if err := store.PrepareFreshReviewRecordState(string(selection.directory), artifact.Directory); err != nil {
 		return err
 	}
 	return rememberInitializedState(manager, selection)
@@ -83,10 +84,43 @@ func prepareExistingInitializationState(manager *configuration.Manager, selectio
 	if err := store.PrepareReviewRecordState(string(selection.directory)); err != nil {
 		return false, err
 	}
+	// The sweep runs only when the ledger was not ready. No Review runs
+	// against a missing, outdated, or maintenance-pending ledger, so no
+	// unreferenced file can be one a Review has published but not recorded.
+	if !alreadyReady {
+		if err := completeMaintenance(selection.directory); err != nil {
+			return false, err
+		}
+	}
 	if err := rememberInitializedState(manager, selection); err != nil {
 		return false, err
 	}
 	return alreadyReady, nil
+}
+
+func completeMaintenance(directory statePath) (returnErr error) {
+	ledger, err := store.NewLedgerRecordStore(string(directory))
+	if err != nil {
+		return err
+	}
+	defer func() {
+		returnErr = errors.Join(returnErr, ledger.Close())
+	}()
+	artifacts, err := artifact.NewStore(string(directory))
+	if err != nil {
+		return err
+	}
+	if err := ledger.ExpireEvidence(retainedFailureEvidence, newArtifactPublisher(artifacts).removeArtifacts); err != nil {
+		return err
+	}
+	referenced, err := ledger.EvidencePaths()
+	if err != nil {
+		return err
+	}
+	if err := artifacts.RemoveUnreferenced(referenced); err != nil {
+		return err
+	}
+	return ledger.CompleteMaintenance()
 }
 
 func rememberInitializedState(manager *configuration.Manager, selection initializationStateSelection) error {

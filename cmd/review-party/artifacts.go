@@ -5,12 +5,8 @@ import (
 )
 
 func writeArtifactReferences(output *commandOutput, record model.ReviewRecord) {
-	for _, pass := range record.Passes {
-		for _, attempt := range pass.Attempts {
-			for _, artifact := range attempt.Artifacts {
-				writeArtifactReference(output, artifact)
-			}
-		}
+	for _, artifact := range record.Artifacts() {
+		writeArtifactReference(output, artifact)
 	}
 }
 

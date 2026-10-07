@@ -103,8 +103,9 @@ and private source provenance. The Reviewer view is a Synthetic Review Subject:
 - the ordinary restricted Reviewer capability contract, including web and shell
   denial.
 
-The ordinary Review Record persists only the synthetic identity, patch, changed
-paths, Profile Revision, Attempts, artifacts, and Review Result. The Eval Run
+The ordinary Review Record persists only the synthetic identity, changed paths,
+Profile Revision, Attempts, failure evidence, and Review Result. It does not
+keep the patch. The Eval Run
 separately freezes the complete Eval Case Revision. Local ledger access is not a
 secret-storage boundary, and Review Party cannot prove that a model never saw
 public code during training.

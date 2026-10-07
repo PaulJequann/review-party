@@ -17,10 +17,9 @@ import (
 
 const emptyGitTree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
-// Subject owns the correspondence between a durable ReviewSubject and the
-// private material needed to prepare one Reviewer execution view.
 type Subject struct {
 	model.ReviewSubject
+	Patch          string
 	capturedHead   string
 	capturedDigest string
 }
@@ -29,11 +28,9 @@ func ResolveSubject(repository string, reference model.SubjectReference) (Subjec
 	root := repositoryRoot(repository)
 	switch reference.Kind {
 	case model.SubjectWorkingChanges:
-		resolved, err := resolveWorkingChangesAtRoot(root)
-		return Subject{ReviewSubject: resolved}, err
+		return resolveWorkingChangesAtRoot(root)
 	case model.SubjectCommittedRange:
-		resolved, err := resolveCommittedRange(root, reference)
-		return Subject{ReviewSubject: resolved}, err
+		return resolveCommittedRange(root, reference)
 	case model.SubjectCapturedChange:
 		return resolveCapturedChange(reference)
 	case model.SubjectUnreviewedDelta:
@@ -74,7 +71,7 @@ func resolveCapturedChange(reference model.SubjectReference) (Subject, error) {
 	}
 	identity := sha256.Sum256(append([]byte(strings.Join(paths, "\x00")+"\x00"), patch...))
 	facts := model.SubjectFacts{ChangedFiles: len(paths)}
-	return Subject{ReviewSubject: model.ReviewSubject{Kind: model.SubjectCapturedChange, Repository: "eval://" + hex.EncodeToString(identity[:]), Identity: hex.EncodeToString(identity[:]), ChangedPaths: paths, Patch: string(patch), Facts: &facts}, capturedHead: string(head), capturedDigest: digest}, nil
+	return Subject{ReviewSubject: model.ReviewSubject{Kind: model.SubjectCapturedChange, Repository: "eval://" + hex.EncodeToString(identity[:]), Identity: hex.EncodeToString(identity[:]), ChangedPaths: paths, Facts: &facts}, Patch: string(patch), capturedHead: string(head), capturedDigest: digest}, nil
 }
 
 type capturedDirectory string
@@ -193,30 +190,30 @@ func capturedFileIdentity(directory capturedDirectory, path capturedFile) (strin
 
 type repositoryRoot string
 
-func resolveCommittedRange(root repositoryRoot, reference model.SubjectReference) (model.ReviewSubject, error) {
+func resolveCommittedRange(root repositoryRoot, reference model.SubjectReference) (Subject, error) {
 	if reference.Base == "" || reference.Head == "" {
-		return model.ReviewSubject{}, errors.New("committed range requires both base and head revisions")
+		return Subject{}, errors.New("committed range requires both base and head revisions")
 	}
 	resolver := committedRangeResolver{repository: root}
 	base, head, err := resolver.resolveRange(revisionName(reference.Base), revisionName(reference.Head))
 	if err != nil {
-		return model.ReviewSubject{}, err
+		return Subject{}, err
 	}
 	patch, err := resolver.patch(base, head)
 	if err != nil {
-		return model.ReviewSubject{}, err
+		return Subject{}, err
 	}
 	if len(patch) == 0 {
-		return model.ReviewSubject{}, errors.New("committed range is empty")
+		return Subject{}, errors.New("committed range is empty")
 	}
 	paths, facts, err := measureCapturedPatch(string(root), patch)
 	if err != nil {
-		return model.ReviewSubject{}, err
+		return Subject{}, err
 	}
 	facts.ChangedFiles = len(paths)
 	changes, err := root.treeContentChanges(revisionName(base), revisionName(head))
 	if err != nil {
-		return model.ReviewSubject{}, err
+		return Subject{}, err
 	}
 	capture := committedRangeCapture{repository: root, base: base, head: head, patch: patch, paths: paths, facts: facts, changes: changes}
 	return capture.subject(), nil
@@ -263,33 +260,33 @@ type committedRangeCapture struct {
 	changes    []model.ContentChange
 }
 
-func (capture committedRangeCapture) subject() model.ReviewSubject {
+func (capture committedRangeCapture) subject() Subject {
 	hash := sha256.New()
 	for _, value := range []string{string(model.SubjectCommittedRange), string(capture.repository), string(capture.base), string(capture.head)} {
 		hash.Write([]byte(value))
 		hash.Write([]byte{0})
 	}
 	hash.Write(capture.patch)
-	return model.ReviewSubject{Kind: model.SubjectCommittedRange, Repository: string(capture.repository), Identity: hex.EncodeToString(hash.Sum(nil)), BaseObject: string(capture.base), HeadObject: string(capture.head), ChangedPaths: capture.paths, Patch: string(capture.patch), Facts: &capture.facts, ContentChanges: capture.changes}
+	return Subject{ReviewSubject: model.ReviewSubject{Kind: model.SubjectCommittedRange, Repository: string(capture.repository), Identity: hex.EncodeToString(hash.Sum(nil)), BaseObject: string(capture.base), HeadObject: string(capture.head), ChangedPaths: capture.paths, Facts: &capture.facts, ContentChanges: capture.changes}, Patch: string(capture.patch)}
 }
 
-func ResolveWorkingChanges(repository string) (model.ReviewSubject, error) {
+func ResolveWorkingChanges(repository string) (Subject, error) {
 	root, err := ResolveRepositoryRoot(repository)
 	if err != nil {
-		return model.ReviewSubject{}, err
+		return Subject{}, err
 	}
 	return resolveWorkingChangesAtRoot(repositoryRoot(root))
 }
 
-func resolveWorkingChangesAtRoot(root repositoryRoot) (model.ReviewSubject, error) {
+func resolveWorkingChangesAtRoot(root repositoryRoot) (Subject, error) {
 	capture, err := captureWorkingChanges(string(root))
 	if err != nil {
-		return model.ReviewSubject{}, err
+		return Subject{}, err
 	}
 	return newWorkingChangesSubject(root, capture), nil
 }
 
-func newWorkingChangesSubject(root repositoryRoot, capture workingChangesCapture) model.ReviewSubject {
+func newWorkingChangesSubject(root repositoryRoot, capture workingChangesCapture) Subject {
 	hash := sha256.New()
 	hash.Write([]byte(model.SubjectWorkingChanges))
 	hash.Write([]byte{0})
@@ -297,15 +294,14 @@ func newWorkingChangesSubject(root repositoryRoot, capture workingChangesCapture
 	hash.Write([]byte{0})
 	hash.Write(capture.patch)
 
-	return model.ReviewSubject{
+	return Subject{ReviewSubject: model.ReviewSubject{
 		Kind:           model.SubjectWorkingChanges,
 		Repository:     string(root),
 		Identity:       hex.EncodeToString(hash.Sum(nil)),
 		ChangedPaths:   capture.paths,
-		Patch:          string(capture.patch),
 		Facts:          &capture.facts,
 		ContentChanges: capture.changes,
-	}
+	}, Patch: string(capture.patch)}
 }
 
 func ResolveRepositoryRoot(repository string) (string, error) {

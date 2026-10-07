@@ -447,7 +447,6 @@ type ReviewSubject struct {
 	BaseObject   string        `json:"base_object,omitempty"`
 	HeadObject   string        `json:"head_object,omitempty"`
 	ChangedPaths []string      `json:"changed_paths"`
-	Patch        string        `json:"patch"`
 	Facts        *SubjectFacts `json:"facts,omitempty"`
 	// ContentChanges is the commit-free identity of the reviewed content,
 	// sorted by Path; Checkpoints match Reviews on this set alone.
@@ -641,7 +640,6 @@ type AttemptRecord struct {
 	Outcome      AttemptOutcome      `json:"outcome"`
 	Provenance   ReviewerProvenance  `json:"provenance"`
 	Diagnostic   string              `json:"diagnostic,omitempty"`
-	RawOutput    string              `json:"raw_output,omitempty"`
 	RetryAfterMS int64               `json:"retry_after_ms,omitempty"`
 	Artifacts    []ArtifactReference `json:"artifacts,omitempty"`
 	StartedAt    time.Time           `json:"started_at"`
@@ -678,7 +676,6 @@ type ReviewResult struct {
 	Status   ResultStatus `json:"status"`
 	Summary  string       `json:"summary"`
 	Findings []Finding    `json:"findings"`
-	Raw      string       `json:"raw"`
 }
 
 type Finding struct {
@@ -711,6 +708,16 @@ type ReviewRecord struct {
 	Timings         *ReviewTimings     `json:"timings,omitempty"`
 	CreatedAt       time.Time          `json:"created_at"`
 	UpdatedAt       time.Time          `json:"updated_at"`
+}
+
+func (r ReviewRecord) Artifacts() []ArtifactReference {
+	var references []ArtifactReference
+	for _, pass := range r.Passes {
+		for _, attempt := range pass.Attempts {
+			references = append(references, attempt.Artifacts...)
+		}
+	}
+	return references
 }
 
 func (r ReviewRecord) AttemptCount() int {

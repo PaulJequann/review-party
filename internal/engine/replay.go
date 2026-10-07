@@ -43,7 +43,7 @@ func replaySubject(recorded model.ReviewSubject) (subject.Subject, error) {
 	if resolved.Identity != recorded.Identity {
 		return subject.Subject{}, errors.New("reconstructed replay Subject does not match the recorded identity")
 	}
-	return subject.Subject{ReviewSubject: recorded}, nil
+	return resolved, nil
 }
 
 func (conductor *Conductor) replayProfile(source model.ReviewRecord, selection model.ReplaySelection) (compiledProfile, error) {
@@ -109,7 +109,7 @@ func replayCompiledProfile(revision model.ProfileRevision, snapshot model.Profil
 		revision: revision,
 		snapshot: snapshot,
 		reviewer: registration,
-		buildPrompt: func(subject model.ReviewSubject) string {
+		buildPrompt: func(subject subject.Subject) string {
 			return renderReviewPrompt(snapshot, subject)
 		},
 	}

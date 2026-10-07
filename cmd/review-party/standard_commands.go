@@ -202,7 +202,7 @@ func newInitCommand(streams commandIO) *cobra.Command {
 	}
 	addRepositoryFlag(cmd, "Git repository to initialize")
 	cmd.Flags().String("state-dir", "", "Advanced per-user state location")
-	cmd.Flags().Bool("backup-incompatible", false, "Back up an incompatible ledger and SQLite sidecars without initializing")
+	cmd.Flags().Bool("backup-incompatible", false, "Back up an incompatible ledger, its SQLite sidecars, and its evidence without initializing")
 	cmd.Flags().Bool("fresh", false, "Initialize fresh state after a separately confirmed backup")
 	cmd.Flags().Var(setupTargetFlag{kind: configuration.ItemProfile, targets: &setup}, "profile", "Add a Profile to the Review selection; repeatable")
 	cmd.Flags().Var(setupTargetFlag{kind: configuration.ItemParty, targets: &setup}, "party", "Add a Party to the Review selection; repeatable")

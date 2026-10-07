@@ -11,6 +11,7 @@ import (
 
 	"reviewparty/internal/configuration"
 	"reviewparty/internal/model"
+	"reviewparty/internal/subject"
 )
 
 func TestRepositoryProfileShadowsGlobalAsCompleteDefinition(t *testing.T) {
@@ -28,7 +29,7 @@ func TestRepositoryProfileShadowsGlobalAsCompleteDefinition(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if profile.revision.Source != "repository:.reviewparty/profiles/bugs" || !strings.Contains(profile.prompt(model.ReviewSubject{}), "REPOSITORY GUIDANCE") {
+	if profile.revision.Source != "repository:.reviewparty/profiles/bugs" || !strings.Contains(profile.prompt(subject.Subject{}), "REPOSITORY GUIDANCE") {
 		t.Fatalf("revision = %#v", profile.revision)
 	}
 }

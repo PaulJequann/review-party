@@ -80,17 +80,30 @@ func TestReviewFreezesWorkingChangesBeforeExecution(t *testing.T) {
 			return attemptExecution{AssistantText: cleanReview, Outcome: model.AttemptCompleted}
 		},
 	}
+	before, err := subject.ResolveWorkingChanges(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
 	conductor := testConductor(t, executor, time.Second)
 	record, err := conductor.Review(testContext(t), testSelection(repository))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(record.Subject.Patch, "first change") {
-		t.Fatalf("frozen subject does not contain original change:\n%s", record.Subject.Patch)
+	if patch := promptPatch(t, executor.attempts[0].Prompt); !strings.Contains(patch, "first change") || strings.Contains(patch, "later change") {
+		t.Fatalf("reviewer did not receive the frozen change:\n%s", patch)
 	}
-	if strings.Contains(record.Subject.Patch, "later change") {
-		t.Fatalf("frozen subject changed during execution:\n%s", record.Subject.Patch)
+	if record.Subject.Identity != before.Identity {
+		t.Fatalf("recorded identity %s, want the frozen identity %s", record.Subject.Identity, before.Identity)
 	}
+}
+
+func promptPatch(t *testing.T, prompt string) string {
+	t.Helper()
+	_, patch, found := strings.Cut(prompt, "--- PATCH ---\n")
+	if !found {
+		t.Fatalf("prompt has no patch section:\n%s", prompt)
+	}
+	return patch
 }
 
 func TestReviewCompletesOnlyWithValidCleanResult(t *testing.T) {
@@ -161,18 +174,15 @@ func TestRecordSaveFailureRemovesPublishedAttemptArtifacts(t *testing.T) {
 func TestOverflowedExecutionMarksAssistantArtifactTruncated(t *testing.T) {
 	publisher := newArtifactPublisher(mustNewArtifactStore(t, t.TempDir()))
 	runner := &reviewRunner{publisher: publisher}
-	attempt, err := runner.buildAttempt(attemptDraft{reviewID: "rp_1723200000000_0123456789abcdef", number: 1, prompt: "prompt", execution: attemptExecution{AssistantText: "captured prefix", ArtifactTruncated: true}, outcome: model.AttemptInvalidResult})
+	attempt, err := runner.buildAttempt(attemptDraft{reviewID: "rp_1723200000000_0123456789abcdef", number: 1, execution: attemptExecution{AssistantText: "captured prefix", ArtifactTruncated: true}, outcome: model.AttemptInvalidResult, failed: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(attempt.Artifacts) != 2 {
-		t.Fatalf("artifacts = %d, want 2", len(attempt.Artifacts))
+	if len(attempt.Artifacts) != 1 {
+		t.Fatalf("artifacts = %d, want the assistant text only", len(attempt.Artifacts))
 	}
-	if !attempt.Artifacts[1].Truncated {
-		t.Fatalf("assistant artifact = %#v, want truncated", attempt.Artifacts[1])
-	}
-	if attempt.RawOutput != "" {
-		t.Fatalf("raw output = %q, want empty", attempt.RawOutput)
+	if !attempt.Artifacts[0].Truncated {
+		t.Fatalf("assistant artifact = %#v, want truncated", attempt.Artifacts[0])
 	}
 }
 
@@ -188,6 +198,10 @@ func (store *failFinalRecordStore) Save(model.ReviewRecord) error {
 
 func (*failFinalRecordStore) Load(model.ReviewID) (model.ReviewRecord, error) {
 	return model.ReviewRecord{}, errors.New("not found")
+}
+
+func (*failFinalRecordStore) ExpireEvidence(int, func([]model.ArtifactReference) error) error {
+	return nil
 }
 
 func mustNewArtifactStore(t *testing.T, root string) *artifact.Store {

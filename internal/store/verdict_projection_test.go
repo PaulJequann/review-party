@@ -252,6 +252,7 @@ func TestPrepareUpgradesSchemaElevenLedgerToTakeVerdicts(t *testing.T) {
 	if err := PrepareReviewRecordState(directory); err != nil {
 		t.Fatalf("prepare = %v", err)
 	}
+	completeTestMaintenance(t, directory)
 	if version := readSchemaVersion(t, directory); version != currentLedgerSchemaVersion {
 		t.Fatalf("schema version = %d, want %d", version, currentLedgerSchemaVersion)
 	}

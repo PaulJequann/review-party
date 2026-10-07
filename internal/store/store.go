@@ -17,11 +17,7 @@ import (
 
 const ledgerFilename = "ledger.sqlite"
 
-// currentLedgerSchemaVersion is the newest step in ledgerMigrations. State
-// preparation upgrades a ledger at schema 10 or later additively, preserving its
-// records, and replaces anything older without preserving it. The numbering
-// continued past the last released migration so no obsolete ledger can collide.
-const currentLedgerSchemaVersion = 14
+const currentLedgerSchemaVersion = 15
 
 var ledgerMigrations = []struct {
 	version int
@@ -32,6 +28,7 @@ var ledgerMigrations = []struct {
 	{12, "migrations/finding_verdicts.sql"},
 	{13, "migrations/content_changes.sql"},
 	{14, "migrations/checkpoint_waivers.sql"},
+	{15, "migrations/stored_text.sql"},
 }
 
 var ErrReviewRecordStateNotInitialized = errors.New("Review Party is not initialized")
@@ -63,6 +60,7 @@ var migrationFiles embed.FS
 type RecordStore interface {
 	Save(model.ReviewRecord) error
 	Load(model.ReviewID) (model.ReviewRecord, error)
+	ExpireEvidence(keep int, remove func([]model.ArtifactReference) error) error
 }
 
 type EvalRunStore interface {
@@ -155,6 +153,14 @@ func (s *DeferredLedgerRecordStore) Save(record model.ReviewRecord) error {
 		return err
 	}
 	return ledger.Save(record)
+}
+
+func (s *DeferredLedgerRecordStore) ExpireEvidence(keep int, remove func([]model.ArtifactReference) error) error {
+	ledger, err := s.openExisting()
+	if err != nil {
+		return err
+	}
+	return ledger.ExpireEvidence(keep, remove)
 }
 
 func (s *DeferredLedgerRecordStore) RequirePrepared() error {
@@ -427,7 +433,7 @@ func (s *LedgerRecordStore) requirePreparedSchema() error {
 	if version != currentLedgerSchemaVersion {
 		return fmt.Errorf("%w: review ledger schema %d requires state preparation for schema %d", ErrReviewRecordStateRequiresPreparation, version, currentLedgerSchemaVersion)
 	}
-	return nil
+	return s.requireNoPendingMaintenance()
 }
 
 func (s *LedgerRecordStore) restrictPermissions() error {
@@ -457,7 +463,7 @@ func (s *LedgerRecordStore) configure() error {
 // obsoleteLedgerTables lists every table a replaced pre-release ledger could own,
 // ordered so foreign-key children are dropped before their parents.
 var obsoleteLedgerTables = []string{
-	"checkpoint_waivers", "finding_verdicts", "misses", "artifacts", "findings", "attempts", "passes",
+	"pending_maintenance", "checkpoint_waivers", "finding_verdicts", "misses", "artifacts", "findings", "attempts", "passes",
 	"eval_runs", "adjudication_revisions", "review_bundles",
 	"eval_suite_runs", "review_content_changes", "reviews", "schema_migrations",
 }
@@ -488,14 +494,15 @@ func upgradeLedgerSchema(tx *sql.Tx, version int) error {
 		return fmt.Errorf("review ledger schema %d is newer than supported schema %d", version, currentLedgerSchemaVersion)
 	}
 	if !upgradableLedgerVersion(version) {
-		// A version outside the additive chain (zero for a fresh database) is an
-		// obsolete pre-release ledger: replace it rather than preserve it.
 		if err := dropObsoleteLedgerTables(tx, version); err != nil {
 			return err
 		}
-		version = 0
+		return applyLedgerMigrationsAfter(tx, 0)
 	}
-	return applyLedgerMigrationsAfter(tx, version)
+	if err := applyLedgerMigrationsAfter(tx, version); err != nil || version == currentLedgerSchemaVersion {
+		return err
+	}
+	return recordPendingMaintenance(tx)
 }
 
 // dropObsoleteLedgerTables clears every table a replaced pre-release ledger

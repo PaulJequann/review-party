@@ -57,7 +57,7 @@ func (row agentCostRow) String() string {
 }
 
 func costRecord(id model.ReviewID, profile string, findings int) model.ReviewRecord {
-	record := largePatchRecord(id, profile, findings)
+	record := reportRecord(id, profile, findings)
 	record.SchemaVersion = model.CurrentReviewRecordSchemaVersion
 	record.CreatedAt, record.UpdatedAt = costClock, costClock
 	return record

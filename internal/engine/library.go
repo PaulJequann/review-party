@@ -10,6 +10,7 @@ import (
 
 	"reviewparty/internal/model"
 	"reviewparty/internal/result"
+	"reviewparty/internal/subject"
 
 	"reviewparty/internal/configuration"
 )
@@ -67,7 +68,7 @@ func (conductor *Conductor) compileProfile(request profileCompileRequest) (compi
 	compiled.revision.Revision = profileRevisionIdentity(compiled.revision)
 	compiled.snapshot = model.ProfileSnapshot{Name: profile.Name, Source: profile.Source, SourceDigest: profile.SourceDigest, Instructions: profile.Instructions}
 	compiled.reviewerWasDefault = request.selection.Reviewer == ""
-	compiled.buildPrompt = func(subject model.ReviewSubject) string { return renderReviewPrompt(compiled.snapshot, subject) }
+	compiled.buildPrompt = func(subject subject.Subject) string { return renderReviewPrompt(compiled.snapshot, subject) }
 	return compiled, nil
 }
 
@@ -147,14 +148,14 @@ needed, and a fix that treats the symptom and misses the root cause.
 
 Prior Findings on the changed paths, from this Profile's earlier Reviews:`
 
-func renderReviewPrompt(profile model.ProfileSnapshot, subject model.ReviewSubject) string {
+func renderReviewPrompt(profile model.ProfileSnapshot, subject subject.Subject) string {
 	return renderPrompt(profile, subject, "")
 }
 
 // renderDeltaPrompt frames a Review that follows earlier Reviews of the same
 // Profile with their Findings on the paths it touches, so a fix is reviewed as
 // a claim.
-func renderDeltaPrompt(profile model.ProfileSnapshot, subject model.ReviewSubject, prior []priorFinding) string {
+func renderDeltaPrompt(profile model.ProfileSnapshot, subject subject.Subject, prior []priorFinding) string {
 	lines := make([]string, 0, len(prior))
 	for _, entry := range prior {
 		lines = append(lines, fmt.Sprintf("- %s #%d %s %s: %s", entry.review, entry.finding.Ordinal, entry.finding.Severity, entry.finding.Location, entry.finding.Failure))
@@ -162,7 +163,7 @@ func renderDeltaPrompt(profile model.ProfileSnapshot, subject model.ReviewSubjec
 	return renderPrompt(profile, subject, deltaFraming+"\n"+joinLines(lines))
 }
 
-func renderPrompt(profile model.ProfileSnapshot, subject model.ReviewSubject, framing string) string {
+func renderPrompt(profile model.ProfileSnapshot, subject subject.Subject, framing string) string {
 	sections := []string{profile.Instructions, reviewToolRules, result.CanonicalReviewResultContract.Instructions()}
 	if framing != "" {
 		sections = append(sections, framing)

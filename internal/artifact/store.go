@@ -25,6 +25,17 @@ func IsTemporary(entry fs.DirEntry) bool {
 	return err == nil && matched && entry.Type().IsRegular()
 }
 
+const (
+	AssistantText = "assistant-text"
+	ReviewerNoise = "reviewer-noise"
+)
+
+type Evidence struct {
+	Kind      string
+	Contents  []byte
+	Truncated bool
+}
+
 type Store struct{ root string }
 
 func NewStore(root string) (*Store, error) {
@@ -34,7 +45,8 @@ func NewStore(root string) (*Store, error) {
 	return &Store{root: filepath.Clean(root)}, nil
 }
 
-func (store *Store) Publish(reviewID model.ReviewID, attempt int, kind string, contents []byte, truncated bool) (reference model.ArtifactReference, returnErr error) {
+func (store *Store) Publish(reviewID model.ReviewID, attempt int, evidence Evidence) (reference model.ArtifactReference, returnErr error) {
+	kind, contents := evidence.Kind, evidence.Contents
 	if attempt < 1 || !validKind(kind) {
 		return model.ArtifactReference{}, errors.New("invalid artifact identity")
 	}
@@ -61,7 +73,7 @@ func (store *Store) Publish(reviewID model.ReviewID, attempt int, kind string, c
 		return model.ArtifactReference{}, fmt.Errorf("publish artifact: %w", err)
 	}
 	digest := sha256.Sum256(contents)
-	return model.ArtifactReference{Kind: kind, Path: relative, Size: int64(len(contents)), Digest: hex.EncodeToString(digest[:]), Truncated: truncated}, nil
+	return model.ArtifactReference{Kind: kind, Path: relative, Size: int64(len(contents)), Digest: hex.EncodeToString(digest[:]), Truncated: evidence.Truncated}, nil
 }
 
 func writeTemporaryArtifact(file *os.File, contents []byte) error {
@@ -118,6 +130,23 @@ func (store *Store) Remove(reference model.ArtifactReference) error {
 	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return fmt.Errorf("remove artifact %q: %w", reference.Path, err)
 	}
+	return store.pruneEmptyDirectories(reference)
+}
+
+func (store *Store) pruneEmptyDirectories(reference model.ArtifactReference) error {
+	for directory := filepath.Dir(reference.Path); directory != Directory && directory != "."; directory = filepath.Dir(directory) {
+		path := filepath.Join(store.root, directory)
+		entries, err := os.ReadDir(path)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil || len(entries) > 0 {
+			return err
+		}
+		if err := os.Remove(path); err != nil {
+			return fmt.Errorf("remove empty artifact directory: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -129,5 +158,39 @@ func (store *Store) resolve(relative string) (string, error) {
 }
 
 func validKind(kind string) bool {
-	return kind == "assistant-text" || kind == "constructed-prompt" || kind == "reviewer-noise" || kind == "native-stdout" || kind == "native-stderr"
+	return kind == AssistantText || kind == ReviewerNoise
+}
+
+func (store *Store) RemoveUnreferenced(referenced []string) error {
+	keep := map[string]bool{}
+	for _, path := range referenced {
+		keep[filepath.Clean(path)] = true
+	}
+	orphans, err := store.unreferencedFiles(keep)
+	if err != nil {
+		return err
+	}
+	for _, orphan := range orphans {
+		if err := store.Remove(orphan); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (store *Store) unreferencedFiles(keep map[string]bool) (orphans []model.ArtifactReference, err error) {
+	err = filepath.WalkDir(filepath.Join(store.root, Directory), func(path string, entry fs.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return err
+		}
+		relative, err := filepath.Rel(store.root, path)
+		if err == nil && !keep[relative] {
+			orphans = append(orphans, model.ArtifactReference{Path: relative})
+		}
+		return err
+	})
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	return orphans, err
 }

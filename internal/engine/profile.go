@@ -8,6 +8,7 @@ import (
 	"reviewparty/internal/configuration"
 	"reviewparty/internal/model"
 	"reviewparty/internal/result"
+	"reviewparty/internal/subject"
 	"sort"
 	"strings"
 	"time"
@@ -19,7 +20,7 @@ type compiledProfile struct {
 	reviewer           reviewerRegistration
 	deadline           time.Duration
 	reviewerWasDefault bool
-	buildPrompt        func(model.ReviewSubject) string
+	buildPrompt        func(subject.Subject) string
 }
 
 type profileCompileRequest struct {
@@ -207,7 +208,7 @@ func canonicalCapabilities(capabilities []model.Capability) []model.Capability {
 	return canonical
 }
 
-func (profile compiledProfile) prompt(subject model.ReviewSubject) string {
+func (profile compiledProfile) prompt(subject subject.Subject) string {
 	return profile.buildPrompt(subject)
 }
 
