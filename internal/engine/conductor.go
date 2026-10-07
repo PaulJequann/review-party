@@ -51,11 +51,7 @@ func New(config Config) (*Conductor, error) {
 		config.AttemptDeadline = 10 * time.Minute
 	}
 	manager := newConfigurationManager(config.UserConfigurationPath)
-	configuredState, err := manager.ResolveStateDirectory()
-	if err != nil {
-		return nil, err
-	}
-	stateDirectory, err := requiredStateDirectory(statePath(configuredState.Value))
+	stateDirectory, err := resolveStateDirectory(manager)
 	if err != nil {
 		return nil, err
 	}
@@ -288,6 +284,22 @@ func (conductor *Conductor) VerifyArtifacts(record model.ReviewRecord) error {
 }
 
 var errStateDirectoryRequired = errors.New("Review Party needs a durable state directory: set XDG_STATE_HOME, a home directory, or state_directory in the global Configuration")
+
+// StateDirectory is the durable state directory New would use with the
+// global Configuration at userConfigurationPath. It reads the Configuration
+// and creates nothing.
+func StateDirectory(userConfigurationPath string) (string, error) {
+	directory, err := resolveStateDirectory(newConfigurationManager(userConfigurationPath))
+	return string(directory), err
+}
+
+func resolveStateDirectory(manager *configuration.Manager) (statePath, error) {
+	configured, err := manager.ResolveStateDirectory()
+	if err != nil {
+		return "", err
+	}
+	return requiredStateDirectory(statePath(configured.Value))
+}
 
 // requiredStateDirectory is the configured state directory, else the XDG
 // default. There is no fallback under the host temp directory: durable state

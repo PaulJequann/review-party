@@ -52,9 +52,10 @@ func productionCommandIO(input io.Reader, output, errorOutput io.Writer) command
 // openRun gives the invocation its run and the close that removes it. A
 // runtime root this process cannot use is one warning; the command still
 // runs, and every Reviewer path then fails with hostrun.ErrNoRun.
-func openRun(ctx context.Context, arguments []string, stderr io.Writer) (context.Context, func()) {
-	warn := newRunWarningSink(stderr)
+func openRun(ctx context.Context, arguments []string, streams commandIO) (context.Context, func()) {
+	warn := newRunWarningSink(streams.errors)
 	run, err := hostrun.Open(hostrun.Options{
+		Root:    streams.host.runtimeRoot,
 		Warn:    warn,
 		Command: commandName(arguments),
 		Version: currentRuntimeProvenance().Version,

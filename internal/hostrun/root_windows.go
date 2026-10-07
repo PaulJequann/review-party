@@ -8,8 +8,9 @@ import (
 	"path/filepath"
 )
 
+// DefaultRoot is the per-user runtime root under the host temp directory.
 // %TEMP% is already per-user, so the root needs no uid suffix.
-func defaultRoot() string {
+func DefaultRoot() string {
 	return filepath.Join(hostTemp, "review-party-runtime")
 }
 

@@ -113,3 +113,10 @@ func TestFromReturnsErrNoRunWithoutRun(t *testing.T) {
 		t.Fatalf("From(WithRun) = %v, %v; want the run", got, err)
 	}
 }
+
+func TestDefaultRootIsOneNamedEntryInHostTemp(t *testing.T) {
+	root := DefaultRoot()
+	if filepath.Dir(root) != HostTempDir() || !strings.HasPrefix(filepath.Base(root), "review-party-runtime") {
+		t.Fatalf("DefaultRoot = %s; want review-party-runtime* directly under %s", root, HostTempDir())
+	}
+}

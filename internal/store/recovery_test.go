@@ -125,3 +125,38 @@ func TestIncompatibleStateBackupRefusesUpgradableLedger(t *testing.T) {
 		t.Fatalf("schema version after prepare = %d, want %d", version, currentLedgerSchemaVersion)
 	}
 }
+
+func TestIsLedgerFileCoversWhatPreparationAndRecoveryLeave(t *testing.T) {
+	prepared := t.TempDir()
+	if err := PrepareReviewRecordState(prepared); err != nil {
+		t.Fatal(err)
+	}
+	assertLedgerFiles(t, prepared)
+
+	recovering := t.TempDir()
+	for _, suffix := range ledgerSuffixes {
+		if err := os.WriteFile(filepath.Join(recovering, ledgerFilename+suffix), []byte("retired"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := BackupIncompatibleReviewRecordState(recovering); err != nil {
+		t.Fatal(err)
+	}
+	assertLedgerFiles(t, recovering)
+	if IsLedgerFile("ledger.sqlite.bak") || IsLedgerFile("notes.txt") {
+		t.Fatal("IsLedgerFile accepted a name the ledger never writes")
+	}
+}
+
+func assertLedgerFiles(t *testing.T, directory string) {
+	t.Helper()
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if want := entry.Name() != BackupDirectory; IsLedgerFile(entry.Name()) != want {
+			t.Errorf("IsLedgerFile(%q) = %t, want %t", entry.Name(), !want, want)
+		}
+	}
+}

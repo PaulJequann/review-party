@@ -40,16 +40,27 @@ func (r Report) Warnings() []string {
 }
 
 // Reap claims and removes every dead run under the root, waiting first for
-// the removals Open started.
+// the removals Open started. Removed includes what Open's pass removed and
+// no earlier Reap reported; Leftovers is only what is still there.
 func (r *Run) Reap() Report {
 	r.reaps.Wait()
+	opened := r.takeOpenRemoved()
 	claims, live, err := r.claimDead(r.currentID())
 	if err != nil {
-		return Report{Leftovers: []Leftover{{Path: r.root, Err: err}}}
+		return Report{Removed: opened, Leftovers: []Leftover{{Path: r.root, Err: err}}}
 	}
 	report := r.removeClaims(claims)
+	report.Removed = append(opened, report.Removed...)
 	report.Live = live
 	return report
+}
+
+func (r *Run) takeOpenRemoved() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	removed := r.openRemoved
+	r.openRemoved = nil
+	return removed
 }
 
 func (r *Run) claimDead(own string) ([]claim, int, error) {
@@ -243,7 +254,7 @@ func Inventory(root string) ([]Entry, error) {
 		return nil, err
 	}
 	for i := range entries {
-		entries[i].Bytes, err = directorySize(entries[i].Path)
+		entries[i].Bytes, err = DiskUsage(entries[i].Path)
 		if err != nil && entries[i].Err == nil {
 			entries[i].Err = err
 		}
@@ -301,7 +312,9 @@ func probeLease(dir string) (State, error) {
 	return StateLive, nil
 }
 
-func directorySize(path string) (int64, error) {
+// DiskUsage sums the sizes of the regular files at or under path without
+// following symlinks.
+func DiskUsage(path string) (int64, error) {
 	var total int64
 	err := filepath.WalkDir(path, func(_ string, entry fs.DirEntry, err error) error {
 		if err != nil {
