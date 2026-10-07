@@ -119,6 +119,13 @@ linters:
             - github.com/spf13/cobra
             - github.com/spf13/pflag
             - github.com/mattn/go-isatty
+        hostrun:
+          files:
+            - "**/internal/hostrun/*.go"
+          allow:
+            - $gostd
+            - golang.org/x/sys/unix
+            - golang.org/x/sys/windows
   exclusions:
     generated: strict
     warn-unused: true
