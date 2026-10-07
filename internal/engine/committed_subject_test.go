@@ -86,7 +86,9 @@ func assertIncompleteViewRetained(t *testing.T, execute func(context.Context) at
 		return execute(ctx)
 	}}
 	run := testRun(t)
-	record, err := testConductor(t, executor, 10*time.Millisecond).Review(hostrun.WithRun(context.Background(), run), model.RunSelection{Repository: repository, Subject: model.CommittedRange(base, "HEAD"), Profile: "bugs"})
+	// The attempt deadline also bounds building the view, so it must leave
+	// room for git on a slow runner before the Reviewer can start.
+	record, err := testConductor(t, executor, time.Second).Review(hostrun.WithRun(context.Background(), run), model.RunSelection{Repository: repository, Subject: model.CommittedRange(base, "HEAD"), Profile: "bugs"})
 	if err != nil {
 		t.Fatal(err)
 	}
