@@ -85,7 +85,7 @@ func prepareExistingInitializationState(manager *configuration.Manager, selectio
 		return false, err
 	}
 	if !alreadyReady {
-		if err := removeUnreferencedEvidence(selection.directory); err != nil {
+		if err := trimEvidence(selection.directory); err != nil {
 			return false, err
 		}
 	}
@@ -95,7 +95,7 @@ func prepareExistingInitializationState(manager *configuration.Manager, selectio
 	return alreadyReady, nil
 }
 
-func removeUnreferencedEvidence(directory statePath) (returnErr error) {
+func trimEvidence(directory statePath) (returnErr error) {
 	ledger, err := store.NewLedgerRecordStore(string(directory))
 	if err != nil {
 		return err
@@ -103,6 +103,9 @@ func removeUnreferencedEvidence(directory statePath) (returnErr error) {
 	defer func() {
 		returnErr = errors.Join(returnErr, ledger.Close())
 	}()
+	if _, err := ledger.ExpireEvidence(retainedFailureEvidence); err != nil {
+		return err
+	}
 	referenced, err := ledger.EvidencePaths()
 	if err != nil {
 		return err

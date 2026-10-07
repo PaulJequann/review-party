@@ -3,6 +3,7 @@ package engine
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -234,5 +235,87 @@ func TestInitializingAReadyLedgerKeepsUnrecordedEvidence(t *testing.T) {
 
 	if files := artifactFiles(t, state); !slices.Equal(files, []string{filepath.Join(orphan, "constructed-prompt.txt")}) {
 		t.Fatalf("artifact files = %v, want the unrecorded file kept", files)
+	}
+}
+
+type keepAllEvidence struct {
+	store.RecordStore
+}
+
+func (keepAllEvidence) ExpireEvidence(int) ([]model.ArtifactReference, error) {
+	return nil, nil
+}
+
+func failedReviewsWithoutExpiry(t *testing.T, state string, count int) []model.ReviewID {
+	t.Helper()
+	ledger, err := store.NewLedgerRecordStore(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := ledger.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	executors := map[string]attemptExecutor{defaultReviewer: successfulExecutor("not a result contract")}
+	conductor, err := newConductorWithManager(keepAllEvidence{ledger}, catalogWithExecutors(executors), newTestConfigurationManagerWithDeadline(t, time.Second), time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conductor.artifacts = mustNewArtifactStore(t, state)
+	conductor.getRunner().publisher = newArtifactPublisher(conductor.artifacts)
+	conductor.now = steppingClock()
+	repository := changedTestRepository(t)
+	reviews := make([]model.ReviewID, 0, count)
+	for range count {
+		record, err := conductor.Review(testContext(t), testSelection(repository))
+		if err != nil {
+			t.Fatal(err)
+		}
+		reviews = append(reviews, record.ID)
+	}
+	return reviews
+}
+
+func forgetStoredTextUpgrade(t *testing.T, state string) {
+	t.Helper()
+	db, err := sql.Open("sqlite", filepath.Join(state, "ledger.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	for _, statement := range []string{
+		"ALTER TABLE reviews ADD COLUMN result_raw BLOB",
+		"ALTER TABLE attempts ADD COLUMN raw_output BLOB",
+		"DELETE FROM schema_migrations WHERE version = 15",
+	} {
+		if _, err := db.Exec(statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestUpgradingTheLedgerKeepsOnlyTheNewestFailureEvidence(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	state := initializeTestState(t)
+	reviews := failedReviewsWithoutExpiry(t, state, retainedFailureEvidence+2)
+	forgetStoredTextUpgrade(t, state)
+
+	initializeTestState(t)
+
+	entries, err := os.ReadDir(filepath.Join(state, artifact.Directory))
+	if err != nil {
+		t.Fatal(err)
+	}
+	kept := []model.ReviewID{}
+	for _, entry := range entries {
+		kept = append(kept, model.ReviewID(entry.Name()))
+	}
+	if want := reviews[2:]; !slices.Equal(kept, want) {
+		t.Fatalf("reviews with evidence after upgrade = %v, want the newest %v", kept, want)
 	}
 }
