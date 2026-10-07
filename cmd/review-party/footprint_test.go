@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -266,4 +267,23 @@ func TestFootprintHumanLineNamesTheRunAndItsRemoval(t *testing.T) {
 	pattern := regexp.MustCompile(`(?m)^orphaned-run ` + regexp.QuoteMeta(dead) + ` \d+ B; run dead of run by pid 1 version v0, 0 Reviewers, 0 views; remove with: review-party clean\n` +
 		`(?s:.*)Footprint: 10 items, \d+ B; 9 removable now; 4 left over \(\d+ B\); fix: review-party clean --yes\n\z`)
 	assertCleanMatch(t, "footprint", result, pattern)
+}
+
+func TestFootprintExitsOneWhenAnItemIsOnlyPartlyRead(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("needs a directory this user cannot read")
+	}
+	fixture := newHostFixture(t)
+	sealed := filepath.Join(fixture.host.cache, "sealed")
+	fixture.write(filepath.Join(sealed, "entry.json"), "{}")
+	if err := os.Chmod(sealed, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(sealed, 0o700) }) //nolint:errcheck // Restoring the mode only lets TempDir cleanup succeed.
+
+	run := fixture.run("footprint")
+
+	if run.exit != 1 || !strings.Contains(run.stderr, "could not read "+fixture.host.cache+": ") {
+		t.Fatalf("footprint of a partly unreadable cache = %+v; want exit 1 naming %s", run, fixture.host.cache)
+	}
 }

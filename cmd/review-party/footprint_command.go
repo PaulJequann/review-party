@@ -18,7 +18,8 @@ model discovery cache, and leftovers earlier releases put in the host temp
 directory. Each item shows its size and whether review-party clean can
 remove it now.
 
-Footprint changes nothing. It exits 1 when a location could not be read.`,
+Footprint changes nothing. It exits 1 when a location or an item could not
+be fully read.`,
 		Args:        cobra.NoArgs,
 		Annotations: map[string]string{withoutRun: "reads the runtime root without claiming dead runs"},
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -42,7 +43,18 @@ func executeFootprint(format, configurationPath string, streams commandIO) int {
 	if code := printCommandOutput(streams.output, streams.errors, render); code != 0 {
 		return code
 	}
-	return reportUnreadable(streams, result.Unreadable)
+	return reportUnreadable(streams, append(result.Unreadable, result.itemProblems()...))
+}
+
+// itemProblems are the items listed despite an error inspecting them.
+func (result footprint) itemProblems() []footprintProblem {
+	var problems []footprintProblem
+	for _, item := range result.Items {
+		if item.Error != "" {
+			problems = append(problems, footprintProblem{Path: item.Path, Error: item.Error})
+		}
+	}
+	return problems
 }
 
 // reportUnreadable puts each location an inventory could not read on
