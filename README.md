@@ -785,7 +785,9 @@ It removes the marked hook blocks, the `PreToolUse` entries, and the
 only when install created it in this clone and nothing else was added to it
 since. Install records the files it creates in
 `.git/review-party-created.json`, and uninstall deletes that record once it
-lists nothing. A file you had before install is only edited. A block or entry
+lists nothing. If that record is damaged, uninstall edits the files it would
+have deleted, says so, and drops the record. A file you had before install is
+only edited. A block or entry
 someone edited, unbalanced `agents-md` markers, and lefthook or pre-commit
 framework configuration are reported for you to remove by hand, and the
 command exits 1 while any of them is left. It prints what it will change
@@ -797,8 +799,8 @@ without one. Rerunning it is safe, and a run with nothing left prints
 of undeclared Checkpoints, and the agent entries and `agents-md` block once no
 Checkpoint is declared. `config checkpoint remove` offers that in a terminal
 and prints the command otherwise. `$CODEX_HOME/hooks.json` serves every
-repository on the machine, so uninstall only names it unless you pass
-`--shared`.
+repository on the machine, and a `core.hooksPath` outside the clone may serve
+several, so uninstall only names those hooks unless you pass `--shared`.
 
 `review-party doctor` reports what the declared Checkpoints still lack in this
 clone, one line per finding, each ending in `; fix: <command>`:

@@ -16,8 +16,12 @@ import (
 const installRecordName = "review-party-created.json"
 
 type installRecord struct {
-	path    string
-	Created []createdFile `json:"created"`
+	path string
+	// unreadable means the file held something else, so it is read as listing
+	// nothing: uninstall then edits rather than deletes, and the next save
+	// replaces it.
+	unreadable bool
+	Created    []createdFile `json:"created"`
 }
 
 type createdFile struct {
@@ -32,14 +36,14 @@ func readInstallRecord(root string) (installRecord, error) {
 	}
 	record := installRecord{path: filepath.Join(locations.Common, installRecordName)}
 	content, err := os.ReadFile(record.path)
-	if errors.Is(err, fs.ErrNotExist) {
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
 		return record, nil
-	}
-	if err == nil {
-		err = json.Unmarshal(content, &record)
-	}
-	if err != nil {
+	case err != nil:
 		return installRecord{}, fmt.Errorf("read %s: %w", record.path, err)
+	}
+	if json.Unmarshal(content, &record) != nil {
+		return installRecord{path: record.path, unreadable: true}, nil
 	}
 	return record, nil
 }

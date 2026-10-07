@@ -30,8 +30,9 @@ edited, and configuration install never writes, such as lefthook, are
 reported for you to remove by hand.
 
 --undeclared removes only what no declared Checkpoint uses. --shared also
-removes the Codex entry in $CODEX_HOME/hooks.json, which every repository on
-this machine shares. Rerunning is safe.`,
+removes the Codex entry in $CODEX_HOME/hooks.json and hooks in a
+core.hooksPath outside this clone, which other repositories may share.
+Rerunning is safe.`,
 		Example: "  review-party checkpoint uninstall\n  review-party checkpoint uninstall --undeclared --yes",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -45,7 +46,7 @@ this machine shares. Rerunning is safe.`,
 	addRepositoryFlag(command, "Git repository to remove Checkpoint Integrations from")
 	addConfigurationFlag(command)
 	command.Flags().Bool("undeclared", false, "Remove only what no declared Checkpoint uses")
-	command.Flags().Bool("shared", false, "Also remove the Codex entry in $CODEX_HOME/hooks.json, shared by every repository")
+	command.Flags().Bool("shared", false, "Also remove the Codex entry in $CODEX_HOME/hooks.json and hooks in a core.hooksPath outside this clone")
 	command.Flags().Bool("yes", false, "Remove without a confirmation prompt")
 	command.MarkFlagsMutuallyExclusive("undeclared", "shared")
 	return command
@@ -190,7 +191,7 @@ func uninstallSurfaces(root string, scope uninstallScope) ([]uninstallSurface, e
 	}
 	var surfaces []uninstallSurface
 	for _, name := range scope.checkpoints {
-		surfaces = append(surfaces, gitUninstallSurfaces(root, locations, name)...)
+		surfaces = append(surfaces, gitUninstallSurfaces(root, locations, name, scope.shared)...)
 	}
 	if scope.agents {
 		agents, err := agentUninstallSurfaces(root, scope.shared)
@@ -212,13 +213,15 @@ func uninstallSurfaces(root string, scope uninstallScope) ([]uninstallSurface, e
 	}), nil
 }
 
-func gitUninstallSurfaces(root string, locations subject.HookLocations, name configuration.CheckpointName) []uninstallSurface {
+func gitUninstallSurfaces(root string, locations subject.HookLocations, name configuration.CheckpointName, shared bool) []uninstallSurface {
 	created := []byte("#!/bin/sh\n" + checkpointHookBlock(name))
 	var surfaces []uninstallSurface
 	for _, directory := range []string{filepath.Join(root, ".husky"), locations.Directory, filepath.Join(locations.Common, "hooks")} {
+		path := filepath.Join(directory, string(name))
+		withheld := !shared && !insideRoot(resolvedPath(root), resolvedPath(path)) && !insideRoot(resolvedPath(locations.Common), resolvedPath(path))
 		surfaces = append(surfaces, uninstallSurface{
-			integration: configuration.IntegrationGit, checkpoint: name, path: filepath.Join(directory, string(name)),
-			created: created, remove: hookBlockRemoval(name),
+			integration: configuration.IntegrationGit, checkpoint: name, path: path,
+			created: created, remove: hookBlockRemoval(name), withheld: withheld,
 		})
 	}
 	for _, marker := range hookToolMarkers {
@@ -347,6 +350,9 @@ func planUninstall(root string, scope uninstallScope) (uninstallPlan, error) {
 		return uninstallPlan{}, err
 	}
 	plan := uninstallPlan{writes: map[string][]byte{}, record: record}
+	if record.unreadable {
+		plan.notes = append(plan.notes, "note: "+record.path+" is not a record install wrote, so files install created are edited, not deleted")
+	}
 	for _, surface := range surfaces {
 		content, err := os.ReadFile(surface.path)
 		switch {
@@ -365,7 +371,7 @@ func planUninstall(root string, scope uninstallScope) (uninstallPlan, error) {
 
 func (plan *uninstallPlan) withhold(surface uninstallSurface, result surfaceRemoval) {
 	if result.removed != "" || result.left.remains() {
-		plan.notes = append(plan.notes, "note: "+surface.path+" still runs review-party for every repository on this machine; remove it with --shared")
+		plan.notes = append(plan.notes, "note: "+surface.path+" may run review-party for other repositories on this machine; remove it with --shared")
 	}
 }
 

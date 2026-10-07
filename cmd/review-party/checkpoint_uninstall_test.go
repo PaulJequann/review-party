@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io/fs"
 	"maps"
 	"os"
@@ -348,9 +349,71 @@ func TestUninstallLeavesTheSharedCodexFileUnlessAsked(t *testing.T) {
 	installed := fixture.tree()
 	shared := filepath.Join(fixture.codexHome, "hooks.json")
 
-	assertRun(t, fixture.uninstall("", false, "--yes"), commandRun{stdout: "Nothing to remove.\nnote: " + shared + " still runs review-party for every repository on this machine; remove it with --shared\n"})
+	assertRun(t, fixture.uninstall("", false, "--yes"), commandRun{stdout: "Nothing to remove.\nnote: " + shared + " may run review-party for other repositories on this machine; remove it with --shared\n"})
 	assertTree(t, fixture.tree(), installed)
 	assertRun(t, fixture.uninstall("", false, "--shared", "--yes"), commandRun{stdout: "codex: delete the file install created at " + shared + "\nUpdated 0 file(s); deleted 1 file(s).\n"})
+}
+
+func TestUninstallLeavesHooksInASharedHooksPathUnlessAsked(t *testing.T) {
+	fixture := newUninstallFixture(t)
+	hooks := t.TempDir()
+	fixture.git("config", "core.hooksPath", hooks)
+	fixture.install([]string{"git"})
+	installed := []string{filepath.Join(hooks, "pre-push"), filepath.Join(hooks, "pre-commit")}
+
+	notes := ""
+	for _, hook := range installed {
+		notes += "note: " + hook + " may run review-party for other repositories on this machine; remove it with --shared\n"
+	}
+	assertRun(t, fixture.uninstall("", false, "--yes"), commandRun{stdout: "Nothing to remove.\n" + notes})
+	for _, hook := range installed {
+		if _, err := os.Stat(hook); err != nil {
+			t.Fatalf("uninstall without --shared removed %s: %v", hook, err)
+		}
+	}
+	assertRun(t, fixture.uninstall("", false, "--shared", "--yes"), commandRun{stdout: "git pre-push: delete the file install created at " + installed[0] + "\ngit pre-commit: delete the file install created at " + installed[1] + "\nUpdated 0 file(s); deleted 2 file(s).\n"})
+}
+
+func TestUninstallFromALinkedWorktreeRemovesTheCloneHooks(t *testing.T) {
+	fixture := newUninstallFixture(t)
+	fixture.install([]string{"git"})
+	fixture.git("commit", "--allow-empty", "--quiet", "--message", "base")
+	linked := filepath.Join(t.TempDir(), "linked")
+	fixture.git("worktree", "add", "--quiet", "--detach", linked)
+
+	result := fixture.runWith("", false, "checkpoint", "uninstall", "--repo", linked, "--yes")
+
+	if result.exit != 0 || strings.Contains(result.stdout, "--shared") {
+		t.Fatalf("uninstall from a linked worktree = %+v, want the clone's hooks removed", result)
+	}
+	for _, name := range []string{"pre-push", "pre-commit"} {
+		if _, err := os.Stat(fixture.path(".git/hooks/" + name)); !errors.Is(err, fs.ErrNotExist) {
+			t.Fatalf("%s survived uninstall from a linked worktree: %v", name, err)
+		}
+	}
+}
+
+func TestUninstallOverACorruptRecordEditsWhatInstallCreatedAndDropsTheRecord(t *testing.T) {
+	fixture := newUninstallFixture(t)
+	fixture.install([]string{"git"})
+	record := fixture.path(".git/" + installRecordName)
+	if err := os.WriteFile(record, []byte("garbage"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result := fixture.uninstall("", false, "--yes")
+
+	if note := "note: " + record + " is not a record install wrote, so files install created are edited, not deleted\n"; result.exit != 0 || !strings.Contains(result.stdout, note) {
+		t.Fatalf("uninstall over a corrupt record = %+v, want exit 0 and %q", result, note)
+	}
+	for _, name := range []string{"pre-push", "pre-commit"} {
+		if got := fixture.read(".git/hooks/" + name); got != "#!/bin/sh\n" {
+			t.Fatalf("%s = %q, want install's skeleton left in place", name, got)
+		}
+	}
+	if _, err := os.Stat(record); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("the corrupt record survived uninstall: %v", err)
+	}
 }
 
 func TestUninstallRemovesEveryCopyOfTheBlock(t *testing.T) {
