@@ -36,28 +36,6 @@ func CommittedRangeContentChanges(repository string, reference model.SubjectRefe
 	return RangeContentChanges{Base: string(baseObject), Head: string(headObject), Changes: changes}, nil
 }
 
-// Push range sources name where DefaultPushBase found the base of the range
-// a push would publish.
-const (
-	PushBaseUpstream   = "upstream"
-	PushBaseRemoteHead = "remote-head"
-)
-
-var ErrNoDefaultPushBase = errors.New("no upstream branch and no origin/HEAD to compare with")
-
-// DefaultPushBase is the merge base of HEAD and the current branch's
-// upstream, else of HEAD and origin/HEAD. A merge base keeps a diverged
-// upstream's own commits out of the range.
-func DefaultPushBase(repository string) (base, source string, err error) {
-	if output, err := gitOutput(repository, "merge-base", "HEAD", "@{upstream}"); err == nil {
-		return strings.TrimSpace(string(output)), PushBaseUpstream, nil
-	}
-	if output, err := gitOutput(repository, "merge-base", "HEAD", "refs/remotes/origin/HEAD"); err == nil {
-		return strings.TrimSpace(string(output)), PushBaseRemoteHead, nil
-	}
-	return "", "", ErrNoDefaultPushBase
-}
-
 // StagedContentChanges compares the index with HEAD, or with the empty tree
 // before the first commit.
 func StagedContentChanges(repository string) ([]model.ContentChange, error) {
