@@ -96,8 +96,4 @@ func TestTrackedWorkingChangesLeaveOutUntrackedFiles(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(contentChangePaths(changes), []string{"review.go"}) {
 		t.Fatalf("tracked changes = %#v, %v", changes, err)
 	}
-	lines, err := TrackedLineCounts(repository)
-	if err != nil || !reflect.DeepEqual(lines, LineCounts{"review.go": {Added: 1, Deleted: 1}}) {
-		t.Fatalf("tracked lines = %#v, %v", lines, err)
-	}
 }

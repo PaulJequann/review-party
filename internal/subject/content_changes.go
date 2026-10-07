@@ -15,24 +15,14 @@ import (
 	"reviewparty/internal/model"
 )
 
-// RangeContentChanges is a committed range's whole content change set, the
-// set each commit in the range introduces over its first parent, and the
-// whole range's line counts per path.
+// RangeContentChanges is a committed range's whole content change set with
+// its resolved base and head commits.
 type RangeContentChanges struct {
 	Base    string
 	Head    string
 	Changes []model.ContentChange
-	Commits []CommitContentChanges
-	Lines   LineCounts
 }
 
-type CommitContentChanges struct {
-	Commit  string
-	Changes []model.ContentChange
-}
-
-// CommittedRangeContentChanges omits commits that change no content, because
-// they leave nothing a Review could cover.
 func CommittedRangeContentChanges(repository string, reference model.SubjectReference) (RangeContentChanges, error) {
 	root := repositoryRoot(repository)
 	baseObject, headObject, err := committedRangeResolver{repository: root}.resolveRange(revisionName(reference.Base), revisionName(reference.Head))
@@ -43,15 +33,7 @@ func CommittedRangeContentChanges(repository string, reference model.SubjectRefe
 	if err != nil {
 		return RangeContentChanges{}, err
 	}
-	commits, err := root.commitContentChanges(baseObject, headObject)
-	if err != nil {
-		return RangeContentChanges{}, err
-	}
-	lines, err := root.rangeLineCounts(baseObject, headObject)
-	if err != nil {
-		return RangeContentChanges{}, err
-	}
-	return RangeContentChanges{Base: string(baseObject), Head: string(headObject), Changes: changes, Commits: commits, Lines: lines}, nil
+	return RangeContentChanges{Base: string(baseObject), Head: string(headObject), Changes: changes}, nil
 }
 
 // Push range sources name where DefaultPushBase found the base of the range
@@ -74,32 +56,6 @@ func DefaultPushBase(repository string) (base, source string, err error) {
 		return strings.TrimSpace(string(output)), PushBaseRemoteHead, nil
 	}
 	return "", "", ErrNoDefaultPushBase
-}
-
-func (root repositoryRoot) commitContentChanges(base, head commitObject) ([]CommitContentChanges, error) {
-	listing, err := gitOutput(string(root), "rev-list", "--reverse", "--parents", string(base)+".."+string(head))
-	if err != nil {
-		return nil, fmt.Errorf("list range commits: %w", err)
-	}
-	var commits []CommitContentChanges
-	for _, line := range strings.Split(strings.TrimSpace(string(listing)), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) == 0 {
-			continue
-		}
-		parent := revisionName(emptyGitTree)
-		if len(fields) > 1 {
-			parent = revisionName(fields[1])
-		}
-		changes, err := root.treeContentChanges(parent, revisionName(fields[0]))
-		if err != nil {
-			return nil, err
-		}
-		if len(changes) > 0 {
-			commits = append(commits, CommitContentChanges{Commit: fields[0], Changes: changes})
-		}
-	}
-	return commits, nil
 }
 
 // StagedContentChanges compares the index with HEAD, or with the empty tree

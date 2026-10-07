@@ -50,32 +50,6 @@ type LineCount struct {
 // LineCounts maps repository paths to their line counts.
 type LineCounts map[string]LineCount
 
-// rangeLineCounts counts lines from base to head, without rename pairing so
-// each path counts on its own.
-func (root repositoryRoot) rangeLineCounts(base, head commitObject) (LineCounts, error) {
-	return gitLineCounts(string(root), "diff", "--numstat", "-z", "--no-renames", string(base), string(head), "--")
-}
-
-// StagedLineCounts counts lines the index changes over HEAD, or over the empty
-// tree before the first commit.
-func StagedLineCounts(repository string) (LineCounts, error) {
-	return gitLineCounts(repository, "diff", "--numstat", "-z", "--no-renames", "--cached", workingChangesBase(repository), "--")
-}
-
-// TrackedLineCounts counts lines the working tree's tracked files change over
-// HEAD, or over the empty tree before the first commit.
-func TrackedLineCounts(repository string) (LineCounts, error) {
-	return gitLineCounts(repository, "diff", "--numstat", "-z", "--no-renames", workingChangesBase(repository), "--")
-}
-
-func gitLineCounts(repository string, args ...string) (LineCounts, error) {
-	output, err := gitOutput(repository, args...)
-	if err != nil {
-		return nil, fmt.Errorf("count changed lines: %w", err)
-	}
-	return parseLineCounts(output)
-}
-
 func parseLineCounts(output []byte) (LineCounts, error) {
 	entries := bytes.Split(output, []byte{0})
 	byPath := LineCounts{}
