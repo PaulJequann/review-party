@@ -36,7 +36,9 @@ const (
 var helpers = map[string]func() int{
 	"sleep": block,
 	"stubborn": func() int {
-		signal.Ignore(syscall.SIGTERM, os.Interrupt)
+		// Catch rather than Ignore: on Windows an ignored Ctrl+Break falls
+		// through to the default handler, which exits the process.
+		signal.Notify(make(chan os.Signal, 1), syscall.SIGTERM, os.Interrupt)
 		announce("")
 		return block()
 	},
