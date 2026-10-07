@@ -458,20 +458,28 @@ type ReviewSubject struct {
 const ZeroObjectID = "0000000000000000000000000000000000000000"
 
 // ContentChange names one path's object before and after a change, by full
-// object ID. A Gitlink path is a nested repository: its sides are commits of
-// that repository, never objects of this one, so they are compared by ID
-// alone. The flag comes from the current content's modes and is not part of
-// the change's identity.
+// object ID. A gitlink side is a nested repository's commit, never an object
+// of this repository, so it is compared by ID alone. The gitlink flags come
+// from the current content's modes and are not part of the change's identity.
 type ContentChange struct {
-	Path    string `json:"path"`
-	Before  string `json:"before"`
-	After   string `json:"after"`
-	Gitlink bool   `json:"gitlink,omitempty"`
+	Path          string `json:"path"`
+	Before        string `json:"before"`
+	After         string `json:"after"`
+	BeforeGitlink bool   `json:"before_gitlink,omitempty"`
+	AfterGitlink  bool   `json:"after_gitlink,omitempty"`
 }
 
-// From is the same change from an earlier reviewed state of the path.
+// From is the same change from an earlier reviewed state of the path, which
+// has the path's kind. A path that turned between a file and a gitlink keeps
+// its whole change, since the kind of an earlier state is not known. An
+// absent side has no kind.
 func (change ContentChange) From(before string) ContentChange {
+	bothPresent := change.Before != ZeroObjectID && change.After != ZeroObjectID
+	if bothPresent && change.BeforeGitlink != change.AfterGitlink {
+		return change
+	}
 	change.Before = before
+	change.BeforeGitlink = change.BeforeGitlink || change.AfterGitlink
 	return change
 }
 

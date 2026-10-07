@@ -255,10 +255,23 @@ func TestAReviewedStateWhoseBlobIsGoneIsUnreached(t *testing.T) {
 // A gitlink's states are commits of the nested repository, so the repository
 // is never asked whether it has them.
 func TestAReviewedGitlinkStateIsReachedWithoutTheObject(t *testing.T) {
-	nested := []model.ContentChange{{Path: "nested", Before: model.ZeroObjectID, After: a1, Gitlink: true}}
+	nested := []model.ContentChange{{Path: "nested", Before: model.ZeroObjectID, After: a1, AfterGitlink: true}}
 	reviews := []recordedCoverage{recorded(bugsSource, "rp_1", model.LifecycleCompleted, nested)}
 	conductor, repository := newCheckpointConductor(t, &coverageStore{reviews: reviews, absent: map[string]bool{a1: true}}, bounded(0, 9))
 	assertOutcome(t, checkPrePush(t, conductor, repository, nested), checkpointOutcome{State: CheckpointCovered, Declared: true, ReviewIDs: []model.ReviewID{"rp_1"}, Spent: 1})
+}
+
+// The kind of a reviewed state between a file and a gitlink is unknown, so a
+// path that changed kind stays unreviewed as a whole until its current
+// content is reviewed.
+func TestATypeChangedPathIsUnreviewedAsAWhole(t *testing.T) {
+	reviews := []recordedCoverage{recorded(bugsSource, "rp_1", model.LifecycleCompleted, []model.ContentChange{{Path: "vendored", Before: a1, After: a2}})}
+	conductor, repository := newCheckpointConductor(t, &coverageStore{reviews: reviews}, bounded(0, 9))
+	current := []model.ContentChange{{Path: "vendored", Before: a1, After: a3, AfterGitlink: true}}
+	report := checkPrePush(t, conductor, repository, current)
+	if report.State != CheckpointMissing || !reflect.DeepEqual(report.Coverage.Unreviewed, current) {
+		t.Fatalf("state = %s, unreviewed = %v, want missing with %v", report.State, report.Coverage.Unreviewed, current)
+	}
 }
 
 func TestTheAllowanceDecidesBetweenResidualAndMissing(t *testing.T) {

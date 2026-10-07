@@ -104,9 +104,9 @@ func (root repositoryRoot) diffDeltaTrees(delta []model.ContentChange, options .
 		returnErr = errors.Join(returnErr, os.RemoveAll(scratch))
 	}()
 	var trees [2]string
-	for side, pick := range []func(model.ContentChange) string{
-		func(change model.ContentChange) string { return change.Before },
-		func(change model.ContentChange) string { return change.After },
+	for side, pick := range []func(model.ContentChange) (string, bool){
+		func(change model.ContentChange) (string, bool) { return change.Before, change.BeforeGitlink },
+		func(change model.ContentChange) (string, bool) { return change.After, change.AfterGitlink },
 	} {
 		trees[side], err = writeDeltaTree(deltaIndex{repository: string(root), file: filepath.Join(scratch, fmt.Sprint("index-", side))}, delta, pick)
 		if err != nil {
@@ -148,20 +148,20 @@ func MissingObjects(repository string, objects iter.Seq[string]) (map[string]boo
 // writeDeltaTree stages one side of the delta into a private index and
 // writes it as a tree. Paths whose side is the zero ID are absent from it.
 // write-tree names the path of a blob the repository lacks.
-func writeDeltaTree(index deltaIndex, delta []model.ContentChange, pick func(model.ContentChange) string) (string, error) {
+func writeDeltaTree(index deltaIndex, delta []model.ContentChange, pick func(model.ContentChange) (string, bool)) (string, error) {
 	var entries strings.Builder
 	for _, change := range delta {
-		object := pick(change)
+		object, gitlink := pick(change)
 		if object == model.ZeroObjectID {
 			continue
 		}
 		mode := "100644"
-		if change.Gitlink {
-			mode = "160000"
+		if gitlink {
+			mode = gitlinkMode
 		}
-		entries.WriteString(mode + " " + object + "\t" + change.Path + "\n")
+		entries.WriteString(mode + " " + object + "\t" + change.Path + "\x00")
 	}
-	if _, err := index.git([]byte(entries.String()), "update-index", "--index-info"); err != nil {
+	if _, err := index.git([]byte(entries.String()), "update-index", "-z", "--index-info"); err != nil {
 		return "", fmt.Errorf("stage delta side: %w", err)
 	}
 	tree, err := index.git(nil, "write-tree")

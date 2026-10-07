@@ -164,7 +164,7 @@ func (check *coverageCheck) loadEdges(sources []string) (map[string][]store.Cont
 func (check *coverageCheck) reachedBlobs(edges map[string][]store.ContentTransition) map[string]bool {
 	gitlink := map[string]bool{}
 	for _, change := range check.content {
-		gitlink[change.Path] = change.Gitlink
+		gitlink[change.Path] = change.BeforeGitlink || change.AfterGitlink
 	}
 	reached := map[string]bool{}
 	for _, transitions := range edges {

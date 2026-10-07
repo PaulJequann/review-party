@@ -91,12 +91,12 @@ func TestAGitlinkIsMeasuredWithoutItsCommits(t *testing.T) {
 	runTestCommand(t, nested, "git", "config", "user.name", "Review Party Test")
 	runTestCommand(t, nested, "git", "commit", "--quiet", "--allow-empty", "-m", "first")
 	first := gitText(t, nested, "rev-parse", "HEAD")
-	assertContentChanges(t, repository, []model.ContentChange{{Path: "nested", Before: model.ZeroObjectID, After: first, Gitlink: true}})
+	assertContentChanges(t, repository, []model.ContentChange{{Path: "nested", Before: model.ZeroObjectID, After: first, AfterGitlink: true}})
 	runTestCommand(t, repository, "git", "commit", "--quiet", "-m", "add nested")
 
 	runTestCommand(t, nested, "git", "commit", "--quiet", "--allow-empty", "-m", "second")
 	second := gitText(t, nested, "rev-parse", "HEAD")
-	bumped := []model.ContentChange{{Path: "nested", Before: first, After: second, Gitlink: true}}
+	bumped := []model.ContentChange{{Path: "nested", Before: first, After: second, BeforeGitlink: true, AfterGitlink: true}}
 	assertContentChanges(t, repository, bumped)
 	lines, err := MeasureDelta(repository, bumped)
 	if err != nil || !reflect.DeepEqual(lines, DeltaLines{ByPath: map[string]int{"nested": 2}, Total: 2}) {
@@ -105,6 +105,44 @@ func TestAGitlinkIsMeasuredWithoutItsCommits(t *testing.T) {
 	patch, err := DeltaPatch(repository, bumped)
 	if err != nil || !strings.Contains(string(patch), "-Subproject commit "+first+"\n+Subproject commit "+second+"\n") {
 		t.Fatalf("gitlink patch = %q, %v", patch, err)
+	}
+}
+
+// A path that turns between a file and a nested repository keeps each side's
+// kind, so the file's lines count in full.
+func TestATypeChangeMeasuresTheFileSideInFull(t *testing.T) {
+	repository := testRepository(t)
+	file := blobOf(t, repository, []byte("1\n2\n3\n4\n5\n"))
+	pointer := strings.Repeat("ab", 20)
+	for _, change := range []model.ContentChange{
+		{Path: "vendored", Before: file, After: pointer, AfterGitlink: true},
+		{Path: "vendored", Before: pointer, After: file, BeforeGitlink: true},
+	} {
+		lines, err := MeasureDelta(repository, []model.ContentChange{change})
+		if err != nil || lines.Total != 6 {
+			t.Fatalf("type change %+v lines = %#v, %v, want 6", change, lines, err)
+		}
+		patch, err := DeltaPatch(repository, []model.ContentChange{change})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, want := range []string{"Subproject commit " + pointer, "5\n"} {
+			if !strings.Contains(string(patch), want) {
+				t.Fatalf("type change patch lacks %q:\n%s", want, patch)
+			}
+		}
+	}
+}
+
+func TestADeltaPathMayHoldANewline(t *testing.T) {
+	repository := testRepository(t)
+	delta := []model.ContentChange{{Path: "odd\nname.go", Before: blobOf(t, repository, []byte("a\n")), After: blobOf(t, repository, []byte("b\n"))}}
+	lines, err := MeasureDelta(repository, delta)
+	if err != nil || !reflect.DeepEqual(lines, DeltaLines{ByPath: map[string]int{"odd\nname.go": 2}, Total: 2}) {
+		t.Fatalf("newline path lines = %#v, %v", lines, err)
+	}
+	if _, err := DeltaPatch(repository, delta); err != nil {
+		t.Fatal(err)
 	}
 }
 

@@ -10,7 +10,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 
 	"reviewparty/internal/model"
@@ -116,8 +115,7 @@ type rawDiffEntry struct {
 const gitlinkMode = "160000"
 
 // parseRawDiff reads `:<oldmode> <newmode> <before> <after> <status>\0<path>\0`
-// records, which --no-renames limits to one path each. A path is a gitlink
-// when either side has the gitlink mode.
+// records, which --no-renames limits to one path each.
 func parseRawDiff(output []byte) ([]rawDiffEntry, error) {
 	fields := strings.Split(string(output), "\x00")
 	var entries []rawDiffEntry
@@ -126,7 +124,7 @@ func parseRawDiff(output []byte) ([]rawDiffEntry, error) {
 		if len(header) != 5 || !strings.HasPrefix(fields[index], ":") {
 			return nil, fmt.Errorf("parse raw diff record %q", fields[index])
 		}
-		change := model.ContentChange{Path: fields[index+1], Before: header[2], After: header[3], Gitlink: slices.Contains(header[:2], gitlinkMode)}
+		change := model.ContentChange{Path: fields[index+1], Before: header[2], After: header[3], BeforeGitlink: header[0] == gitlinkMode, AfterGitlink: header[1] == gitlinkMode}
 		deleted := header[1] == "000000"
 		entries = append(entries, rawDiffEntry{change: change, inWorktree: change.After == model.ZeroObjectID && !deleted})
 	}
@@ -196,7 +194,7 @@ func (root repositoryRoot) worktreeObject(entry *rawDiffEntry) (batched bool, er
 		if _, err := os.Lstat(filepath.Join(location, ".git")); err != nil {
 			return false, fmt.Errorf("directory is not a nested repository: %w", err)
 		}
-		entry.change.Gitlink = true
+		entry.change.AfterGitlink = true
 		output, err = gitOutput(location, "rev-parse", "--verify", "HEAD")
 	case strings.Contains(path, "\n"):
 		output, err = gitOutput(repository, "hash-object", "-w", "--", path)
