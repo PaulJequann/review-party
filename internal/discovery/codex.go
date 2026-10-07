@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -178,31 +179,53 @@ type execCodexSession struct {
 }
 
 func newCodexSession(ctx context.Context, capture *codexCapture) (codexSession, error) {
-	_ = ctx
 	environment := environmentFor("codex")
 	executable, err := trustedExecutable("codex")
 	if err != nil {
 		return nil, err
 	}
+	stdin, stdout, err := newSessionPipes()
+	if err != nil {
+		return nil, err
+	}
 	process := exec.Command(executable, "app-server")
 	process.Env = environment
-	stdin, err := process.StdinPipe()
-	if err != nil {
-		return nil, err
-	}
-	stdout, err := process.StdoutPipe()
-	if err != nil {
-		if closeErr := stdin.Close(); closeErr != nil {
-			err = errors.Join(err, closeErr)
-		}
-		return nil, err
-	}
+	process.Stdin = stdin.child
+	process.Stdout = stdout.child
 	process.Stderr = capture
-	started, err := startProcessSession(process, stdin, stdout)
+	started, err := startProcessSession(ctx, process, stdin.owner, stdout.owner)
+	stdin.closeChild()
+	stdout.closeChild()
 	if err != nil {
 		return nil, err
 	}
-	return &execCodexSession{process: started, stdin: stdin, stdout: stdout}, nil
+	return &execCodexSession{process: started, stdin: stdin.owner, stdout: stdout.owner}, nil
+}
+
+// sessionPipe is one pipe between the owner and a supervised process. The
+// child end is an *os.File so the sentinel inherits it directly; the owner
+// closes that end once the process holds it, so EOF reaches the reader when
+// the other side goes away.
+type sessionPipe struct {
+	owner *os.File
+	child *os.File
+}
+
+func (pipe sessionPipe) closeChild() {
+	_ = pipe.child.Close() //nolint:errcheck // The child end is only closed once, after the process inherited it.
+}
+
+func newSessionPipes() (stdin, stdout sessionPipe, err error) {
+	stdinRead, stdinWrite, err := os.Pipe()
+	if err != nil {
+		return sessionPipe{}, sessionPipe{}, err
+	}
+	stdoutRead, stdoutWrite, err := os.Pipe()
+	if err != nil {
+		closeProcessResources([]io.Closer{stdinRead, stdinWrite})
+		return sessionPipe{}, sessionPipe{}, err
+	}
+	return sessionPipe{owner: stdinWrite, child: stdinRead}, sessionPipe{owner: stdoutRead, child: stdoutWrite}, nil
 }
 
 func (session *execCodexSession) Stdin() io.WriteCloser { return session.stdin }

@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"reviewparty/internal/hostrun"
 	"runtime"
 	"strconv"
 	"strings"
@@ -18,7 +19,7 @@ import (
 )
 
 func TestRunnerForceKillsAProcessGroupAfterGracePeriod(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(testContext(t))
 	defer cancel()
 	pidFile := filepath.Join(t.TempDir(), "child.pid")
 	environment := []string{"DISCOVERY_RUNNER_HELPER=spawn", "DISCOVERY_RUNNER_PID_FILE=" + pidFile}
@@ -67,7 +68,7 @@ func waitForFile(t *testing.T, path string) {
 }
 
 func TestRunnerReportsAlreadyCancelledProcessAsIncomplete(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(testContext(t))
 	cancel()
 	run := NewDefaultRunner().Run(ctx, Command{Args: []string{"true"}, Environment: environmentFor("true")})
 	if !run.Canceled || run.Err == nil {
@@ -77,7 +78,7 @@ func TestRunnerReportsAlreadyCancelledProcessAsIncomplete(t *testing.T) {
 
 func TestRunnerUsesExplicitAllowlistedEnvironment(t *testing.T) {
 	t.Setenv("DISCOVERY_RUNNER_UNLISTED_SECRET", "should-not-leak")
-	run := NewDefaultRunner().Run(context.Background(), Command{
+	run := NewDefaultRunner().Run(testContext(t), Command{
 		Args:        []string{"sh", "-c", "printf '%s' \"$DISCOVERY_RUNNER_UNLISTED_SECRET\""},
 		Environment: environmentFor("codex"),
 	})
@@ -251,4 +252,32 @@ func helperEnvironment(value string) []string {
 		environment = append(environment, entry)
 	}
 	return append(environment, "DISCOVERY_RUNNER_HELPER="+value)
+}
+
+func TestRunnerRefusesToStartWithoutARun(t *testing.T) {
+	run := NewDefaultRunner().Run(context.Background(), Command{Args: []string{"true"}, Environment: environmentFor("true")})
+	if !errors.Is(run.Err, hostrun.ErrNoRun) {
+		t.Fatalf("run without a hostrun = %#v, want %v", run, hostrun.ErrNoRun)
+	}
+}
+
+// testContext carries a run rooted in the host temp directory, outside the
+// redirected TMPDIR, so the root outlives every supervised process.
+func testContext(t *testing.T) context.Context {
+	t.Helper()
+	root, err := os.MkdirTemp(hostrun.HostTempDir(), "review-party-discovery-test-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := hostrun.Open(hostrun.Options{Root: root, Warn: func(line string) { t.Log(line) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		run.Close()
+		if err := os.RemoveAll(root); err != nil {
+			t.Log(err)
+		}
+	})
+	return hostrun.WithRun(context.Background(), run)
 }
