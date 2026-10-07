@@ -48,8 +48,8 @@ func (conductor *Conductor) executeEvalCasesConcurrent(ctx context.Context, suit
 }
 
 // awaitConcurrentEvalCases blocks until the remaining started cases have
-// reported, so no Reviewer is still running in a checkout when the caller
-// removes the suite's temporary directory.
+// reported, so no Reviewer is still reading the suite when the caller
+// removes its temporary directory.
 func awaitConcurrentEvalCases(results <-chan concurrentEvalResult, remaining int) {
 	for ; remaining > 0; remaining-- {
 		<-results

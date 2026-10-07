@@ -3,7 +3,10 @@ package engine
 import (
 	"context"
 	"errors"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"reviewparty/internal/hostrun"
 	"reviewparty/internal/model"
 	"testing"
 	"time"
@@ -154,30 +157,27 @@ func assertFailureLocation(t *testing.T, execution attemptExecution, category mo
 	}
 }
 
-func TestProcessGroupCanBeTerminated(t *testing.T) {
-	command := exec.Command("sh", "-c", "sleep 30")
-	configureProcessGroup(command)
-	if err := command.Start(); err != nil {
-		t.Fatal(err)
-	}
-	terminateProcessGroup(command)
-
-	waited := make(chan error, 1)
-	go func() { waited <- command.Wait() }()
-	select {
-	case <-waited:
-	case <-time.After(2 * time.Second):
-		killProcessGroup(command)
-		t.Fatal("process did not terminate")
-	}
-}
-
 func TestCommandRunnerReturnsAfterCancellation(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	ctx, cancel := context.WithTimeout(testContext(t), 20*time.Millisecond)
 	defer cancel()
+	started := time.Now()
 	run := runCommand(ctx, exec.Command("sh", "-c", "sleep 30"))
 	if !errors.Is(run.ContextErr, context.DeadlineExceeded) {
 		t.Fatalf("context error = %v, want deadline exceeded", run.ContextErr)
+	}
+	if elapsed := time.Since(started); elapsed > processKillGrace {
+		t.Fatalf("cancelled Reviewer took %s to stop", elapsed)
+	}
+}
+
+func TestCommandRunnerRefusesToStartWithoutARun(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "started")
+	run := runCommand(context.Background(), exec.Command("sh", "-c", ": > \"$0\"", marker))
+	if !errors.Is(run.StartErr, hostrun.ErrNoRun) {
+		t.Fatalf("start error = %v, want %v", run.StartErr, hostrun.ErrNoRun)
+	}
+	if _, err := os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the Reviewer ran without a hostrun: %v", err)
 	}
 }
 

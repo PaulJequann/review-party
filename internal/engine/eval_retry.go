@@ -39,6 +39,9 @@ func (conductor *Conductor) prepareEvalReview(ctx context.Context, selection mod
 	if err := conductor.requirePreparedState(selection.Repository); err != nil {
 		return preparedReview{}, time.Time{}, err
 	}
+	if err := requireRun(ctx); err != nil {
+		return preparedReview{}, time.Time{}, err
+	}
 	started := conductor.now().UTC()
 	timings := model.ReviewTimings{}
 	preparation, err := conductor.startReviewPreparation(selection.Repository, selection.Subject)
@@ -84,7 +87,7 @@ func (conductor *Conductor) retryEvalReview(execution retryReviewExecution, reco
 	}
 	next, err := conductor.getRunner().resumePreparedReview(execution.context, record, execution.prepared, execution.started)
 	next, resumeErr := conductor.recordAvailabilityFailure(next, execution.prepared, err)
-	if next.Lifecycle != model.LifecycleCompleted && next.Result == nil && retained != nil {
+	if restoresRetainedPartial(next, retained) {
 		next.Result = retained
 		next.UpdatedAt = conductor.now().UTC()
 		if saveErr := conductor.store.Save(next); saveErr != nil {
@@ -92,6 +95,12 @@ func (conductor *Conductor) retryEvalReview(execution retryReviewExecution, reco
 		}
 	}
 	return next, resumeErr
+}
+
+// restoresRetainedPartial reports that the retry produced nothing, so the
+// partial evidence salvaged before it is what the Review keeps.
+func restoresRetainedPartial(next model.ReviewRecord, retained *model.ReviewResult) bool {
+	return next.Lifecycle != model.LifecycleCompleted && next.Result == nil && retained != nil
 }
 
 func (conductor *Conductor) recordAvailabilityFailure(record model.ReviewRecord, prepared preparedReview, err error) (model.ReviewRecord, error) {

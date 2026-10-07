@@ -51,7 +51,7 @@ func writeBoundedSelection(t *testing.T, repository string, checkpoint configura
 // runOneMember runs the saved selection and returns its one member's record.
 func runOneMember(t *testing.T, conductor *Conductor, selection model.RunSelection) model.ReviewRecord {
 	t.Helper()
-	bundle, err := conductor.Run(context.Background(), selection)
+	bundle, err := conductor.Run(testContext(t), selection)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +111,7 @@ func TestRunUnreviewedReviewsOnlyTheDeltaAndExtendsTheChain(t *testing.T) {
 	if strings.Contains(executor.attempts[0].Prompt, "claim to verify") {
 		t.Fatal("the plain Review's prompt carries the delta framing")
 	}
-	_, err := conductor.Run(context.Background(), model.RunSelection{Repository: repository, Subject: model.WorkingChanges(), Unreviewed: true})
+	_, err := conductor.Run(testContext(t), model.RunSelection{Repository: repository, Subject: model.WorkingChanges(), Unreviewed: true})
 	if !errors.Is(err, ErrNothingUnreviewed) {
 		t.Fatalf("third run error = %v, want ErrNothingUnreviewed", err)
 	}
@@ -181,7 +181,7 @@ func TestRunUnreviewedFramesOnlyTheProfilesWithEarlierReviews(t *testing.T) {
 
 	writeBoundedSelection(t, repository, boundedCheckpoint(0, 3), "bugs", "code-quality")
 	writeTestFile(t, filepath.Join(repository, "review.go"), "package demo\n\nconst state = \"changed\"\n\nvar next = 1\n")
-	bundle, err := conductor.Run(context.Background(), model.RunSelection{Repository: repository, Subject: model.WorkingChanges(), Unreviewed: true})
+	bundle, err := conductor.Run(testContext(t), model.RunSelection{Repository: repository, Subject: model.WorkingChanges(), Unreviewed: true})
 	if err != nil {
 		t.Fatal(err)
 	}

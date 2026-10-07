@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"reviewparty/internal/hostrun"
 	"reviewparty/internal/model"
 	"slices"
 	"strings"
@@ -187,38 +188,26 @@ type commandRun struct {
 }
 
 func runCommand(ctx context.Context, command *exec.Cmd) commandRun {
+	run, err := hostrun.From(ctx)
+	if err != nil {
+		return commandRun{StartErr: err}
+	}
 	stdout := newBoundedBuffer(maxHarnessStdout)
 	stderr := newBoundedBuffer(maxHarnessStderr)
 	command.Stdout = &stdout
 	command.Stderr = &stderr
-	configureProcessGroup(command)
-	if err := command.Start(); err != nil {
+	process, err := run.Start(command)
+	if err != nil {
 		return commandRun{StartErr: err}
 	}
-
-	waited := make(chan error, 1)
-	go func() { waited <- command.Wait() }()
 	select {
-	case waitErr := <-waited:
-		return commandResult(stdout, stderr, waitErr, nil)
+	case <-process.Done():
+		return commandResult(stdout, stderr, process.Wait(), nil)
 	case <-ctx.Done():
-		terminateProcessGroup(command)
-		grace := time.NewTimer(5 * time.Second)
-		select {
-		case waitErr := <-waited:
-			stopTimer(grace)
-			return commandResult(stdout, stderr, waitErr, ctx.Err())
-		case <-grace.C:
-			killProcessGroup(command)
-			finalWait := time.NewTimer(processKillGrace)
-			select {
-			case waitErr := <-waited:
-				stopTimer(finalWait)
-				return commandResult(stdout, stderr, waitErr, ctx.Err())
-			case <-finalWait.C:
-				return commandRun{WaitErr: errors.New("process did not exit after forced termination"), ContextErr: ctx.Err()}
-			}
+		if err := process.Stop(processKillGrace); err != nil {
+			return commandRun{WaitErr: err, ContextErr: ctx.Err()}
 		}
+		return commandResult(stdout, stderr, process.Wait(), ctx.Err())
 	}
 }
 
@@ -264,15 +253,6 @@ func (buffer boundedBuffer) Bytes() []byte {
 
 func (buffer boundedBuffer) String() string {
 	return string(buffer.data)
-}
-
-func stopTimer(timer *time.Timer) {
-	if !timer.Stop() {
-		select {
-		case <-timer.C:
-		default:
-		}
-	}
 }
 
 func contextExecution(err error) attemptExecution {

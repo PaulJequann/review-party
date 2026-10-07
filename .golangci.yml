@@ -76,6 +76,7 @@ linters:
             - "**/internal/discovery/*.go"
           allow:
             - $gostd
+            - reviewparty/internal/hostrun$
         leaf-model-only:
           files:
             - "**/internal/artifact/*.go"
@@ -99,6 +100,7 @@ linters:
             - $gostd
             - reviewparty/internal/artifact$
             - reviewparty/internal/configuration$
+            - reviewparty/internal/hostrun$
             - reviewparty/internal/model$
             - reviewparty/internal/provenance$
             - reviewparty/internal/result$
@@ -111,6 +113,7 @@ linters:
             - $gostd
             - reviewparty/internal/configuration$
             - reviewparty/internal/engine$
+            - reviewparty/internal/hostrun$
             - reviewparty/internal/model$
             - reviewparty/internal/provenance$
             - reviewparty/internal/store$

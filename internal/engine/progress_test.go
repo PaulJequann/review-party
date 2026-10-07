@@ -181,7 +181,7 @@ func TestReviewExplicitProfileEmitsProgressEvents(t *testing.T) {
 
 	selection := model.RunSelection{Repository: repository, Subject: model.WorkingChanges(), Profile: "repository:local-docs"}
 	writeExecutableProfile(t, repository, "local-docs")
-	record, err := conductor.ReviewExplicitProfile(context.Background(), selection)
+	record, err := conductor.ReviewExplicitProfile(testContext(t), selection)
 	if err != nil {
 		t.Fatal(err)
 	}

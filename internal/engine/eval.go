@@ -14,6 +14,9 @@ import (
 )
 
 func (conductor *Conductor) RunEvalSuite(ctx context.Context, selection model.EvalSuiteSelection) (run model.EvalSuiteRun, returnErr error) {
+	if err := requireRun(ctx); err != nil {
+		return model.EvalSuiteRun{}, err
+	}
 	suite, ledger, run, err := conductor.prepareEvalSuiteRun(selection)
 	if err != nil {
 		return model.EvalSuiteRun{}, err

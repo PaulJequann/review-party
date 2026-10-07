@@ -15,7 +15,7 @@ func TestSeededEvalRunsThroughOrdinaryReviewWithDurableProvenance(t *testing.T) 
 	suite, sourceFile := writeSeededEvalTestSuite(t, seededTestCase{expectedFiles: []string{"service.go"}, patch: seededPatch(false)})
 	original := readTestFile(t, sourceFile)
 	conductor := testEvalConductor(t, successfulExecutor(findingsReview))
-	run, err := conductor.RunEvalSuite(context.Background(), evalSelection(suite))
+	run, err := conductor.RunEvalSuite(testContext(t), evalSelection(suite))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +44,7 @@ func TestSeededEvalRejectsUndeclaredChangedPathsBeforeLaunch(t *testing.T) {
 
 func TestPackagedSeededEvalRunsThroughOrdinaryReview(t *testing.T) {
 	conductor := testEvalConductor(t, successfulExecutor(findingsReview))
-	run, err := conductor.RunEvalSuite(context.Background(), evalSelection("global:seeded-bugs"))
+	run, err := conductor.RunEvalSuite(testContext(t), evalSelection("global:seeded-bugs"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ func assertSeedPreflightFailure(t *testing.T, fixture seededTestCase, message st
 	suite, _ := writeSeededEvalTestSuite(t, fixture)
 	executor := successfulExecutor(cleanReview)
 	conductor := testEvalConductor(t, executor)
-	_, err := conductor.RunEvalSuite(context.Background(), evalSelection(suite))
+	_, err := conductor.RunEvalSuite(testContext(t), evalSelection(suite))
 	if err == nil || !strings.Contains(err.Error(), message) {
 		t.Fatalf("error = %v", err)
 	}

@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"reviewparty/internal/artifact"
 	"reviewparty/internal/configuration"
+	"reviewparty/internal/hostrun"
 	"reviewparty/internal/model"
 	"reviewparty/internal/store"
 	"reviewparty/internal/subject"
@@ -80,7 +81,7 @@ func TestReviewFreezesWorkingChangesBeforeExecution(t *testing.T) {
 		},
 	}
 	conductor := testConductor(t, executor, time.Second)
-	record, err := conductor.Review(context.Background(), testSelection(repository))
+	record, err := conductor.Review(testContext(t), testSelection(repository))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +98,7 @@ func TestReviewCompletesOnlyWithValidCleanResult(t *testing.T) {
 	executor := successfulExecutor(cleanReview)
 	conductor := testConductor(t, executor, time.Second)
 
-	record, err := conductor.Review(context.Background(), testSelection(repository))
+	record, err := conductor.Review(testContext(t), testSelection(repository))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +117,7 @@ func TestReviewPreservesValidFindings(t *testing.T) {
 	repository := changedTestRepository(t)
 	conductor := testConductor(t, successfulExecutor(findingsReview), time.Second)
 
-	record, err := conductor.Review(context.Background(), testSelection(repository))
+	record, err := conductor.Review(testContext(t), testSelection(repository))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +145,7 @@ func TestRecordSaveFailureRemovesPublishedAttemptArtifacts(t *testing.T) {
 	artifactRoot := t.TempDir()
 	conductor.artifacts = mustNewArtifactStore(t, artifactRoot)
 
-	_, err = conductor.Review(context.Background(), testSelection(repository))
+	_, err = conductor.Review(testContext(t), testSelection(repository))
 	if err == nil || !strings.Contains(err.Error(), "final record save") {
 		t.Fatalf("error = %v, want final record save failure", err)
 	}
@@ -203,7 +204,7 @@ func TestMalformedOutputIsIncompleteNeverClean(t *testing.T) {
 	executor := successfulExecutor("I found nothing concerning.")
 	conductor := testConductor(t, executor, time.Second)
 
-	record, err := conductor.Review(context.Background(), testSelection(repository))
+	record, err := conductor.Review(testContext(t), testSelection(repository))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,7 +229,7 @@ func TestFailedExecutionCannotBeCompletedByValidPayload(t *testing.T) {
 	}
 	conductor := testConductor(t, executor, time.Second)
 
-	record, err := conductor.Review(context.Background(), testSelection(repository))
+	record, err := conductor.Review(testContext(t), testSelection(repository))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -252,7 +253,7 @@ func TestUnavailableReviewerLaunchesNoAttempt(t *testing.T) {
 	}
 	conductor := testConductor(t, executor, time.Second)
 
-	record, err := conductor.Review(context.Background(), testSelection(repository))
+	record, err := conductor.Review(testContext(t), testSelection(repository))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -283,7 +284,7 @@ func TestUnavailableReviewerDoesNotFallBack(t *testing.T) {
 		"opencode": opencode,
 	}, time.Second)
 
-	record, err := conductor.Review(context.Background(), testSelection(repository))
+	record, err := conductor.Review(testContext(t), testSelection(repository))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -314,7 +315,7 @@ func TestAttemptDeadlineProducesInspectableIncompleteRecord(t *testing.T) {
 	}
 	conductor := testConductor(t, executor, 20*time.Millisecond)
 
-	record, err := conductor.Review(context.Background(), testSelection(repository))
+	record, err := conductor.Review(testContext(t), testSelection(repository))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -347,7 +348,7 @@ func TestReviewRecordsCoherentOperationalTimingAndBuildProvenance(t *testing.T) 
 		return model.RuntimeProvenance{Version: "0.4.0", VCSRevision: "abc123", VCSModified: &modified}
 	}
 
-	record, err := conductor.Review(context.Background(), testSelection(repository))
+	record, err := conductor.Review(testContext(t), testSelection(repository))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -418,6 +419,32 @@ func successfulExecutor(output string) *scriptedExecutor {
 			return attemptExecution{AssistantText: output, Outcome: model.AttemptCompleted}
 		},
 	}
+}
+
+// testRun opens a runtime under the host temp directory, never under a
+// previous run's redirected TMPDIR, and closes it with the test.
+func testRun(t *testing.T) *hostrun.Run {
+	t.Helper()
+	root, err := os.MkdirTemp(hostrun.HostTempDir(), "review-party-engine-test-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := hostrun.Open(hostrun.Options{Root: root, Warn: func(line string) { t.Log(line) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		run.Close()
+		if err := os.RemoveAll(root); err != nil {
+			t.Error(err)
+		}
+	})
+	return run
+}
+
+func testContext(t *testing.T) context.Context {
+	t.Helper()
+	return hostrun.WithRun(context.Background(), testRun(t))
 }
 
 func testConductor(t *testing.T, executor attemptExecutor, deadline time.Duration) *Conductor {

@@ -1,114 +1,113 @@
 package subject
 
 import (
-	"encoding/json"
+	"context"
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reviewparty/internal/model"
 	"strings"
-	"syscall"
-	"unicode"
 )
 
-const executionRootName = "review-party-worktrees"
-const maxReconciledCheckouts = 100
+// viewAttributes stops clean filters, ident expansion, and encoding
+// conversion from running while a view is checked out.
+const viewAttributes = "* -filter -ident -working-tree-encoding\n"
 
-// ExecutionCheckout hides the complete lifecycle of the repository view used
-// by one Review attempt. Close must run only after the Reviewer process exits.
-type ExecutionCheckout struct {
-	Repository string
-	close      func() error
+// InPlace is the repository itself for a Subject that needs no view. Every
+// other Subject is a view source: ViewKey names the content and BuildView
+// materializes it into an empty directory owned by the runtime.
+func (subject Subject) InPlace() (string, bool) {
+	if subject.Kind == model.SubjectCapturedChange || subject.HeadObject != "" {
+		return "", false
+	}
+	return subject.Repository, true
 }
 
-func (checkout *ExecutionCheckout) Close() error {
-	if checkout == nil || checkout.close == nil {
-		return nil
+func (subject Subject) ViewKey() string {
+	if subject.Kind == model.SubjectCapturedChange {
+		return "captured:" + subject.capturedDigest
 	}
-	err := checkout.close()
-	checkout.close = nil
+	return "git:" + subject.Repository + ":" + subject.HeadObject
+}
+
+// BuildView copies a captured change, or checks out the recorded head of a
+// Subject with one (a committed range or the unreviewed delta of one) into a
+// git view that shares the repository's objects and writes nothing back.
+func (subject Subject) BuildView(ctx context.Context, dir string) error {
+	switch {
+	case subject.Kind == model.SubjectCapturedChange:
+		if subject.capturedHead == "" {
+			return errors.New("captured Subject execution source is unavailable")
+		}
+		return subject.copyCaptured(dir)
+	case subject.HeadObject != "":
+		return gitView{repository: subject.Repository, head: subject.HeadObject, dir: dir}.build(ctx)
+	default:
+		return fmt.Errorf("%s Subjects are reviewed in place and have no view", subject.Kind)
+	}
+}
+
+// gitView is a detached checkout of head in dir whose objects are borrowed
+// from repository through an alternates file.
+type gitView struct {
+	repository string
+	head       string
+	dir        string
+}
+
+func (view gitView) build(ctx context.Context) error {
+	objects, err := view.query(ctx, "rev-parse", "--path-format=absolute", "--git-path", "objects")
+	if err != nil {
+		return err
+	}
+	format, err := view.query(ctx, "rev-parse", "--show-object-format")
+	if err != nil {
+		return err
+	}
+	if _, err := runGit(ctx, "", "init", "-q", "--template=", "--object-format="+format, view.dir); err != nil {
+		return err
+	}
+	if err := view.write(filepath.Join(".git", "objects", "info", "alternates"), []byte(objects+"\n")); err != nil {
+		return err
+	}
+	if err := view.write(filepath.Join(".git", "info", "attributes"), []byte(viewAttributes)); err != nil {
+		return err
+	}
+	_, err = runGit(ctx, view.dir, "-c", "core.hooksPath="+os.DevNull, "-c", "core.fsmonitor=false", "-c", "core.longpaths=true", "checkout", "-q", "--force", "--detach", view.head)
 	return err
 }
 
-type checkoutOwner struct {
-	Repository string `json:"repository"`
-	Path       string `json:"path"`
-	PID        int    `json:"pid"`
+func (view gitView) query(ctx context.Context, args ...string) (string, error) {
+	output, err := runGit(ctx, view.repository, args...)
+	return strings.TrimSpace(string(output)), err
 }
 
-type ownedCheckout struct {
-	root     executionRoot
-	metadata metadataPath
-	owner    checkoutOwner
+func (view gitView) write(relative string, content []byte) error {
+	path := filepath.Join(view.dir, relative)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("prepare Subject view: %w", err)
+	}
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		return fmt.Errorf("prepare Subject view: %w", err)
+	}
+	return nil
 }
 
-type executionRoot string
-type metadataPath string
-type ownerLabel string
-type repositoryPath string
-type checkoutPath string
-
-// PrepareExecution is the repository view a Reviewer reads: a copy of a
-// captured change, a detached checkout of a Subject with a head commit (a
-// committed range or the unreviewed delta of one), else the working tree.
-func (subject Subject) PrepareExecution(owner string) (*ExecutionCheckout, error) {
-	switch {
-	case subject.Kind == model.SubjectCapturedChange:
-		return subject.prepareCapturedExecution(owner)
-	case subject.HeadObject != "":
-		return prepareCommittedExecution(subject.ReviewSubject, owner)
-	default:
-		return &ExecutionCheckout{Repository: subject.Repository}, nil
-	}
-}
-
-func prepareCommittedExecution(subject model.ReviewSubject, owner string) (*ExecutionCheckout, error) {
-	root := executionRoot(filepath.Join(os.TempDir(), executionRootName))
-	if err := os.MkdirAll(string(root), 0o700); err != nil {
-		return nil, fmt.Errorf("create Subject execution root: %w", err)
-	}
-	if err := reconcileOwnedCheckouts(root); err != nil {
-		return nil, err
-	}
-	path, err := os.MkdirTemp(string(root), safeOwner(ownerLabel(owner))+"-")
+func runGit(ctx context.Context, dir string, args ...string) ([]byte, error) {
+	command := exec.CommandContext(ctx, "git", args...)
+	command.Dir = dir
+	command.Env = append(os.Environ(), "GIT_LFS_SKIP_SMUDGE=1", "GIT_TERMINAL_PROMPT=0")
+	output, err := command.Output()
 	if err != nil {
-		return nil, fmt.Errorf("allocate Subject execution checkout: %w", err)
+		return nil, gitCommandError(args, err)
 	}
-	if err := os.Remove(path); err != nil {
-		return nil, fmt.Errorf("prepare Subject execution path: %w", err)
-	}
-	metadata := metadataPath(path + ".owner.json")
-	owned := checkoutOwner{Repository: subject.Repository, Path: path, PID: os.Getpid()}
-	if err := writeOwner(metadata, owned); err != nil {
-		return nil, err
-	}
-	if _, err := gitOutput(subject.Repository, "worktree", "add", "--detach", path, subject.HeadObject); err != nil {
-		return nil, errors.Join(fmt.Errorf("create Subject execution checkout: %w", err), os.Remove(string(metadata)))
-	}
-	checkout := ownedCheckout{root: root, metadata: metadata, owner: owned}
-	return &ExecutionCheckout{Repository: path, close: func() error { return removeOwnedCheckout(checkout) }}, nil
+	return output, nil
 }
 
-func (subject Subject) prepareCapturedExecution(owner string) (*ExecutionCheckout, error) {
-	if subject.capturedHead == "" {
-		return nil, errors.New("captured Subject execution source is unavailable")
-	}
-	root := filepath.Join(os.TempDir(), executionRootName)
-	if err := os.MkdirAll(root, 0o700); err != nil {
-		return nil, err
-	}
-	destination, err := os.MkdirTemp(root, safeOwner(ownerLabel(owner))+"-captured-")
-	if err != nil {
-		return nil, err
-	}
-	if err := copyCapturedTree(subject.capturedHead, destination); err != nil {
-		return nil, errors.Join(err, os.RemoveAll(destination))
-	}
-	return &ExecutionCheckout{Repository: destination, close: func() error { return os.RemoveAll(destination) }}, nil
-}
-
-func copyCapturedTree(source, destination string) error {
+func (subject Subject) copyCaptured(destination string) error {
+	source := subject.capturedHead
 	return filepath.WalkDir(source, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -133,115 +132,4 @@ func copyCapturedTree(source, destination string) error {
 		}
 		return os.WriteFile(target, payload, 0o600)
 	})
-}
-
-func safeOwner(value ownerLabel) string {
-	cleaned := strings.Map(func(r rune) rune {
-		if validOwnerRune(r) {
-			return r
-		}
-		return '-'
-	}, string(value))
-	if cleaned == "" {
-		return "attempt"
-	}
-	return cleaned
-}
-
-func validOwnerRune(value rune) bool {
-	return unicode.IsLetter(value) || unicode.IsDigit(value) || strings.ContainsRune("-_", value)
-}
-
-func writeOwner(path metadataPath, owner checkoutOwner) error {
-	payload, err := json.Marshal(owner)
-	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(string(path), payload, 0o600); err != nil {
-		return fmt.Errorf("write Subject execution ownership: %w", err)
-	}
-	return nil
-}
-
-func reconcileOwnedCheckouts(root executionRoot) error {
-	entries, err := filepath.Glob(filepath.Join(string(root), "*.owner.json"))
-	if err != nil {
-		return err
-	}
-	if len(entries) > maxReconciledCheckouts {
-		entries = entries[:maxReconciledCheckouts]
-	}
-	for _, metadata := range entries {
-		payload, err := os.ReadFile(metadata)
-		if err != nil {
-			return err
-		}
-		var owner checkoutOwner
-		if err := json.Unmarshal(payload, &owner); err != nil {
-			continue
-		}
-		if processAlive(owner.PID) {
-			continue
-		}
-		if err := removeOwnedCheckout(ownedCheckout{root: root, metadata: metadataPath(metadata), owner: owner}); err != nil {
-			return fmt.Errorf("reconcile Subject execution checkout: %w", err)
-		}
-	}
-	return nil
-}
-
-func processAlive(pid int) bool {
-	if pid <= 0 {
-		return false
-	}
-	err := syscall.Kill(pid, 0)
-	return err == nil || errors.Is(err, syscall.EPERM)
-}
-
-func removeOwnedCheckout(checkout ownedCheckout) error {
-	path, err := validateOwnedPath(checkout)
-	if err != nil {
-		return err
-	}
-	registered, err := registeredWorktree(repositoryPath(checkout.owner.Repository), path)
-	if err != nil {
-		return err
-	}
-	if registered {
-		if _, err := gitOutput(checkout.owner.Repository, "worktree", "remove", "--force", string(path)); err != nil {
-			return fmt.Errorf("remove Subject execution checkout: %w", err)
-		}
-	}
-	if err := os.Remove(string(checkout.metadata)); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	return nil
-}
-
-func validateOwnedPath(checkout ownedCheckout) (checkoutPath, error) {
-	root, err := filepath.Abs(string(checkout.root))
-	if err != nil {
-		return "", err
-	}
-	path, err := filepath.Abs(checkout.owner.Path)
-	if err != nil {
-		return "", err
-	}
-	if filepath.Dir(path) != root || string(checkout.metadata) != path+".owner.json" {
-		return "", fmt.Errorf("refuse unowned Subject execution path %q", path)
-	}
-	return checkoutPath(path), nil
-}
-
-func registeredWorktree(repository repositoryPath, target checkoutPath) (bool, error) {
-	value, err := gitOutput(string(repository), "worktree", "list", "--porcelain", "-z")
-	if err != nil {
-		return false, err
-	}
-	for _, field := range strings.Split(string(value), "\x00") {
-		if strings.HasPrefix(field, "worktree ") && strings.TrimPrefix(field, "worktree ") == string(target) {
-			return true, nil
-		}
-	}
-	return false, nil
 }

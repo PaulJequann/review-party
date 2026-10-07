@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"reviewparty/internal/configuration"
+	"reviewparty/internal/hostrun"
 	"reviewparty/internal/model"
 )
 
@@ -24,6 +25,9 @@ func (conductor *Conductor) Run(ctx context.Context, selection model.RunSelectio
 	if err := conductor.requirePreparedState(selection.Repository); err != nil {
 		return model.ReviewBundle{}, err
 	}
+	if err := requireRun(ctx); err != nil {
+		return model.ReviewBundle{}, err
+	}
 	prepared, ledger, err := conductor.prepareRun(selection)
 	if err != nil {
 		return model.ReviewBundle{}, err
@@ -32,6 +36,18 @@ func (conductor *Conductor) Run(ctx context.Context, selection model.RunSelectio
 		conductor.emitRunProgress(bundleMemberProgress(prepared.bundle, index, member.record).event(model.RunProgressPending))
 	}
 	return conductor.executePreparedBundle(ctx, ledger, prepared)
+}
+
+// requireRun creates this invocation's run directory before the Subject is
+// resolved, so delta measurement's private index and every later temporary
+// file land inside the run rather than the host temp directory.
+func requireRun(ctx context.Context) error {
+	run, err := hostrun.From(ctx)
+	if err != nil {
+		return err
+	}
+	_, err = run.TempDir()
+	return err
 }
 
 // ReviewExplicitProfile runs one explicitly selected Profile as an ordinary
@@ -46,6 +62,9 @@ func (conductor *Conductor) ReviewExplicitProfile(ctx context.Context, selection
 		return model.ReviewRecord{}, errors.New("an explicit Profile is required")
 	}
 	if err := conductor.requirePreparedState(selection.Repository); err != nil {
+		return model.ReviewRecord{}, err
+	}
+	if err := requireRun(ctx); err != nil {
 		return model.ReviewRecord{}, err
 	}
 	reviewStarted := conductor.now().UTC()

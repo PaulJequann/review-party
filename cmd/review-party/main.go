@@ -5,11 +5,13 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"reviewparty/internal/hostrun"
 	"strings"
 	"syscall"
 )
 
 func main() {
+	hostrun.Init()
 	ctx, stop := signalContext(context.Background())
 	defer stop()
 	os.Exit(execute(ctx, os.Args[1:], productionCommandIO(os.Stdin, os.Stdout, os.Stderr)))
@@ -45,4 +47,30 @@ func run(ctx context.Context, arguments []string, stdout, stderr io.Writer) int 
 
 func productionCommandIO(input io.Reader, output, errorOutput io.Writer) commandIO {
 	return commandIO{input: input, output: output, errors: errorOutput}
+}
+
+// openRun gives the invocation its run and the close that removes it. A
+// runtime root this process cannot use is one warning; the command still
+// runs, and every Reviewer path then fails with hostrun.ErrNoRun.
+func openRun(ctx context.Context, arguments []string, stderr io.Writer) (context.Context, func()) {
+	warn := newRunWarningSink(stderr)
+	run, err := hostrun.Open(hostrun.Options{
+		Warn:    warn,
+		Command: commandName(arguments),
+		Version: currentRuntimeProvenance().Version,
+	})
+	if err != nil {
+		warn("review-party cannot use its runtime directory: " + err.Error())
+		return ctx, func() {}
+	}
+	return hostrun.WithRun(ctx, run), run.Close
+}
+
+func commandName(arguments []string) string {
+	for _, argument := range arguments {
+		if !strings.HasPrefix(argument, "-") {
+			return argument
+		}
+	}
+	return ""
 }

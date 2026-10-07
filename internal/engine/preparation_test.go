@@ -57,7 +57,7 @@ func TestReviewPreparationBuildsSharedPreparedReviews(t *testing.T) {
 func TestReviewPreparationFailurePrecedesReviewerLaunch(t *testing.T) {
 	executor := successfulExecutor(cleanReview)
 	conductor := testConductor(t, executor, time.Second)
-	_, err := conductor.Review(context.Background(), model.RunSelection{
+	_, err := conductor.Review(testContext(t), model.RunSelection{
 		Repository: testRepository(t), Subject: model.WorkingChanges(), Profile: "bugs",
 	})
 	requirePreparationErrorContains(t, err, "working changes are empty")
@@ -79,7 +79,7 @@ func TestBundleMembersSharePreparedSubjectAndTiming(t *testing.T) {
 		instant = instant.Add(time.Millisecond)
 		return instant
 	}
-	bundle, err := conductor.Run(context.Background(), model.RunSelection{Repository: repository, Subject: model.WorkingChanges()})
+	bundle, err := conductor.Run(testContext(t), model.RunSelection{Repository: repository, Subject: model.WorkingChanges()})
 	requirePreparationNoError(t, err)
 	requirePreparationEqual(t, "bundle members", len(bundle.Members), 2)
 	first, err := conductor.Inspect(context.Background(), bundle.Members[0].ReviewID)
@@ -113,7 +113,7 @@ func TestEvalRetryReusesPreparedSubject(t *testing.T) {
 		Repository: suite, Subject: model.CapturedChange(base, head), Profile: "bugs",
 		Reviewer: defaultReviewer, Model: "grok-code-fast-1", Effort: "high",
 	}
-	record, err := conductor.reviewEvalCase(context.Background(), selection, model.RetryPolicy{
+	record, err := conductor.reviewEvalCase(testContext(t), selection, model.RetryPolicy{
 		MaxAttempts: 2, InitialBackoff: "1ms", MaxBackoff: "1ms",
 	})
 	requirePreparationNoError(t, err)

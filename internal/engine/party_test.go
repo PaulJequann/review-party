@@ -77,7 +77,7 @@ func writeExecutableProfile(t *testing.T, repository, name string) {
 
 func runRun(t *testing.T, conductor *Conductor, selection model.RunSelection) model.ReviewBundle {
 	t.Helper()
-	bundle, err := conductor.Run(context.Background(), selection)
+	bundle, err := conductor.Run(testContext(t), selection)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +86,7 @@ func runRun(t *testing.T, conductor *Conductor, selection model.RunSelection) mo
 
 func runRunExpectingFailure(t *testing.T, conductor *Conductor, selection model.RunSelection) error {
 	t.Helper()
-	_, err := conductor.Run(context.Background(), selection)
+	_, err := conductor.Run(testContext(t), selection)
 	if err == nil {
 		t.Fatal("run unexpectedly succeeded")
 	}
@@ -437,7 +437,7 @@ func TestRunHonorsTheAuthoredConcurrencyLimit(t *testing.T) {
 		close(*release)
 	}()
 	writeRepositorySelection(t, repository, concurrentTwoProfilesSelection())
-	runContext, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	runContext, cancel := context.WithTimeout(testContext(t), 10*time.Second)
 	defer cancel()
 	bundle, err := conductor.Run(runContext, model.RunSelection{Repository: repository, Subject: model.WorkingChanges()})
 	if err != nil {

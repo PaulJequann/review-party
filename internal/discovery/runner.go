@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"reviewparty/internal/hostrun"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -43,25 +44,26 @@ type Runner interface {
 }
 
 type processSession struct {
-	process   *exec.Cmd
-	finished  chan error
+	process   *hostrun.Process
 	resources []io.Closer
 	closeOnce sync.Once
 }
 
-func startProcessSession(process *exec.Cmd, resources ...io.Closer) (*processSession, error) {
-	if !processTreeCleanupAvailable() {
-		closeProcessResources(resources)
-		return nil, errors.New("discovery process-tree cleanup is unavailable on this platform")
-	}
-	configureProcessGroup(process)
-	if err := process.Start(); err != nil {
+// startProcessSession starts process under the invocation's run, which owns
+// its process tree. resources are the owner's ends of the process's pipes;
+// they are closed on a failed start and when the session closes.
+func startProcessSession(ctx context.Context, process *exec.Cmd, resources ...io.Closer) (*processSession, error) {
+	run, err := hostrun.From(ctx)
+	if err != nil {
 		closeProcessResources(resources)
 		return nil, err
 	}
-	finished := make(chan error, 1)
-	go func() { finished <- process.Wait() }()
-	return &processSession{process: process, finished: finished, resources: resources}, nil
+	started, err := run.Start(process)
+	if err != nil {
+		closeProcessResources(resources)
+		return nil, err
+	}
+	return &processSession{process: started, resources: resources}, nil
 }
 
 func closeProcessResources(resources []io.Closer) {
@@ -75,8 +77,13 @@ func closeProcessResources(resources []io.Closer) {
 	}
 }
 
+// Stop ends the process tree, terminate then kill with processCleanupGrace
+// each, and reports how the process exited.
 func (session *processSession) Stop() error {
-	return stopProcess(session.process, session.finished)
+	if err := session.process.Stop(processCleanupGrace); err != nil {
+		return err
+	}
+	return session.process.Wait()
 }
 
 func (session *processSession) Close() {
@@ -97,7 +104,7 @@ func (execRunner) Run(ctx context.Context, command Command) RunResult {
 	commandContext, cancel := context.WithCancel(ctx)
 	defer cancel()
 	output := &combinedBoundedOutput{boundedCapture: boundedCapture{limit: maxCaptureBytes, cancel: cancel}}
-	session, err := startDiscoveryProcess(command, output)
+	session, err := startDiscoveryProcess(commandContext, command, output)
 	if err != nil {
 		return processStartResult(err, ctx, output)
 	}
@@ -115,7 +122,7 @@ func validateCommand(command Command) error {
 	return nil
 }
 
-func startDiscoveryProcess(command Command, output *combinedBoundedOutput) (*processSession, error) {
+func startDiscoveryProcess(ctx context.Context, command Command, output *combinedBoundedOutput) (*processSession, error) {
 	executable, err := trustedExecutable(command.Args[0])
 	if err != nil {
 		return nil, err
@@ -124,7 +131,7 @@ func startDiscoveryProcess(command Command, output *combinedBoundedOutput) (*pro
 	process.Env = append([]string(nil), command.Environment...)
 	process.Stdout = &boundedStream{output: output, target: &output.stdout}
 	process.Stderr = &boundedStream{output: output, target: &output.stderr}
-	return startProcessSession(process)
+	return startProcessSession(ctx, process)
 }
 
 func trustedExecutable(name string) (string, error) {
@@ -178,11 +185,8 @@ func processStartResult(err error, ctx context.Context, output *combinedBoundedO
 
 func waitForDiscoveryProcess(ctx context.Context, session *processSession) error {
 	select {
-	case runErr := <-session.finished:
-		if ctx.Err() != nil {
-			killProcessGroup(session.process)
-		}
-		return runErr
+	case <-session.process.Done():
+		return session.process.Wait()
 	case <-ctx.Done():
 		return session.Stop()
 	}
@@ -200,33 +204,6 @@ func discoveryRunResult(output *combinedBoundedOutput, ctx context.Context, runE
 		}
 	}
 	return RunResult{Stdout: output.stdout.Bytes(), Stderr: output.stderr.Bytes(), OutputOverflow: output.overflow.Load()}
-}
-
-func stopProcess(process *exec.Cmd, finished <-chan error) error {
-	terminateProcessGroup(process)
-	err, stopped := waitForProcess(finished, processCleanupGrace)
-	if stopped {
-		// The leader may have exited while descendants still hold its pipes.
-		// Reap the leader first, then clear the process group as well.
-		killProcessGroup(process)
-		return err
-	}
-	killProcessGroup(process)
-	if err, stopped := waitForProcess(finished, processCleanupGrace); stopped {
-		return err
-	}
-	return errors.New("discovery process did not terminate after forced cleanup")
-}
-
-func waitForProcess(finished <-chan error, timeout time.Duration) (error, bool) {
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
-	select {
-	case err := <-finished:
-		return err, true
-	case <-timer.C:
-		return nil, false
-	}
 }
 
 type combinedBoundedOutput struct {
