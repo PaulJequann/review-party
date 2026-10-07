@@ -363,3 +363,61 @@ func TestUninstallRemovesEveryCopyOfTheBlock(t *testing.T) {
 		t.Fatalf("pre-push = %q", got)
 	}
 }
+
+func TestUninstallDeletesAHookInstallCreatedThroughADanglingSymlink(t *testing.T) {
+	fixture := newUninstallFixture(t)
+	link, target := fixture.path(".git/hooks/pre-commit"), fixture.path("tools/hooks/pre-commit")
+	if err := os.Symlink(filepath.Join("..", "..", "tools", "hooks", "pre-commit"), link); err != nil {
+		t.Skipf("cannot create a symlink: %v", err)
+	}
+	fixture.install([]string{"git"})
+	if _, err := os.Stat(target); err != nil {
+		t.Fatalf("install did not write through the symlink: %v", err)
+	}
+
+	result := fixture.uninstall("", false, "--yes")
+
+	if result.exit != 0 || !strings.Contains(result.stdout, "git pre-commit: delete the file install created at "+target+"\n") {
+		t.Fatalf("uninstall = %+v, want the target install created deleted", result)
+	}
+	if _, err := os.Lstat(fixture.path("tools")); err == nil {
+		t.Fatal("uninstall kept the directories install created for the symlink's target")
+	}
+	if info, err := os.Lstat(link); err != nil || info.Mode()&fs.ModeSymlink == 0 {
+		t.Fatalf("uninstall removed the Caller's symlink: %v", err)
+	}
+}
+
+func TestUninstallReportsAnInstalledHookWhoseMarkersOrConditionWereEdited(t *testing.T) {
+	start, _ := hookBlockMarkers(configuration.CheckpointPrePush)
+	for _, test := range []struct {
+		name, path, from, to, left string
+	}{
+		{name: "an edited start marker", path: ".git/hooks/pre-push", from: start, to: "# review-party, mine now", left: "git pre-push: edited review-party block left in "},
+		{name: "a deleted start marker", path: ".git/hooks/pre-push", from: start + "\n", left: "git pre-push: edited review-party block left in "},
+		{name: "an edited Claude Code condition", path: ".claude/settings.json", from: `"Bash(git *)"`, to: `"Bash(git push *)"`, left: "claude-code: edited review-party entry left in "},
+		{name: "a deleted Claude Code condition", path: ".claude/settings.json", from: `"if": "Bash(git *)",`, left: "claude-code: edited review-party entry left in "},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newUninstallFixture(t)
+			fixture.writeExecutable(".git/hooks/pre-push", "#!/bin/sh\necho team\n")
+			fixture.writeFile(".claude/settings.json", teamSettings)
+			fixture.install([]string{"git"}, []string{"claude-code"})
+			installed := fixture.read(test.path)
+			edited := strings.Replace(installed, test.from, test.to, 1)
+			if edited == installed {
+				t.Fatalf("%s holds no %q:\n%s", test.path, test.from, installed)
+			}
+			fixture.writeExecutable(test.path, edited)
+
+			result := fixture.uninstall("", false, "--yes")
+
+			if result.exit != 1 || !strings.Contains(result.stdout, test.left+fixture.path(test.path)+"\n") {
+				t.Fatalf("uninstall = %+v, want %q", result, test.left+fixture.path(test.path))
+			}
+			if got := fixture.read(test.path); got != edited {
+				t.Fatalf("uninstall changed the edited file:\n%s", got)
+			}
+		})
+	}
+}

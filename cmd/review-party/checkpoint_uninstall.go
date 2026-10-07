@@ -240,13 +240,14 @@ func gitUninstallSurfaces(root string, locations subject.HookLocations, name con
 
 func hookBlockRemoval(name configuration.CheckpointName) func([]byte) removal {
 	block := checkpointHookBlock(name)
-	start, _ := hookBlockMarkers(name)
+	start, end := hookBlockMarkers(name)
+	traces := []string{start, end, "review-party checkpoint hook git " + string(name)}
 	return func(content []byte) removal {
 		result := removal{residue: content}
 		if bytes.Contains(content, []byte(block)) {
 			result.residue, result.removed = bytes.ReplaceAll(content, []byte(block), nil), removedBlock
 		}
-		if bytes.Contains(result.residue, []byte(start+"\n")) {
+		if slices.ContainsFunc(traces, func(trace string) bool { return bytes.Contains(result.residue, []byte(trace)) }) {
 			result.left = leftBlock
 		}
 		return result
@@ -294,7 +295,7 @@ func (agent agentIntegration) removeEntry(content []byte) removal {
 	if removed {
 		result.removed = removedEntry
 	}
-	if outcome != hookEntryAdded {
+	if outcome != hookEntryAdded || bytes.Contains(residue, []byte(agent.hookCall())) {
 		result.left = leftEntry
 	}
 	return result
@@ -350,7 +351,7 @@ func planUninstall(root string, scope uninstallScope) (uninstallPlan, error) {
 		content, err := os.ReadFile(surface.path)
 		switch {
 		case errors.Is(err, fs.ErrNotExist):
-			plan.record.forget(surface.path)
+			plan.record.forget(recordedPath(surface.path))
 		case err != nil:
 			return uninstallPlan{}, fmt.Errorf("read %s: %w", surface.path, err)
 		case surface.withheld:
@@ -376,10 +377,11 @@ func (surface uninstallSurface) skeleton(result removal) bool {
 // block went earlier, so a rerun finishes what an interrupted one started.
 func (plan *uninstallPlan) survey(surface uninstallSurface, result removal) {
 	skeleton := surface.skeleton(result)
-	created, recorded := plan.record.created(surface.path)
+	created, recorded := plan.record.created(recordedPath(surface.path))
 	switch {
 	case skeleton && recorded:
 		plan.deletes = append(plan.deletes, created)
+		surface.path = created.Path
 		plan.add(surface, removedFile, nil)
 	case result.removed != "":
 		plan.writes[surface.path] = result.residue
@@ -391,7 +393,7 @@ func (plan *uninstallPlan) survey(surface uninstallSurface, result removal) {
 	if result.left.remains() {
 		plan.add(surface, result.left, result.manual)
 	} else {
-		plan.record.forget(surface.path)
+		plan.record.forget(recordedPath(surface.path))
 	}
 }
 

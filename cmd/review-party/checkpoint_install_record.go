@@ -49,6 +49,7 @@ func readInstallRecord(root string) (installRecord, error) {
 func recordCreations(root string, paths []string) error {
 	var created []createdFile
 	for _, path := range paths {
+		path = recordedPath(path)
 		if _, err := os.Lstat(path); errors.Is(err, fs.ErrNotExist) {
 			created = append(created, createdFile{Path: path, Directories: missingDirectories(filepath.Dir(path))})
 		}
@@ -65,6 +66,15 @@ func recordCreations(root string, paths []string) error {
 		record.Created = append(record.Created, file)
 	}
 	return record.save()
+}
+
+// recordedPath is the file a write to path creates: a symlink's target, as
+// replaceFile writes through it.
+func recordedPath(path string) string {
+	if target, err := linkTarget(path); err == nil {
+		return target
+	}
+	return path
 }
 
 func missingDirectories(directory string) []string {
