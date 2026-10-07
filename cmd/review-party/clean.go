@@ -153,6 +153,9 @@ func (result *cleanResult) remove(item footprintItem) {
 		return
 	}
 	result.Removed = append(result.Removed, item)
+	if item.Kind == kindCache {
+		_ = os.Remove(filepath.Dir(item.Path)) //nolint:errcheck // The parent is Review Party's own cache directory; removal fails only while another cache still lives in it.
+	}
 	if item.Kind == kindLegacy && filepath.Base(item.Path) == "review-party-worktrees" {
 		result.Notes = append(result.Notes, "repositories reviewed by an earlier release may still list worktrees under "+item.Path+"; run `git worktree prune` in each to clear them")
 	}

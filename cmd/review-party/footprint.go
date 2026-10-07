@@ -62,7 +62,14 @@ const (
 	kindUnrecognized                = footprintKind(engine.StateUnrecognized)
 	kindCache         footprintKind = "cache"
 	kindLegacy        footprintKind = "legacy"
+	kindRecentTemp    footprintKind = "recent-temp"
 )
+
+// legacyQuietPeriod is how long a review-party-* entry in the host temp
+// directory must sit unchanged before clean treats it as left over. The
+// current release still names some host temp files this way, such as the
+// instruction editor's open draft, and an older binary may still be running.
+const legacyQuietPeriod = 24 * time.Hour
 
 // removal is what asks clean to remove an item.
 type removal int
@@ -102,6 +109,7 @@ var footprintRules = map[footprintKind]footprintRule{
 	kindUnrecognized:  {class: classDurable, blocked: "Review Party did not write it"},
 	kindCache:         {class: classCache, removal: removedWithYes},
 	kindLegacy:        {class: classLegacy, removal: removedWithYes, leftover: true},
+	kindRecentTemp:    {class: classLegacy, blocked: "changed in the last 24 hours, so a running Review Party may still use it"},
 }
 
 // command is the clean invocation that removes an item of this kind.
@@ -323,9 +331,17 @@ func legacyItems(temp string) ([]footprintItem, error) {
 		}
 		path := filepath.Join(temp, entry.Name())
 		bytes, sizeErr := hostrun.DiskUsage(path)
-		items = append(items, newFootprintItem(path, kindLegacy, bytes, sizeErr))
+		items = append(items, newFootprintItem(path, legacyKind(entry), bytes, sizeErr))
 	}
 	return items, err
+}
+
+func legacyKind(entry fs.DirEntry) footprintKind {
+	info, err := entry.Info()
+	if err != nil || time.Since(info.ModTime()) < legacyQuietPeriod {
+		return kindRecentTemp
+	}
+	return kindLegacy
 }
 
 // isLegacyEntry matches review-party and review-party-*, except runtime

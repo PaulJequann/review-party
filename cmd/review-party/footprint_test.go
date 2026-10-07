@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"reviewparty/internal/hostrun"
 )
@@ -56,6 +57,7 @@ func (fixture hostFixture) seed() string {
 	fixture.write(filepath.Join(fixture.host.cache, "codex.json"), "{}")
 	fixture.write(filepath.Join(fixture.host.temp, "review-party-worktrees", "abc", "file"), "old worktree")
 	fixture.write(filepath.Join(fixture.host.temp, "review-party-delta-1", "patch"), "old delta")
+	fixture.age(fixture.inTemp("review-party-worktrees", "review-party-delta-1")...)
 	fixture.write(filepath.Join(fixture.host.temp, "review-party-runtime-9999", "x"), "another root")
 	fixture.write(filepath.Join(fixture.host.temp, "unrelated", "x"), "someone else's")
 	return dead
@@ -68,6 +70,18 @@ func (fixture hostFixture) write(path, content string) {
 	}
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		fixture.t.Fatal(err)
+	}
+}
+
+// age backdates paths past legacyQuietPeriod, as leftovers of an earlier
+// release would be.
+func (fixture hostFixture) age(paths ...string) {
+	fixture.t.Helper()
+	old := time.Now().Add(-2 * legacyQuietPeriod)
+	for _, path := range paths {
+		if err := os.Chtimes(path, old, old); err != nil {
+			fixture.t.Fatal(err)
+		}
 	}
 }
 

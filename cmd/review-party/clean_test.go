@@ -46,7 +46,18 @@ func TestCleanYesRemovesLeftoversAndCacheButNotHistory(t *testing.T) {
 	assertLabels(t, "removed by a second pass", result.Removed)
 	kept := append(fixture.inState("ledger.sqlite", "ledger.sqlite-wal", "backups", "artifacts/ab/published", "notes.txt"), fixture.inTemp("review-party-runtime-9999", "unrelated")...)
 	removed := append(fixture.inState("artifacts/.artifact-1.tmp"), fixture.inTemp("review-party-delta-1", "review-party-worktrees")...)
-	fixture.assertOnDisk(kept, append(removed, fixture.host.cache))
+	fixture.assertOnDisk(kept, append(removed, filepath.Dir(fixture.host.cache)))
+}
+
+func TestCleanYesKeepsRecentTempEntriesARunningReviewPartyMayUse(t *testing.T) {
+	fixture := newHostFixture(t)
+	draft := filepath.Join(fixture.host.temp, "review-party-instructions-1.md")
+	fixture.write(draft, "unsaved instructions")
+
+	result := decodeInto[cleanResult](t, fixture.run("clean", "--yes", "--format", "json"), 0)
+
+	assertLabels(t, "kept", result.Kept, "recent-temp review-party-instructions-1.md")
+	fixture.assertOnDisk([]string{draft}, nil)
 }
 
 // assertExitAndOutput fails unless the command exited with exit and its
@@ -91,6 +102,7 @@ func TestCleanExitsOneAndNamesWhatItCouldNotRemove(t *testing.T) {
 	fixture := newHostFixture(t)
 	locked := filepath.Join(fixture.host.temp, "review-party-eval-1", "sealed")
 	fixture.write(filepath.Join(locked, "file"), "stuck")
+	fixture.age(filepath.Dir(locked))
 	if err := os.Chmod(locked, 0o500); err != nil {
 		t.Fatal(err)
 	}
