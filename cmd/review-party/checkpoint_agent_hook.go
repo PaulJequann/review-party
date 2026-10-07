@@ -33,9 +33,11 @@ type agentIntegration struct {
 	shellTool string
 	// teamFile is the committed settings file, relative to the repository
 	// root; personalFile is the Caller's own, which personalHelp names.
+	// machineWide means every repository on the machine reads personalFile.
 	teamFile     string
 	personalFile func(root string) (string, error)
 	personalHelp string
+	machineWide  bool
 	// handler is the hook handler every declared Checkpoint shares.
 	handler agentHookHandler
 	// missingBinary is what the installed hook does while review-party is
@@ -60,6 +62,7 @@ var agentIntegrations = []agentIntegration{
 		teamFile:      ".codex/hooks.json",
 		personalFile:  codexPersonalHooksFile,
 		personalHelp:  "$CODEX_HOME/hooks.json (~/.codex/hooks.json by default)",
+		machineWide:   true,
 		handler:       codexHookHandler,
 		missingBinary: "the Codex hook allows every command silently",
 		followUp:      []string{codexApprovalStep, codexCostNote},

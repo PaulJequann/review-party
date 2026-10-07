@@ -167,7 +167,7 @@ func placeAgentsMDBlock(content string, found bool, body string) (hookOutcome, s
 		return hookInserted, content + blankLineBefore(content) + block, nil
 	case sequence != "be":
 		return hookBlockMalformed, content, []string{
-			fmt.Sprintf("Found %d %q and %d %q lines; the block needs one begin line before one end line.", strings.Count(sequence, "b"), agentsMDBegin, strings.Count(sequence, "e"), agentsMDEnd),
+			sequence.problem(),
 			"Delete the extra or misplaced marker lines, or both markers and the lines between them, then rerun the install.",
 		}
 	}
@@ -177,11 +177,9 @@ func placeAgentsMDBlock(content string, found bool, body string) (hookOutcome, s
 	return hookBlockStale, strings.Join(lines[:at[0]+1], "") + body + strings.Join(lines[at[1]:], ""), nil
 }
 
-// agentsMDMarkers reads the marker lines in file order as a sequence of "b"
-// for a begin line and "e" for an end line, with their line indexes. One
-// well-formed block reads "be". A line is a marker only when it holds
-// nothing else.
-func agentsMDMarkers(lines []string) (string, []int) {
+type agentsMDSequence string
+
+func agentsMDMarkers(lines []string) (agentsMDSequence, []int) {
 	kinds := map[string]string{agentsMDBegin: "b", agentsMDEnd: "e"}
 	var sequence strings.Builder
 	var indexes []int
@@ -191,7 +189,11 @@ func agentsMDMarkers(lines []string) (string, []int) {
 			indexes = append(indexes, index)
 		}
 	}
-	return sequence.String(), indexes
+	return agentsMDSequence(sequence.String()), indexes
+}
+
+func (sequence agentsMDSequence) problem() string {
+	return fmt.Sprintf("Found %d %q and %d %q lines; the block needs one begin line before one end line.", strings.Count(string(sequence), "b"), agentsMDBegin, strings.Count(string(sequence), "e"), agentsMDEnd)
 }
 
 // blankLineBefore is what appending after content needs so one blank line

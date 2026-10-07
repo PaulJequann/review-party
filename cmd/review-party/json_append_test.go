@@ -83,3 +83,68 @@ func TestAppendJSONArrayElementRejectsAnUnexpectedShape(t *testing.T) {
 		}
 	}
 }
+
+func TestRemoveJSONArrayElementRestoresTheDocumentBeforeTheAppend(t *testing.T) {
+	element := map[string]string{"matcher": "Bash", "command": "a >/dev/null 2>&1 && b"}
+	for _, content := range []string{
+		"{\n  \"model\": \"opus\",\n  \"hooks\": {\n    \"PreToolUse\": [\n      {\"matcher\": \"Edit\", \"hooks\": []}\n    ]\n  },\n  \"z\": 1\n}\n",
+		"{\n\t\"model\": \"opus\"\n}",
+		`{"model":"opus","hooks":{"Stop":[]}}` + "\n",
+		"{\n  \"hooks\": {\n    \"Stop\": []\n  }\n}\n",
+		"{}\n",
+		"{}",
+	} {
+		appended, err := appendJSONArrayElement([]byte(content), jsonPath{"hooks", "PreToolUse"}, element)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, removed := removeHooks(t, string(appended), element); got != content || !removed {
+			t.Errorf("remove after append = %v\n%s\nwant\n%s", removed, got, content)
+		}
+	}
+}
+
+func TestRemoveJSONArrayElementTakesEveryCopyWhereverItSits(t *testing.T) {
+	ours := `{"matcher":"Bash","hooks":[{"type":"command","command":"x"}]}`
+	element := agentHookGroup{Matcher: "Bash", Hooks: []agentHookHandler{{Type: "command", Command: "x"}}}
+	cases := []struct{ name, content, want string }{
+		{"first of several", "{\"hooks\": {\"PreToolUse\": [\n  " + ours + ",\n  {\"matcher\": \"Edit\"}\n]}}\n", "{\"hooks\": {\"PreToolUse\": [\n  {\"matcher\": \"Edit\"}\n]}}\n"},
+		{"between others", `{"hooks":{"PreToolUse":[1,` + ours + `,2]}}`, `{"hooks":{"PreToolUse":[1,2]}}`},
+		{"twice", `{"a":1,"hooks":{"PreToolUse":[` + ours + `,` + ours + `]}}`, `{"a":1}`},
+		{"hooks before other keys", `{"hooks":{"PreToolUse":[` + ours + `]},"a":1}`, `{"a":1}`},
+		{"key order and spacing differ", `{"hooks":{"PreToolUse":[{ "hooks": [{"command":"x","type":"command"}], "matcher":"Bash" }]},"a":1}`, `{"a":1}`},
+	}
+	for _, test := range cases {
+		if got, removed := removeHooks(t, test.content, element); got != test.want || !removed {
+			t.Errorf("%s: remove = %v\n%s\nwant\n%s", test.name, removed, got, test.want)
+		}
+	}
+}
+
+func TestRemoveJSONArrayElementLeavesOtherShapesAlone(t *testing.T) {
+	element := map[string]string{"matcher": "Bash"}
+	for _, content := range []string{
+		"",
+		"  \n",
+		`{"hooks": []}`,
+		`{"hooks": {"PreToolUse": {"matcher": "Bash"}}}`,
+		`{"hooks": {"PreToolUse": [{"matcher": "Bash", "extra": true}]}}`,
+		`{"other": {"PreToolUse": [{"matcher": "Bash"}]}}`,
+	} {
+		if got, removed := removeHooks(t, content, element); got != content || removed {
+			t.Errorf("remove(%s) = %v, %s; want it unchanged", content, removed, got)
+		}
+	}
+	if _, _, err := removeJSONArrayElement([]byte(`{"hooks": `), jsonPath{"hooks", "PreToolUse"}, element); err == nil {
+		t.Error("remove from truncated JSON succeeded")
+	}
+}
+
+func removeHooks(t *testing.T, content string, element any) (string, bool) {
+	t.Helper()
+	got, removed, err := removeJSONArrayElement([]byte(content), jsonPath{"hooks", "PreToolUse"}, element)
+	if err != nil {
+		t.Fatalf("remove(%s): %v", content, err)
+	}
+	return string(got), removed
+}

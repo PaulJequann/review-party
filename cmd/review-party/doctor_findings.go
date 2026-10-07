@@ -44,6 +44,16 @@ type exemptionConflict struct {
 	Fix         string                       `json:"fix"`
 }
 
+// undeclaredIntegration is something Checkpoint install added that no
+// declared Checkpoint uses any longer. Checkpoint is empty for an entry or
+// block every Checkpoint shares.
+type undeclaredIntegration struct {
+	Integration configuration.IntegrationName `json:"integration"`
+	Checkpoint  configuration.CheckpointName  `json:"checkpoint,omitempty"`
+	Path        string                        `json:"path"`
+	Fix         string                        `json:"fix"`
+}
+
 // waiversUnread reports a ledger doctor cannot read until state preparation
 // upgrades it.
 type waiversUnread struct {
@@ -77,7 +87,22 @@ func (repository doctorRepository) addFindings(result *doctorResult) error {
 		return err
 	}
 	result.ExemptionConflicts = append(result.ExemptionConflicts, conflicts...)
+	if err := repository.addUndeclared(result); err != nil {
+		return err
+	}
 	return repository.addRecentWaivers(result)
+}
+
+func (repository doctorRepository) addUndeclared(result *doctorResult) error {
+	plan, err := planUndeclaredUninstall(repository.root, repository.manager)
+	if err != nil {
+		return err
+	}
+	fix := undeclaredUninstallCommand(repository.root, repository.configuration)
+	for _, step := range plan.steps {
+		result.Undeclared = append(result.Undeclared, undeclaredIntegration{Integration: step.integration, Checkpoint: step.checkpoint, Path: step.path, Fix: fix})
+	}
+	return nil
 }
 
 func (repository doctorRepository) unresolvedNames() []unresolvedName {
@@ -174,6 +199,9 @@ func (result doctorResult) findingLines() []string {
 	for _, conflict := range result.ExemptionConflicts {
 		lines = append(lines, fmt.Sprintf("Checkpoint %s exempts %s, so changes the documentation Profile %s reviews pass it unreviewed; fix: %s",
 			conflict.Checkpoint, strings.Join(conflict.ExemptPaths, ", "), strings.Join(conflict.Profiles, ", "), conflict.Fix))
+	}
+	for _, installed := range result.Undeclared {
+		lines = append(lines, strings.TrimSpace(string(installed.Integration)+" "+string(installed.Checkpoint))+" Integration in "+installed.Path+" serves no declared Checkpoint; fix: "+installed.Fix)
 	}
 	if result.WaiversUnread != nil {
 		lines = append(lines, "Recent Waivers unread: "+result.WaiversUnread.Reason+"; fix: "+result.WaiversUnread.Fix)

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -70,17 +71,86 @@ func assertPushedRefBase(t *testing.T, repository string, ref PushedRef, want st
 	}
 }
 
+func TestSharedHooksAreThoseConfiguredOutsideTheClonesOwnConfigThatLeaveEachRepository(t *testing.T) {
+	tests := []struct {
+		name      string
+		configure func(t *testing.T, repository, global, hooks string)
+		shared    bool
+	}{
+		{name: "the clone's config", configure: func(t *testing.T, repository, _, hooks string) {
+			runTestCommand(t, repository, "git", "config", "core.hooksPath", hooks)
+		}},
+		{name: "the clone's config.worktree", configure: func(t *testing.T, repository, _, hooks string) {
+			runTestCommand(t, repository, "git", "config", "extensions.worktreeConfig", "true")
+			runTestCommand(t, repository, "git", "config", "--worktree", "core.hooksPath", hooks)
+		}},
+		{name: "the global file", shared: true, configure: func(t *testing.T, repository, global, hooks string) {
+			runTestCommand(t, repository, "git", "config", "--file", global, "core.hooksPath", hooks)
+		}},
+		{name: "a file the clone's config includes", shared: true, configure: func(t *testing.T, repository, _, hooks string) {
+			included := filepath.Join(t.TempDir(), "included")
+			runTestCommand(t, repository, "git", "config", "--file", included, "core.hooksPath", hooks)
+			runTestCommand(t, repository, "git", "config", "include.path", included)
+		}},
+		{name: "the global file under the clone's own override", shared: true, configure: func(t *testing.T, repository, global, hooks string) {
+			runTestCommand(t, repository, "git", "config", "--file", global, "core.hooksPath", hooks)
+			runTestCommand(t, repository, "git", "config", "core.hooksPath", "hooks")
+		}},
+		{name: "the command line after the clone's own value", shared: true, configure: func(t *testing.T, repository, _, hooks string) {
+			runTestCommand(t, repository, "git", "config", "core.hooksPath", "hooks")
+			t.Setenv("GIT_CONFIG_COUNT", "1")
+			t.Setenv("GIT_CONFIG_KEY_0", "core.hooksPath")
+			t.Setenv("GIT_CONFIG_VALUE_0", hooks)
+		}},
+		{name: "a home-relative path in the global file", shared: true, configure: func(t *testing.T, repository, global, _ string) {
+			t.Setenv("HOME", repository)
+			runTestCommand(t, repository, "git", "config", "--file", global, "core.hooksPath", "~/hooks")
+		}},
+		{name: "a relative path in the global file", configure: func(t *testing.T, repository, global, _ string) {
+			runTestCommand(t, repository, "git", "config", "--file", global, "core.hooksPath", ".githooks")
+		}},
+		{name: "an empty value in the global file", configure: func(t *testing.T, repository, global, _ string) {
+			runTestCommand(t, repository, "git", "config", "--file", global, "core.hooksPath", "")
+		}},
+		{name: "a relative path in the global file that leaves each repository", shared: true, configure: func(t *testing.T, repository, global, _ string) {
+			runTestCommand(t, repository, "git", "config", "--file", global, "core.hooksPath", filepath.Join("..", filepath.Base(repository), "hooks"))
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			repository := testRepository(t)
+			global := filepath.Join(t.TempDir(), "gitconfig")
+			t.Setenv("GIT_CONFIG_GLOBAL", global)
+			t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+			hooks := filepath.Join(repository, "hooks")
+			test.configure(t, repository, global, hooks)
+
+			locations, err := ResolveHookLocations(repository)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var want []string
+			if test.shared {
+				want = []string{hooks}
+			}
+			if !slices.Equal(locations.SharedHooks, want) {
+				t.Fatalf("shared hooks = %q, want %q", locations.SharedHooks, want)
+			}
+		})
+	}
+}
+
 func TestResolveHookLocations(t *testing.T) {
 	repository := testRepository(t)
 	locations, err := ResolveHookLocations(repository)
-	if err != nil || locations != (HookLocations{Directory: filepath.Join(repository, ".git", "hooks")}) {
+	if err != nil || !reflect.DeepEqual(locations, HookLocations{Directory: filepath.Join(repository, ".git", "hooks"), Common: filepath.Join(repository, ".git")}) {
 		t.Fatalf("plain hooks = %#v, %v", locations, err)
 	}
 
 	for _, hooksPath := range []string{".githooks", " spaced hooks "} {
 		runTestCommand(t, repository, "git", "config", "core.hooksPath", hooksPath)
 		locations, err = ResolveHookLocations(repository)
-		if err != nil || locations != (HookLocations{Directory: filepath.Join(repository, hooksPath), HooksPath: hooksPath}) {
+		if err != nil || !reflect.DeepEqual(locations, HookLocations{Directory: filepath.Join(repository, hooksPath), HooksPath: hooksPath, Common: filepath.Join(repository, ".git")}) {
 			t.Fatalf("core.hooksPath %q = %#v, %v", hooksPath, locations, err)
 		}
 	}
@@ -89,7 +159,7 @@ func TestResolveHookLocations(t *testing.T) {
 	runTestCommand(t, repository, "git", "config", "--unset", "core.hooksPath")
 	runTestCommand(t, repository, "git", "worktree", "add", "--quiet", "-b", "linked", worktree)
 	locations, err = ResolveHookLocations(worktree)
-	if err != nil || locations.Directory != filepath.Join(repository, ".git", "hooks") {
+	if err != nil || !reflect.DeepEqual(locations, HookLocations{Directory: filepath.Join(repository, ".git", "hooks"), Common: filepath.Join(repository, ".git")}) {
 		t.Fatalf("linked worktree hooks = %#v, %v", locations, err)
 	}
 }

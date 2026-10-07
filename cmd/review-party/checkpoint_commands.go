@@ -31,7 +31,7 @@ func newCheckpointCommand(streams commandIO) *cobra.Command {
 			return cmd.Help()
 		},
 	}
-	checkpoint.AddCommand(newCheckpointCheckCommand(streams), newCheckpointWaiveCommand(streams), newCheckpointHookCommand(streams), newCheckpointInstallCommand(streams))
+	checkpoint.AddCommand(newCheckpointCheckCommand(streams), newCheckpointWaiveCommand(streams), newCheckpointHookCommand(streams), newCheckpointInstallCommand(streams), newCheckpointUninstallCommand(streams))
 	return checkpoint
 }
 

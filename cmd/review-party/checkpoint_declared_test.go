@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"testing/iotest"
 
 	"reviewparty/internal/model"
 )
@@ -25,7 +26,7 @@ type commandRun struct {
 func (fixture checkpointFixture) runWith(input string, terminal bool, arguments ...string) commandRun {
 	fixture.t.Helper()
 	var stdout, stderr bytes.Buffer
-	streams := productionCommandIO(strings.NewReader(input), &stdout, &stderr)
+	streams := productionCommandIO(iotest.OneByteReader(strings.NewReader(input)), &stdout, &stderr)
 	streams.terminal = func(any) bool { return terminal }
 	exit := execute(context.Background(), arguments, streams)
 	return commandRun{exit: exit, stdout: stdout.String(), stderr: stderr.String()}
