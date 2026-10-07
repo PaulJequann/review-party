@@ -10,8 +10,20 @@ import (
 	"os"
 	"path/filepath"
 	"reviewparty/internal/model"
-	"strings"
 )
+
+// Directory is the state subdirectory that holds published artifacts.
+const Directory = "artifacts"
+
+// temporaryPattern names an artifact being written. One left behind is a
+// partial write from a process that died before publishing it.
+const temporaryPattern = ".artifact-*.tmp"
+
+// IsTemporary reports whether entry is an unpublished artifact write.
+func IsTemporary(entry fs.DirEntry) bool {
+	matched, err := filepath.Match(temporaryPattern, entry.Name())
+	return err == nil && matched && entry.Type().IsRegular()
+}
 
 type Store struct{ root string }
 
@@ -26,7 +38,7 @@ func (store *Store) Publish(reviewID model.ReviewID, attempt int, kind string, c
 	if attempt < 1 || !validKind(kind) {
 		return model.ArtifactReference{}, errors.New("invalid artifact identity")
 	}
-	relative := filepath.Join("artifacts", string(reviewID), fmt.Sprintf("%d", attempt), kind+".txt")
+	relative := filepath.Join(Directory, string(reviewID), fmt.Sprintf("%d", attempt), kind+".txt")
 	path, err := store.resolve(relative)
 	if err != nil {
 		return model.ArtifactReference{}, err
@@ -34,7 +46,7 @@ func (store *Store) Publish(reviewID model.ReviewID, attempt int, kind string, c
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return model.ArtifactReference{}, fmt.Errorf("create artifact directory: %w", err)
 	}
-	temporary, err := os.CreateTemp(filepath.Dir(path), ".artifact-*.tmp")
+	temporary, err := os.CreateTemp(filepath.Dir(path), temporaryPattern)
 	if err != nil {
 		return model.ArtifactReference{}, fmt.Errorf("create temporary artifact: %w", err)
 	}
@@ -110,7 +122,7 @@ func (store *Store) Remove(reference model.ArtifactReference) error {
 }
 
 func (store *Store) resolve(relative string) (string, error) {
-	if filepath.IsAbs(relative) || strings.HasPrefix(filepath.Clean(relative), ".."+string(filepath.Separator)) || filepath.Clean(relative) == ".." {
+	if !filepath.IsLocal(relative) {
 		return "", fmt.Errorf("artifact path %q escapes root", relative)
 	}
 	return filepath.Join(store.root, relative), nil

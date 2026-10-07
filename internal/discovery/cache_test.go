@@ -38,6 +38,24 @@ func TestFileCacheRoundTripIsPrivateAndStripsTransientFacts(t *testing.T) {
 	assertMode(t, filepath.Join(root, "grok.json"), 0o600)
 }
 
+func TestDefaultCacheWritesOnlyUnderCacheDirectory(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, "cache"))
+	t.Setenv("LocalAppData", filepath.Join(home, "local"))
+	directory, err := CacheDirectory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := Result{Reviewer: "grok", Status: StatusSupported, ObservedAt: time.Now().UTC()}
+	if err := DefaultCache().Save(result.Reviewer, result); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(directory, "grok.json")); err != nil {
+		t.Fatalf("DefaultCache did not write under CacheDirectory %s: %v", directory, err)
+	}
+}
+
 func TestFileCacheSaveReplacesExistingEntry(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "model-discovery")
 	cache := newFileCache(root, func() time.Time { return time.Unix(20, 0).UTC() }, 0)

@@ -57,11 +57,23 @@ func newFileCache(root string, now func() time.Time, maxAge time.Duration) fileC
 // DefaultCache returns the user cache location, or a disabled cache when the
 // platform does not expose one.
 func DefaultCache() Cache {
-	root, err := os.UserCacheDir()
-	if err != nil || root == "" {
+	root, err := CacheDirectory()
+	if err != nil {
 		return nil
 	}
-	return NewFileCache(filepath.Join(root, "review-party", "model-discovery"))
+	return NewFileCache(root)
+}
+
+// CacheDirectory is where DefaultCache keeps model discovery results.
+func CacheDirectory() (string, error) {
+	root, err := os.UserCacheDir()
+	if err != nil {
+		return "", err
+	}
+	if root == "" {
+		return "", errors.New("the platform has no user cache directory")
+	}
+	return filepath.Join(root, "review-party", "model-discovery"), nil
 }
 
 func (cache fileCache) Load(reviewer string) (Result, bool, error) {
@@ -177,16 +189,10 @@ func writeCacheFile(entry cacheEntry, payload []byte) error {
 		}
 	}()
 	if err := temporary.Chmod(0o600); err != nil {
-		if closeErr := temporary.Close(); closeErr != nil {
-			err = errors.Join(err, closeErr)
-		}
-		return fmt.Errorf("set discovery cache permissions: %w", err)
+		return fmt.Errorf("set discovery cache permissions: %w", errors.Join(err, temporary.Close()))
 	}
 	if _, err := temporary.Write(payload); err != nil {
-		if closeErr := temporary.Close(); closeErr != nil {
-			err = errors.Join(err, closeErr)
-		}
-		return fmt.Errorf("write discovery cache: %w", err)
+		return fmt.Errorf("write discovery cache: %w", errors.Join(err, temporary.Close()))
 	}
 	if err := temporary.Close(); err != nil {
 		return fmt.Errorf("close discovery cache: %w", err)

@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reviewparty/internal/model"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -39,6 +40,43 @@ func TestReadRejectsTamperedOrEscapingArtifact(t *testing.T) {
 	if _, err := store.Read(model.ArtifactReference{Path: "../outside", Size: 0}); err == nil || !strings.Contains(err.Error(), "escapes root") {
 		t.Fatalf("error = %v, want root escape rejection", err)
 	}
+}
+
+func TestIsTemporaryMatchesOnlyUnpublishedWrites(t *testing.T) {
+	root := t.TempDir()
+	reference, err := mustNewStore(t, root).Publish(model.ReviewID("rp_1723200000000_0123456789abcdef"), 1, "assistant-text", []byte("x"), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	attempt := filepath.Dir(filepath.Join(root, reference.Path))
+	partial, err := os.CreateTemp(attempt, temporaryPattern)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := partial.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(attempt, ".artifact-dir.tmp"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := temporaryNames(t, attempt), []string{filepath.Base(partial.Name())}; !slices.Equal(got, want) {
+		t.Fatalf("IsTemporary matched %v; want only the partial write %v", got, want)
+	}
+}
+
+func temporaryNames(t *testing.T, directory string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, entry := range entries {
+		if IsTemporary(entry) {
+			names = append(names, entry.Name())
+		}
+	}
+	return names
 }
 
 func mustNewStore(t *testing.T, root string) *Store {

@@ -9,9 +9,6 @@ import (
 	"time"
 )
 
-const stateBackupDirectory = "backups"
-const recoveryMarker = ".recovery-pending"
-
 type StateBackup struct {
 	Directory string   `json:"directory"`
 	Files     []string `json:"files"`
@@ -42,7 +39,7 @@ func BackupIncompatibleReviewRecordState(directory string) (StateBackup, error) 
 	if !recoverableIncompatibility(checkErr) {
 		return StateBackup{}, checkErr
 	}
-	backup := filepath.Join(directory, stateBackupDirectory, time.Now().UTC().Format("20060102T150405.000000000Z"))
+	backup := filepath.Join(directory, BackupDirectory, time.Now().UTC().Format("20060102T150405.000000000Z"))
 	if err := os.MkdirAll(backup, 0o700); err != nil {
 		return StateBackup{}, fmt.Errorf("create review state backup: %w", err)
 	}
@@ -74,7 +71,7 @@ func resumeStateBackup(directory string) (StateBackup, error) {
 		return StateBackup{}, err
 	}
 	backup := strings.TrimSpace(string(payload))
-	if filepath.Dir(filepath.Dir(backup)) != directory || filepath.Base(filepath.Dir(backup)) != stateBackupDirectory {
+	if filepath.Dir(filepath.Dir(backup)) != directory || filepath.Base(filepath.Dir(backup)) != BackupDirectory {
 		return StateBackup{}, errors.New("invalid pending recovery backup path")
 	}
 	result := StateBackup{Directory: backup}
