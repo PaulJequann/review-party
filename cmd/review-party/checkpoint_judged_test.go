@@ -110,7 +110,7 @@ func TestCheckpointWaiverPassesAnUnjudgedPush(t *testing.T) {
 	refs := pushLine(head, fixture.base)
 
 	refused := fixture.hook(refs, "pre-push", "origin", "url")
-	assertRunContains(t, refused, commandRun{exit: 1, stderr: "; judge: review-party finding record " + string(judgedBugs) + "; or waive: review-party checkpoint waive pre-push"})
+	assertRunContains(t, refused, commandRun{exit: 1, stderr: "; judge: review-party finding record " + string(judgedBugs) + "\n"})
 	assertRunContains(t, fixture.waive("", false, "pre-push", "--base", fixture.base, "--reason", "hotfix"), commandRun{stdout: "waived by"})
 	assertRun(t, fixture.hook(refs, "pre-push", "origin", "url"), commandRun{})
 }

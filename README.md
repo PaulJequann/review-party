@@ -684,7 +684,8 @@ nothing, and a block someone edited is left alone.
 
 The hook refuses a change with unreviewed lines beyond the allowance, a spent
 budget, or unjudged Findings, with one line that names the Checkpoint and the
-next command. It mentions waivers only under `anyone`. When the hook
+next command. Only a spent budget adds the waive command, and only under
+`anyone`. When the hook
 cannot decide, because `review-party` is not on `PATH`, the configuration does
 not load, or git cannot name a base, it warns on one line and allows the push
 or commit.

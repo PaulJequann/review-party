@@ -349,7 +349,8 @@ func trackedCheckpointContent(root string, options checkpointOptions) (checkpoin
 // completeCheckpointReport names one next step for a Checkpoint that does not
 // pass: a Review of the unreviewed delta, a wait on a running Review, a stop
 // for a person when the budget is spent, or verdicts on the first unjudged
-// Review. Only a policy that lets anyone waive adds the waive command.
+// Review. Only the stop offers the waive command, and only under a policy
+// that lets anyone waive: every other refusal is its one command.
 func completeCheckpointReport(content checkpointContent, result engine.CheckpointReport, configurationPath string) checkpointReport {
 	report := content.report
 	report.State = result.State
@@ -373,7 +374,7 @@ func completeCheckpointReport(content checkpointContent, result engine.Checkpoin
 		return report
 	}
 	report.nextLabel, report.NextCommand = nextCheckpointStep(report, content.runCommand, configurationPath)
-	if report.Waivers == configuration.WaiversAnyone {
+	if result.State == engine.CheckpointSpent && report.Waivers == configuration.WaiversAnyone {
 		report.WaiveCommand = content.waiveCommand
 	}
 	return report

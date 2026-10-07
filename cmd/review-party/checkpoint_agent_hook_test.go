@@ -110,8 +110,7 @@ func TestAgentHookRefusesCommitsItCannotSee(t *testing.T) {
 	}
 
 	repo := " --repo " + shellQuoteArgument(fixture.repository)
-	staged := denial("pre-commit Checkpoint: 2 unreviewed lines in the staged changes; next: review-party run --unreviewed" + repo +
-		"; or waive: review-party checkpoint waive pre-commit" + repo + ` --reason "<why>"`)
+	staged := denial("pre-commit Checkpoint: 2 unreviewed lines in the staged changes; next: review-party run --unreviewed" + repo)
 	assertRun(t, hook("git commit -m x"), staged.run())
 	tracked := denial("pre-commit Checkpoint: 2 unreviewed lines in the tracked changes; next: review-party run --unreviewed" + repo)
 	assertRun(t, hook("git commit -am x"), tracked.run())

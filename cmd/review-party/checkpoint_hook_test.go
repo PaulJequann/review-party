@@ -98,14 +98,13 @@ func assertOneWarning(t *testing.T, result commandRun) {
 	}
 }
 
-func TestCheckpointHookPreCommitChecksStagedContentAndOffersAnyoneWaivers(t *testing.T) {
+func TestCheckpointHookPreCommitChecksStagedContentWithOneCommand(t *testing.T) {
 	fixture := newCheckpointFixture(t)
 	fixture.declare("pre-commit", "--waivers", "anyone")
 	fixture.writeFile("one.go", "package app\n")
 	fixture.git("add", "one.go")
 
-	refusal := "review-party: pre-commit Checkpoint: 1 unreviewed line in the staged changes; next: review-party run --unreviewed" +
-		`; or waive: review-party checkpoint waive pre-commit --reason "<why>"` + "\n"
+	refusal := "review-party: pre-commit Checkpoint: 1 unreviewed line in the staged changes; next: review-party run --unreviewed\n"
 	assertRun(t, fixture.hook("", "pre-commit"), commandRun{exit: 1, stderr: refusal})
 }
 

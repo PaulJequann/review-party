@@ -116,8 +116,9 @@ Checkpoint and the next command:
 - A Review still running: `review-party wait <id>`.
 - Unjudged Findings, under `judged`: `review-party finding record <id>`.
 
-The refusal never calls the change bad. It mentions waivers only when
-`waivers` is `anyone`.
+The refusal never calls the change bad. Only the spent budget mentions
+waivers, and only when `waivers` is `anyone`: every other refusal is one
+line and its one command.
 
 ### Missing binary
 
@@ -497,7 +498,7 @@ lines, so a Profile that still needs a Review is never judged.
 **Refusal wording.** The refusal reads `pre-push Checkpoint needs a verdict on
 Findings 1, 2 of <id> for <base>..<head>; judge: review-party finding record
 <id>`. With more than one unjudged Review it adds `; 2 more Reviews need
-verdicts`, and under `anyone` it ends with the waive command as before. It
+verdicts`, and never the waive command, which only a spent budget offers. It
 names one Review, the first in selection order, because each Review takes its
 own `finding record` command, and two or more full commands would not fit a
 short line. The count says more remain, and `checkpoint check` lists every
