@@ -85,7 +85,7 @@ func (e *editor) baselineStep(baseline configuration.Baseline, selection configu
 		return func() error { return e.reportBaselineBlocked(blocked) }
 	}
 	if slices.ContainsFunc(gaps, func(missing configuration.UnresolvedReferenceError) bool { return baseline.Binds(selection, missing) }) {
-		return e.bindBaseline
+		return func() error { return e.bindBaseline(selection) }
 	}
 	return nil
 }
@@ -168,7 +168,7 @@ func kindLabel(kind configuration.AuthoredItemKind) string {
 
 // bindBaseline creates what the selected Review Party baseline lacks on this
 // machine. It never edits the selection.
-func (e *editor) bindBaseline() error {
+func (e *editor) bindBaseline(selection configuration.ReviewSelection) error {
 	offer := true
 	title := "This repository selects the Review Party baseline, which your Global Configuration lacks. Create it now?"
 	if err := e.form(huh.NewConfirm().Title(title).Value(&offer)); err != nil || !offer {
@@ -178,7 +178,7 @@ func (e *editor) bindBaseline() error {
 	if err != nil {
 		return err
 	}
-	_, err = e.completeBaseline(baseline, configuration.ReviewSelection{})
+	_, err = e.completeBaseline(baseline, selection)
 	return err
 }
 

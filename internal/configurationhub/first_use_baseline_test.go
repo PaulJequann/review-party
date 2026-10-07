@@ -126,6 +126,22 @@ func TestFirstUseBindsASelectedBaselineWithoutEditingTheSelection(t *testing.T) 
 	}
 }
 
+func TestFirstUseBindingNotesASelectedBaselineLimitBelowItsMembers(t *testing.T) {
+	repository := configuration.Repository(t.TempDir())
+	author := baselineFirstUseManager(t)
+	runFirstUse(t, author, repository, "", "", "codex", "luna", "high", "8m", "y", "y", "y", "3")
+	publishSelection(t, author, repository, configuration.ReviewSelection{
+		ConcurrencyLimit: 1, Global: []configuration.SelectionItem{{Party: configuration.BaselinePartyName}},
+	})
+	teammate := baselineFirstUseManager(t)
+
+	output := runFirstUse(t, teammate, repository, "", "", "codex", "luna", "high", "8m", "y", "y", "3")
+
+	if note := "The Review selection keeps Concurrency Limit 1, below the baseline's 2 Profiles; raise it to 2 to run them at once."; !strings.Contains(output, note) {
+		t.Fatalf("output lacks %q:\n%s", note, output)
+	}
+}
+
 func TestFirstUseReportsASelectedDifferingBaselineAsBlocked(t *testing.T) {
 	repository := configuration.Repository(t.TempDir())
 	author := baselineFirstUseManager(t)
