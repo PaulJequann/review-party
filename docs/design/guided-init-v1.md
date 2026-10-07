@@ -38,6 +38,12 @@ repeatable. An unqualified name resolves Repository before Global, the same as
 `run`, and is added to the selection array of the scope it resolved to. Adding
 a reference that is already selected changes nothing.
 
+`--baseline` adds the [Review Party baseline](baseline-v1.md). It creates
+missing baseline Profiles, then the Global Party `baseline`, then the
+selection, each through its own Plan. `--reviewer`, `--model`, `--effort`, and
+`--deadline` give the missing Profiles one execution. They are all or none,
+need `--baseline`, and are required only when a baseline Profile is missing.
+
 ## First-use journey
 
 Every step is skipped when its outcome already holds. A cancelled `init` loses
@@ -49,8 +55,12 @@ nothing that a rerun cannot finish.
 	  names. For each unresolved Profile, offer Profile Creation with the
 	  Template of the same name preselected when one exists. For each
 	  unresolved Party, offer Party creation.
-	- If the repository declares no selection, offer the Caller's existing
-	  Global Parties and Profiles, or Profile Creation.
+	- If the repository selects `global:baseline` and the Caller lacks the
+	  Party or its Profiles, one step creates what is missing without
+	  editing the selection.
+	- If the repository declares no selection, offer the Review Party
+	  baseline first and preselected, then the Caller's existing Global
+	  Parties and Profiles, or Profile Creation.
 3. Report what remains, one line each.
 
 Slices 3 and 4 of Review Checkpoints v1 add Checkpoint and Integration steps
@@ -78,6 +88,11 @@ Party, so that teammates bind Profiles, not Parties.
 
 Implemented as the default: the offer is preselected, and the journey reports
 when it applied it. Declining selects the Global Party unchanged.
+
+The Review Party baseline answers this question for its own Party. Its
+composition is fixed by the Templates marked as baseline, so a teammate who
+binds `global:baseline` creates the same four Profiles and Party without
+inventing members.
 
 ## Out of scope
 

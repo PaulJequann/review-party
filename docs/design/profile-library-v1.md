@@ -6,7 +6,7 @@ Status: implemented by Configuration Hub Slice 4
 
 A Review Profile is a complete executable package owned by Global or Repository Configuration. The Configuration Manager loads, validates, resolves, and publishes the package. Callers do not assemble execution settings at run time.
 
-Packaged `bugs`, `code-quality`, and `documentation` content is available only as Review Profile Templates. A Template contains judgment instructions and a stable revision. It has no Reviewer, model, reasoning effort, or Attempt deadline, so it cannot execute.
+Packaged `bugs`, `code-quality`, `documentation`, and `test-audit` content is available only as Review Profile Templates. A Template contains judgment instructions and a stable revision. It has no Reviewer, model, reasoning effort, or Attempt deadline, so it cannot execute.
 
 ## Filesystem contract
 

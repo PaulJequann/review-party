@@ -34,7 +34,7 @@ Repository Configuration owns the complete default roll-up:
     "concurrency_limit": 3,
     "global": [
       {"party": "baseline"},
-      {"profile": "documentation"}
+      {"profile": "release-notes"}
     ],
     "repository": [
       {"profile": "supabase-rls"}
@@ -61,5 +61,7 @@ Slice 5 fails preflight on a missing reference, incomplete Profile, unavailable 
 - Inherited concurrency.
 - Per-member execution settings.
 - Packaged executable Parties.
-- Automatic Global baseline selection.
+- Automatic Global baseline selection. Review Party Initialization offers the
+  [Review Party baseline](baseline-v1.md) and selects it only when the Caller
+  confirms that selection.
 - Party rename or deletion in V1.

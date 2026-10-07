@@ -57,6 +57,11 @@ func (plan Plan) Valid() bool {
 	return plan.state != nil && plan.state.valid
 }
 
+// Unchanged reports whether a valid Plan writes nothing.
+func (plan Plan) Unchanged() bool {
+	return plan.Valid() && len(plan.Changes()) == 0
+}
+
 // Reason explains why a plan is invalid.
 func (plan Plan) Reason() string {
 	if plan.state == nil {
@@ -250,6 +255,26 @@ func newProfilePlan(manager *Manager, scope Scope, change Change, publication pe
 		paths: []string{filepath.Join(publication.directory, "profile.json"), filepath.Join(publication.directory, "instructions.md")},
 	}
 	return Plan{state: state}
+}
+
+// mergePlans joins valid Plans into one that publishes all of them or none.
+// The first invalid Plan is returned unchanged.
+func mergePlans(manager *Manager, plans []Plan) Plan {
+	merged := &planState{owner: manager, valid: true}
+	for _, plan := range plans {
+		if !plan.Valid() {
+			return plan
+		}
+		for _, scope := range plan.state.scopes {
+			addScopeOnce(&merged.scopes, scope)
+		}
+		merged.changes = append(merged.changes, plan.state.changes...)
+		merged.paths = append(merged.paths, plan.state.paths...)
+		merged.warnings = append(merged.warnings, plan.state.warnings...)
+		merged.publication.files = append(merged.publication.files, plan.state.publication.files...)
+		merged.publication.profiles = append(merged.publication.profiles, plan.state.publication.profiles...)
+	}
+	return Plan{state: merged}
 }
 
 func addPlanFiles(state *planState, scope Scope, writes []pendingWrite) {

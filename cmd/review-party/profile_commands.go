@@ -22,6 +22,7 @@ type initOptions struct {
 	yes              bool
 	accessible       bool
 	setup            []setupTarget
+	baseline         *configuration.ProfileExecution
 	discoveryService func() *discovery.Service
 }
 
@@ -68,8 +69,8 @@ func executeInit(ctx context.Context, options initOptions, streams commandIO) in
 	manager := streams.configurationManager(options.configuration)
 	repository := configuration.Repository(result.Repository)
 	switch {
-	case len(options.setup) > 0:
-		return applyInitSetup(manager, repository, options, streams)
+	case options.hasSetup():
+		return initSetup{manager: manager, repository: repository, options: options, streams: streams}.apply()
 	case streams.interactive():
 		hub := configurationHubOptions{
 			repository: result.Repository, configuration: options.configuration,
@@ -122,33 +123,71 @@ func freshInitializationCommand(repository string, options initOptions) string {
 	return command
 }
 
-// applyInitSetup adds each named Profile or Party to the selection group of
-// the scope it resolves to, Repository before Global, through one Plan.
-// Names the selection already holds change nothing.
-func applyInitSetup(manager *configuration.Manager, repository configuration.Repository, options initOptions, streams commandIO) int {
-	selection, err := currentReviewSelection(manager, repository)
-	if err != nil {
-		return printFailure(streams.errors, err)
+// hasSetup reports whether setup flags replace the first-use journey.
+func (options initOptions) hasSetup() bool {
+	return len(options.setup) > 0 || options.baseline != nil
+}
+
+// initSetup applies init's setup flags without the journey. Each step
+// publishes through its own Plan and is skipped when its outcome already
+// holds, so a stopped run resumes where it ended.
+type initSetup struct {
+	manager    *configuration.Manager
+	repository configuration.Repository
+	options    initOptions
+	streams    commandIO
+}
+
+// apply adds each named Profile or Party to the selection group of the scope
+// it resolves to, Repository before Global, through one selection Plan. Names
+// the selection already holds change nothing.
+func (setup initSetup) apply() int {
+	selection, unchanged, code := setup.startingSelection()
+	if code != 0 {
+		return code
 	}
-	for _, target := range options.setup {
-		group, item, err := manager.ResolveSelectionTarget(repository, target.kind, target.value)
+	for _, target := range setup.options.setup {
+		group, item, err := setup.manager.ResolveSelectionTarget(setup.repository, target.kind, target.value)
 		if err != nil {
-			return printFailure(streams.errors, err)
+			return printFailure(setup.streams.errors, err)
 		}
 		selection = configuration.AddReviewSelection(selection, group, item).Selection
 	}
-	plan, err := manager.Plan(repository, []configuration.Intent{configuration.SetReviewSelection{Selection: selection}})
+	plan, err := setup.manager.Plan(setup.repository, []configuration.Intent{configuration.SetReviewSelection{Selection: selection}})
 	if err != nil {
-		return printFailure(streams.errors, err)
+		return printFailure(setup.streams.errors, err)
 	}
-	if plan.Valid() && len(plan.Changes()) == 0 {
-		return printCommandOutput(streams.output, streams.errors, func(output *commandOutput) {
-			output.write("The Review selection already includes every name given; nothing was written.\n")
+	if plan.Unchanged() {
+		return printCommandOutput(setup.streams.output, setup.streams.errors, func(output *commandOutput) {
+			output.write("%s", unchanged)
 		})
 	}
-	return publishConfigurationPlan(manager, plan, configurationMutationOptions{
-		repository: string(repository), configuration: options.configuration, yes: options.yes, format: "human",
-	}, streams)
+	return setup.publish(plan)
+}
+
+// startingSelection is the selection the named targets join, and what to
+// print when it ends unchanged. With --baseline it already holds the baseline
+// Party, after the Profile and Party steps.
+func (setup initSetup) startingSelection() (configuration.ReviewSelection, string, int) {
+	if setup.options.baseline == nil {
+		selection, err := currentReviewSelection(setup.manager, setup.repository)
+		return selection, "The Review selection already includes every name given; nothing was written.\n", failureCode(setup.streams.errors, err)
+	}
+	selection, _, err := setup.manager.EffectiveReviewSelection(setup.repository)
+	if err != nil {
+		return configuration.ReviewSelection{}, "", printFailure(setup.streams.errors, err)
+	}
+	baseline, code := setup.completeBaseline(selection)
+	if code != 0 {
+		return configuration.ReviewSelection{}, "", code
+	}
+	return baseline.Select(selection).Selection, "The Review selection already includes the Review Party baseline; it was not changed.\n", 0
+}
+
+func (setup initSetup) publish(plan configuration.Plan) int {
+	return publishConfigurationPlan(setup.manager, plan, configurationMutationOptions{
+		repository: string(setup.repository), configuration: setup.options.configuration, yes: setup.options.yes, format: "human",
+	}, setup.streams)
 }
 
 func runFirstUseJourney(parent context.Context, manager *configuration.Manager, hub configurationHubOptions, streams commandIO) error {

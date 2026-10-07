@@ -55,7 +55,8 @@ func packagedReviewProfileTemplates() []configuration.Template {
 		if err != nil {
 			panic(fmt.Sprintf("read packaged Review Profile Template %q: %v", id, err))
 		}
-		templates = append(templates, configuration.Template{ID: id, Revision: packagedTemplateRevisions[id], Instructions: string(instructions)})
+		packaged := packagedTemplates[id]
+		templates = append(templates, configuration.Template{ID: id, Revision: packaged.revision, Baseline: packaged.baseline, Instructions: string(instructions)})
 	}
 	return templates
 }

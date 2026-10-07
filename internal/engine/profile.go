@@ -166,15 +166,21 @@ func profileRevisionIdentity(revision model.ProfileRevision) string {
 	return hex.EncodeToString(hash[:])
 }
 
-var packagedTemplateRevisions = map[string]string{
-	"bugs":          "bugs-v4",
-	"code-quality":  "code-quality-v1",
-	"documentation": "documentation-v1",
+type packagedTemplate struct {
+	revision string
+	baseline bool
+}
+
+var packagedTemplates = map[string]packagedTemplate{
+	"bugs":          {revision: "bugs-v4", baseline: true},
+	"code-quality":  {revision: "code-quality-v1", baseline: true},
+	"documentation": {revision: "documentation-v1", baseline: true},
+	"test-audit":    {revision: "test-audit-v1", baseline: true},
 }
 
 func packagedTemplateIDs() []string {
-	names := make([]string, 0, len(packagedTemplateRevisions))
-	for name := range packagedTemplateRevisions {
+	names := make([]string, 0, len(packagedTemplates))
+	for name := range packagedTemplates {
 		names = append(names, name)
 	}
 	sort.Strings(names)

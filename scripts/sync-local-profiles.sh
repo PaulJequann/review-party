@@ -13,7 +13,7 @@ revision_for() {
   awk -F '"' -v name="$1" '$2 == name { print $4; exit }' "$revision_source"
 }
 
-for profile in bugs code-quality documentation; do
+for profile in bugs code-quality documentation test-audit; do
   instructions="$repository/profiles/$profile.md"
   revision=$(revision_for "$profile")
   if [ ! -f "$instructions" ] || [ -z "$revision" ]; then
