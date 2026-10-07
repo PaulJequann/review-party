@@ -175,18 +175,15 @@ func TestRecordSaveFailureRemovesPublishedAttemptArtifacts(t *testing.T) {
 func TestOverflowedExecutionMarksAssistantArtifactTruncated(t *testing.T) {
 	publisher := newArtifactPublisher(mustNewArtifactStore(t, t.TempDir()))
 	runner := &reviewRunner{publisher: publisher}
-	attempt, err := runner.buildAttempt(attemptDraft{reviewID: "rp_1723200000000_0123456789abcdef", number: 1, prompt: "prompt", execution: attemptExecution{AssistantText: "captured prefix", ArtifactTruncated: true}, outcome: model.AttemptInvalidResult})
+	attempt, err := runner.buildAttempt(attemptDraft{reviewID: "rp_1723200000000_0123456789abcdef", number: 1, execution: attemptExecution{AssistantText: "captured prefix", ArtifactTruncated: true}, outcome: model.AttemptInvalidResult})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(attempt.Artifacts) != 2 {
-		t.Fatalf("artifacts = %d, want 2", len(attempt.Artifacts))
+	if len(attempt.Artifacts) != 1 {
+		t.Fatalf("artifacts = %d, want the assistant text only", len(attempt.Artifacts))
 	}
-	if !attempt.Artifacts[1].Truncated {
-		t.Fatalf("assistant artifact = %#v, want truncated", attempt.Artifacts[1])
-	}
-	if attempt.RawOutput != "" {
-		t.Fatalf("raw output = %q, want empty", attempt.RawOutput)
+	if !attempt.Artifacts[0].Truncated {
+		t.Fatalf("assistant artifact = %#v, want truncated", attempt.Artifacts[0])
 	}
 }
 

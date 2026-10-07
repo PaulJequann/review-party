@@ -26,7 +26,7 @@ func reportRecord(id model.ReviewID, profile string, findings int) model.ReviewR
 	for index := range paths {
 		paths[index] = fmt.Sprintf("internal/file%02d.go", index)
 	}
-	result := &model.ReviewResult{Status: model.ResultClean, Summary: profile + " summary", Raw: "RAW_SENTINEL", Findings: []model.Finding{}}
+	result := &model.ReviewResult{Status: model.ResultClean, Summary: profile + " summary", Findings: []model.Finding{}}
 	for ordinal := 1; ordinal <= findings; ordinal++ {
 		result.Status = model.ResultFindings
 		result.Findings = append(result.Findings, model.Finding{
@@ -183,12 +183,12 @@ func TestBundleReportInlinesEveryMembersFindings(t *testing.T) {
 	}
 }
 
-func TestPrintReportKeepsChangedPathsRawAndArtifactsBehindFull(t *testing.T) {
+func TestPrintReportKeepsChangedPathsAndArtifactsBehindFull(t *testing.T) {
 	record := reportRecord("rp_patch", "bugs", 1)
 	for _, format := range []string{"json", "human"} {
 		for _, full := range []bool{false, true} {
 			output := renderReport(t, recordReport(record, full), format)
-			for _, marker := range []string{reportChangedPathSentinel, "RAW_SENTINEL", "artifacts/rp_patch/assistant-text.txt"} {
+			for _, marker := range []string{reportChangedPathSentinel, "artifacts/rp_patch/assistant-text.txt"} {
 				if strings.Contains(output, marker) != full {
 					t.Errorf("%s output with full=%t: contains %q = %t", format, full, marker, !full)
 				}

@@ -177,7 +177,6 @@ func (runner *reviewRunner) executePass(ctx context.Context, pass passExecution)
 	attempt, artifactErr := runner.buildAttempt(attemptDraft{
 		reviewID:  record.ID,
 		number:    record.AttemptCount() + 1,
-		prompt:    prompt,
 		candidate: pass.profile.reviewer.candidate,
 		execution: execution,
 		outcome:   outcome,
@@ -287,7 +286,6 @@ func executionRepository(ctx context.Context, subject subject.Subject) (string, 
 type attemptDraft struct {
 	reviewID  model.ReviewID
 	number    int
-	prompt    string
 	candidate reviewerCandidate
 	execution attemptExecution
 	outcome   model.AttemptOutcome
@@ -302,7 +300,6 @@ func (runner *reviewRunner) buildAttempt(draft attemptDraft) (model.AttemptRecor
 		Outcome:      draft.outcome,
 		Provenance:   resolvedProvenance(draft.candidate, execution),
 		Diagnostic:   execution.Diagnostic,
-		RawOutput:    boundedAttemptOutput(execution.AssistantText),
 		RetryAfterMS: execution.RetryAfter.Milliseconds(),
 		StartedAt:    draft.started,
 		CompletedAt:  draft.completed,
@@ -310,12 +307,11 @@ func (runner *reviewRunner) buildAttempt(draft attemptDraft) (model.AttemptRecor
 	if runner.publisher == nil || runner.publisher.store == nil {
 		return attempt, nil
 	}
-	references, err := runner.publisher.publishAttemptArtifacts(draft.reviewID, attempt.Number, draft.prompt, execution)
+	references, err := runner.publisher.publishAttemptArtifacts(draft.reviewID, attempt.Number, execution)
 	if err != nil {
 		return model.AttemptRecord{}, err
 	}
 	attempt.Artifacts = references
-	attempt.RawOutput = ""
 	return attempt, nil
 }
 
@@ -337,13 +333,6 @@ func terminationForAvailability(diagnostic string) model.ReviewTermination {
 func terminationForAttempt(execution attemptExecution, outcome model.AttemptOutcome, parseErr error) model.ReviewTermination {
 	message := attemptTerminationMessage(outcome, execution.Diagnostic, parseErr)
 	return model.ReviewTermination{Category: execution.FailureCategory, Phase: execution.FailurePhase, Message: message}
-}
-
-func boundedAttemptOutput(output string) string {
-	if len(output) <= result.MaxResultSize {
-		return output
-	}
-	return "[truncated to final bytes]\n" + output[len(output)-result.MaxResultSize:]
 }
 
 func resolvedProvenance(candidate reviewerCandidate, execution attemptExecution) model.ReviewerProvenance {

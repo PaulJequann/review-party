@@ -26,13 +26,12 @@ type artifactInput struct {
 	truncated bool
 }
 
-func (publisher *artifactPublisher) publishAttemptArtifacts(id model.ReviewID, number int, prompt string, execution attemptExecution) ([]model.ArtifactReference, error) {
+func (publisher *artifactPublisher) publishAttemptArtifacts(id model.ReviewID, number int, execution attemptExecution) ([]model.ArtifactReference, error) {
 	inputs := []artifactInput{
-		{kind: "constructed-prompt", contents: []byte(prompt), truncated: len(prompt) > maxHarnessStdout},
-		{kind: "assistant-text", contents: []byte(execution.AssistantText), truncated: execution.ArtifactTruncated || len(execution.AssistantText) > maxHarnessStdout},
+		{kind: artifact.AssistantText, contents: []byte(execution.AssistantText), truncated: execution.ArtifactTruncated || len(execution.AssistantText) > maxHarnessStdout},
 	}
 	if execution.ReviewerNoise != "" {
-		inputs = append(inputs, artifactInput{kind: "reviewer-noise", contents: []byte(execution.ReviewerNoise), truncated: len(execution.ReviewerNoise) > maxHarnessStdout})
+		inputs = append(inputs, artifactInput{kind: artifact.ReviewerNoise, contents: []byte(execution.ReviewerNoise), truncated: len(execution.ReviewerNoise) > maxHarnessStdout})
 	}
 	references := make([]model.ArtifactReference, 0, len(inputs))
 	for _, input := range inputs {

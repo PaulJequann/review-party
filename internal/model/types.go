@@ -640,7 +640,6 @@ type AttemptRecord struct {
 	Outcome      AttemptOutcome      `json:"outcome"`
 	Provenance   ReviewerProvenance  `json:"provenance"`
 	Diagnostic   string              `json:"diagnostic,omitempty"`
-	RawOutput    string              `json:"raw_output,omitempty"`
 	RetryAfterMS int64               `json:"retry_after_ms,omitempty"`
 	Artifacts    []ArtifactReference `json:"artifacts,omitempty"`
 	StartedAt    time.Time           `json:"started_at"`
@@ -677,7 +676,6 @@ type ReviewResult struct {
 	Status   ResultStatus `json:"status"`
 	Summary  string       `json:"summary"`
 	Findings []Finding    `json:"findings"`
-	Raw      string       `json:"raw"`
 }
 
 type Finding struct {

@@ -67,7 +67,9 @@ func filesHolding(t *testing.T, root, needle string) []string {
 	return holding
 }
 
-func TestReviewKeepsThePatchOutOfTheLedger(t *testing.T) {
+// The patch and the prompt that carries it are rebuilt from the repository on
+// demand, so neither the ledger nor the artifact store may hold them.
+func TestReviewLeavesNoPatchInHostState(t *testing.T) {
 	repository := sentinelRepository(t)
 	executor := successfulExecutor(cleanReview)
 	conductor, state := hostStateConductor(t, executor)
@@ -79,9 +81,7 @@ func TestReviewKeepsThePatchOutOfTheLedger(t *testing.T) {
 	if !strings.Contains(promptPatch(t, executor.attempts[0].Prompt), patchSentinel) {
 		t.Fatal("the reviewer prompt lost the patch")
 	}
-	for _, path := range filesHolding(t, state, patchSentinel) {
-		if store.IsLedgerFile(filepath.Base(path)) {
-			t.Fatalf("ledger file %s holds the patch", path)
-		}
+	if holding := filesHolding(t, state, patchSentinel); len(holding) != 0 {
+		t.Fatalf("host state holds the patch: %v", holding)
 	}
 }

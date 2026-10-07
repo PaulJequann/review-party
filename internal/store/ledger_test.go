@@ -29,7 +29,7 @@ func TestLedgerRoundTripsCompleteAndIncompleteReviews(t *testing.T) {
 	}
 	defer closeTestResource(t, store.Close)
 	clean := ledgerFixture(model.LifecycleCompleted)
-	clean.Result = &model.ReviewResult{Status: model.ResultClean, Summary: "clean", Raw: "raw", Findings: []model.Finding{}}
+	clean.Result = &model.ReviewResult{Status: model.ResultClean, Summary: "clean", Findings: []model.Finding{}}
 	withoutAttempts := ledgerFixture(model.LifecycleIncomplete)
 	withoutAttempts.ID = "rp_1723200000003_0123456789abcdef"
 	withoutAttempts.Passes[0].Attempts = []model.AttemptRecord{}
@@ -74,7 +74,6 @@ func TestLedgerLoadReconstructsOneCommittedReviewVersion(t *testing.T) {
 	versionB.Subject.Identity = "version-b"
 	versionB.ProfileRevision.Name = "code-quality"
 	versionB.Result.Summary = "version-b summary"
-	versionB.Result.Raw = "version-b raw"
 	versionB.Passes = append(versionB.Passes, model.PassRecord{
 		Name:     "second-pass",
 		Required: false,
@@ -644,7 +643,7 @@ func ledgerFixture(lifecycle model.Lifecycle) model.ReviewRecord {
 	now := time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC)
 	record := model.ReviewRecord{SchemaVersion: model.CurrentReviewRecordSchemaVersion, ID: "rp_1723200000000_0123456789abcdef", Lifecycle: lifecycle, Subject: model.ReviewSubject{Kind: model.SubjectWorkingChanges, Repository: "/repo", Identity: "subject", ChangedPaths: []string{"a.go"}}, ProfileRevision: model.ProfileRevision{Name: "bugs"}, ProfileSnapshot: model.ProfileSnapshot{Name: "bugs"}, Runtime: &model.RuntimeProvenance{Version: "test"}, Timings: &model.ReviewTimings{TotalMS: 1}, CreatedAt: now, UpdatedAt: now, Passes: []model.PassRecord{{Name: "review", Required: true, Attempts: []model.AttemptRecord{{Number: 1, Outcome: model.AttemptCompleted, Provenance: model.ReviewerProvenance{ReviewerID: "opencode"}, RetryAfterMS: 750, Artifacts: []model.ArtifactReference{{Kind: "assistant-text", Path: "artifacts/a", Size: 1, Digest: "digest"}}, StartedAt: now, CompletedAt: now}}}}}
 	if lifecycle == model.LifecycleCompleted {
-		record.Result = &model.ReviewResult{Status: model.ResultFindings, Summary: "finding", Raw: "raw", Findings: []model.Finding{{Ordinal: 1, Severity: "high", Category: "correctness", Location: "a.go:1", Failure: "failure", Evidence: "evidence", Fix: "fix", Test: "test"}}}
+		record.Result = &model.ReviewResult{Status: model.ResultFindings, Summary: "finding", Findings: []model.Finding{{Ordinal: 1, Severity: "high", Category: "correctness", Location: "a.go:1", Failure: "failure", Evidence: "evidence", Fix: "fix", Test: "test"}}}
 	} else {
 		record.Termination = &model.ReviewTermination{Category: model.TerminationDeadlineExceeded, Phase: model.PhaseReviewerExecution, Message: "deadline"}
 	}

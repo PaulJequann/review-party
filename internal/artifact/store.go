@@ -25,6 +25,12 @@ func IsTemporary(entry fs.DirEntry) bool {
 	return err == nil && matched && entry.Type().IsRegular()
 }
 
+// The kinds of evidence an Attempt may publish.
+const (
+	AssistantText = "assistant-text"
+	ReviewerNoise = "reviewer-noise"
+)
+
 type Store struct{ root string }
 
 func NewStore(root string) (*Store, error) {
@@ -129,5 +135,5 @@ func (store *Store) resolve(relative string) (string, error) {
 }
 
 func validKind(kind string) bool {
-	return kind == "assistant-text" || kind == "constructed-prompt" || kind == "reviewer-noise" || kind == "native-stdout" || kind == "native-stderr"
+	return kind == AssistantText || kind == ReviewerNoise
 }

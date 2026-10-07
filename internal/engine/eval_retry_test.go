@@ -45,7 +45,7 @@ func TestEvalRetryPublishesArtifactsUnderTheRetryAttemptNumber(t *testing.T) {
 	}
 
 	assertArtifactsLiveUnderTheirAttemptNumber(t, review)
-	first := review.Passes[0].Attempts[0].Artifacts[1]
+	first := review.Passes[0].Attempts[0].Artifacts[0]
 	contents, err := conductor.artifacts.Read(first)
 	if err != nil {
 		t.Fatalf("attempt 1 assistant text no longer reads back: %v", err)

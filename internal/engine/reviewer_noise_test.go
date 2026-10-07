@@ -128,7 +128,7 @@ func TestReviewerNoiseIsPublishedAsAnAttemptArtifact(t *testing.T) {
 	publisher := newArtifactPublisher(mustNewArtifactStore(t, t.TempDir()))
 	runner := &reviewRunner{publisher: publisher}
 
-	attempt, err := runner.buildAttempt(attemptDraft{reviewID: "rp_1723200000000_0123456789abcdef", number: 1, prompt: "prompt", execution: attemptExecution{AssistantText: cleanReview, ReviewerNoise: codexWebsocketNoise}, outcome: model.AttemptCompleted})
+	attempt, err := runner.buildAttempt(attemptDraft{reviewID: "rp_1723200000000_0123456789abcdef", number: 1, execution: attemptExecution{AssistantText: cleanReview, ReviewerNoise: codexWebsocketNoise}, outcome: model.AttemptCompleted})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,10 +137,10 @@ func TestReviewerNoiseIsPublishedAsAnAttemptArtifact(t *testing.T) {
 	for _, reference := range attempt.Artifacts {
 		kinds = append(kinds, reference.Kind)
 	}
-	if strings.Join(kinds, ",") != "constructed-prompt,assistant-text,reviewer-noise" {
+	if strings.Join(kinds, ",") != "assistant-text,reviewer-noise" {
 		t.Fatalf("artifact kinds = %v", kinds)
 	}
-	contents, err := publisher.store.Read(attempt.Artifacts[2])
+	contents, err := publisher.store.Read(attempt.Artifacts[1])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,12 +152,12 @@ func TestReviewerNoiseIsPublishedAsAnAttemptArtifact(t *testing.T) {
 func TestQuietAttemptPublishesNoNoiseArtifact(t *testing.T) {
 	runner := &reviewRunner{publisher: newArtifactPublisher(mustNewArtifactStore(t, t.TempDir()))}
 
-	attempt, err := runner.buildAttempt(attemptDraft{reviewID: "rp_1723200000000_0123456789abcdef", number: 1, prompt: "prompt", execution: attemptExecution{AssistantText: cleanReview}, outcome: model.AttemptCompleted})
+	attempt, err := runner.buildAttempt(attemptDraft{reviewID: "rp_1723200000000_0123456789abcdef", number: 1, execution: attemptExecution{AssistantText: cleanReview}, outcome: model.AttemptCompleted})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(attempt.Artifacts) != 2 {
-		t.Fatalf("artifacts = %d, want prompt and assistant text only", len(attempt.Artifacts))
+	if len(attempt.Artifacts) != 1 {
+		t.Fatalf("artifacts = %d, want assistant text only", len(attempt.Artifacts))
 	}
 }
 
