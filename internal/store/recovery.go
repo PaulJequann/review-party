@@ -148,7 +148,7 @@ func ReviewRecordStateRecoveryPending(directory string) (bool, error) {
 	return false, err
 }
 
-func PrepareFreshReviewRecordState(directory string) error {
+func PrepareFreshReviewRecordState(directory, evidence string) error {
 	pending, err := ReviewRecordStateRecoveryPending(directory)
 	if err != nil {
 		return err
@@ -156,7 +156,7 @@ func PrepareFreshReviewRecordState(directory string) error {
 	if !pending {
 		return errors.New("fresh initialization requires a preceding incompatible-ledger backup")
 	}
-	if err := prepareFreshLedger(directory); err != nil {
+	if err := (stateRecovery{directory: directory, evidence: evidence}).prepareFreshLedger(); err != nil {
 		return err
 	}
 	if err := os.Remove(filepath.Join(directory, recoveryMarker)); err != nil {
@@ -170,12 +170,15 @@ func PrepareFreshReviewRecordState(directory string) error {
 // state, then exited before the marker was dropped, including a failed marker
 // removal). It cannot be the backed-up original, which was unusable by
 // definition, so it is kept. Any other ledger file could be an unrestored
-// original: refuse and direct the operator to --backup first.
-func prepareFreshLedger(directory string) error {
+// original: refuse and direct the operator to --backup first. With no ledger
+// file left, the backup is resumed first, because an interrupted backup can
+// leave the evidence behind and a fresh ledger must not start beside files
+// only the backed-up ledger references.
+func (recovery stateRecovery) prepareFreshLedger() error {
 	for _, suffix := range ledgerSuffixes {
-		path := filepath.Join(directory, ledgerFilename+suffix)
+		path := filepath.Join(recovery.directory, ledgerFilename+suffix)
 		if _, err := os.Lstat(path); err == nil {
-			if ready, err := ReviewRecordStatePrepared(directory); err != nil || !ready {
+			if ready, err := ReviewRecordStatePrepared(recovery.directory); err != nil || !ready {
 				return fmt.Errorf("fresh initialization refused while review state file %q remains outside backup", path)
 			}
 			return nil
@@ -183,5 +186,8 @@ func prepareFreshLedger(directory string) error {
 			return err
 		}
 	}
-	return PrepareReviewRecordState(directory)
+	if _, err := recovery.resume(); err != nil {
+		return err
+	}
+	return PrepareReviewRecordState(recovery.directory)
 }

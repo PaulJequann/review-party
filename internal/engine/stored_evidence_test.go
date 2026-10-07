@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -421,6 +422,17 @@ func TestInitializingAfterAFailedSweepRetriesItsMaintenance(t *testing.T) {
 }
 
 func TestFreshStateLeavesTheReplacedLedgersEvidenceInItsBackup(t *testing.T) {
+	for _, interrupted := range []bool{false, true} {
+		t.Run(fmt.Sprintf("interrupted=%t", interrupted), func(t *testing.T) {
+			assertFreshStateLeavesEvidenceInBackup(t, interrupted)
+		})
+	}
+}
+
+// assertFreshStateLeavesEvidenceInBackup backs up an unusable ledger beside
+// evidence. An interrupted backup moved the ledger but not the evidence.
+func assertFreshStateLeavesEvidenceInBackup(t *testing.T, interrupted bool) {
+	t.Helper()
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	state := initializeTestState(t)
 	orphan := writeOrphanEvidence(t, state)
@@ -430,6 +442,11 @@ func TestFreshStateLeavesTheReplacedLedgersEvidenceInItsBackup(t *testing.T) {
 	backedUp, err := InitializeReviewParty(ReviewPartyInitialization{Repository: repository, BackupIncompatible: true})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if interrupted {
+		if err := os.Rename(filepath.Join(backedUp.Backup.Directory, artifact.Directory), filepath.Join(state, artifact.Directory)); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if _, err := InitializeReviewParty(ReviewPartyInitialization{Repository: repository, Fresh: true}); err != nil {
 		t.Fatal(err)

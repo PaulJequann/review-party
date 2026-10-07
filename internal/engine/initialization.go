@@ -67,7 +67,7 @@ func refuseUnconfirmedRecovery(directory statePath, fresh bool) error {
 }
 
 func prepareFreshInitializationState(manager *configuration.Manager, selection initializationStateSelection) error {
-	if err := store.PrepareFreshReviewRecordState(string(selection.directory)); err != nil {
+	if err := store.PrepareFreshReviewRecordState(string(selection.directory), artifact.Directory); err != nil {
 		return err
 	}
 	return rememberInitializedState(manager, selection)

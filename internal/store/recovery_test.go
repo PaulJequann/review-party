@@ -33,13 +33,13 @@ func TestIncompatibleStateBackupPreservesLedgerAndSidecarsBeforeFreshInit(t *tes
 	if err := os.Rename(walBackup, walState); err != nil {
 		t.Fatal(err)
 	}
-	if err := PrepareFreshReviewRecordState(directory); err == nil {
+	if err := PrepareFreshReviewRecordState(directory, testEvidenceDirectory); err == nil {
 		t.Fatal("fresh initialization accepted a sidecar outside backup")
 	}
 	if _, err := BackupIncompatibleReviewRecordState(directory, testEvidenceDirectory); err != nil {
 		t.Fatalf("resume backup: %v", err)
 	}
-	if err := PrepareFreshReviewRecordState(directory); err != nil {
+	if err := PrepareFreshReviewRecordState(directory, testEvidenceDirectory); err != nil {
 		t.Fatal(err)
 	}
 	assertRecoveryState(t, directory, recoveryState{prepared: true})
@@ -65,6 +65,48 @@ func TestIncompatibleStateBackupTakesTheLedgersEvidence(t *testing.T) {
 		t.Fatalf("resume backup: %v", err)
 	}
 	assertEvidenceBackedUp(t, directory, backup, original)
+}
+
+func TestFreshPreparationFinishesAnInterruptedEvidenceMove(t *testing.T) {
+	directory := t.TempDir()
+	evidence := filepath.Join(testEvidenceDirectory, "rp_1_retired", "1", "assistant-text.txt")
+	original := map[string][]byte{ledgerFilename: []byte("retired-ledger-bytes"), evidence: []byte("retired-evidence-bytes")}
+	writeStateFiles(t, directory, original)
+	backup, err := BackupIncompatibleReviewRecordState(directory, testEvidenceDirectory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(filepath.Join(backup.Directory, testEvidenceDirectory), filepath.Join(directory, testEvidenceDirectory)); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := PrepareFreshReviewRecordState(directory, testEvidenceDirectory); err != nil {
+		t.Fatal(err)
+	}
+	assertEvidenceBackedUp(t, directory, backup, original)
+	assertRecoveryState(t, directory, recoveryState{prepared: true})
+}
+
+func TestIncompatibleStateBackupRestoresTheLedgerWhenTheEvidenceCannotMove(t *testing.T) {
+	directory := t.TempDir()
+	original := map[string][]byte{ledgerFilename: []byte("retired-ledger-bytes"), ledgerFilename + "-wal": []byte("retired-wal-bytes")}
+	writeStateFiles(t, directory, original)
+	evidence := filepath.Join(directory, testEvidenceDirectory)
+	if err := os.Mkdir(evidence, 0o500); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := BackupIncompatibleReviewRecordState(directory, testEvidenceDirectory); err == nil {
+		t.Fatal("backup succeeded although the evidence could not move")
+	}
+	for name, wanted := range original {
+		if got, err := os.ReadFile(filepath.Join(directory, name)); err != nil || !bytes.Equal(got, wanted) {
+			t.Fatalf("restored %s = %q, %v; want %q", name, got, err, wanted)
+		}
+	}
+	if pending, err := ReviewRecordStateRecoveryPending(directory); err != nil || pending {
+		t.Fatalf("recovery pending after a rolled-back backup = %t, %v", pending, err)
+	}
 }
 
 type recoveryState struct {
@@ -125,7 +167,7 @@ func assertEvidenceBackedUp(t *testing.T, directory string, backup StateBackup, 
 }
 
 func TestFreshPreparationRequiresPriorBackup(t *testing.T) {
-	if err := PrepareFreshReviewRecordState(t.TempDir()); err == nil {
+	if err := PrepareFreshReviewRecordState(t.TempDir(), testEvidenceDirectory); err == nil {
 		t.Fatal("fresh initialization succeeded without backup")
 	}
 }
@@ -145,7 +187,7 @@ func TestFreshPreparationCompletesInterruptedState(t *testing.T) {
 	if err := PrepareReviewRecordState(directory); err != nil {
 		t.Fatal(err)
 	}
-	if err := PrepareFreshReviewRecordState(directory); err != nil {
+	if err := PrepareFreshReviewRecordState(directory, testEvidenceDirectory); err != nil {
 		t.Fatalf("retry after interrupted fresh initialization: %v", err)
 	}
 	assertRecoveryState(t, directory, recoveryState{prepared: true})
