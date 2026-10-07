@@ -62,7 +62,9 @@ type Run struct {
 	cancelBuilds context.CancelFunc
 }
 
-var hostTemp = os.TempDir()
+// Clean drops the trailing separator macOS puts on TMPDIR, so paths built
+// from it compare equal to their parent.
+var hostTemp = filepath.Clean(os.TempDir())
 
 // HostTempDir is the temporary directory the host gave this process, never
 // the run's redirected one.
