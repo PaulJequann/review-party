@@ -52,6 +52,9 @@ type Run struct {
 	views     map[string]*viewEntry
 	viewCount int
 	hostEnv   map[string]string
+	// openRemoved is what Open's background pass removed, until Reap
+	// reports it.
+	openRemoved []string
 
 	reaps        sync.WaitGroup
 	builds       sync.WaitGroup
@@ -78,7 +81,7 @@ var errRunClosed = errors.New("the run is closed")
 func Open(options Options) (*Run, error) {
 	root := options.Root
 	if root == "" {
-		root = defaultRoot()
+		root = DefaultRoot()
 	}
 	if err := validateRoot(root); err != nil {
 		return nil, err
@@ -106,7 +109,11 @@ func Open(options Options) (*Run, error) {
 	r.reaps.Add(1)
 	go func() {
 		defer r.reaps.Done()
-		r.warnReport(r.removeClaims(claims))
+		report := r.removeClaims(claims)
+		r.mu.Lock()
+		r.openRemoved = report.Removed
+		r.mu.Unlock()
+		r.warnReport(report)
 	}()
 	return r, nil
 }

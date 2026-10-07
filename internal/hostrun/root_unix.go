@@ -11,7 +11,8 @@ import (
 	"syscall"
 )
 
-func defaultRoot() string {
+// DefaultRoot is the per-user runtime root under the host temp directory.
+func DefaultRoot() string {
 	return filepath.Join(hostTemp, "review-party-runtime-"+strconv.Itoa(os.Getuid()))
 }
 

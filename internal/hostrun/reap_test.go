@@ -35,6 +35,21 @@ func TestLiveRunIsNeverClaimed(t *testing.T) {
 	}
 }
 
+func TestReapReportsTheRunsOpenRemovedOnce(t *testing.T) {
+	root := testRoot(t)
+	dead := fakeDeadRun(t, root, "1-dead")
+	r := openRun(t, root, nil)
+	if rep := r.Reap(); !reflect.DeepEqual(rep, Report{Removed: []string{dead}}) {
+		t.Fatalf("first Reap reported %+v; want the run Open removed", rep)
+	}
+	if rep := r.Reap(); !reflect.DeepEqual(rep, Report{}) {
+		t.Fatalf("second Reap reported %+v; want nothing", rep)
+	}
+	if fileExists(dead) {
+		t.Fatalf("dead run %s survived", dead)
+	}
+}
+
 func runReaper(root string) (string, error) {
 	out, err := helperCommand("reaper", rootVar+"="+root).CombinedOutput()
 	return string(out), err
