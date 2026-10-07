@@ -14,10 +14,16 @@ import (
 	"reviewparty/internal/configuration"
 )
 
+// doctor drops the footprint line, which reflects the whole host rather
+// than the fixture; TestDoctorSummarizesTheFootprint covers it.
 func (fixture checkpointFixture) doctor(arguments ...string) commandRun {
 	fixture.t.Helper()
-	return fixture.runWith("", false, append([]string{"doctor", "--repo", fixture.repository}, arguments...)...)
+	result := fixture.runWith("", false, append([]string{"doctor", "--repo", fixture.repository}, arguments...)...)
+	result.stdout = footprintLine.ReplaceAllString(result.stdout, "")
+	return result
 }
+
+var footprintLine = regexp.MustCompile(`(?m)^Footprint: .*\n`)
 
 func (fixture checkpointFixture) installIntegration(integration string) {
 	fixture.t.Helper()
@@ -197,5 +203,21 @@ func TestDoctorCreatesNoStateDirectory(t *testing.T) {
 	assertRun(t, fixture.doctor(), commandRun{stdout: "configuration is valid\n"})
 	if _, err := os.Stat(state); !os.IsNotExist(err) {
 		t.Fatalf("doctor created %s: %v", state, err)
+	}
+}
+
+func TestDoctorSummarizesTheFootprintAndNamesTheClean(t *testing.T) {
+	fixture := newHostFixture(t)
+	fixture.seed()
+
+	result := fixture.run("doctor", "--repo", t.TempDir())
+
+	pattern := regexp.MustCompile(`\nFootprint: 9 items, \d+ B; 8 removable now; 3 left over \(\d+ B\); fix: review-party clean --yes\n\z`)
+	assertCleanMatch(t, "doctor", result, pattern)
+	report := decodeInto[doctorResult](t, fixture.run("doctor", "--repo", t.TempDir(), "--format", "json"), 0)
+	summary := report.Footprint
+	summary.Bytes, summary.LeftoverBytes = 0, 0
+	if want := (footprintSummary{Items: 9, Removable: 8, Leftovers: 3, Fix: "review-party clean --yes"}); summary != want {
+		t.Fatalf("doctor footprint = %+v, want %+v", report.Footprint, want)
 	}
 }

@@ -1,9 +1,11 @@
 package main
 
 import (
+	"context"
 	"fmt"
 
 	"reviewparty/internal/configuration"
+	"reviewparty/internal/hostrun"
 	"reviewparty/internal/model"
 	"reviewparty/internal/subject"
 
@@ -26,6 +28,7 @@ type doctorResult struct {
 	ExemptionConflicts []exemptionConflict             `json:"exemption_conflicts"`
 	RecentWaivers      []model.CheckpointWaiver        `json:"recent_waivers"`
 	WaiversUnread      *waiversUnread                  `json:"waivers_unread,omitempty"`
+	Footprint          footprintSummary                `json:"footprint"`
 	invalid            error
 }
 
@@ -35,12 +38,13 @@ repository's declared Checkpoints still lack in this clone. Each finding is
 one line ending in the command that fixes it. Unresolved names, missing or
 edited team-floor Integrations, a stale agents-md block, and Markdown
 exemptions a selected documentation Profile reviews are listed, followed by
-the Waivers recorded here in the last 30 days.
+the Waivers recorded here in the last 30 days. The last line sums up what
+Review Party keeps on this host; review-party footprint lists it.
 
 Doctor exits 1 only when the configuration is invalid. Findings exit 0, so
 the repository's instructions and the Caller decide whether one blocks.`, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		options := doctorOptions{repository: stringFlag(cmd, "repo"), format: stringFlag(cmd, "format"), configuration: stringFlag(cmd, "config")}
-		return commandResult(executeDoctor(options, streams))
+		return commandResult(executeDoctor(cmd.Context(), options, streams))
 	}}
 	addRepositoryFlag(cmd, "Repository whose configuration should be checked")
 	addFormatFlag(cmd)
@@ -48,12 +52,13 @@ the repository's instructions and the Caller decide whether one blocks.`, Args: 
 	return cmd
 }
 
-func executeDoctor(options doctorOptions, streams commandIO) int {
+func executeDoctor(ctx context.Context, options doctorOptions, streams commandIO) int {
 	return runConfigurationCommand(options.format, options.configuration, streams, func(manager *configuration.Manager) (int, error) {
 		result, err := options.inspect(manager)
 		if err != nil {
 			return 0, err
 		}
+		result.Footprint = footprintAfterReap(ctx, streams.host, options.configuration)
 		if options.format == "json" {
 			if err := writeJSON(streams.output, result); err != nil {
 				return 0, err
@@ -114,6 +119,16 @@ func (result doctorResult) writeText(output *commandOutput) {
 	for _, line := range result.findingLines() {
 		output.write("%s\n", line)
 	}
+	output.write("%s\n", result.Footprint.line())
+}
+
+// footprintAfterReap waits for the reap this invocation's Open started, so
+// the summary counts only what the reap could not remove.
+func footprintAfterReap(ctx context.Context, host hostDirectories, configurationPath string) footprintSummary {
+	if run, err := hostrun.From(ctx); err == nil {
+		run.Reap()
+	}
+	return takeFootprint(host, configurationPath).summary()
 }
 
 func doctorTemplateDriftLine(item configuration.TemplateDrift) string {
