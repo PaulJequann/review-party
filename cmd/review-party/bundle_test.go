@@ -20,7 +20,7 @@ func TestPrintBundleReportPreservesHumanPresentation(t *testing.T) {
 		Members:     []model.BundleMember{{Scope: "global", Profile: "bugs", Lifecycle: model.LifecycleCompleted, ReviewID: "rp_test", Status: "clean"}},
 		Termination: &model.BundleTermination{Category: model.TerminationCancelled, Message: "context canceled"},
 	}
-	report := bundleReport(context.Background(), fakeReviewLoader{"rp_test": largePatchRecord("rp_test", "bugs", 0)}, bundle, false)
+	report := bundleReport(context.Background(), fakeReviewLoader{"rp_test": reportRecord("rp_test", "bugs", 0)}, bundle, false)
 	text := renderReport(t, report, "human")
 	for _, want := range []string{
 		"bundle rb_test · incomplete · 1/1 review(s) completed\n", "global:bugs · rp_test · completed · clean · 0 finding(s)\n",
@@ -39,7 +39,7 @@ func TestPrintReportJSONCarriesTheBundleSummary(t *testing.T) {
 }
 
 func TestExecuteRunReturnsUsageExitForIncompleteBundle(t *testing.T) {
-	conductor := &fakeRunConductor{records: fakeReviewLoader{"rp_member": largePatchRecord("rp_member", "bugs", 1), "rp_security": stoppedMemberRecord("rp_security", "security")}}
+	conductor := &fakeRunConductor{records: fakeReviewLoader{"rp_member": reportRecord("rp_member", "bugs", 1), "rp_security": stoppedMemberRecord("rp_security", "security")}}
 	conductor.runBundle = model.ReviewBundle{ID: "rb_incomplete", Lifecycle: model.LifecycleIncomplete, Members: []model.BundleMember{
 		{Scope: "global", Profile: "bugs", ReviewID: "rp_member", Lifecycle: model.LifecycleCompleted},
 		{Scope: "global", Profile: "security", ReviewID: "rp_security", Lifecycle: model.LifecycleIncomplete},

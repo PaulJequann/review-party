@@ -41,6 +41,7 @@ func TestEvalRecordsOrdinaryReviewsForEachExecutionCategory(t *testing.T) {
 	if run.Lifecycle != model.LifecycleCompleted || run.Termination != nil {
 		t.Fatalf("suite lifecycle = %s, termination = %#v", run.Lifecycle, run.Termination)
 	}
+	assertNoPromptPatchMentions(t, executor.prompts, filepath.Dir(suite))
 	for index, id := range run.EvalRunIDs {
 		assertPersistedEvalRun(t, persistedEvalAssertion{conductor: conductor, suite: suite, index: index, id: id})
 	}
@@ -263,7 +264,7 @@ func assertPersistedEvalRun(t *testing.T, assertion persistedEvalAssertion) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertSyntheticSubject(t, assertion.suite, assertion.index, review.Subject)
+	assertSyntheticSubject(t, assertion.index, review.Subject)
 	if evalRun.AdjudicationState != "awaiting_adjudication" {
 		t.Fatalf("adjudication = %s", evalRun.AdjudicationState)
 	}
@@ -272,7 +273,7 @@ func assertPersistedEvalRun(t *testing.T, assertion persistedEvalAssertion) {
 	}
 }
 
-func assertSyntheticSubject(t *testing.T, suite string, index int, subject model.ReviewSubject) {
+func assertSyntheticSubject(t *testing.T, index int, subject model.ReviewSubject) {
 	t.Helper()
 	if subject.Kind != model.SubjectCapturedChange {
 		t.Fatalf("case %d kind = %s", index, subject.Kind)
@@ -280,8 +281,16 @@ func assertSyntheticSubject(t *testing.T, suite string, index int, subject model
 	if subject.Repository != "eval://"+subject.Identity {
 		t.Fatalf("case %d repository = %s", index, subject.Repository)
 	}
-	if strings.Contains(subject.Patch, filepath.Dir(suite)) {
-		t.Fatalf("case %d patch leaked suite path: %s", index, subject.Patch)
+}
+
+// assertNoPromptPatchMentions proves corpus authority, such as the suite path
+// or an expected Finding, never reaches the patch a reviewer reads.
+func assertNoPromptPatchMentions(t *testing.T, prompts []string, authority string) {
+	t.Helper()
+	for index, prompt := range prompts {
+		if patch := promptPatch(t, prompt); strings.Contains(patch, authority) {
+			t.Fatalf("prompt %d patch leaked %q: %s", index, authority, patch)
+		}
 	}
 }
 
@@ -418,6 +427,7 @@ func TestGeneralEvalReviewerReceivesMultiFileRepositoryWithoutAuthority(t *testi
 		t.Fatal("reviewer view did not materialize the packaged Go module")
 	}
 	assertFirstGeneralSubject(t, conductor, run)
+	assertNoPromptPatchMentions(t, executor.prompts, "persisted-zero-role-becomes-administrator")
 }
 
 func runPackagedEval(t *testing.T, suite string, executor attemptExecutor) model.EvalSuiteRun {
@@ -443,9 +453,6 @@ func assertFirstGeneralSubject(t *testing.T, conductor *Conductor, run model.Eva
 	if len(review.Subject.ChangedPaths) < 2 {
 		t.Fatalf("changed paths = %#v", review.Subject.ChangedPaths)
 	}
-	if strings.Contains(review.Subject.Patch, "persisted-zero-role-becomes-administrator") {
-		t.Fatal("expected Finding leaked into Review Subject")
-	}
 }
 
 type evalSequenceExecutor struct {
@@ -456,6 +463,7 @@ type evalSequenceExecutor struct {
 	sawAuthority bool
 	sawGoModule  bool
 	fileCounts   []int
+	prompts      []string
 	onExecute    func()
 }
 
@@ -469,6 +477,7 @@ func (executor *evalSequenceExecutor) Execute(_ context.Context, spec attemptSpe
 	if executor.onExecute != nil {
 		executor.onExecute()
 	}
+	executor.prompts = append(executor.prompts, spec.Prompt)
 	if _, err := os.Stat(filepath.Join(spec.Repository, ".git")); err == nil {
 		executor.sawGit = true
 	}

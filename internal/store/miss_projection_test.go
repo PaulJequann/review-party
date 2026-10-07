@@ -2,7 +2,6 @@ package store
 
 import (
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -71,7 +70,6 @@ func TestLedgerRecordsMissWithFactsReadFromTheReview(t *testing.T) {
 	ledger := newTestLedger(t, t.TempDir())
 	defer closeTestResource(t, ledger.Close)
 	review := ledgerFixture(model.LifecycleCompleted)
-	review.Subject.Patch = "PATCH-SENTINEL"
 	saveTestReviews(t, ledger, review)
 
 	recorded := recordTestMisses(t, ledger, missTestRecord("ms_1725192000000_0000000000000001", review.ID, 0))
@@ -94,13 +92,6 @@ func TestLedgerRecordsMissWithFactsReadFromTheReview(t *testing.T) {
 	}
 	if listed := listTestMisses(t, ledger, MissQuery{}); !reflect.DeepEqual(listed, want) {
 		t.Fatalf("listed = %#v, want %#v", listed, want)
-	}
-	encoded, err := json.Marshal(recorded)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(encoded), "PATCH-SENTINEL") {
-		t.Fatalf("miss carries the subject patch: %s", encoded)
 	}
 	requireNoCopiedReviewFacts(t, missColumns(t, ledger))
 }

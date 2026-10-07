@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"reviewparty/internal/model"
+	"reviewparty/internal/subject"
 )
 
 func TestExperimentCompilationUsesFrozenExperimentDeadline(t *testing.T) {
@@ -47,7 +48,7 @@ func TestSavedInstructionsReachPromptWithoutTemplateInheritance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	prompt := profile.prompt(model.ReviewSubject{})
+	prompt := profile.prompt(subject.Subject{})
 	if !strings.Contains(prompt, "Review documentation concerns.") {
 		t.Fatalf("prompt = %q", prompt)
 	}

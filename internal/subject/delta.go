@@ -91,8 +91,8 @@ func ResolveUnreviewedDelta(scope model.ReviewSubject, delta []model.ContentChan
 	return Subject{ReviewSubject: model.ReviewSubject{
 		Kind: model.SubjectUnreviewedDelta, Repository: scope.Repository, Identity: hex.EncodeToString(hash.Sum(nil)),
 		BaseObject: scope.BaseObject, HeadObject: scope.HeadObject,
-		ChangedPaths: paths, Patch: string(patch), Facts: &facts, ContentChanges: delta,
-	}}, nil
+		ChangedPaths: paths, Facts: &facts, ContentChanges: delta,
+	}, Patch: string(patch)}, nil
 }
 
 func (root repositoryRoot) diffDeltaTrees(delta []model.ContentChange, options ...string) (output []byte, returnErr error) {

@@ -91,7 +91,7 @@ func (runner *reviewRunner) runPendingReview(ctx context.Context, member pending
 		return record, err
 	}
 
-	prompt := prepared.profile.prompt(record.Subject)
+	prompt := prepared.profile.prompt(prepared.subject)
 	if ctx.Err() == nil {
 		if termination := runner.preflightInput(prepared.profile.reviewer, prompt); termination != nil {
 			return runner.finishIncomplete(record, *termination, reviewStarted)
@@ -127,7 +127,7 @@ func (runner *reviewRunner) resumePreparedReview(ctx context.Context, record mod
 	if !check.Available {
 		return runner.finishIncomplete(record, terminationForAvailability(check.Diagnostic), reviewStarted)
 	}
-	return runner.executePass(ctx, passExecution{record: record, subject: prepared.subject, profile: prepared.profile, prompt: prepared.profile.prompt(record.Subject), executor: executor, reviewStarted: reviewStarted, deadline: prepared.deadline})
+	return runner.executePass(ctx, passExecution{record: record, subject: prepared.subject, profile: prepared.profile, prompt: prepared.profile.prompt(prepared.subject), executor: executor, reviewStarted: reviewStarted, deadline: prepared.deadline})
 }
 
 func (runner *reviewRunner) finishIncomplete(record model.ReviewRecord, termination model.ReviewTermination, reviewStarted time.Time) (model.ReviewRecord, error) {

@@ -100,9 +100,6 @@ func writeFullRecord(output *commandOutput, record model.ReviewRecord) {
 			output.write("  %s\n", path)
 		}
 	}
-	if record.Subject.Patch != "" {
-		output.write("patch:\n%s\n", strings.TrimRight(record.Subject.Patch, "\n"))
-	}
 }
 
 func writeInspectHint(output *commandOutput, id, configuration string) {

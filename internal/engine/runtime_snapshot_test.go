@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"reviewparty/internal/configuration"
-	"reviewparty/internal/model"
+	"reviewparty/internal/subject"
 )
 
 func TestCompileSlotsUsesCapturedRuntimeProfile(t *testing.T) {
@@ -25,7 +25,7 @@ func TestCompileSlotsUsesCapturedRuntimeProfile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(slots) != 1 || !strings.Contains(slots[0].profile.prompt(model.ReviewSubject{}), "captured instructions") {
+	if len(slots) != 1 || !strings.Contains(slots[0].profile.prompt(subject.Subject{}), "captured instructions") {
 		t.Fatalf("compiled slots = %#v", slots)
 	}
 }

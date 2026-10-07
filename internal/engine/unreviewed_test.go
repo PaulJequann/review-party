@@ -99,10 +99,10 @@ func TestRunUnreviewedReviewsOnlyTheDeltaAndExtendsTheChain(t *testing.T) {
 	if want := []model.ContentChange{{Path: "review.go", Before: reviewed.After, After: current}}; !slices.Equal(second.Subject.ContentChanges, want) {
 		t.Fatalf("delta edges = %#v, want %#v from the first Review's reviewed state", second.Subject.ContentChanges, want)
 	}
-	if !strings.Contains(second.Subject.Patch, "+var next = 1") || strings.Contains(second.Subject.Patch, "+const state") {
-		t.Fatalf("delta patch reviews more than the unreviewed lines:\n%s", second.Subject.Patch)
-	}
 	prompt := executor.attempts[1].Prompt
+	if patch := promptPatch(t, prompt); !strings.Contains(patch, "+var next = 1") || strings.Contains(patch, "+const state") {
+		t.Fatalf("delta patch reviews more than the unreviewed lines:\n%s", patch)
+	}
 	for _, want := range []string{"claim to verify", "- " + string(first.ID) + " #1 HIGH review.go:3: The changed state is not handled."} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("delta prompt lacks %q:\n%s", want, prompt)
@@ -158,7 +158,8 @@ func TestRunUnreviewedLeavesExemptPathsOut(t *testing.T) {
 	checkpoint := boundedCheckpoint(0, 3)
 	checkpoint.ExemptPaths = []string{"notes.md"}
 	writeBoundedSelection(t, repository, checkpoint, "bugs")
-	conductor := testPartyConductor(t, map[string]attemptExecutor{defaultReviewer: successfulExecutor(cleanReview)})
+	executor := successfulExecutor(cleanReview)
+	conductor := testPartyConductor(t, map[string]attemptExecutor{defaultReviewer: executor})
 	runOneMember(t, conductor, model.RunSelection{Repository: repository, Subject: model.WorkingChanges()})
 
 	writeTestFile(t, filepath.Join(repository, "review.go"), "package demo\n\nconst state = \"changed\"\n\nvar next = 1\n")
@@ -167,8 +168,8 @@ func TestRunUnreviewedLeavesExemptPathsOut(t *testing.T) {
 	if got := changedPaths(record.Subject.ContentChanges); !slices.Equal(got, []string{"review.go"}) {
 		t.Fatalf("delta paths = %q, want review.go without the exempt notes.md", got)
 	}
-	if strings.Contains(record.Subject.Patch, "notes.md") {
-		t.Fatalf("delta patch reviews the exempt path:\n%s", record.Subject.Patch)
+	if patch := promptPatch(t, executor.attempts[1].Prompt); strings.Contains(patch, "notes.md") {
+		t.Fatalf("delta patch reviews the exempt path:\n%s", patch)
 	}
 }
 

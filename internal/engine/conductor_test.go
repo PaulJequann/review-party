@@ -80,17 +80,31 @@ func TestReviewFreezesWorkingChangesBeforeExecution(t *testing.T) {
 			return attemptExecution{AssistantText: cleanReview, Outcome: model.AttemptCompleted}
 		},
 	}
+	before, err := subject.ResolveWorkingChanges(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
 	conductor := testConductor(t, executor, time.Second)
 	record, err := conductor.Review(testContext(t), testSelection(repository))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(record.Subject.Patch, "first change") {
-		t.Fatalf("frozen subject does not contain original change:\n%s", record.Subject.Patch)
+	if patch := promptPatch(t, executor.attempts[0].Prompt); !strings.Contains(patch, "first change") || strings.Contains(patch, "later change") {
+		t.Fatalf("reviewer did not receive the frozen change:\n%s", patch)
 	}
-	if strings.Contains(record.Subject.Patch, "later change") {
-		t.Fatalf("frozen subject changed during execution:\n%s", record.Subject.Patch)
+	if record.Subject.Identity != before.Identity {
+		t.Fatalf("recorded identity %s, want the frozen identity %s", record.Subject.Identity, before.Identity)
 	}
+}
+
+// promptPatch is the patch section of a constructed Review prompt.
+func promptPatch(t *testing.T, prompt string) string {
+	t.Helper()
+	_, patch, found := strings.Cut(prompt, "--- PATCH ---\n")
+	if !found {
+		t.Fatalf("prompt has no patch section:\n%s", prompt)
+	}
+	return patch
 }
 
 func TestReviewCompletesOnlyWithValidCleanResult(t *testing.T) {

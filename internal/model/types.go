@@ -447,7 +447,6 @@ type ReviewSubject struct {
 	BaseObject   string        `json:"base_object,omitempty"`
 	HeadObject   string        `json:"head_object,omitempty"`
 	ChangedPaths []string      `json:"changed_paths"`
-	Patch        string        `json:"patch"`
 	Facts        *SubjectFacts `json:"facts,omitempty"`
 	// ContentChanges is the commit-free identity of the reviewed content,
 	// sorted by Path; Checkpoints match Reviews on this set alone.

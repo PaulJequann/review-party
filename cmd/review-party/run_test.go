@@ -115,7 +115,7 @@ func TestExecuteRunFailsWhenHumanOutputCannotBeWritten(t *testing.T) {
 
 func TestExecuteRunBundlePrintsReadableMembersAndFailsOnAnUnreadableOne(t *testing.T) {
 	conductor := &fakeRunConductor{
-		records: fakeReviewLoader{"rp_bugs": largePatchRecord("rp_bugs", "bugs", 1)},
+		records: fakeReviewLoader{"rp_bugs": reportRecord("rp_bugs", "bugs", 1)},
 		runBundle: model.ReviewBundle{ID: "rb_run", Lifecycle: model.LifecycleCompleted, Members: []model.BundleMember{
 			{Scope: "global", Profile: "bugs", ReviewID: "rp_bugs", Lifecycle: model.LifecycleCompleted},
 			{Scope: "global", Profile: "security", ReviewID: "rp_torn", Lifecycle: model.LifecycleCompleted},
