@@ -197,3 +197,30 @@ func TestReapRightAfterOwnerDeathLeavesNoSurvivor(t *testing.T) {
 		return len(survivors(everything)) == 0
 	})
 }
+
+func TestProcessSpawnedAfterCloseShutsDownWithoutResidue(t *testing.T) {
+	root := testRoot(t)
+	r := openRun(t, root, nil)
+	dir, err := r.ensureDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := helperCommand("sleep")
+	p, err := r.spawnSentinel(cmd, sentinelSpec{Path: cmd.Path, Args: cmd.Args, Env: cmd.Env})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Close()
+
+	began := time.Now()
+	if _, err := r.adopt(p, filepath.Join(dir, procsName)); !errors.Is(err, errRunClosed) {
+		t.Fatalf("adopt after Close: %v; want %v", err, errRunClosed)
+	}
+	if elapsed := time.Since(began); elapsed >= closeStopGrace {
+		t.Fatalf("shutting down the late process took %s; want under one grace period", elapsed)
+	}
+	<-p.Done()
+	if names := rootNames(t, root); !slices.Equal(names, []string{rootLockName}) {
+		t.Fatalf("root holds %v; want only root.lock", names)
+	}
+}

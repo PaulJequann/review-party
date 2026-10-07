@@ -80,22 +80,49 @@ func (r *Run) Start(cmd *exec.Cmd) (*Process, error) {
 		return nil, err
 	}
 	spec := sentinelSpec{Path: cmd.Path, Args: cmd.Args, Dir: cmd.Dir, Env: withTemp(cmd.Env, filepath.Join(dir, tempName))}
-	p, err := r.spawnSentinel(cmd, spec, filepath.Join(dir, procsName))
+	p, err := r.spawnSentinel(cmd, spec)
 	if err != nil {
 		return nil, err
 	}
-	r.mu.Lock()
-	closed := r.closed
-	if !closed {
-		r.procs[p] = struct{}{}
-	}
-	r.mu.Unlock()
+	return r.adopt(p, filepath.Join(dir, procsName))
+}
+
+// adopt starts p's waiter before anything else, so even a process that
+// finished spawning after Close shuts down through the normal path.
+func (r *Run) adopt(p *Process, recordDir string) (*Process, error) {
+	closed, recordErr := r.register(p, recordDir)
+	go p.wait()
 	if closed {
 		_ = p.Stop(closeStopGrace) //nolint:errcheck // The caller gets errRunClosed either way.
 		return nil, errRunClosed
 	}
-	go p.wait()
+	if recordErr != nil {
+		r.warn(fmt.Sprintf("review-party could not record Reviewer process %d: %v; a crash will leave it to the user", p.record.Reviewer.PID, recordErr))
+	}
 	return p, nil
+}
+
+// register records p under the run lock, so Close either sees p and its
+// record or the record is never written.
+func (r *Run) register(p *Process, recordDir string) (closed bool, err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed {
+		return true, nil
+	}
+	r.procs[p] = struct{}{}
+	if p.record.Mode == TreeJobDegraded {
+		r.degraded = true
+	}
+	path := filepath.Join(recordDir, strconv.Itoa(p.record.Sentinel.PID)+".json")
+	if err := os.MkdirAll(recordDir, 0o700); err != nil {
+		return false, err
+	}
+	if err := writeRecord(path, p.record); err != nil {
+		return false, err
+	}
+	p.recordPath = path
+	return false, nil
 }
 
 func withTemp(env []string, dir string) []string {
@@ -124,7 +151,7 @@ func isTempVariable(pair string) bool {
 	return false
 }
 
-func (r *Run) spawnSentinel(cmd *exec.Cmd, spec sentinelSpec, recordDir string) (*Process, error) {
+func (r *Run) spawnSentinel(cmd *exec.Cmd, spec sentinelSpec) (*Process, error) {
 	executable, err := os.Executable()
 	if err != nil {
 		return nil, err
@@ -157,7 +184,7 @@ func (r *Run) spawnSentinel(cmd *exec.Cmd, spec sentinelSpec, recordDir string) 
 		return nil, err
 	}
 	p := &Process{run: r, sentinel: sentinel, control: controlWrite, done: make(chan struct{})}
-	p.recordPath = p.writeRecord(recordDir, spec, status)
+	p.record = newProcessRecord(sentinel.Process.Pid, spec.Path, status)
 	return p, nil
 }
 
@@ -199,35 +226,20 @@ func readStatus(statusPipe *os.File) (sentinelStatus, error) {
 	return status, nil
 }
 
-func (p *Process) writeRecord(dir string, spec sentinelSpec, status sentinelStatus) string {
-	sentinel, err := identify(p.sentinel.Process.Pid)
+func newProcessRecord(sentinelPID int, program string, status sentinelStatus) ProcessRecord {
+	sentinel, err := identify(sentinelPID)
 	if err != nil {
-		sentinel = Identity{PID: p.sentinel.Process.Pid, Boot: status.Reviewer.Boot}
+		sentinel = Identity{PID: sentinelPID, Boot: status.Reviewer.Boot}
 	}
-	p.record = ProcessRecord{
+	return ProcessRecord{
 		Schema:   recordSchema,
 		Sentinel: sentinel,
 		Reviewer: status.Reviewer,
 		Group:    status.Group,
 		Started:  time.Now().UTC(),
-		Program:  spec.Path,
+		Program:  program,
 		Mode:     status.Mode,
 	}
-	if status.Mode == TreeJobDegraded {
-		p.run.mu.Lock()
-		p.run.degraded = true
-		p.run.mu.Unlock()
-	}
-	path := filepath.Join(dir, strconv.Itoa(sentinel.PID)+".json")
-	err = os.MkdirAll(dir, 0o700)
-	if err == nil {
-		err = writeRecord(path, p.record)
-	}
-	if err != nil {
-		p.run.warn(fmt.Sprintf("review-party could not record Reviewer process %d: %v; a crash will leave it to the user", status.Reviewer.PID, err))
-		return ""
-	}
-	return path
 }
 
 func (p *Process) wait() {
