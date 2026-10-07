@@ -99,11 +99,17 @@ func TestFindingRecordShowsVerdictsOnInspectUntilEveryFindingIsJudged(t *testing
 	requireFindingCLI(t, `{"recorded":0,"unchanged":1,"changed":0}`+"\n", "3 accept real", "finding", "record", string(costThreeReview), "--format", "json")
 }
 
-func TestInspectBundleHintNamesNoMemberWhileAnyFindingIsUnjudged(t *testing.T) {
+func TestInspectBundleHintNamesEachMemberWithAnUnjudgedFinding(t *testing.T) {
 	newFindingLedger(t)
+	hint := func(review model.ReviewID) string {
+		return "review-party finding record " + string(review) + " <<'EOF'\nN accept|reject|defer REASON\nEOF"
+	}
+	if human := succeedCLI(t, "", "inspect", string(costBundle)); !strings.HasSuffix(human, "\nfeedback: "+hint(costThreeReview)+"\n"+hint(costOneReview)+"\n") {
+		t.Fatalf("inspect stdout =\n%s\nwant the hint naming both unjudged members", human)
+	}
 	requireFindingCLI(t, "recorded 3\n", "1 accept a\n2 accept b\n3 accept c\n", "finding", "record", string(costThreeReview))
-	if human := succeedCLI(t, "", "inspect", string(costBundle)); !strings.HasSuffix(human, "\nfeedback: review-party finding record REVIEW <<'EOF'\nN accept|reject|defer REASON\nEOF\n") {
-		t.Fatalf("inspect stdout =\n%s\nwant the hint naming no member", human)
+	if human := succeedCLI(t, "", "inspect", string(costBundle)); !strings.HasSuffix(human, "\nfeedback: "+hint(costOneReview)+"\n") {
+		t.Fatalf("inspect stdout =\n%s\nwant the hint naming the one unjudged member", human)
 	}
 	requireFindingCLI(t, "recorded 1\n", "1 reject d\n", "finding", "record", string(costOneReview))
 	if human := succeedCLI(t, "", "inspect", string(costBundle)); strings.Contains(human, "feedback:") {

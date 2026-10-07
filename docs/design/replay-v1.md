@@ -4,8 +4,8 @@ Status: implemented locally on 2026-08-11.
 
 ## Interface
 
-`Conductor.Replay` accepts one source Review ID and optional explicit
-Reviewer/model/effort overrides. This small Interface hides ledger lookup,
+`Conductor.Replay` accepts one source Review ID and refuses Reviewer, model,
+and effort overrides. This small Interface hides ledger lookup,
 reconstructibility checks, stored Profile reconstruction, relationship
 publication, and ordinary Review execution. The CLI does not see rows,
 migrations, or compiler internals.
@@ -32,13 +32,13 @@ deadline must remain supported.
 
 The original Reviewer ID, model, effort, harness, and transport must still be
 available exactly. Current configuration may disable or disallow a choice, but
-Review Party never falls back. Explicit Reviewer/model/effort overrides are
-resolved through current configuration and produce a newly identified effective
-Profile Revision with actual candidate provenance.
+Review Party never falls back. A Replay selection that names a Reviewer, model,
+or effort is refused before any record is created; a different choice is an
+ordinary new Review, not a Replay.
 
 ## Semantics and exclusions
 
-Replay reproduces frozen experiment inputs and declared overrides. Model output
+Replay reproduces frozen experiment inputs. Model output
 is non-deterministic: Results and Findings are never expected or asserted to
 equal the source. Replay does not overwrite a record, replay application events,
 fetch missing Git objects, recover another machine's repository, or upgrade to
