@@ -160,7 +160,7 @@ func TestRecordSaveFailureRemovesPublishedAttemptArtifacts(t *testing.T) {
 func TestOverflowedExecutionMarksAssistantArtifactTruncated(t *testing.T) {
 	publisher := newArtifactPublisher(mustNewArtifactStore(t, t.TempDir()))
 	runner := &reviewRunner{publisher: publisher}
-	attempt, err := runner.buildAttempt("rp_1723200000000_0123456789abcdef", "prompt", reviewerCandidate{}, attemptExecution{AssistantText: "captured prefix", ArtifactTruncated: true}, model.AttemptInvalidResult, time.Time{}, time.Time{})
+	attempt, err := runner.buildAttempt(attemptDraft{reviewID: "rp_1723200000000_0123456789abcdef", number: 1, prompt: "prompt", execution: attemptExecution{AssistantText: "captured prefix", ArtifactTruncated: true}, outcome: model.AttemptInvalidResult})
 	if err != nil {
 		t.Fatal(err)
 	}
