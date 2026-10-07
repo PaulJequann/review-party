@@ -49,14 +49,15 @@ type ownerLabel string
 type repositoryPath string
 type checkoutPath string
 
+// PrepareExecution is the repository view a Reviewer reads: a copy of a
+// captured change, a detached checkout of a Subject with a head commit (a
+// committed range or the unreviewed delta of one), else the working tree.
 func (subject Subject) PrepareExecution(owner string) (*ExecutionCheckout, error) {
-	switch subject.Kind {
-	case model.SubjectCapturedChange:
+	switch {
+	case subject.Kind == model.SubjectCapturedChange:
 		return subject.prepareCapturedExecution(owner)
-	case model.SubjectCommittedRange:
+	case subject.HeadObject != "":
 		return prepareCommittedExecution(subject.ReviewSubject, owner)
-	case model.SubjectWorkingChanges:
-		return &ExecutionCheckout{Repository: subject.Repository}, nil
 	default:
 		return &ExecutionCheckout{Repository: subject.Repository}, nil
 	}

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"reviewparty/internal/engine"
 	"reviewparty/internal/model"
 )
 
@@ -15,6 +16,8 @@ type fakeRunConductor struct {
 	records      fakeReviewLoader
 	record       model.ReviewRecord
 	runBundle    model.ReviewBundle
+	runErr       error
+	selection    model.RunSelection
 	profileCalls int
 	runCalls     int
 }
@@ -28,8 +31,12 @@ func (conductor *fakeRunConductor) ReviewExplicitProfile(context.Context, model.
 	return conductor.record, nil
 }
 
-func (conductor *fakeRunConductor) Run(context.Context, model.RunSelection) (model.ReviewBundle, error) {
+func (conductor *fakeRunConductor) Run(_ context.Context, selection model.RunSelection) (model.ReviewBundle, error) {
 	conductor.runCalls++
+	conductor.selection = selection
+	if conductor.runErr != nil {
+		return model.ReviewBundle{}, conductor.runErr
+	}
 	if conductor.runBundle.ID != "" {
 		return conductor.runBundle, nil
 	}
@@ -65,6 +72,30 @@ func TestExecuteRunExplicitProfileUsesOrdinaryReviewRecord(t *testing.T) {
 	}
 	if strings.Contains(stdout.String(), "rb_unexpected") {
 		t.Fatalf("output = %q, must not render a bundle", stdout.String())
+	}
+}
+
+func TestExecuteRunUnreviewedWithNothingLeftSucceedsWithOneLine(t *testing.T) {
+	for _, format := range []string{"human", "json"} {
+		t.Run(format, func(t *testing.T) {
+			conductor := &fakeRunConductor{runErr: engine.ErrNothingUnreviewed}
+			var stdout, stderr bytes.Buffer
+			exit := executeRunWithConductor(context.Background(), conductor, runOptions{
+				format: format, configuration: defaultUserConfigurationPath(), subject: model.WorkingChanges(), unreviewed: true,
+			}, commandIO{output: &stdout, errors: &stderr})
+			if exit != 0 {
+				t.Fatalf("exit = %d, stderr = %q", exit, stderr.String())
+			}
+			if !conductor.selection.Unreviewed {
+				t.Fatal("the run did not ask the Conductor for the unreviewed delta")
+			}
+			if lines := strings.Split(strings.TrimSuffix(stdout.String(), "\n"), "\n"); len(lines) != 1 || !strings.Contains(lines[0], "nothing") {
+				t.Fatalf("stdout = %q, want one line saying nothing is unreviewed", stdout.String())
+			}
+			if stderr.Len() != 0 {
+				t.Fatalf("stderr = %q, want nothing", stderr.String())
+			}
+		})
 	}
 }
 

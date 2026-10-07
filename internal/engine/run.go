@@ -82,7 +82,8 @@ type compiledSlot struct {
 
 // planSelection preflights the complete selection before anything persists or
 // launches. It fails closed on a missing selection, missing reference,
-// incomplete Profile, unavailable saved Reviewer, or rejected model.
+// incomplete Profile, unavailable saved Reviewer, or rejected model, then
+// bounds the plan by what the Profiles already reviewed.
 func (conductor *Conductor) planSelection(selection model.RunSelection) (plannedSelection, error) {
 	preparation, err := conductor.startReviewPreparation(selection.Repository, selection.Subject)
 	if err != nil {
@@ -100,12 +101,12 @@ func (conductor *Conductor) planSelection(selection model.RunSelection) (planned
 	if err != nil {
 		return plannedSelection{}, err
 	}
-	return plannedSelection{
+	return conductor.boundPlan(plannedSelection{
 		resolved:        resolved.snapshot.Selection(),
 		repository:      preparation.repository,
 		preparedSubject: preparedSubject,
 		members:         members,
-	}, nil
+	}, selection.Unreviewed)
 }
 
 // resolvedRunSelection carries the one configuration snapshot for a run.

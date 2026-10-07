@@ -106,10 +106,24 @@ func (judge *findingJudge) currentVerdicts(id model.ReviewID) (map[int]bool, err
 	return current, nil
 }
 
-// exempts reports whether a Finding's location is one path:line, as the
-// result contract writes it, in a path the Checkpoint exempts. Any other
-// location, such as one naming two files, needs a Verdict.
+// exempts reports whether a Finding is located in a path the Checkpoint
+// exempts. A Finding at any other location needs a Verdict.
 func (judge *findingJudge) exempts(location string) bool {
+	path := findingPath(location)
+	return path != "" && judge.declaration.Exempts(path)
+}
+
+// findingPath is the path of a Finding located at one path:line, as the
+// result contract writes it. Any other location, such as one naming two
+// files, has no path.
+func findingPath(location string) string {
 	path, line, found := strings.Cut(strings.TrimSpace(location), ":")
-	return found && line != "" && strings.Trim(line, "0123456789-:") == "" && judge.declaration.Exempts(path)
+	if found && isLineReference(line) {
+		return path
+	}
+	return ""
+}
+
+func isLineReference(line string) bool {
+	return line != "" && strings.Trim(line, "0123456789-:") == ""
 }

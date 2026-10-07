@@ -6,6 +6,8 @@ package subject
 // paths it spans.
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -64,6 +66,33 @@ func DeltaPatch(repository string, delta []model.ContentChange) ([]byte, error) 
 	return diffDeltaTrees(repository, delta, "-p", "--binary", "--no-ext-diff")
 }
 
+// ResolveUnreviewedDelta is the Subject a run --unreviewed reviews: the delta
+// of a scope Subject from the states the Profiles reached. The delta and its
+// patch are its identity, and its content changes are the delta edges, so the
+// Review extends each Profile's chain to the scope's current content.
+func ResolveUnreviewedDelta(scope model.ReviewSubject, delta []model.ContentChange) (Subject, error) {
+	patch, err := DeltaPatch(scope.Repository, delta)
+	if err != nil {
+		return Subject{}, err
+	}
+	paths, facts, err := measureCapturedPatch(scope.Repository, patch)
+	if err != nil {
+		return Subject{}, err
+	}
+	facts.ChangedFiles = len(paths)
+	hash := sha256.New()
+	for _, value := range []string{string(model.SubjectUnreviewedDelta), scope.Repository, model.ContentChangesDigest(delta)} {
+		hash.Write([]byte(value))
+		hash.Write([]byte{0})
+	}
+	hash.Write(patch)
+	return Subject{ReviewSubject: model.ReviewSubject{
+		Kind: model.SubjectUnreviewedDelta, Repository: scope.Repository, Identity: hex.EncodeToString(hash.Sum(nil)),
+		BaseObject: scope.BaseObject, HeadObject: scope.HeadObject,
+		ChangedPaths: paths, Patch: string(patch), Facts: &facts, ContentChanges: delta,
+	}}, nil
+}
+
 func diffDeltaTrees(repository string, delta []model.ContentChange, options ...string) ([]byte, error) {
 	types, err := deltaObjectTypes(repository, delta)
 	if err != nil {
@@ -95,15 +124,10 @@ func diffDeltaTrees(repository string, delta []model.ContentChange, options ...s
 // deltaObjectTypes checks every non-zero side exists and learns its type, so
 // a nested repository's commit is listed as a gitlink rather than a blob.
 func deltaObjectTypes(repository string, delta []model.ContentChange) (map[string]string, error) {
+	paths := deltaObjectPaths(delta)
 	var input strings.Builder
-	paths := map[string]string{}
-	for _, change := range delta {
-		for _, object := range []string{change.Before, change.After} {
-			if object != model.ZeroObjectID {
-				input.WriteString(object + "\n")
-				paths[object] = change.Path
-			}
-		}
+	for object := range paths {
+		input.WriteString(object + "\n")
 	}
 	output, err := gitInputOutput(repository, []byte(input.String()), "cat-file", "--batch-check")
 	if err != nil {
@@ -111,15 +135,29 @@ func deltaObjectTypes(repository string, delta []model.ContentChange) (map[strin
 	}
 	types := map[string]string{}
 	for line := range strings.SplitSeq(strings.TrimSpace(string(output)), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) >= 2 && fields[1] == "missing" {
-			return nil, fmt.Errorf("%w: %s of %s", ErrMissingObject, fields[0], paths[fields[0]])
+		object, kind, found := strings.Cut(line, " ")
+		if !found {
+			continue
 		}
-		if len(fields) >= 2 {
-			types[fields[0]] = fields[1]
+		if kind == "missing" {
+			return nil, fmt.Errorf("%w: %s of %s", ErrMissingObject, object, paths[object])
 		}
+		types[object] = strings.Fields(kind)[0]
 	}
 	return types, nil
+}
+
+// deltaObjectPaths maps every non-zero side of the delta to its path.
+func deltaObjectPaths(delta []model.ContentChange) map[string]string {
+	paths := map[string]string{}
+	for _, change := range delta {
+		for _, object := range []string{change.Before, change.After} {
+			if object != model.ZeroObjectID {
+				paths[object] = change.Path
+			}
+		}
+	}
+	return paths
 }
 
 // writeDeltaTree stages one side of the delta into a private index and

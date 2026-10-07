@@ -8,6 +8,7 @@ package engine
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"sort"
 	"strings"
@@ -82,13 +83,12 @@ func (conductor *Conductor) checkCoverage(repository string, content []model.Con
 	if err != nil {
 		return CoverageReport{}, err
 	}
-	ledger, ok := conductor.store.(transitionLedger)
-	if !ok {
-		return CoverageReport{}, errors.New("coverage check requires the SQLite ledger")
+	check, err := conductor.newCoverageCheck(repository, content, declaration, judge)
+	if err != nil {
+		return CoverageReport{}, err
 	}
-	check := coverageCheck{conductor: conductor, ledger: ledger, repository: repository, content: content, declaration: declaration, judge: judge, measured: map[string]subject.DeltaLines{}}
 	report := CoverageReport{}
-	reaches := make([]profileReach, 0, len(resolved.Expanded))
+	var participants []profileReach
 	for _, profile := range resolved.Expanded {
 		entry, reach, err := check.profile(profile.Scope, profile.Profile)
 		if errors.Is(err, store.ErrReviewRecordStateNotInitialized) {
@@ -98,11 +98,21 @@ func (conductor *Conductor) checkCoverage(repository string, content []model.Con
 			return CoverageReport{}, fmt.Errorf("check coverage for Profile %q: %w", profile.Profile, err)
 		}
 		report.Profiles = append(report.Profiles, entry)
-		reaches = append(reaches, reach)
+		if len(entry.Unreviewed) > 0 {
+			participants = append(participants, reach)
+		}
 	}
-	report.Unreviewed = commonDelta(content, report.Profiles, reaches)
+	report.Unreviewed = commonDelta(content, participants)
 	report.UnreviewedLines, err = check.measure(report.Unreviewed)
 	return report, err
+}
+
+func (conductor *Conductor) newCoverageCheck(repository string, content []model.ContentChange, declaration configuration.Checkpoint, judge *findingJudge) (*coverageCheck, error) {
+	ledger, ok := conductor.store.(transitionLedger)
+	if !ok {
+		return nil, errors.New("coverage check requires the SQLite ledger")
+	}
+	return &coverageCheck{conductor: conductor, ledger: ledger, repository: repository, content: content, declaration: declaration, judge: judge, measured: map[string]subject.DeltaLines{}}, nil
 }
 
 // profileReach is, per path, the states one Profile reached and when.
@@ -248,13 +258,17 @@ func newestReached(reached map[string]time.Time, current string) string {
 	if _, ok := reached[current]; ok {
 		return current
 	}
-	newest, at := "", time.Time{}
-	for node, reachedAt := range reached {
-		if newest == "" || reachedAt.After(at) || (reachedAt.Equal(at) && node < newest) {
-			newest, at = node, reachedAt
-		}
+	nodes := slices.Collect(maps.Keys(reached))
+	if len(nodes) == 0 {
+		return ""
 	}
-	return newest
+	slices.SortFunc(nodes, func(a, b string) int {
+		if order := reached[b].Compare(reached[a]); order != 0 {
+			return order
+		}
+		return strings.Compare(a, b)
+	})
+	return nodes[0]
 }
 
 func isInFlight(lifecycle model.Lifecycle) bool {
@@ -307,38 +321,36 @@ func (tally profileTally) fill(entry *ProfileCoverage) {
 	entry.Unreviewed = tally.unreviewed
 }
 
-// commonDelta is the delta from the newest state every Profile with
-// something unreviewed reached, per path, so one Review of it extends each of
-// their chains. It re-reviews more than any one Profile needs, never less.
-func commonDelta(content []model.ContentChange, profiles []ProfileCoverage, reaches []profileReach) []model.ContentChange {
-	var participants []profileReach
-	for index, profile := range profiles {
-		if len(profile.Unreviewed) > 0 {
-			participants = append(participants, reaches[index])
-		}
-	}
+// commonDelta is the delta from the newest state every participating Profile
+// reached, per path, so one Review of it extends each of their chains. It
+// re-reviews more than any one Profile needs, never less.
+func commonDelta(content []model.ContentChange, participants []profileReach) []model.ContentChange {
 	if len(participants) == 0 {
 		return nil
 	}
 	var delta []model.ContentChange
 	for _, change := range content {
-		shared := map[string]time.Time{}
-		for node, at := range participants[0][change.Path] {
-			shared[node] = at
-		}
-		for _, reach := range participants[1:] {
-			for node, at := range shared {
-				reachedAt, ok := reach[change.Path][node]
-				if !ok {
-					delete(shared, node)
-				} else if reachedAt.After(at) {
-					shared[node] = reachedAt
-				}
-			}
-		}
-		if reviewed := newestReached(shared, change.After); reviewed != change.After {
+		if reviewed := newestReached(sharedReach(participants, change.Path), change.After); reviewed != change.After {
 			delta = append(delta, model.ContentChange{Path: change.Path, Before: reviewed, After: change.After})
 		}
 	}
 	return delta
+}
+
+// sharedReach is the states of one path every participant reached, each at
+// the time the last of them reached it.
+func sharedReach(participants []profileReach, path string) map[string]time.Time {
+	shared := maps.Clone(participants[0][path])
+	for _, reach := range participants[1:] {
+		for node, at := range shared {
+			reachedAt, ok := reach[path][node]
+			switch {
+			case !ok:
+				delete(shared, node)
+			case reachedAt.After(at):
+				shared[node] = reachedAt
+			}
+		}
+	}
+	return shared
 }

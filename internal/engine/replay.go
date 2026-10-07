@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-var ErrWorkingChangesReplayUnsupported = errors.New("working-changes Reviews cannot be replayed; replay requires a committed-range Subject")
+var ErrWorkingChangesReplayUnsupported = errors.New("replay requires a committed-range Subject; working-changes and unreviewed-delta Reviews cannot be replayed")
 
 func (conductor *Conductor) prepareReplay(source model.ReviewRecord, selection model.ReplaySelection) (preparedReview, error) {
 	timings := model.ReviewTimings{}

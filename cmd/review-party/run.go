@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 
 	"github.com/spf13/cobra"
@@ -36,8 +37,13 @@ the saved selection for this one run and never changes configuration.
 While the run is in progress, stderr carries a lifecycle heartbeat that names
 the Review Bundle or Review and each member's transitions. Stdout carries only
 the final result. --quiet suppresses the heartbeat. Use review-party status to
-check a run from another shell and review-party wait to block until it ends.`,
-		Example:           "  review-party run --repo .\n  review-party run --profile code-quality\n  review-party run --party baseline --base main --head HEAD",
+check a run from another shell and review-party wait to block until it ends.
+
+--unreviewed reviews, per Profile, only what that Profile has not reviewed of
+the Subject yet, and skips Profiles with nothing left. It is the next step a
+refused Checkpoint prints, and exits 0 without a Review when nothing is
+unreviewed.`,
+		Example:           "  review-party run --repo .\n  review-party run --profile code-quality\n  review-party run --party baseline --base main --head HEAD\n  review-party run --unreviewed --base main --head HEAD",
 		Args:              cobra.NoArgs,
 		ValidArgsFunction: cobra.NoFileCompletions,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -49,6 +55,7 @@ check a run from another shell and review-party wait to block until it ends.`,
 				profile: stringFlag(cmd, "profile"), party: stringFlag(cmd, "party"),
 				repository: stringFlag(cmd, "repo"), subject: subjectReference,
 				format: stringFlag(cmd, "format"), configuration: stringFlag(cmd, "config"), full: boolFlag(cmd, "full"),
+				unreviewed: boolFlag(cmd, "unreviewed"),
 			}
 			renderer, sink := newRunProgressSink(boolFlag(cmd, "quiet"), streams.errors, options.configuration)
 			defer renderer.stop()
@@ -62,6 +69,7 @@ check a run from another shell and review-party wait to block until it ends.`,
 	cmd.RegisterFlagCompletionFunc("profile", completeProfileNames) //nolint:errcheck // Cobra completion registration is best-effort
 	cmd.RegisterFlagCompletionFunc("party", completePartyNames)     //nolint:errcheck // Cobra completion registration is best-effort
 	cmd.Flags().Bool("quiet", false, "Suppress the stderr lifecycle heartbeat")
+	cmd.Flags().Bool("unreviewed", false, "Review only what each Profile has not reviewed of the Subject yet")
 	cmd.MarkFlagsMutuallyExclusive("profile", "party")
 	addReviewFlags(cmd)
 	return cmd
@@ -75,6 +83,7 @@ type runOptions struct {
 	format        string
 	configuration string
 	full          bool
+	unreviewed    bool
 	progress      func(model.RunProgressEvent)
 	warn          func(string)
 }
@@ -95,7 +104,23 @@ type runConductor interface {
 
 func executeRunWithConductor(ctx context.Context, conductor runConductor, options runOptions, streams commandIO) int {
 	report, err := runReport(ctx, conductor, options)
+	if errors.Is(err, engine.ErrNothingUnreviewed) {
+		return printNothingUnreviewed(streams, options.format)
+	}
 	return printRunOutcome(streams, report, err, reportOptions{format: options.format, configuration: options.configuration})
+}
+
+// printNothingUnreviewed is the one line a run --unreviewed with nothing left
+// prints; it ran no Review and succeeded.
+func printNothingUnreviewed(streams commandIO, format string) int {
+	line := engine.ErrNothingUnreviewed.Error()
+	if format == "json" {
+		line = `{"nothing_unreviewed": true}`
+	}
+	if _, err := fmt.Fprintln(streams.output, line); err != nil {
+		return printFailure(streams.errors, fmt.Errorf("write command output: %w", err))
+	}
+	return 0
 }
 
 func printRunOutcome(streams commandIO, report reviewReport, runErr error, options reportOptions) int {
@@ -120,6 +145,7 @@ func runReport(ctx context.Context, conductor runConductor, options runOptions) 
 		Subject:    options.subject,
 		Profile:    options.profile,
 		Party:      options.party,
+		Unreviewed: options.unreviewed,
 	}
 	if options.profile != "" {
 		record, err := conductor.ReviewExplicitProfile(ctx, selection)

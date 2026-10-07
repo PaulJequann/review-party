@@ -30,6 +30,10 @@ const (
 	SubjectWorkingChanges SubjectKind = "working-changes"
 	SubjectCommittedRange SubjectKind = "committed-range"
 	SubjectCapturedChange SubjectKind = "captured-change"
+	// SubjectUnreviewedDelta is the content between the state a Profile last
+	// reviewed and the current content of a working-changes or
+	// committed-range scope.
+	SubjectUnreviewedDelta SubjectKind = "unreviewed-delta"
 )
 
 type SubjectReference struct {
@@ -75,6 +79,9 @@ type RunSelection struct {
 	Subject    SubjectReference
 	Profile    string
 	Party      string
+	// Unreviewed narrows each Profile's Review to what it has not reviewed
+	// of the Subject yet, and skips Profiles with nothing left.
+	Unreviewed bool
 }
 
 type EvalRunID string
