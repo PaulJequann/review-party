@@ -41,6 +41,7 @@ type Conductor struct {
 	wait                func(context.Context, time.Duration) error
 	runner              *reviewRunner
 	progress            func(model.RunProgressEvent)
+	measureDelta        func(string, []model.ContentChange) (subject.DeltaLines, error)
 }
 
 func New(config Config) (*Conductor, error) {
@@ -93,6 +94,7 @@ func newConductorWithManagerAndProgress(store store.RecordStore, reviewers revie
 		retryDelay:          retryDelay,
 		wait:                waitForRetry,
 		progress:            progress,
+		measureDelta:        subject.MeasureDelta,
 	}
 	conductor.runner = newReviewRunner(store, func() time.Time { return conductor.now() }, func() model.RuntimeProvenance { return conductor.buildProvenance() }, newArtifactPublisher(nil))
 	return conductor, nil

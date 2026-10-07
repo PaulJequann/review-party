@@ -89,8 +89,8 @@ func TestAgentHookRefusesAnUnreviewedPushInEachAgentsForm(t *testing.T) {
 
 	fixture.declare("pre-push")
 	repo := " --repo " + shellQuoteArgument(fixture.repository)
-	refusal := denial("pre-push Checkpoint has no completed Review of " + fixture.base[:12] + ".." + head[:12] +
-		"; next: review-party run --base " + fixture.base + " --head " + head + repo).run()
+	refusal := denial("pre-push Checkpoint: 3 unreviewed lines in " + fixture.base[:12] + ".." + head[:12] +
+		"; next: review-party run --unreviewed --base " + fixture.base + " --head " + head + repo).run()
 	assertRun(t, fixture.agentHook(configuration.IntegrationClaudeCode, claudeEvent(t, toolCall{"Bash", "git push", fixture.repository})), refusal)
 	assertRun(t, fixture.agentHook(configuration.IntegrationCodex, codexEvent(t, toolCall{"Bash", "git -C " + fixture.repository + " push origin main | tail -1", "/"})), refusal)
 
@@ -110,10 +110,10 @@ func TestAgentHookRefusesCommitsItCannotSee(t *testing.T) {
 	}
 
 	repo := " --repo " + shellQuoteArgument(fixture.repository)
-	staged := denial("pre-commit Checkpoint has no completed Review of the staged changes; next: review-party run" + repo +
+	staged := denial("pre-commit Checkpoint: 2 unreviewed lines in the staged changes; next: review-party run --unreviewed" + repo +
 		"; or waive: review-party checkpoint waive pre-commit" + repo + ` --reason "<why>"`)
 	assertRun(t, hook("git commit -m x"), staged.run())
-	tracked := denial("pre-commit Checkpoint has no completed Review of the tracked changes; next: review-party run" + repo)
+	tracked := denial("pre-commit Checkpoint: 2 unreviewed lines in the tracked changes; next: review-party run --unreviewed" + repo)
 	assertRun(t, hook("git commit -am x"), tracked.run())
 	paths := denial("pre-commit Checkpoint cannot see the content a git commit of paths or picked hunks takes; stage the change and run git commit without paths")
 	assertRun(t, hook("git commit -m x app.go"), paths.run())
@@ -150,8 +150,8 @@ func TestAgentHookDecidesAGitCommandAfterALiteralCdInItsDirectory(t *testing.T) 
 	}
 
 	repo := " --repo " + shellQuoteArgument(fixture.repository)
-	unreviewed := denial("pre-push Checkpoint has no completed Review of " + fixture.base[:12] + ".." + head[:12] +
-		"; next: review-party run --base " + fixture.base + " --head " + head + repo)
+	unreviewed := denial("pre-push Checkpoint: 3 unreviewed lines in " + fixture.base[:12] + ".." + head[:12] +
+		"; next: review-party run --unreviewed --base " + fixture.base + " --head " + head + repo)
 	assertRun(t, hook("cd "+name+" && git push"), unreviewed.run())
 	assertRun(t, hook("cd /; cd "+fixture.repository+"\ngit push origin main"), unreviewed.run())
 	chained := denial("pre-push Checkpoint cannot check a git push chained after another command; run that git push as its own command")

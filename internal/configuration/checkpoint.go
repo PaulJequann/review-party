@@ -78,24 +78,42 @@ func ParseIntegrationName(value string) (IntegrationName, error) {
 	return "", fmt.Errorf("unknown integration %q; expected git, claude-code, codex, or agents-md", value)
 }
 
-// Checkpoint is one declared Review Checkpoint.
+// Checkpoint is one declared Review Checkpoint. UnreviewedLines is the
+// allowance: a change passes while no Profile has more unreviewed lines than
+// it. ReviewBudget caps how many Reviews one Profile spends on a change before
+// the Checkpoint stops and asks a person.
 type Checkpoint struct {
-	Requirement      CheckpointRequirement `json:"requirement"`
-	ExemptPaths      []string              `json:"exempt_paths,omitempty"`
-	SmallChangeLines int                   `json:"small_change_lines,omitempty"`
-	Waivers          WaiverPolicy          `json:"waivers,omitempty"`
-	Integrations     []IntegrationName     `json:"integrations,omitempty"`
+	Requirement     CheckpointRequirement `json:"requirement"`
+	ExemptPaths     []string              `json:"exempt_paths,omitempty"`
+	UnreviewedLines int                   `json:"unreviewed_lines"`
+	ReviewBudget    int                   `json:"review_budget"`
+	Waivers         WaiverPolicy          `json:"waivers,omitempty"`
+	Integrations    []IntegrationName     `json:"integrations,omitempty"`
 }
 
+// Defaults a declaration takes when the Caller sets nothing else.
+const (
+	DefaultUnreviewedLines = 0
+	DefaultReviewBudget    = 3
+	MaxReviewBudget        = 9
+)
+
 // NewCheckpoint returns a Checkpoint with the declared defaults: reviewed,
-// human waivers, no exemptions, and no integrations.
+// no allowance, a budget of three Reviews, human waivers, no exemptions, and
+// no integrations.
 func NewCheckpoint() Checkpoint {
-	return Checkpoint{Requirement: RequirementReviewed, Waivers: WaiversHuman}
+	return Checkpoint{Requirement: RequirementReviewed, UnreviewedLines: DefaultUnreviewedLines, ReviewBudget: DefaultReviewBudget, Waivers: WaiversHuman}
 }
 
 func (checkpoint *Checkpoint) UnmarshalJSON(payload []byte) error {
-	if _, err := decodeObjectFields(payload, "checkpoint", "requirement", "exempt_paths", "small_change_lines", "waivers", "integrations"); err != nil {
+	fields, err := decodeObjectFields(payload, "checkpoint", "requirement", "exempt_paths", "unreviewed_lines", "review_budget", "waivers", "integrations")
+	if err != nil {
 		return err
+	}
+	for _, required := range []string{"unreviewed_lines", "review_budget"} {
+		if _, present := fields[required]; !present {
+			return fmt.Errorf("%s is required", required)
+		}
 	}
 	type plainCheckpoint Checkpoint
 	var decoded plainCheckpoint
@@ -146,9 +164,7 @@ func (checkpoint Checkpoint) Summary(name CheckpointName) string {
 	if len(checkpoint.ExemptPaths) > 0 {
 		parts = append(parts, "exempt "+strings.Join(checkpoint.ExemptPaths, " "))
 	}
-	if checkpoint.SmallChangeLines > 0 {
-		parts = append(parts, fmt.Sprintf("small changes up to %d lines", checkpoint.SmallChangeLines))
-	}
+	parts = append(parts, fmt.Sprintf("unreviewed lines %d", checkpoint.UnreviewedLines), fmt.Sprintf("review budget %d", checkpoint.ReviewBudget))
 	if len(checkpoint.Integrations) > 0 {
 		integrations := make([]string, len(checkpoint.Integrations))
 		for index, integration := range checkpoint.Integrations {
@@ -217,8 +233,11 @@ func validateCheckpoint(checkpoint Checkpoint) error {
 	default:
 		return checkpointFieldError{"waivers", fmt.Errorf("unknown waiver policy %q; expected anyone, human, or none", checkpoint.Waivers)}
 	}
-	if checkpoint.SmallChangeLines < 0 {
-		return checkpointFieldError{"small_change_lines", errors.New("must not be negative")}
+	if checkpoint.UnreviewedLines < 0 {
+		return checkpointFieldError{"unreviewed_lines", errors.New("must not be negative")}
+	}
+	if checkpoint.ReviewBudget < 1 || checkpoint.ReviewBudget > MaxReviewBudget {
+		return checkpointFieldError{"review_budget", fmt.Errorf("must be between 1 and %d", MaxReviewBudget)}
 	}
 	for _, pattern := range checkpoint.ExemptPaths {
 		if err := ValidatePathPattern(pattern); err != nil {

@@ -145,9 +145,9 @@ func TestCheckpointPrePushCoveredByOneRangeReview(t *testing.T) {
 	if exit != 0 {
 		t.Fatalf("exit = %d, stdout = %q, stderr = %q", exit, stdout, stderr)
 	}
-	want := `{"checkpoint": "pre-push", "base": "` + fixture.base + `", "head": "` + head + `", "range_source": "flags", "state": "covered", "covered": true, "profiles": [
-		{"scope": "repository", "name": "bugs", "state": "covered", "review_ids": ["rp_1725192000000_00000000000000a1"]},
-		{"scope": "repository", "name": "docs", "state": "covered", "review_ids": ["rp_1725192000000_00000000000000a2"]}]}`
+	want := `{"checkpoint": "pre-push", "base": "` + fixture.base + `", "head": "` + head + `", "range_source": "flags", "state": "covered", "unreviewed_lines": 0, "profiles": [
+		{"scope": "repository", "name": "bugs", "state": "covered", "reviews": ["rp_1725192000000_00000000000000a1"], "unreviewed_lines": 0, "budget_spent": 1, "review_budget": 0},
+		{"scope": "repository", "name": "docs", "state": "covered", "reviews": ["rp_1725192000000_00000000000000a2"], "unreviewed_lines": 0, "budget_spent": 1, "review_budget": 0}]}`
 	var got, wanted any
 	if err := json.Unmarshal([]byte(stdout), &got); err != nil {
 		t.Fatal(err)
@@ -160,17 +160,14 @@ func TestCheckpointPrePushCoveredByOneRangeReview(t *testing.T) {
 	}
 }
 
-func TestCheckpointPrePushCoveredByPerCommitReviews(t *testing.T) {
+func TestCheckpointPrePushCoveredByAReviewOfEachPath(t *testing.T) {
 	fixture := newCheckpointFixture(t)
-	first := fixture.commit("one.go", "package app\n\nconst one = 1\n")
+	fixture.commit("one.go", "package app\n\nconst one = 1\n")
 	head := fixture.commit("two.go", "package app\n\nconst two = 2\n")
-	commits := fixture.rangeChanges(head).Commits
-	fixture.saveReview("rp_1725192000000_00000000000000b1", "bugs", model.LifecycleCompleted, commits[0].Changes)
-	fixture.saveReview("rp_1725192000000_00000000000000b2", "bugs", model.LifecycleCompleted, commits[1].Changes)
-	fixture.saveReview("rp_1725192000000_00000000000000b3", "docs", model.LifecycleCompleted, fixture.rangeChanges(head).Changes)
-	if commits[0].Commit != first {
-		t.Fatalf("first commit = %s, want %s", commits[0].Commit, first)
-	}
+	whole := fixture.rangeChanges(head).Changes
+	fixture.saveReview("rp_1725192000000_00000000000000b1", "bugs", model.LifecycleCompleted, whole[:1])
+	fixture.saveReview("rp_1725192000000_00000000000000b2", "bugs", model.LifecycleCompleted, whole[1:])
+	fixture.saveReview("rp_1725192000000_00000000000000b3", "docs", model.LifecycleCompleted, whole)
 
 	exit, stdout, stderr := fixture.check("pre-push", "--base", fixture.base)
 	if exit != 0 {
@@ -196,8 +193,8 @@ func TestCheckpointPrePushMissingPrintsRunCommand(t *testing.T) {
 	}
 	for _, line := range []string{
 		"bugs (repository): covered by rp_1725192000000_00000000000000c1\n",
-		"docs (repository): missing\n",
-		"next: review-party run --base " + fixture.base + " --head " + head + " --repo " + shellQuoteArgument(fixture.repository) + "\n",
+		"docs (repository): missing, 3 unreviewed lines in one.go\n",
+		"next: review-party run --unreviewed --base " + fixture.base + " --head " + head + " --repo " + shellQuoteArgument(fixture.repository) + "\n",
 	} {
 		if !strings.Contains(stdout, line) {
 			t.Fatalf("stdout lacks %q:\n%s", line, stdout)
@@ -229,7 +226,7 @@ func TestCheckpointPrePushRunningPrintsWait(t *testing.T) {
 		t.Fatalf("exit = %d, stdout = %q, stderr = %q", exit, stdout, stderr)
 	}
 	want := "pre-push checkpoint: " + fixture.base + ".." + head + " (range from --base)\n" +
-		"bugs (repository): running rp_1725192000000_00000000000000d1\n" +
+		"bugs (repository): running rp_1725192000000_00000000000000d1, 3 unreviewed lines in one.go\n" +
 		"docs (repository): covered by rp_1725192000000_00000000000000d2\n" +
 		"wait: review-party wait rp_1725192000000_00000000000000d1\n"
 	if stdout != want {
@@ -254,9 +251,9 @@ func TestCheckpointPreCommitWithPartialStagingIsUncovered(t *testing.T) {
 	}
 	want := "pre-commit checkpoint: staged changes\n" +
 		"bugs (repository): covered by rp_1725192000000_00000000000000e1\n" +
-		"docs (repository): missing\n" +
+		"docs (repository): missing, 2 unreviewed lines in app.go\n" +
 		"The Review must match the staged content, so stash or stage the rest of your changes first.\n" +
-		"next: review-party run --repo " + shellQuoteArgument(fixture.repository) + "\n"
+		"next: review-party run --unreviewed --repo " + shellQuoteArgument(fixture.repository) + "\n"
 	if stdout != want {
 		t.Fatalf("stdout = %q, want %q", stdout, want)
 	}

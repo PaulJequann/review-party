@@ -81,7 +81,7 @@ func decodeCheckpointReport(t *testing.T, result commandRun) checkpointReport {
 
 func TestCheckpointSetPublishesTheDeclaration(t *testing.T) {
 	fixture := newCheckpointFixture(t)
-	fixture.declare("pre-push", "--exempt", "*.md", "--exempt", "docs/**", "--small-change-lines", "3", "--waivers", "anyone", "--integration", "git")
+	fixture.declare("pre-push", "--exempt", "*.md", "--exempt", "docs/**", "--unreviewed-lines", "3", "--review-budget", "2", "--waivers", "anyone", "--integration", "git")
 
 	payload, err := os.ReadFile(filepath.Join(fixture.repository, ".reviewparty", "config.json"))
 	if err != nil {
@@ -94,7 +94,7 @@ func TestCheckpointSetPublishesTheDeclaration(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string]any{"pre-push": map[string]any{
-		"requirement": "reviewed", "exempt_paths": []any{"*.md", "docs/**"}, "small_change_lines": float64(3),
+		"requirement": "reviewed", "exempt_paths": []any{"*.md", "docs/**"}, "unreviewed_lines": float64(3), "review_budget": float64(2),
 		"waivers": "anyone", "integrations": []any{"git"},
 	}}
 	if !reflect.DeepEqual(config.Checkpoints, want) {
@@ -140,20 +140,28 @@ func TestCheckpointExemptPathsLeaveBothSides(t *testing.T) {
 	}
 }
 
-func TestCheckpointSmallChangePassesAndLargeChangeNamesTheLimit(t *testing.T) {
+func TestCheckpointAllowanceAndBudgetDecideAfterAReview(t *testing.T) {
 	fixture := newCheckpointFixture(t)
-	fixture.declare("pre-push", "--small-change-lines", "2")
-	small := fixture.commit("app.go", "package app\n\nconst one = 1\n")
-
+	fixture.declare("pre-push", "--unreviewed-lines", "1", "--review-budget", "1")
+	reviewed := fixture.commit("one.go", "package app\n\nconst one = 1\n")
 	exit, stdout, _ := fixture.check("pre-push", "--base", fixture.base)
-	if exit != 0 || !strings.Contains(stdout, "exempt: small change of 2 lines, at most 2 pass\n") {
-		t.Fatalf("small change exit = %d, stdout = %q", exit, stdout)
+	if exit != 1 || !strings.Contains(stdout, "bugs (repository): missing, 3 unreviewed lines in one.go; 0 of 1 Reviews spent\n") {
+		t.Fatalf("unreviewed exit = %d, stdout = %q", exit, stdout)
 	}
 
-	fixture.commit("app.go", "package app\n\nconst one = 1\nconst two = 2\n")
+	changes := fixture.rangeChanges(reviewed).Changes
+	fixture.saveReview(judgedBugs, "bugs", model.LifecycleCompleted, changes)
+	fixture.saveReview(judgedDocs, "docs", model.LifecycleCompleted, changes)
+	fixture.commit("one.go", "package app\n\nconst one = 1\nconst two = 2\n")
 	exit, stdout, _ = fixture.check("pre-push", "--base", fixture.base)
-	if exit != 1 || !strings.Contains(stdout, "changed lines: 3, over the small-change limit of 2\n") {
-		t.Fatalf("large change from %s exit = %d, stdout = %q", small, exit, stdout)
+	if exit != 0 || !strings.Contains(stdout, "bugs (repository): residual, 1 unreviewed line in one.go; 1 of 1 Reviews spent; after "+string(judgedBugs)+"\n") {
+		t.Fatalf("residual exit = %d, stdout = %q", exit, stdout)
+	}
+
+	fixture.commit("one.go", "package app\n\nconst one = 1\nconst two = 2\nconst three = 3\n")
+	exit, stdout, _ = fixture.check("pre-push", "--base", fixture.base)
+	if exit != 1 || !strings.HasSuffix(stdout, "stop: 2 unreviewed lines exceed 1 after 1 of 1 Reviews; ask a person\n") || strings.Contains(stdout, "review-party run") {
+		t.Fatalf("spent exit = %d, stdout = %q", exit, stdout)
 	}
 }
 

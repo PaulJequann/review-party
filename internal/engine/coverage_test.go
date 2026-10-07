@@ -3,7 +3,6 @@ package engine
 import (
 	"context"
 	"errors"
-	"fmt"
 	"reflect"
 	"slices"
 	"strings"
@@ -20,64 +19,12 @@ var (
 	coverageFirst  = []model.ContentChange{{Path: "a.go", Before: model.ZeroObjectID, After: "1111111111111111111111111111111111111111"}}
 	coverageSecond = []model.ContentChange{{Path: "b.go", Before: model.ZeroObjectID, After: "2222222222222222222222222222222222222222"}}
 	coverageWhole  = append(append([]model.ContentChange{}, coverageFirst...), coverageSecond...)
-	twoCommits     = CoverageSubject{Changes: coverageWhole, Commits: []subject.CommitContentChanges{{Commit: "c1", Changes: coverageFirst}, {Commit: "c2", Changes: coverageSecond}}}
 )
 
-func candidate(id string, lifecycle model.Lifecycle) store.CoverageCandidate {
-	return store.CoverageCandidate{ID: model.ReviewID(id), Lifecycle: lifecycle}
-}
-
-func changeSetKey(changes []model.ContentChange) string {
-	return fmt.Sprint(changes)
-}
-
-func TestDecideCoverage(t *testing.T) {
-	whole, first, second := changeSetKey(coverageWhole), changeSetKey(coverageFirst), changeSetKey(coverageSecond)
-	for _, test := range []struct {
-		name       string
-		subject    CoverageSubject
-		candidates map[string][]store.CoverageCandidate
-		state      CoverageState
-		ids        []model.ReviewID
-	}{
-		{name: "empty content is covered", subject: CoverageSubject{}, state: CoverageCovered},
-		{name: "completed whole set covers", subject: twoCommits, candidates: map[string][]store.CoverageCandidate{
-			whole: {candidate("rp_running", model.LifecycleRunning), candidate("rp_done", model.LifecycleCompleted), candidate("rp_older", model.LifecycleCompleted)},
-		}, state: CoverageCovered, ids: []model.ReviewID{"rp_done"}},
-		{name: "completed commits cover", subject: twoCommits, candidates: map[string][]store.CoverageCandidate{
-			first: {candidate("rp_first", model.LifecycleCompleted)}, second: {candidate("rp_second", model.LifecycleCompleted)},
-		}, state: CoverageCovered, ids: []model.ReviewID{"rp_first", "rp_second"}},
-		{name: "incomplete never covers", subject: twoCommits, candidates: map[string][]store.CoverageCandidate{
-			whole: {candidate("rp_broken", model.LifecycleIncomplete)}, first: {candidate("rp_first", model.LifecycleCompleted)}, second: {candidate("rp_broken_second", model.LifecycleIncomplete)},
-		}, state: CoverageMissing},
-		{name: "in-flight whole set runs", subject: twoCommits, candidates: map[string][]store.CoverageCandidate{
-			whole: {candidate("rp_pending", model.LifecyclePending)}, first: {candidate("rp_first", model.LifecycleCompleted)},
-		}, state: CoverageRunning, ids: []model.ReviewID{"rp_pending"}},
-		{name: "in-flight commit with the rest completed runs", subject: twoCommits, candidates: map[string][]store.CoverageCandidate{
-			first: {candidate("rp_first", model.LifecycleCompleted)}, second: {candidate("rp_second", model.LifecycleRunning)},
-		}, state: CoverageRunning, ids: []model.ReviewID{"rp_second"}},
-		{name: "in-flight commit with another commit missing is missing", subject: twoCommits, candidates: map[string][]store.CoverageCandidate{
-			second: {candidate("rp_second", model.LifecycleRunning)},
-		}, state: CoverageMissing},
-		{name: "a range without commits needs the whole set", subject: CoverageSubject{Changes: coverageWhole}, state: CoverageMissing},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			lookup := func(changes []model.ContentChange) ([]store.CoverageCandidate, error) {
-				return test.candidates[changeSetKey(changes)], nil
-			}
-			state, ids, err := decideCoverage(lookup, test.subject)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if state != test.state || !reflect.DeepEqual(ids, test.ids) {
-				t.Fatalf("decision = %s %v, want %s %v", state, ids, test.state, test.ids)
-			}
-		})
-	}
-}
-
-// coverageStore keeps the ledger contract: a Profile source's Reviews that
-// share an entry with the query, newest first, each with its full set.
+// coverageStore keeps the ledger contract: each Profile source's Review edges
+// on the queried paths, grouped by path, oldest Review first. It also stands
+// in for the repository: the lines between two blobs, 100 unless the test
+// says otherwise, and the paths whose delta is binary.
 type coverageStore struct {
 	reviews  []recordedCoverage
 	waivers  []model.CheckpointWaiver
@@ -85,11 +32,15 @@ type coverageStore struct {
 	findings map[model.ReviewID][]model.Finding
 	verdicts []model.FindingVerdict
 	loads    int
+	lines    map[model.ContentChange]int
+	binary   map[string]bool
 }
 
 type recordedCoverage struct {
 	source    string
-	candidate store.CoverageCandidate
+	id        model.ReviewID
+	lifecycle model.Lifecycle
+	changes   []model.ContentChange
 }
 
 func recorded(source, id string, lifecycle model.Lifecycle, changes ...[]model.ContentChange) recordedCoverage {
@@ -97,7 +48,7 @@ func recorded(source, id string, lifecycle model.Lifecycle, changes ...[]model.C
 	for _, part := range changes {
 		set = append(set, part...)
 	}
-	return recordedCoverage{source: source, candidate: store.CoverageCandidate{ID: model.ReviewID(id), Lifecycle: lifecycle, Changes: set}}
+	return recordedCoverage{source: source, id: model.ReviewID(id), lifecycle: lifecycle, changes: set}
 }
 
 func (*coverageStore) Save(model.ReviewRecord) error { return nil }
@@ -125,15 +76,40 @@ func (*coverageStore) RecordVerdicts(store.VerdictBatch) (store.VerdictTally, er
 	return store.VerdictTally{}, nil
 }
 
-func (fake *coverageStore) CoverageCandidates(query store.CoverageQuery) ([]store.CoverageCandidate, error) {
+// ContentTransitions dates each Review by its position: a later entry is a
+// newer Review.
+func (fake *coverageStore) ContentTransitions(query store.TransitionQuery) ([]store.ContentTransition, error) {
 	fake.queries++
-	var candidates []store.CoverageCandidate
-	for _, review := range fake.reviews {
-		if review.source == query.ProfileSource && slices.ContainsFunc(review.candidate.Changes, func(change model.ContentChange) bool { return slices.Contains(query.Changes, change) }) {
-			candidates = append(candidates, review.candidate)
+	edges := []store.ContentTransition{}
+	for index, review := range fake.reviews {
+		if review.source != query.ProfileSource {
+			continue
+		}
+		for _, change := range review.changes {
+			if slices.Contains(query.Paths, change.Path) {
+				edges = append(edges, store.ContentTransition{Review: review.id, Lifecycle: review.lifecycle, CreatedAt: time.Unix(int64(1700000000+index), 0), Path: change.Path, Before: change.Before, After: change.After})
+			}
 		}
 	}
-	return candidates, nil
+	slices.SortStableFunc(edges, func(a, b store.ContentTransition) int { return strings.Compare(a.Path, b.Path) })
+	return edges, nil
+}
+
+func (fake *coverageStore) measure(_ string, delta []model.ContentChange) (subject.DeltaLines, error) {
+	lines := subject.DeltaLines{ByPath: map[string]int{}}
+	for _, change := range delta {
+		if fake.binary[change.Path] {
+			lines.Binary = append(lines.Binary, change.Path)
+			continue
+		}
+		count, known := fake.lines[change]
+		if !known {
+			count = 100
+		}
+		lines.ByPath[change.Path] = count
+		lines.Total += count
+	}
+	return lines, nil
 }
 
 func (fake *coverageStore) CheckpointWaiver(key model.WaiverKey) (model.CheckpointWaiver, bool, error) {
@@ -170,7 +146,18 @@ func newCoverageConductor(t *testing.T, recordStore store.RecordStore, selection
 	if err != nil {
 		t.Fatal(err)
 	}
+	if fake, ok := recordStore.(*coverageStore); ok {
+		conductor.measureDelta = fake.measure
+	}
 	return conductor, repository
+}
+
+func globalSelection(profiles ...string) *configuration.ReviewSelection {
+	selection := configuration.ReviewSelection{ConcurrencyLimit: 1, Repository: []configuration.SelectionItem{}}
+	for _, profile := range profiles {
+		selection.Global = append(selection.Global, configuration.SelectionItem{Profile: profile})
+	}
+	return &selection
 }
 
 func TestCheckCoverageReportsSelectedProfilesInOrder(t *testing.T) {
@@ -179,30 +166,57 @@ func TestCheckCoverageReportsSelectedProfilesInOrder(t *testing.T) {
 		recorded("global:profiles/bugs", "rp_bugs", model.LifecycleRunning, coverageWhole),
 		recorded("global:profiles/code-quality", "rp_partial", model.LifecycleCompleted, coverageFirst),
 	}}
-	selection := configuration.ReviewSelection{ConcurrencyLimit: 1, Global: []configuration.SelectionItem{{Profile: "documentation"}, {Profile: "bugs"}, {Profile: "code-quality"}}, Repository: []configuration.SelectionItem{}}
-	conductor, repository := newCoverageConductor(t, fake, &selection)
+	conductor, repository := newCoverageConductor(t, fake, globalSelection("documentation", "bugs", "code-quality"))
 
-	report, err := conductor.CheckCheckpoint(context.Background(), CheckpointRequest{Repository: repository, Name: configuration.CheckpointPrePush, Content: CoverageSubject{Changes: coverageWhole}})
+	report, err := conductor.CheckCheckpoint(context.Background(), CheckpointRequest{Repository: repository, Name: configuration.CheckpointPrePush, Content: coverageWhole})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.State != CheckpointMissing {
-		t.Fatalf("state = %s, want missing", report.State)
+	if report.State != CheckpointRunning {
+		t.Fatalf("state = %s, want running", report.State)
 	}
-	want := CoverageReport{Covered: false, Profiles: []ProfileCoverage{
-		{Scope: configuration.ScopeGlobal, Profile: "documentation", State: CoverageCovered, ReviewIDs: []model.ReviewID{"rp_docs"}},
-		{Scope: configuration.ScopeGlobal, Profile: "bugs", State: CoverageRunning, ReviewIDs: []model.ReviewID{"rp_bugs"}},
-		{Scope: configuration.ScopeGlobal, Profile: "code-quality", State: CoverageMissing},
-	}}
+	none := subject.DeltaLines{ByPath: map[string]int{}}
+	want := CoverageReport{
+		Profiles: []ProfileCoverage{
+			{Scope: configuration.ScopeGlobal, Profile: "documentation", State: CoverageCovered, Reviews: []model.ReviewID{"rp_docs"}, Spent: 1, UnreviewedLines: none},
+			{Scope: configuration.ScopeGlobal, Profile: "bugs", State: CoverageRunning, Spent: 1, Running: []model.ReviewID{"rp_bugs"}, Unreviewed: coverageWhole, UnreviewedLines: subject.DeltaLines{ByPath: map[string]int{"a.go": 100, "b.go": 100}, Total: 200}},
+			{Scope: configuration.ScopeGlobal, Profile: "code-quality", State: CoverageMissing, Reviews: []model.ReviewID{"rp_partial"}, Spent: 1, Unreviewed: coverageSecond, UnreviewedLines: subject.DeltaLines{ByPath: map[string]int{"b.go": 100}, Total: 100}},
+		},
+		Unreviewed:      coverageWhole,
+		UnreviewedLines: subject.DeltaLines{ByPath: map[string]int{"a.go": 100, "b.go": 100}, Total: 200},
+	}
 	if !reflect.DeepEqual(report.Coverage, want) {
 		t.Fatalf("coverage = %#v, want %#v", report.Coverage, want)
 	}
 }
 
+func TestCommonDeltaStartsFromTheNewestStateEveryUnreviewedProfileReached(t *testing.T) {
+	chain := func(source string, states ...string) []recordedCoverage {
+		var reviews []recordedCoverage
+		for index := 1; index < len(states); index++ {
+			reviews = append(reviews, recorded(source, source+states[index][:5], model.LifecycleCompleted, []model.ContentChange{{Path: "a.go", Before: states[index-1], After: states[index]}}))
+		}
+		return reviews
+	}
+	fake := &coverageStore{reviews: slices.Concat(
+		chain("global:profiles/documentation", model.ZeroObjectID, a1, a2),
+		chain("global:profiles/bugs", model.ZeroObjectID, a1),
+		chain("global:profiles/code-quality", model.ZeroObjectID, a1, a2, a3),
+	)}
+	conductor, repository := newCoverageConductor(t, fake, globalSelection("documentation", "bugs", "code-quality"))
+
+	report, err := conductor.CheckCheckpoint(context.Background(), CheckpointRequest{Repository: repository, Name: configuration.CheckpointPrePush, Content: []model.ContentChange{{Path: "a.go", Before: model.ZeroObjectID, After: a3}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []model.ContentChange{{Path: "a.go", Before: a1, After: a3}}; !reflect.DeepEqual(report.Coverage.Unreviewed, want) {
+		t.Fatalf("common delta = %v, want %v", report.Coverage.Unreviewed, want)
+	}
+}
+
 func TestCheckCoverageWithoutContentSkipsTheLedger(t *testing.T) {
 	fake := &coverageStore{}
-	selection := configuration.ReviewSelection{ConcurrencyLimit: 1, Global: []configuration.SelectionItem{{Profile: "bugs"}}, Repository: []configuration.SelectionItem{}}
-	conductor, repository := newCoverageConductor(t, fake, &selection)
+	conductor, repository := newCoverageConductor(t, fake, globalSelection("bugs"))
 
 	report, err := conductor.CheckCheckpoint(context.Background(), CheckpointRequest{Repository: repository, Name: configuration.CheckpointPrePush})
 	if err != nil {
@@ -218,16 +232,15 @@ func TestCheckCoverageWithoutContentSkipsTheLedger(t *testing.T) {
 
 func TestCheckCoverageWithoutSelectionNamesInit(t *testing.T) {
 	conductor, repository := newCoverageConductor(t, &coverageStore{}, nil)
-	_, err := conductor.CheckCheckpoint(context.Background(), CheckpointRequest{Repository: repository, Name: configuration.CheckpointPrePush, Content: CoverageSubject{Changes: coverageWhole}})
+	_, err := conductor.CheckCheckpoint(context.Background(), CheckpointRequest{Repository: repository, Name: configuration.CheckpointPrePush, Content: coverageWhole})
 	if !errors.Is(err, configuration.ErrNoRepositorySelection) || !strings.Contains(err.Error(), "review-party init") {
 		t.Fatalf("error = %v", err)
 	}
 }
 
 func TestCheckCoverageRequiresTheLedger(t *testing.T) {
-	selection := configuration.ReviewSelection{ConcurrencyLimit: 1, Global: []configuration.SelectionItem{{Profile: "bugs"}}, Repository: []configuration.SelectionItem{}}
-	conductor, repository := newCoverageConductor(t, &failFinalRecordStore{}, &selection)
-	_, err := conductor.CheckCheckpoint(context.Background(), CheckpointRequest{Repository: repository, Name: configuration.CheckpointPrePush, Content: CoverageSubject{Changes: coverageWhole}})
+	conductor, repository := newCoverageConductor(t, &failFinalRecordStore{}, globalSelection("bugs"))
+	_, err := conductor.CheckCheckpoint(context.Background(), CheckpointRequest{Repository: repository, Name: configuration.CheckpointPrePush, Content: coverageWhole})
 	if err == nil || !strings.Contains(err.Error(), "requires the SQLite ledger") {
 		t.Fatalf("error = %v", err)
 	}

@@ -38,23 +38,25 @@ func newCheckpointCommand(streams commandIO) *cobra.Command {
 func newCheckpointCheckCommand(streams commandIO) *cobra.Command {
 	check := &cobra.Command{
 		Use:   "check <pre-push|pre-commit>",
-		Short: "Report whether every selected Review covers the content a push or commit accepts",
-		Long: `Report, for each Profile the repository selects, whether a completed Review
-of that Profile examined exactly the content the checkpoint accepts.
+		Short: "Report what each selected Review has left unreviewed of the content a push or commit accepts",
+		Long: `Report, for each Profile the repository selects, how much of the content the
+checkpoint accepts no completed Review of that Profile has examined.
 
 pre-push checks the range from --base to --head. Without --base, the base is
 the merge base of HEAD and the branch's upstream, else of HEAD and origin/HEAD. pre-commit
 checks the staged content against HEAD.
 
-A Review covers content when its Subject changed the same paths from the same
-blobs to the same blobs, so rebased, amended, or recommitted content stays
-covered. When the repository declares the Checkpoint, its exempt paths are
-left out of both sides, a small enough change passes, and a matching Waiver
-passes. Under the judged requirement, every Finding of the covering Reviews
-also needs a current verdict, recorded with review-party finding record.
-Exits 0 when the Checkpoint passes, 1 when a Review is missing or still
-running or a Finding has no verdict, and 2 on a usage error or when Review
-Party is not initialized.`,
+A Profile has reviewed a path up to the newest blob its completed Reviews
+reach from the base blob, so rebased, amended, squashed, and recommitted
+content stays reviewed and a Review of the unreviewed delta extends the
+chain. The lines left between that blob and the current one are the
+unreviewed lines. When the repository declares the Checkpoint, its exempt
+paths are left out, up to unreviewed_lines pass without a new Review, a
+change that has spent its review_budget asks for a person, and a matching
+Waiver passes. Under the judged requirement, every Finding of the Reviews on
+the chain also needs a current verdict, recorded with review-party finding
+record. Exits 0 when the Checkpoint passes, 1 when it does not, and 2 on a
+usage error or when Review Party is not initialized.`,
 		Example: "  review-party checkpoint check pre-push\n  review-party checkpoint check pre-push --base origin/main --head HEAD\n  review-party checkpoint check pre-commit --format json",
 		Args:    cobra.MatchAll(cobra.ExactArgs(1), cobra.OnlyValidArgs),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -73,9 +75,9 @@ Party is not initialized.`,
 func newCheckpointWaiveCommand(streams commandIO) *cobra.Command {
 	waive := &cobra.Command{
 		Use:   "waive <pre-push|pre-commit> --reason TEXT",
-		Short: "Record a Waiver that passes a declared Checkpoint for the exact current change",
-		Long: `Record a Waiver that passes a declared Checkpoint for exactly the content
-check would examine. Any later change to a non-exempt path needs its own
+		Short: "Record a Waiver that passes a declared Checkpoint for the exact unreviewed delta",
+		Long: `Record a Waiver that passes a declared Checkpoint for exactly the unreviewed
+delta check reports. Any further change to a non-exempt path needs its own
 Reviews or Waiver.
 
 The Checkpoint's waivers policy decides who may waive: anyone records directly,
@@ -155,32 +157,45 @@ type checkpointReport struct {
 	RangeSource     string                       `json:"range_source,omitempty"`
 	UnstagedContent bool                         `json:"unstaged_content,omitempty"`
 	State           engine.CheckpointState       `json:"state"`
-	Covered         bool                         `json:"covered"`
-	Waivers         configuration.WaiverPolicy   `json:"waivers,omitempty"`
-	Exemption       *checkpointExemption         `json:"exemption,omitempty"`
-	Waiver          *model.CheckpointWaiver      `json:"waiver,omitempty"`
-	Profiles        []checkpointProfile          `json:"profiles"`
-	NextCommand     string                       `json:"next_command,omitempty"`
-	WaiveCommand    string                       `json:"waive_command,omitempty"`
+	// UnreviewedLines is the size of the delta run --unreviewed would review:
+	// from the newest state every Profile with something unreviewed reached.
+	UnreviewedLines int                        `json:"unreviewed_lines"`
+	Waivers         configuration.WaiverPolicy `json:"waivers,omitempty"`
+	Exemption       *checkpointExemption       `json:"exemption,omitempty"`
+	Waiver          *model.CheckpointWaiver    `json:"waiver,omitempty"`
+	Profiles        []checkpointProfile        `json:"profiles"`
+	NextCommand     string                     `json:"next_command,omitempty"`
+	WaiveCommand    string                     `json:"waive_command,omitempty"`
 	nextLabel       string
 	commit          commitScope
+	allowance       int
+	binary          bool
 }
 
 type checkpointExemption struct {
-	Reason           engine.ExemptionReason `json:"reason,omitempty"`
-	ExemptPaths      []string               `json:"exempt_paths,omitempty"`
-	ChangedLines     int                    `json:"changed_lines,omitempty"`
-	SmallChangeLines int                    `json:"small_change_lines,omitempty"`
+	ExemptPaths []string `json:"exempt_paths,omitempty"`
 }
 
 type checkpointProfile struct {
-	Scope     string           `json:"scope"`
-	Name      string           `json:"name"`
-	State     string           `json:"state"`
-	ReviewIDs []model.ReviewID `json:"review_ids"`
-	// Unjudged lists, under the judged requirement, the covering Reviews with
-	// Findings that have no current verdict.
+	Scope   string           `json:"scope"`
+	Name    string           `json:"name"`
+	State   string           `json:"state"`
+	Reviews []model.ReviewID `json:"reviews"`
+	Running []model.ReviewID `json:"running,omitempty"`
+	// Unreviewed is the delta from this Profile's reviewed state, per path.
+	Unreviewed      []checkpointUnreviewed `json:"unreviewed,omitempty"`
+	UnreviewedLines int                    `json:"unreviewed_lines"`
+	BudgetSpent     int                    `json:"budget_spent"`
+	ReviewBudget    int                    `json:"review_budget"`
+	// Unjudged lists, under the judged requirement, the Reviews on the chain
+	// with Findings that have no current verdict.
 	Unjudged []engine.UnjudgedReview `json:"unjudged,omitempty"`
+}
+
+type checkpointUnreviewed struct {
+	Path   string `json:"path"`
+	Lines  int    `json:"lines"`
+	Binary bool   `json:"binary,omitempty"`
 }
 
 var rangeSourceDescriptions = map[string]string{
@@ -190,10 +205,10 @@ var rangeSourceDescriptions = map[string]string{
 }
 
 // checkpointContent is what one Checkpoint accepts, and the commands that
-// would review or waive exactly that content.
+// would review or waive exactly what is unreviewed of it.
 type checkpointContent struct {
 	report       checkpointReport
-	coverage     engine.CoverageSubject
+	content      []model.ContentChange
 	runCommand   string
 	waiveCommand string
 }
@@ -221,7 +236,7 @@ func openCheckpoint(options checkpointOptions) (checkpointTarget, error) {
 }
 
 func (target checkpointTarget) request() engine.CheckpointRequest {
-	return engine.CheckpointRequest{Repository: target.root, Name: target.content.report.Checkpoint, Content: target.content.coverage}
+	return engine.CheckpointRequest{Repository: target.root, Name: target.content.report.Checkpoint, Content: target.content.content}
 }
 
 func (target checkpointTarget) check(ctx context.Context, configurationPath string) (checkpointReport, error) {
@@ -281,8 +296,8 @@ func pushCheckpointContent(root string, options checkpointOptions) (checkpointCo
 	rangeArguments := fmt.Sprintf(" --base %s --head %s%s", changes.Base, changes.Head, options.followUpArguments(root))
 	return checkpointContent{
 		report:       checkpointReport{Checkpoint: configuration.CheckpointPrePush, Base: changes.Base, Head: changes.Head, RangeSource: source},
-		coverage:     engine.CoverageSubject{Changes: changes.Changes, Commits: changes.Commits, Lines: changes.Lines},
-		runCommand:   "review-party run" + rangeArguments,
+		content:      changes.Changes,
+		runCommand:   "review-party run --unreviewed" + rangeArguments,
 		waiveCommand: "review-party checkpoint waive pre-push" + rangeArguments + ` --reason "<why>"`,
 	}, nil
 }
@@ -299,14 +314,10 @@ func commitCheckpointContent(root string, options checkpointOptions) (checkpoint
 	if err != nil {
 		return checkpointContent{}, err
 	}
-	lines, err := subject.StagedLineCounts(root)
-	if err != nil {
-		return checkpointContent{}, err
-	}
 	return checkpointContent{
 		report:       checkpointReport{Checkpoint: configuration.CheckpointPreCommit, UnstagedContent: !slices.Equal(staged, working)},
-		coverage:     engine.CoverageSubject{Changes: staged, Lines: lines},
-		runCommand:   "review-party run" + options.followUpArguments(root),
+		content:      staged,
+		runCommand:   "review-party run --unreviewed" + options.followUpArguments(root),
 		waiveCommand: "review-party checkpoint waive pre-commit" + options.followUpArguments(root) + ` --reason "<why>"`,
 	}, nil
 }
@@ -328,69 +339,92 @@ func trackedCheckpointContent(root string, options checkpointOptions) (checkpoin
 	if err != nil {
 		return checkpointContent{}, err
 	}
-	lines, err := subject.TrackedLineCounts(root)
-	if err != nil {
-		return checkpointContent{}, err
-	}
 	return checkpointContent{
 		report:     checkpointReport{Checkpoint: configuration.CheckpointPreCommit, commit: commitTracked},
-		coverage:   engine.CoverageSubject{Changes: tracked, Lines: lines},
-		runCommand: "review-party run" + options.followUpArguments(root),
+		content:    tracked,
+		runCommand: "review-party run --unreviewed" + options.followUpArguments(root),
 	}, nil
 }
 
 // completeCheckpointReport names one next step for a Checkpoint that does not
-// pass: a run when any Profile lacks a Review, otherwise a wait on the first
-// Review still running, otherwise verdicts on the first unjudged Review. Only a policy that lets anyone waive adds the waive
-// command.
+// pass: a Review of the unreviewed delta, a wait on a running Review, a stop
+// for a person when the budget is spent, or verdicts on the first unjudged
+// Review. Only a policy that lets anyone waive adds the waive command.
 func completeCheckpointReport(content checkpointContent, result engine.CheckpointReport, configurationPath string) checkpointReport {
 	report := content.report
 	report.State = result.State
-	report.Covered = result.Coverage.Covered
 	report.Waiver = result.Waiver
+	report.UnreviewedLines = result.Coverage.UnreviewedLines.Total
+	report.binary = len(result.Coverage.UnreviewedLines.Binary) > 0
+	budget := 0
+	if result.Declaration != nil {
+		budget = result.Declaration.ReviewBudget
+		report.allowance = result.Declaration.UnreviewedLines
+		report.Waivers = result.Declaration.Waivers
+	}
+	if result.Exemption != nil {
+		report.Exemption = &checkpointExemption{ExemptPaths: result.Exemption.ExemptPaths}
+	}
 	report.Profiles = make([]checkpointProfile, 0, len(result.Coverage.Profiles))
 	for _, profile := range result.Coverage.Profiles {
-		ids := append([]model.ReviewID{}, profile.ReviewIDs...)
-		report.Profiles = append(report.Profiles, checkpointProfile{Scope: string(profile.Scope), Name: profile.Profile, State: string(profile.State), ReviewIDs: ids, Unjudged: profile.Unjudged})
-	}
-	if result.Declaration != nil {
-		report.Waivers = result.Declaration.Waivers
-		report.Exemption = newCheckpointExemption(result.Exemption, result.Declaration.SmallChangeLines)
+		report.Profiles = append(report.Profiles, newCheckpointProfile(profile, budget))
 	}
 	if result.State.Passes() {
 		return report
 	}
-	report.nextLabel, report.NextCommand = nextCheckpointStep(report.Profiles, content.runCommand, configurationPath)
+	report.nextLabel, report.NextCommand = nextCheckpointStep(report, content.runCommand, configurationPath)
 	if report.Waivers == configuration.WaiversAnyone {
 		report.WaiveCommand = content.waiveCommand
 	}
 	return report
 }
 
-func newCheckpointExemption(exemption *engine.CheckpointExemption, smallChangeLines int) *checkpointExemption {
-	if exemption == nil {
-		return nil
+func newCheckpointProfile(profile engine.ProfileCoverage, budget int) checkpointProfile {
+	entry := checkpointProfile{
+		Scope: string(profile.Scope), Name: profile.Profile, State: string(profile.State),
+		Reviews: append([]model.ReviewID{}, profile.Reviews...), Running: profile.Running,
+		UnreviewedLines: profile.UnreviewedLines.Total, BudgetSpent: profile.Spent, ReviewBudget: budget, Unjudged: profile.Unjudged,
 	}
-	return &checkpointExemption{Reason: exemption.Reason, ExemptPaths: exemption.ExemptPaths, ChangedLines: exemption.ChangedLines, SmallChangeLines: smallChangeLines}
+	for _, change := range profile.Unreviewed {
+		entry.Unreviewed = append(entry.Unreviewed, checkpointUnreviewed{
+			Path: change.Path, Lines: profile.UnreviewedLines.ByPath[change.Path], Binary: slices.Contains(profile.UnreviewedLines.Binary, change.Path),
+		})
+	}
+	return entry
 }
 
-func nextCheckpointStep(profiles []checkpointProfile, runCommand, configurationPath string) (label, command string) {
-	var running model.ReviewID
-	for _, profile := range profiles {
-		if profile.State == string(engine.CoverageMissing) {
-			return "next", runCommand
-		}
-		if running == "" && profile.State == string(engine.CoverageRunning) {
-			running = profile.ReviewIDs[0]
-		}
-	}
-	if running != "" {
-		return "wait", fmt.Sprintf("review-party wait %s%s", running, configurationArgument(configurationPath))
-	}
-	if unjudged := unjudgedReviews(profiles); len(unjudged) > 0 {
-		return "judge", fmt.Sprintf("review-party finding record %s%s", unjudged[0].Review, configurationArgument(configurationPath))
+// nextCheckpointStep follows the Checkpoint state. A spent budget has no
+// command: a person decides.
+func nextCheckpointStep(report checkpointReport, runCommand, configurationPath string) (label, command string) {
+	switch report.State {
+	case engine.CheckpointMissing:
+		return "next", runCommand
+	case engine.CheckpointRunning:
+		return "wait", fmt.Sprintf("review-party wait %s%s", runningReview(report.Profiles), configurationArgument(configurationPath))
+	case engine.CheckpointSpent:
+		return "stop", ""
+	case engine.CheckpointUnjudged:
+		return "judge", fmt.Sprintf("review-party finding record %s%s", unjudgedReviews(report.Profiles)[0].Review, configurationArgument(configurationPath))
 	}
 	return "", ""
+}
+
+func runningReview(profiles []checkpointProfile) model.ReviewID {
+	for _, profile := range profiles {
+		if len(profile.Running) > 0 {
+			return profile.Running[0]
+		}
+	}
+	return ""
+}
+
+func spentProfile(profiles []checkpointProfile) checkpointProfile {
+	for _, profile := range profiles {
+		if profile.State == string(engine.CoverageSpent) {
+			return profile
+		}
+	}
+	return checkpointProfile{}
 }
 
 func unjudgedReviews(profiles []checkpointProfile) []engine.UnjudgedReview {
@@ -407,7 +441,12 @@ func printHumanCheckpoint(output *commandOutput, report checkpointReport) {
 	} else {
 		output.write("%s checkpoint: %s..%s (%s)\n", report.Checkpoint, report.Base, report.Head, rangeSourceDescriptions[report.RangeSource])
 	}
-	printHumanExemption(output, report.Exemption)
+	if report.Exemption != nil {
+		output.write("exempt paths: %s\n", strings.Join(report.Exemption.ExemptPaths, ", "))
+	}
+	if report.State == engine.CheckpointExempt {
+		output.write("exempt: every changed path is exempt\n")
+	}
 	for _, profile := range report.Profiles {
 		output.write("%s (%s): %s\n", profile.Name, profile.Scope, checkpointProfileState(profile))
 	}
@@ -421,7 +460,11 @@ func printHumanNextSteps(output *commandOutput, report checkpointReport) {
 	if report.nextLabel == "next" && report.UnstagedContent {
 		output.write("The Review must match the staged content, so stash or stage the rest of your changes first.\n")
 	}
-	if report.NextCommand != "" {
+	switch {
+	case report.nextLabel == "stop":
+		spent := spentProfile(report.Profiles)
+		output.write("stop: %s exceed %d after %d of %d Reviews; ask a person\n", unreviewedLines(spent.UnreviewedLines, report.binary), report.allowance, spent.BudgetSpent, spent.ReviewBudget)
+	case report.NextCommand != "":
 		output.write("%s: %s\n", report.nextLabel, report.NextCommand)
 	}
 	if report.WaiveCommand != "" {
@@ -429,36 +472,58 @@ func printHumanNextSteps(output *commandOutput, report checkpointReport) {
 	}
 }
 
-func printHumanExemption(output *commandOutput, exemption *checkpointExemption) {
-	if exemption == nil {
-		return
+// checkpointProfileState is one line of facts: the evidence Reviews, the
+// unreviewed delta, and the budget when the repository declares one.
+func checkpointProfileState(profile checkpointProfile) string {
+	switch profile.State {
+	case string(engine.CoverageCovered), string(engine.CoverageUnjudged):
+		return "covered by " + joinReviewIDs(profile.Reviews) + unjudgedFindings(profile.Unjudged)
 	}
-	if len(exemption.ExemptPaths) > 0 {
-		output.write("exempt paths: %s\n", strings.Join(exemption.ExemptPaths, ", "))
+	line := profile.State
+	if len(profile.Running) > 0 {
+		line += " " + joinReviewIDs(profile.Running)
 	}
-	switch {
-	case exemption.Reason == engine.ExemptByPaths:
-		output.write("exempt: every changed path is exempt\n")
-	case exemption.Reason == engine.ExemptBySmallChange:
-		output.write("exempt: small change of %d lines, at most %d pass\n", exemption.ChangedLines, exemption.SmallChangeLines)
-	case exemption.ChangedLines > 0:
-		output.write("changed lines: %d, over the small-change limit of %d\n", exemption.ChangedLines, exemption.SmallChangeLines)
+	line += ", " + unreviewedSummary(profile.UnreviewedLines, profile.Unreviewed)
+	if profile.ReviewBudget > 0 {
+		line += fmt.Sprintf("; %d of %d Reviews spent", profile.BudgetSpent, profile.ReviewBudget)
 	}
+	if len(profile.Reviews) > 0 {
+		line += "; after " + joinReviewIDs(profile.Reviews)
+	}
+	return line
 }
 
-func checkpointProfileState(profile checkpointProfile) string {
-	ids := make([]string, 0, len(profile.ReviewIDs))
-	for _, id := range profile.ReviewIDs {
-		ids = append(ids, string(id))
+func unreviewedSummary(lines int, unreviewed []checkpointUnreviewed) string {
+	names := make([]string, 0, len(unreviewed))
+	for _, change := range unreviewed {
+		name := change.Path
+		if change.Binary {
+			name += " (binary)"
+		}
+		names = append(names, name)
 	}
-	switch {
-	case len(ids) == 0:
-		return profile.State
-	case profile.State == string(engine.CoverageCovered):
-		return "covered by " + strings.Join(ids, ", ") + unjudgedFindings(profile.Unjudged)
-	default:
-		return profile.State + " " + strings.Join(ids, ", ")
+	return unreviewedLines(lines, false) + " in " + strings.Join(names, ", ")
+}
+
+// unreviewedLines reads "412 unreviewed lines", "1 unreviewed line", or, when
+// a delta has no line count, "0 unreviewed lines and binary content".
+func unreviewedLines(lines int, binary bool) string {
+	text := fmt.Sprintf("%d unreviewed lines", lines)
+	if lines == 1 {
+		text = "1 unreviewed line"
 	}
+	if binary {
+		text += " and binary content"
+	}
+	return text
+}
+
+func joinReviewIDs(ids []model.ReviewID) string {
+	names := make([]string, 0, len(ids))
+	for _, id := range ids {
+		names = append(names, string(id))
+	}
+	return strings.Join(names, ", ")
 }
 
 func unjudgedFindings(unjudged []engine.UnjudgedReview) string {

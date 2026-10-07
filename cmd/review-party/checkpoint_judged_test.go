@@ -80,11 +80,11 @@ func TestCheckpointCheckReportsUnjudgedFindings(t *testing.T) {
 	}
 	report := decodeCheckpointReport(t, result)
 	want := []checkpointProfile{
-		{Scope: "repository", Name: "bugs", State: "covered", ReviewIDs: []model.ReviewID{judgedBugs}, Unjudged: []engine.UnjudgedReview{{Review: judgedBugs, Ordinals: []int{1}}}},
-		{Scope: "repository", Name: "docs", State: "covered", ReviewIDs: []model.ReviewID{judgedDocs}},
+		{Scope: "repository", Name: "bugs", State: "unjudged", Reviews: []model.ReviewID{judgedBugs}, BudgetSpent: 1, ReviewBudget: 3, Unjudged: []engine.UnjudgedReview{{Review: judgedBugs, Ordinals: []int{1}}}},
+		{Scope: "repository", Name: "docs", State: "covered", Reviews: []model.ReviewID{judgedDocs}, BudgetSpent: 1, ReviewBudget: 3},
 	}
-	if report.State != engine.CheckpointUnjudged || !report.Covered {
-		t.Fatalf("report = %+v, want unjudged and covered", report)
+	if report.State != engine.CheckpointUnjudged || report.UnreviewedLines != 0 {
+		t.Fatalf("report = %+v, want unjudged with nothing unreviewed", report)
 	}
 	if !reflect.DeepEqual(report.Profiles, want) {
 		t.Fatalf("profiles = %+v, want %+v", report.Profiles, want)

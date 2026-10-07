@@ -43,12 +43,13 @@ func (e *editor) checkpointsStep() error {
 
 // checkpointDraft holds the form answers; numbers stay text until parsed.
 type checkpointDraft struct {
-	name             configuration.CheckpointName
-	requirement      configuration.CheckpointRequirement
-	exemptions       string
-	smallChangeLines string
-	waivers          configuration.WaiverPolicy
-	integrations     []configuration.IntegrationName
+	name            configuration.CheckpointName
+	requirement     configuration.CheckpointRequirement
+	exemptions      string
+	unreviewedLines string
+	reviewBudget    string
+	waivers         configuration.WaiverPolicy
+	integrations    []configuration.IntegrationName
 }
 
 func (draft checkpointDraft) checkpoint() (configuration.Checkpoint, error) {
@@ -57,8 +58,12 @@ func (draft checkpointDraft) checkpoint() (configuration.Checkpoint, error) {
 	checkpoint.ExemptPaths = strings.Fields(draft.exemptions)
 	checkpoint.Waivers = draft.waivers
 	checkpoint.Integrations = draft.integrations
-	lines, err := strconv.Atoi(strings.TrimSpace(draft.smallChangeLines))
-	checkpoint.SmallChangeLines = lines
+	lines, err := strconv.Atoi(strings.TrimSpace(draft.unreviewedLines))
+	if err != nil {
+		return checkpoint, err
+	}
+	budget, err := strconv.Atoi(strings.TrimSpace(draft.reviewBudget))
+	checkpoint.UnreviewedLines, checkpoint.ReviewBudget = lines, budget
 	return checkpoint, err
 }
 
@@ -66,7 +71,8 @@ func (draft checkpointDraft) checkpoint() (configuration.Checkpoint, error) {
 // through its own Plan.
 func (e *editor) declareCheckpoint() error {
 	draft := checkpointDraft{
-		name: configuration.CheckpointPrePush, requirement: configuration.RequirementReviewed, smallChangeLines: "0", waivers: configuration.WaiversHuman,
+		name: configuration.CheckpointPrePush, requirement: configuration.RequirementReviewed, waivers: configuration.WaiversHuman,
+		unreviewedLines: strconv.Itoa(configuration.DefaultUnreviewedLines), reviewBudget: strconv.Itoa(configuration.DefaultReviewBudget),
 		integrations: slices.Concat([]configuration.IntegrationName{configuration.IntegrationGit}, e.AgentsOnPath, []configuration.IntegrationName{configuration.IntegrationAgentsMD}),
 	}
 	choice := huh.NewSelect[configuration.CheckpointName]().
@@ -85,7 +91,8 @@ func (e *editor) declareCheckpoint() error {
 			huh.NewOption("judged: covered, and every Finding of those Reviews has a verdict", configuration.RequirementJudged),
 		).Value(&draft.requirement),
 		huh.NewInput().Title("Exempt paths (space-separated patterns such as *.md docs/**; blank for none)").Value(&draft.exemptions).Validate(validateExemptions),
-		huh.NewInput().Title("Pass changes of at most this many changed lines (0 disables)").Value(&draft.smallChangeLines).Validate(validateLineLimit),
+		huh.NewInput().Title("How many unreviewed lines may follow a Review without a new one? (0 for none)").Value(&draft.unreviewedLines).Validate(validateUnreviewedLines),
+		huh.NewInput().Title("How many Reviews may one change spend before a person must step in? (1 to 9)").Value(&draft.reviewBudget).Validate(validateReviewBudget),
 		huh.NewSelect[configuration.WaiverPolicy]().Title("Who may waive the Checkpoint?").Options(
 			huh.NewOption("human: a person confirms in a terminal", configuration.WaiversHuman),
 			huh.NewOption("anyone: any caller, including agents and scripts", configuration.WaiversAnyone),
@@ -119,10 +126,18 @@ func validateExemptions(value string) error {
 	return errors.Join(errs...)
 }
 
-func validateLineLimit(value string) error {
+func validateUnreviewedLines(value string) error {
 	lines, err := strconv.Atoi(strings.TrimSpace(value))
 	if err != nil || lines < 0 {
 		return errors.New("enter a whole number of lines, 0 or more")
+	}
+	return nil
+}
+
+func validateReviewBudget(value string) error {
+	budget, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil || budget < 1 || budget > configuration.MaxReviewBudget {
+		return fmt.Errorf("enter a whole number of Reviews from 1 to %d", configuration.MaxReviewBudget)
 	}
 	return nil
 }
