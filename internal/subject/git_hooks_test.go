@@ -70,6 +70,50 @@ func assertPushedRefBase(t *testing.T, repository string, ref PushedRef, want st
 	}
 }
 
+func TestSharedHooksPathMeansAnAbsolutePathFromOutsideTheClonesOwnConfig(t *testing.T) {
+	tests := []struct {
+		name      string
+		configure func(t *testing.T, repository, global, hooks string)
+		shared    bool
+	}{
+		{name: "the clone's config", configure: func(t *testing.T, repository, _, hooks string) {
+			runTestCommand(t, repository, "git", "config", "core.hooksPath", hooks)
+		}},
+		{name: "the clone's config.worktree", configure: func(t *testing.T, repository, _, hooks string) {
+			runTestCommand(t, repository, "git", "config", "extensions.worktreeConfig", "true")
+			runTestCommand(t, repository, "git", "config", "--worktree", "core.hooksPath", hooks)
+		}},
+		{name: "the global file", shared: true, configure: func(t *testing.T, repository, global, hooks string) {
+			runTestCommand(t, repository, "git", "config", "--file", global, "core.hooksPath", hooks)
+		}},
+		{name: "a file the clone's config includes", shared: true, configure: func(t *testing.T, repository, _, hooks string) {
+			included := filepath.Join(t.TempDir(), "included")
+			runTestCommand(t, repository, "git", "config", "--file", included, "core.hooksPath", hooks)
+			runTestCommand(t, repository, "git", "config", "include.path", included)
+		}},
+		{name: "a relative path in the global file", configure: func(t *testing.T, repository, global, _ string) {
+			runTestCommand(t, repository, "git", "config", "--file", global, "core.hooksPath", ".githooks")
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			repository := testRepository(t)
+			global := filepath.Join(t.TempDir(), "gitconfig")
+			t.Setenv("GIT_CONFIG_GLOBAL", global)
+			t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+			test.configure(t, repository, global, filepath.Join(repository, "hooks"))
+
+			locations, err := ResolveHookLocations(repository)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if locations.SharedHooksPath != test.shared {
+				t.Fatalf("hook locations = %#v, want SharedHooksPath %t", locations, test.shared)
+			}
+		})
+	}
+}
+
 func TestResolveHookLocations(t *testing.T) {
 	repository := testRepository(t)
 	locations, err := ResolveHookLocations(repository)

@@ -124,8 +124,10 @@ func removeIfPresent(path string) error {
 	return nil
 }
 
+// created and forget match a file by its resolved path, so a symlink or
+// another spelling of the directory install wrote through still matches.
 func (record installRecord) created(path string) (createdFile, bool) {
-	index := slices.IndexFunc(record.Created, func(file createdFile) bool { return file.Path == path })
+	index := slices.IndexFunc(record.Created, sameRecordedFile(path))
 	if index < 0 {
 		return createdFile{}, false
 	}
@@ -133,7 +135,12 @@ func (record installRecord) created(path string) (createdFile, bool) {
 }
 
 func (record *installRecord) forget(path string) {
-	record.Created = slices.DeleteFunc(record.Created, func(file createdFile) bool { return file.Path == path })
+	record.Created = slices.DeleteFunc(record.Created, sameRecordedFile(path))
+}
+
+func sameRecordedFile(path string) func(createdFile) bool {
+	resolved := resolvedPath(path)
+	return func(file createdFile) bool { return resolvedPath(file.Path) == resolved }
 }
 
 func (record installRecord) save() error {

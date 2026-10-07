@@ -30,9 +30,10 @@ edited, and configuration install never writes, such as lefthook, are
 reported for you to remove by hand.
 
 --undeclared removes only what no declared Checkpoint uses. --shared also
-removes the Codex entry in $CODEX_HOME/hooks.json and hooks in a
-core.hooksPath outside this clone or set in global or system git
-configuration, which other repositories may share. Rerunning is safe.`,
+removes the Codex entry in $CODEX_HOME/hooks.json, even inside this clone, and
+hooks in a core.hooksPath outside this clone or set as an absolute path
+anywhere but the clone's own config or config.worktree file, which other
+repositories may share. Rerunning is safe.`,
 		Example: "  review-party checkpoint uninstall\n  review-party checkpoint uninstall --undeclared --yes",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -153,6 +154,7 @@ type uninstallSurface struct {
 	path        string
 	created     []byte
 	remove      func(content []byte) surfaceRemoval
+	machineWide bool
 	withheld    bool
 }
 
@@ -191,7 +193,7 @@ func uninstallSurfaces(root string, scope uninstallScope) ([]uninstallSurface, e
 	}
 	var surfaces []uninstallSurface
 	for _, name := range scope.checkpoints {
-		surfaces = append(surfaces, gitUninstallSurfaces(root, locations, name, scope.shared)...)
+		surfaces = append(surfaces, gitUninstallSurfaces(root, locations, name)...)
 	}
 	if scope.agents {
 		agents, err := agentUninstallSurfaces(root, scope.shared)
@@ -204,25 +206,57 @@ func uninstallSurfaces(root string, scope uninstallScope) ([]uninstallSurface, e
 			surfaces = append(surfaces, uninstallSurface{integration: configuration.IntegrationAgentsMD, path: filepath.Join(root, name), created: created, remove: removeAgentsMDBlock})
 		}
 	}
+	shared := newSharedLocations(root, locations, surfaces)
 	seen := map[string]bool{}
-	return slices.DeleteFunc(surfaces, func(surface uninstallSurface) bool {
+	surfaces = slices.DeleteFunc(surfaces, func(surface uninstallSurface) bool {
 		key := resolvedPath(surface.path) + "\x00" + string(surface.checkpoint)
 		duplicate := seen[key]
 		seen[key] = true
 		return duplicate
-	}), nil
+	})
+	for index := range surfaces {
+		surfaces[index].withheld = !scope.shared && shared.holds(surfaces[index].path)
+	}
+	return surfaces, nil
 }
 
-func gitUninstallSurfaces(root string, locations subject.HookLocations, name configuration.CheckpointName, shared bool) []uninstallSurface {
+// sharedLocations are where a file may serve other repositories: anything
+// outside the working tree and the git common dir, a personal agent file
+// every repository reads, and a hooks directory configuration other than
+// this clone's own points git at. Paths are resolved, so a symlink or another
+// spelling of a shared location is still shared.
+type sharedLocations struct {
+	clone []string
+	files []string
+	hooks string
+}
+
+func newSharedLocations(root string, locations subject.HookLocations, surfaces []uninstallSurface) sharedLocations {
+	shared := sharedLocations{clone: []string{resolvedPath(root), resolvedPath(locations.Common)}}
+	if locations.SharedHooksPath {
+		shared.hooks = resolvedPath(locations.Directory)
+	}
+	for _, surface := range surfaces {
+		if surface.machineWide {
+			shared.files = append(shared.files, resolvedPath(surface.path))
+		}
+	}
+	return shared
+}
+
+func (shared sharedLocations) holds(path string) bool {
+	resolved := resolvedPath(path)
+	inside := slices.ContainsFunc(shared.clone, func(directory string) bool { return insideRoot(directory, resolved) })
+	return !inside || slices.Contains(shared.files, resolved) || resolvedPath(filepath.Dir(path)) == shared.hooks
+}
+
+func gitUninstallSurfaces(root string, locations subject.HookLocations, name configuration.CheckpointName) []uninstallSurface {
 	created := []byte("#!/bin/sh\n" + checkpointHookBlock(name))
 	var surfaces []uninstallSurface
 	for _, directory := range []string{filepath.Join(root, ".husky"), locations.Directory, filepath.Join(locations.Common, "hooks")} {
-		path := filepath.Join(directory, string(name))
-		outside := !insideRoot(resolvedPath(root), resolvedPath(path)) && !insideRoot(resolvedPath(locations.Common), resolvedPath(path))
-		withheld := !shared && (outside || directory == locations.Directory && locations.SharedHooksPath)
 		surfaces = append(surfaces, uninstallSurface{
-			integration: configuration.IntegrationGit, checkpoint: name, path: path,
-			created: created, remove: hookBlockRemoval(name), withheld: withheld,
+			integration: configuration.IntegrationGit, checkpoint: name, path: filepath.Join(directory, string(name)),
+			created: created, remove: hookBlockRemoval(name),
 		})
 	}
 	for _, marker := range hookToolMarkers {
@@ -273,8 +307,7 @@ func agentUninstallSurfaces(root string, shared bool) ([]uninstallSurface, error
 		personal, err := agent.personalFile(root)
 		switch {
 		case err == nil:
-			withheld := !shared && !insideRoot(root, personal)
-			surfaces = append(surfaces, uninstallSurface{integration: agent.integration, path: personal, created: created, remove: agent.removeEntry, withheld: withheld})
+			surfaces = append(surfaces, uninstallSurface{integration: agent.integration, path: personal, created: created, remove: agent.removeEntry, machineWide: agent.machineWide})
 		case shared:
 			return nil, err
 		}

@@ -354,6 +354,23 @@ func TestUninstallLeavesTheSharedCodexFileUnlessAsked(t *testing.T) {
 	assertRun(t, fixture.uninstall("", false, "--shared", "--yes"), commandRun{stdout: "codex: delete the file install created at " + shared + "\nUpdated 0 file(s); deleted 1 file(s).\n"})
 }
 
+func TestUninstallLeavesACodexFileEveryRepositoryReadsEvenInsideTheClone(t *testing.T) {
+	for _, home := range []string{"dotfiles/codex", ".codex"} {
+		t.Run(home, func(t *testing.T) {
+			fixture := newUninstallFixture(t)
+			t.Setenv("CODEX_HOME", fixture.path(home))
+			fixture.install([]string{"codex", "--personal"})
+			shared := filepath.Join(home, "hooks.json")
+			installed := fixture.read(shared)
+
+			assertRun(t, fixture.uninstall("", false, "--yes"), commandRun{stdout: "Nothing to remove.\nnote: " + fixture.path(shared) + " may run review-party for other repositories on this machine; remove it with --shared\n"})
+			if got := fixture.read(shared); got != installed {
+				t.Fatalf("%s = %q after uninstall, want it untouched", shared, got)
+			}
+		})
+	}
+}
+
 func TestUninstallLeavesHooksInASharedHooksPathUnlessAsked(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -365,10 +382,20 @@ func TestUninstallLeavesHooksInASharedHooksPathUnlessAsked(t *testing.T) {
 			return hooks
 		}},
 		{name: "a global hooksPath inside the clone", hooks: func(fixture uninstallFixture) string {
+			return fixture.globalHooksPath(fixture.path("git-hooks"))
+		}},
+		{name: "a global hooksPath naming the clone's .husky through a symlink", hooks: func(fixture uninstallFixture) string {
+			fixture.globalHooksPath(filepath.Join(fixture.linkToClone(), ".husky") + string(filepath.Separator))
+			return fixture.path(".husky")
+		}},
+		{name: "a global hooksPath inside the clone through a symlink", hooks: func(fixture uninstallFixture) string {
+			return fixture.globalHooksPath(filepath.Join(fixture.linkToClone(), "git-hooks"))
+		}},
+		{name: "a hooksPath inside the clone from a file its config includes", hooks: func(fixture uninstallFixture) string {
 			hooks := fixture.path("git-hooks")
-			global := filepath.Join(fixture.t.TempDir(), "gitconfig")
-			fixture.t.Setenv("GIT_CONFIG_GLOBAL", global)
-			fixture.git("config", "--file", global, "core.hooksPath", hooks)
+			included := filepath.Join(fixture.t.TempDir(), "included")
+			fixture.git("config", "--file", included, "core.hooksPath", hooks)
+			fixture.git("config", "include.path", included)
 			return hooks
 		}},
 	}
@@ -384,8 +411,35 @@ func TestUninstallLeavesHooksInASharedHooksPathUnlessAsked(t *testing.T) {
 				notes += "note: " + hook + " may run review-party for other repositories on this machine; remove it with --shared\n"
 			}
 			assertRun(t, fixture.uninstall("", false, "--yes"), commandRun{stdout: "Nothing to remove.\n" + notes})
-			assertRun(t, fixture.uninstall("", false, "--shared", "--yes"), commandRun{stdout: "git pre-push: delete the file install created at " + installed[0] + "\ngit pre-commit: delete the file install created at " + installed[1] + "\nUpdated 0 file(s); deleted 2 file(s).\n"})
+			if result := fixture.uninstall("", false, "--shared", "--yes"); result.exit != 0 || !strings.HasSuffix(result.stdout, "Updated 0 file(s); deleted 2 file(s).\n") {
+				t.Fatalf("uninstall --shared = %+v, want both hooks deleted", result)
+			}
+			assertMissing(t, installed...)
 		})
+	}
+}
+
+func (fixture uninstallFixture) globalHooksPath(hooks string) string {
+	global := filepath.Join(fixture.t.TempDir(), "gitconfig")
+	fixture.t.Setenv("GIT_CONFIG_GLOBAL", global)
+	fixture.git("config", "--file", global, "core.hooksPath", hooks)
+	return hooks
+}
+
+func (fixture uninstallFixture) linkToClone() string {
+	link := filepath.Join(fixture.t.TempDir(), "link")
+	if err := os.Symlink(fixture.repository, link); err != nil {
+		fixture.t.Skipf("cannot create a symlink: %v", err)
+	}
+	return link
+}
+
+func assertMissing(t *testing.T, paths ...string) {
+	t.Helper()
+	for _, path := range paths {
+		if _, err := os.Lstat(path); !errors.Is(err, fs.ErrNotExist) {
+			t.Fatalf("%s still exists: %v", path, err)
+		}
 	}
 }
 

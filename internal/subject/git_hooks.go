@@ -6,7 +6,9 @@ package subject
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -64,10 +66,13 @@ func PushedRefBase(repository string, ref PushedRef) (string, error) {
 
 // HookLocations says where git runs hooks for a clone. Directory is absolute
 // and shared by linked worktrees; HooksPath is core.hooksPath as configured,
-// empty when unset. Common is the absolute git directory linked worktrees
-// share, whose hooks directory git runs while core.hooksPath is unset.
-// SharedHooksPath means core.hooksPath comes from configuration other
-// repositories read too, such as the global or system file.
+// with a leading ~ expanded, empty when unset. Common is the absolute git
+// directory linked worktrees share, whose hooks directory git runs while
+// core.hooksPath is unset. SharedHooksPath means an absolute core.hooksPath
+// comes from configuration other than this clone's own config or
+// config.worktree file, such as the global file or a file an include pulls
+// in, so other repositories may run the same hooks. A relative core.hooksPath
+// resolves inside each clone, so it is never shared.
 type HookLocations struct {
 	Directory       string
 	HooksPath       string
@@ -76,22 +81,35 @@ type HookLocations struct {
 }
 
 func ResolveHookLocations(repository string) (HookLocations, error) {
-	directories, err := gitOutput(repository, "rev-parse", "--git-path", "hooks", "--git-common-dir")
+	directories, err := gitOutput(repository, "rev-parse", "--git-path", "hooks", "--git-common-dir", "--git-path", "config", "--git-path", "config.worktree")
 	if err != nil {
 		return HookLocations{}, fmt.Errorf("find the hooks directory: %w", err)
 	}
-	scoped, err := gitOutput(repository, "config", "--show-scope", "--default", "", "--get", "core.hooksPath")
+	configured, err := gitOutput(repository, "config", "-z", "--show-origin", "--type=path", "--default", "", "--get", "core.hooksPath")
 	if err != nil {
 		return HookLocations{}, fmt.Errorf("read core.hooksPath: %w", err)
 	}
-	directory, common, _ := strings.Cut(strings.TrimSuffix(string(directories), "\n"), "\n")
-	scope, hooksPath, _ := strings.Cut(strings.TrimSuffix(string(scoped), "\n"), "\t")
+	paths := strings.Split(strings.TrimSuffix(string(directories), "\n"), "\n")
+	if len(paths) != 4 {
+		return HookLocations{}, fmt.Errorf("find the hooks directory: unexpected git output %q", directories)
+	}
+	origin, hooksPath, _ := strings.Cut(strings.TrimSuffix(string(configured), "\x00"), "\x00")
+	own := slices.ContainsFunc(paths[2:], func(config string) bool {
+		file, found := strings.CutPrefix(origin, "file:")
+		return found && sameFile(absoluteIn(repository, file), absoluteIn(repository, config))
+	})
 	return HookLocations{
-		Directory:       absoluteIn(repository, directory),
+		Directory:       absoluteIn(repository, paths[0]),
 		HooksPath:       hooksPath,
-		SharedHooksPath: hooksPath != "" && scope != "local" && scope != "worktree",
-		Common:          absoluteIn(repository, common),
+		SharedHooksPath: filepath.IsAbs(hooksPath) && !own,
+		Common:          absoluteIn(repository, paths[1]),
 	}, nil
+}
+
+func sameFile(left, right string) bool {
+	leftInfo, leftErr := os.Stat(left)
+	rightInfo, rightErr := os.Stat(right)
+	return leftErr == nil && rightErr == nil && os.SameFile(leftInfo, rightInfo)
 }
 
 func absoluteIn(repository, path string) string {
