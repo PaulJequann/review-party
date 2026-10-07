@@ -139,20 +139,21 @@ emerging evidence warrants it. Treat contextual documentation as potentially
 stale; surface material contradictions with provenance rather than assuming a
 document is correct.`
 
-const deltaFraming = `This Review Subject is the unreviewed delta: the content written since the
-last Review of these paths, after that Review's Findings. Code written to
-address an earlier Finding is a claim to verify, not evidence that the Finding
-is resolved. Flag a fix that over-builds beyond what the Finding needed, and a
-fix that treats the symptom and misses the root cause.
+const deltaFraming = `This Profile reviewed earlier states of these paths. This Review Subject
+includes the content written since, after those Reviews' Findings. Code
+written to address an earlier Finding is a claim to verify, not evidence that
+the Finding is resolved. Flag a fix that over-builds beyond what the Finding
+needed, and a fix that treats the symptom and misses the root cause.
 
-Prior Findings on the changed paths, from the Reviews this delta follows:`
+Prior Findings on the changed paths, from this Profile's earlier Reviews:`
 
 func renderReviewPrompt(profile model.ProfileSnapshot, subject model.ReviewSubject) string {
 	return renderPrompt(profile, subject, "")
 }
 
-// renderDeltaPrompt frames a Review of the unreviewed delta with the prior
-// Findings on the paths it touches, so a fix is reviewed as a claim.
+// renderDeltaPrompt frames a Review that follows earlier Reviews of the same
+// Profile with their Findings on the paths it touches, so a fix is reviewed as
+// a claim.
 func renderDeltaPrompt(profile model.ProfileSnapshot, subject model.ReviewSubject, prior []priorFinding) string {
 	lines := make([]string, 0, len(prior))
 	for _, entry := range prior {

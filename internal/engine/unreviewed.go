@@ -46,12 +46,13 @@ func (conductor *Conductor) boundPlan(planned plannedSelection, unreviewed bool)
 	if !unreviewed && declaration.ReviewBudget == 0 {
 		return planned, nil
 	}
-	members, err := conductor.measureMembers(planned, declaration)
+	content, _ := partitionExempt(declaration, planned.preparedSubject.value.ContentChanges)
+	members, err := conductor.measureMembers(planned, content, declaration)
 	if err != nil {
 		return plannedSelection{}, err
 	}
 	if unreviewed {
-		if members, err = conductor.narrowToUnreviewed(&planned, members); err != nil {
+		if members, err = conductor.narrowToUnreviewed(&planned, content, members); err != nil {
 			return plannedSelection{}, err
 		}
 	}
@@ -77,8 +78,10 @@ func (conductor *Conductor) scopeCheckpoint(repository string, kind model.Subjec
 	return checkpoints[name], nil
 }
 
-func (conductor *Conductor) measureMembers(planned plannedSelection, declaration configuration.Checkpoint) ([]boundMember, error) {
-	check, err := conductor.newCoverageCheck(planned.repository, planned.preparedSubject.value.ContentChanges, declaration, nil)
+// measureMembers measures what each member reviewed of the content the
+// Checkpoint requires Reviews for.
+func (conductor *Conductor) measureMembers(planned plannedSelection, content []model.ContentChange, declaration configuration.Checkpoint) ([]boundMember, error) {
+	check, err := conductor.newCoverageCheck(planned.repository, content, declaration, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -101,25 +104,26 @@ func (conductor *Conductor) measureMembers(planned plannedSelection, declaration
 	return members, nil
 }
 
-// narrowToUnreviewed keeps the members with something unreviewed and, unless
-// none of them reviewed anything, replaces the Subject with their common
-// unreviewed delta and frames each prompt with the prior Findings.
-func (conductor *Conductor) narrowToUnreviewed(planned *plannedSelection, members []boundMember) ([]boundMember, error) {
+// narrowToUnreviewed keeps the members with something unreviewed, replaces
+// the Subject with their common unreviewed delta of the required content
+// unless that is the whole Subject, and frames the prompt of each member with
+// earlier Reviews.
+func (conductor *Conductor) narrowToUnreviewed(planned *plannedSelection, content []model.ContentChange, members []boundMember) ([]boundMember, error) {
 	participants := conductor.withUnreviewed(members)
 	if len(participants) == 0 {
 		return nil, ErrNothingUnreviewed
 	}
 	scope := planned.preparedSubject.value.ReviewSubject
-	delta := commonDelta(scope.ContentChanges, reaches(participants))
+	delta := commonDelta(content, reaches(participants))
 	if model.ContentChangesDigest(delta) != model.ContentChangesDigest(scope.ContentChanges) {
 		resolved, err := subject.ResolveUnreviewedDelta(scope, delta)
 		if err != nil {
 			return nil, err
 		}
 		planned.preparedSubject.value = resolved
-		if err := conductor.frameDeltaPrompts(participants, changedPaths(delta)); err != nil {
-			return nil, err
-		}
+	}
+	if err := conductor.frameDeltaPrompts(participants, changedPaths(delta)); err != nil {
+		return nil, err
 	}
 	planned.members = make([]compiledSlot, 0, len(participants))
 	for _, member := range participants {
@@ -150,10 +154,13 @@ func reaches(members []boundMember) []profileReach {
 	return result
 }
 
-// frameDeltaPrompts gives each member's prompt the delta framing and the
-// prior Findings of its own chain on the delta's paths.
+// frameDeltaPrompts gives the prompt of each member with earlier Reviews the
+// delta framing and the prior Findings of its own chain on the delta's paths.
 func (conductor *Conductor) frameDeltaPrompts(members []boundMember, paths []string) error {
 	for index := range members {
+		if len(members[index].coverage.Reviews) == 0 {
+			continue
+		}
 		prior, err := conductor.priorFindings(members[index].coverage.Reviews, paths)
 		if err != nil {
 			return err
