@@ -1,12 +1,5 @@
 package main
 
-// The install record lists the files a Checkpoint installer created in a
-// clone, with the directories it created to hold them. Uninstall deletes a
-// file only when the record lists it and nothing but what the installer
-// would have created around its content is left, so a file the Caller had
-// before install is never deleted. The record lives in the git directory, so
-// it goes with the clone, and is deleted once it lists nothing.
-
 import (
 	"cmp"
 	"encoding/json"
@@ -27,8 +20,6 @@ type installRecord struct {
 	Created []createdFile `json:"created"`
 }
 
-// createdFile is a file an installer created. Directories are the ones it
-// created to hold the file, deepest first.
 type createdFile struct {
 	Path        string   `json:"path"`
 	Directories []string `json:"directories,omitempty"`
@@ -53,9 +44,8 @@ func readInstallRecord(root string) (installRecord, error) {
 	return record, nil
 }
 
-// recordCreations adds each path that does not exist yet to the clone's
-// record. It runs before the writes, so a failed write leaves a record of a
-// missing file, which uninstall forgets, rather than an unrecorded file.
+// recordCreations runs before the writes, so a failed write leaves a record
+// of a missing file, which uninstall forgets, rather than an unrecorded file.
 func recordCreations(root string, paths []string) error {
 	var created []createdFile
 	for _, path := range paths {

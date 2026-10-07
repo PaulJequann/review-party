@@ -176,7 +176,6 @@ func (agent agentIntegration) group() agentHookGroup {
 	return agentHookGroup{Matcher: agent.shellTool, Hooks: []agentHookHandler{agent.handler}}
 }
 
-// hookCall is the command every form of the agent's review-party hook runs.
 func (agent agentIntegration) hookCall() string {
 	return "review-party checkpoint hook " + string(agent.integration)
 }

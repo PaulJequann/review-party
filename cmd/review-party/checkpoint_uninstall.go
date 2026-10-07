@@ -92,10 +92,6 @@ func undeclaredUninstallCommand(root, config string) string {
 	return "review-party checkpoint uninstall --undeclared --repo " + shellWord(root) + configurationArgument(config)
 }
 
-// offerUndeclaredUninstall follows a removed Checkpoint with what install
-// added for it. A terminal Caller is asked whether to remove it now; any
-// other Caller, and one who answered --yes for the configuration change
-// alone, gets the command that does.
 func offerUndeclaredUninstall(streams commandIO, options uninstallOptions) error {
 	root, err := subject.ResolveRepositoryRoot(options.repository)
 	if err != nil {
@@ -130,9 +126,6 @@ func promptUndeclaredUninstall(streams commandIO, plan uninstallPlan, command st
 	return err
 }
 
-// uninstallScope is what an uninstall looks for: the git hook blocks of
-// checkpoints, and with agents the entries and block every Checkpoint shares.
-// Shared adds settings files outside the repository.
 type uninstallScope struct {
 	checkpoints []configuration.CheckpointName
 	agents      bool
@@ -153,22 +146,15 @@ func planUndeclaredUninstall(root string, manager *configuration.Manager) (unins
 	return planUninstall(root, scope)
 }
 
-// uninstallSurface is one file an installer may have written. created is what
-// install writes into the file when it is missing, nil for configuration
-// install never writes, and remove takes install's part back out of content.
 type uninstallSurface struct {
 	integration configuration.IntegrationName
-	// checkpoint is empty for an entry or block every Checkpoint shares.
-	checkpoint configuration.CheckpointName
-	path       string
-	created    []byte
-	remove     func(content []byte) removal
-	// withheld is a file outside the repository uninstall only reports.
-	withheld bool
+	checkpoint  configuration.CheckpointName
+	path        string
+	created     []byte
+	remove      func(content []byte) removal
+	withheld    bool
 }
 
-// removal is a file's content with install's part taken out: what was
-// removed, and what of ours is left for the Caller.
 type removal struct {
 	residue []byte
 	removed removalOutcome
@@ -226,9 +212,6 @@ func uninstallSurfaces(root string, scope uninstallScope) ([]uninstallSurface, e
 	}), nil
 }
 
-// gitUninstallSurfaces are the hook files a Checkpoint's block may be in,
-// whichever hook tool install found, and the hook tool configuration install
-// asked the Caller to edit by hand.
 func gitUninstallSurfaces(root string, locations subject.HookLocations, name configuration.CheckpointName) []uninstallSurface {
 	created := []byte("#!/bin/sh\n" + checkpointHookBlock(name))
 	var surfaces []uninstallSurface
@@ -255,8 +238,6 @@ func gitUninstallSurfaces(root string, locations subject.HookLocations, name con
 	return surfaces
 }
 
-// hookBlockRemoval takes every copy of the block install adds out of a hook
-// script. A start marker that is left belongs to a block someone edited.
 func hookBlockRemoval(name configuration.CheckpointName) func([]byte) removal {
 	block := checkpointHookBlock(name)
 	start, _ := hookBlockMarkers(name)
@@ -297,9 +278,6 @@ func insideRoot(root, path string) bool {
 	return err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
 }
 
-// removeEntry takes every copy of the group install appends out of a settings
-// file. An entry left that runs this agent's hook is one someone edited. A
-// file uninstall cannot read is left alone unless it mentions the hook.
 func (agent agentIntegration) removeEntry(content []byte) removal {
 	residue, removed, err := removeJSONArrayElement(content, preToolUsePath, agent.group())
 	outcome := hookEntryAdded
@@ -322,8 +300,6 @@ func (agent agentIntegration) removeEntry(content []byte) removal {
 	return result
 }
 
-// removeAgentsMDBlock takes out the lines from the begin marker to the end
-// marker, and the blank line install put before a block at the end.
 func removeAgentsMDBlock(content []byte) removal {
 	lines := strings.SplitAfter(string(content), "\n")
 	sequence, at := agentsMDMarkers(lines)
@@ -352,9 +328,6 @@ type uninstallStep struct {
 	manual      []string
 }
 
-// uninstallPlan is what an uninstall changes: the files it rewrites, the
-// files install created that it deletes, and the install record without the
-// files nothing of ours is left in.
 type uninstallPlan struct {
 	steps   []uninstallStep
 	writes  map[string][]byte
@@ -395,15 +368,12 @@ func (plan *uninstallPlan) withhold(surface uninstallSurface, result removal) {
 	}
 }
 
-// skeleton reports whether removal leaves only what install writes into a
-// new file.
 func (surface uninstallSurface) skeleton(result removal) bool {
 	return surface.created != nil && !result.left.remains() && bytes.Equal(result.residue, surface.remove(surface.created).residue)
 }
 
-// survey plans one surface. A recorded file that holds only install's
-// skeleton is deleted even when its block went earlier, so a rerun finishes
-// what an interrupted one started.
+// survey deletes a recorded file holding only install's skeleton even when its
+// block went earlier, so a rerun finishes what an interrupted one started.
 func (plan *uninstallPlan) survey(surface uninstallSurface, result removal) {
 	skeleton := surface.skeleton(result)
 	created, recorded := plan.record.created(surface.path)

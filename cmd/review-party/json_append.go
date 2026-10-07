@@ -4,8 +4,6 @@ package main
 // entry must leave every existing byte where it was, so the appender reads the
 // objects along its path as ordered keys with raw value spans and splices the
 // new value in after the last existing child, in the file's own indentation.
-// Removal cuts the same spans back out, so removing what was appended restores
-// the document.
 
 import (
 	"bytes"
@@ -264,12 +262,6 @@ func (document jsonText) indentUnit() string {
 	return "  "
 }
 
-// removeJSONArrayElement removes every element equal to element from the
-// array found by following path's object keys, with the separator before
-// it. A container the removal would leave empty is removed from its parent
-// in turn, up to the root, which is left as {}. It reports whether it
-// removed anything; a document whose path holds something else is returned
-// as it is.
 func removeJSONArrayElement(document jsonText, path jsonPath, element any) ([]byte, bool, error) {
 	want, err := canonicalJSON(element)
 	if err != nil {
@@ -286,8 +278,6 @@ func removeJSONArrayElement(document jsonText, path jsonPath, element any) ([]by
 	return document, removed, nil
 }
 
-// jsonLevel is one container along a path and the index of the child the
-// path continues through, or at the last level, the matching element.
 type jsonLevel struct {
 	container jsonContainer
 	index     int
@@ -336,9 +326,6 @@ func (document jsonText) arrayAt(path jsonPath) ([]jsonLevel, jsonContainer, err
 	return levels, container, nil
 }
 
-// cut removes the element levels lead to, or the outermost container that
-// holds nothing else, with the separator and line before it. A first child
-// takes the separator after it instead.
 func (document jsonText) cut(levels []jsonLevel) []byte {
 	level := len(levels) - 1
 	for level > 0 && len(levels[level].container.children) == 1 {

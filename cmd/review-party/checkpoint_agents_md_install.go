@@ -177,8 +177,6 @@ func placeAgentsMDBlock(content string, found bool, body string) (hookOutcome, s
 	return hookBlockStale, strings.Join(lines[:at[0]+1], "") + body + strings.Join(lines[at[1]:], ""), nil
 }
 
-// agentsMDSequence is the marker lines of a file in order, "b" for a begin
-// line and "e" for an end line. One well-formed block reads "be".
 type agentsMDSequence string
 
 func agentsMDMarkers(lines []string) (agentsMDSequence, []int) {
