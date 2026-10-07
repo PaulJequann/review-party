@@ -30,10 +30,11 @@ edited, and configuration install never writes, such as lefthook, are
 reported for you to remove by hand.
 
 --undeclared removes only what no declared Checkpoint uses. --shared also
-removes the Codex entry in $CODEX_HOME/hooks.json, even inside this clone, and
-hooks in a core.hooksPath outside this clone or set as an absolute path
-anywhere but the clone's own config or config.worktree file, which other
-repositories may share. Rerunning is safe.`,
+changes files other repositories may share: the Codex entry in
+$CODEX_HOME/hooks.json, even inside this clone; any file that resolves outside
+this clone; and hooks in a directory an absolute core.hooksPath names anywhere
+but the clone's own config or config.worktree file, even one this clone
+overrides. Rerunning is safe.`,
 		Example: "  review-party checkpoint uninstall\n  review-party checkpoint uninstall --undeclared --yes",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -47,7 +48,7 @@ repositories may share. Rerunning is safe.`,
 	addRepositoryFlag(command, "Git repository to remove Checkpoint Integrations from")
 	addConfigurationFlag(command)
 	command.Flags().Bool("undeclared", false, "Remove only what no declared Checkpoint uses")
-	command.Flags().Bool("shared", false, "Also remove the Codex entry in $CODEX_HOME/hooks.json and hooks in a core.hooksPath other repositories may share")
+	command.Flags().Bool("shared", false, "Also change files other repositories may share: $CODEX_HOME/hooks.json, files outside this clone, and hooks in a shared core.hooksPath")
 	command.Flags().Bool("yes", false, "Remove without a confirmation prompt")
 	command.MarkFlagsMutuallyExclusive("undeclared", "shared")
 	return command
@@ -222,19 +223,20 @@ func uninstallSurfaces(root string, scope uninstallScope) ([]uninstallSurface, e
 
 // sharedLocations are where a file may serve other repositories: anything
 // outside the working tree and the git common dir, a personal agent file
-// every repository reads, and a hooks directory configuration other than
-// this clone's own points git at. Paths are resolved, so a symlink or another
-// spelling of a shared location is still shared.
+// every repository reads, and every hooks directory configuration other than
+// this clone's own points git at, even one this clone overrides. Paths are
+// resolved, so a symlink or another spelling of a shared location is still
+// shared.
 type sharedLocations struct {
 	clone []string
 	files []string
-	hooks string
+	hooks []string
 }
 
 func newSharedLocations(root string, locations subject.HookLocations, surfaces []uninstallSurface) sharedLocations {
 	shared := sharedLocations{clone: []string{resolvedPath(root), resolvedPath(locations.Common)}}
-	if locations.SharedHooksPath {
-		shared.hooks = resolvedPath(locations.Directory)
+	for _, directory := range locations.SharedHooks {
+		shared.hooks = append(shared.hooks, resolvedPath(directory))
 	}
 	for _, surface := range surfaces {
 		if surface.machineWide {
@@ -247,7 +249,7 @@ func newSharedLocations(root string, locations subject.HookLocations, surfaces [
 func (shared sharedLocations) holds(path string) bool {
 	resolved := resolvedPath(path)
 	inside := slices.ContainsFunc(shared.clone, func(directory string) bool { return insideRoot(directory, resolved) })
-	return !inside || slices.Contains(shared.files, resolved) || resolvedPath(filepath.Dir(path)) == shared.hooks
+	return !inside || slices.Contains(shared.files, resolved) || slices.Contains(shared.hooks, resolvedPath(filepath.Dir(path)))
 }
 
 func gitUninstallSurfaces(root string, locations subject.HookLocations, name configuration.CheckpointName) []uninstallSurface {

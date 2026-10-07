@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -68,16 +69,16 @@ func PushedRefBase(repository string, ref PushedRef) (string, error) {
 // and shared by linked worktrees; HooksPath is core.hooksPath as configured,
 // with a leading ~ expanded, empty when unset. Common is the absolute git
 // directory linked worktrees share, whose hooks directory git runs while
-// core.hooksPath is unset. SharedHooksPath means an absolute core.hooksPath
-// comes from configuration other than this clone's own config or
-// config.worktree file, such as the global file or a file an include pulls
-// in, so other repositories may run the same hooks. A relative core.hooksPath
-// resolves inside each clone, so it is never shared.
+// core.hooksPath is unset. SharedHooks lists every absolute core.hooksPath
+// set in configuration other than this clone's own config or config.worktree
+// file, such as the global file or a file an include pulls in, whether or not
+// it wins here: other repositories may run hooks from each. A relative
+// core.hooksPath resolves inside each clone, so it is never shared.
 type HookLocations struct {
-	Directory       string
-	HooksPath       string
-	SharedHooksPath bool
-	Common          string
+	Directory   string
+	HooksPath   string
+	SharedHooks []string
+	Common      string
 }
 
 func ResolveHookLocations(repository string) (HookLocations, error) {
@@ -85,25 +86,55 @@ func ResolveHookLocations(repository string) (HookLocations, error) {
 	if err != nil {
 		return HookLocations{}, fmt.Errorf("find the hooks directory: %w", err)
 	}
-	configured, err := gitOutput(repository, "config", "-z", "--show-origin", "--type=path", "--default", "", "--get", "core.hooksPath")
-	if err != nil {
-		return HookLocations{}, fmt.Errorf("read core.hooksPath: %w", err)
-	}
 	paths := strings.Split(strings.TrimSuffix(string(directories), "\n"), "\n")
 	if len(paths) != 4 {
 		return HookLocations{}, fmt.Errorf("find the hooks directory: unexpected git output %q", directories)
 	}
-	origin, hooksPath, _ := strings.Cut(strings.TrimSuffix(string(configured), "\x00"), "\x00")
-	own := slices.ContainsFunc(paths[2:], func(config string) bool {
-		file, found := strings.CutPrefix(origin, "file:")
-		return found && sameFile(absoluteIn(repository, file), absoluteIn(repository, config))
-	})
-	return HookLocations{
-		Directory:       absoluteIn(repository, paths[0]),
-		HooksPath:       hooksPath,
-		SharedHooksPath: filepath.IsAbs(hooksPath) && !own,
-		Common:          absoluteIn(repository, paths[1]),
-	}, nil
+	values, err := configuredHooksPaths(repository)
+	if err != nil {
+		return HookLocations{}, err
+	}
+	locations := HookLocations{Directory: absoluteIn(repository, paths[0]), Common: absoluteIn(repository, paths[1])}
+	for _, value := range values {
+		locations.HooksPath = value.path
+		own := slices.ContainsFunc(paths[2:], func(config string) bool {
+			file, found := strings.CutPrefix(value.origin, "file:")
+			return found && sameFile(absoluteIn(repository, file), absoluteIn(repository, config))
+		})
+		if filepath.IsAbs(value.path) && !own {
+			locations.SharedHooks = append(locations.SharedHooks, value.path)
+		}
+	}
+	return locations, nil
+}
+
+type configuredPath struct {
+	origin string
+	path   string
+}
+
+// configuredHooksPaths lists every core.hooksPath git reads for the clone,
+// with its origin, in the order git reads them, so the last one wins.
+func configuredHooksPaths(repository string) ([]configuredPath, error) {
+	command := exec.Command("git", "config", "-z", "--show-origin", "--type=path", "--get-all", "core.hooksPath")
+	command.Dir = repository
+	output, err := command.Output()
+	var exitError *exec.ExitError
+	if errors.As(err, &exitError) && exitError.ExitCode() == 1 {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read core.hooksPath: %w", err)
+	}
+	fields := strings.Split(strings.TrimSuffix(string(output), "\x00"), "\x00")
+	if len(fields)%2 != 0 {
+		return nil, fmt.Errorf("read core.hooksPath: unexpected git output %q", output)
+	}
+	var values []configuredPath
+	for index := 0; index < len(fields); index += 2 {
+		values = append(values, configuredPath{origin: fields[index], path: fields[index+1]})
+	}
+	return values, nil
 }
 
 func sameFile(left, right string) bool {

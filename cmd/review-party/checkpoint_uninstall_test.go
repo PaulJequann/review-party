@@ -391,6 +391,16 @@ func TestUninstallLeavesHooksInASharedHooksPathUnlessAsked(t *testing.T) {
 		{name: "a global hooksPath inside the clone through a symlink", hooks: func(fixture uninstallFixture) string {
 			return fixture.globalHooksPath(filepath.Join(fixture.linkToClone(), "git-hooks"))
 		}},
+		{name: "a global hooksPath the clone's own config also names", hooks: func(fixture uninstallFixture) string {
+			fixture.globalHooksPath(fixture.path("git-hooks"))
+			fixture.git("config", "core.hooksPath", "git-hooks")
+			return fixture.path("git-hooks")
+		}},
+		{name: "a global hooksPath naming the clone's .husky under a husky override", hooks: func(fixture uninstallFixture) string {
+			fixture.globalHooksPath(fixture.path(".husky"))
+			fixture.git("config", "core.hooksPath", ".husky")
+			return fixture.path(".husky")
+		}},
 		{name: "a hooksPath inside the clone from a file its config includes", hooks: func(fixture uninstallFixture) string {
 			hooks := fixture.path("git-hooks")
 			included := filepath.Join(fixture.t.TempDir(), "included")
