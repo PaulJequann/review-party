@@ -141,6 +141,9 @@ func (conductor *Conductor) Replay(ctx context.Context, selection model.ReplaySe
 	if err := conductor.requirePreparedState("."); err != nil {
 		return model.ReviewRecord{}, err
 	}
+	if err := requireRun(ctx); err != nil {
+		return model.ReviewRecord{}, err
+	}
 	source, err := conductor.store.Load(selection.SourceReviewID)
 	if err != nil {
 		return model.ReviewRecord{}, fmt.Errorf("load replay source %q: %w", selection.SourceReviewID, err)

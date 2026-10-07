@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os/exec"
+	"reviewparty/internal/hostrun"
 	"reviewparty/internal/model"
 	"testing"
 	"time"
@@ -154,30 +155,23 @@ func assertFailureLocation(t *testing.T, execution attemptExecution, category mo
 	}
 }
 
-func TestProcessGroupCanBeTerminated(t *testing.T) {
-	command := exec.Command("sh", "-c", "sleep 30")
-	configureProcessGroup(command)
-	if err := command.Start(); err != nil {
-		t.Fatal(err)
-	}
-	terminateProcessGroup(command)
-
-	waited := make(chan error, 1)
-	go func() { waited <- command.Wait() }()
-	select {
-	case <-waited:
-	case <-time.After(2 * time.Second):
-		killProcessGroup(command)
-		t.Fatal("process did not terminate")
-	}
-}
-
 func TestCommandRunnerReturnsAfterCancellation(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	ctx, cancel := context.WithTimeout(testContext(t), 20*time.Millisecond)
 	defer cancel()
+	started := time.Now()
 	run := runCommand(ctx, exec.Command("sh", "-c", "sleep 30"))
 	if !errors.Is(run.ContextErr, context.DeadlineExceeded) {
 		t.Fatalf("context error = %v, want deadline exceeded", run.ContextErr)
+	}
+	if elapsed := time.Since(started); elapsed > processKillGrace {
+		t.Fatalf("cancelled Reviewer took %s to stop", elapsed)
+	}
+}
+
+func TestCommandRunnerRefusesToStartWithoutARun(t *testing.T) {
+	run := runCommand(context.Background(), exec.Command("sh", "-c", "true"))
+	if !errors.Is(run.StartErr, hostrun.ErrNoRun) {
+		t.Fatalf("start error = %v, want %v", run.StartErr, hostrun.ErrNoRun)
 	}
 }
 

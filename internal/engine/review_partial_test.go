@@ -32,7 +32,7 @@ func TestPartialResultPreservesEvidenceButNeverCompletes(t *testing.T) {
 	repository := changedTestRepository(t)
 	conductor := testConductor(t, successfulExecutor(partialFindingsReview), time.Second)
 
-	record, err := conductor.Review(context.Background(), testSelection(repository))
+	record, err := conductor.Review(testContext(t), testSelection(repository))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +60,7 @@ func TestPartialResultDoesNotAffectCleanLifecycle(t *testing.T) {
 	repository := changedTestRepository(t)
 	conductor := testConductor(t, successfulExecutor(findingsReview), time.Second)
 
-	record, err := conductor.Review(context.Background(), testSelection(repository))
+	record, err := conductor.Review(testContext(t), testSelection(repository))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestEvalRetryRetainsSalvagedPartialResultWhenRetryFails(t *testing.T) {
 		Repository: suite, Subject: model.CapturedChange(base, head), Profile: "bugs",
 		Reviewer: defaultReviewer, Model: "grok-code-fast-1", Effort: "high",
 	}
-	record, err := conductor.reviewEvalCase(context.Background(), selection, model.RetryPolicy{
+	record, err := conductor.reviewEvalCase(testContext(t), selection, model.RetryPolicy{
 		MaxAttempts: 2, InitialBackoff: "1ms", MaxBackoff: "1ms",
 	})
 	if err != nil {
@@ -141,7 +141,7 @@ func TestEvalRetryCompletingAfterPartialReplacesPartialWithCompleteResult(t *tes
 		Repository: suite, Subject: model.CapturedChange(base, head), Profile: "bugs",
 		Reviewer: defaultReviewer, Model: "grok-code-fast-1", Effort: "high",
 	}
-	record, err := conductor.reviewEvalCase(context.Background(), selection, model.RetryPolicy{
+	record, err := conductor.reviewEvalCase(testContext(t), selection, model.RetryPolicy{
 		MaxAttempts: 2, InitialBackoff: "1ms", MaxBackoff: "1ms",
 	})
 	if err != nil {

@@ -96,7 +96,7 @@ func TestStatusMarksALiveStandaloneReviewStale(t *testing.T) {
 	probe = staleProbe{conductor: testPartyConductor(t, map[string]attemptExecutor{defaultReviewer: executor}), limit: time.Minute + staleSlack}
 	writeExecutableProfile(t, repository, "local-docs")
 
-	if _, err := probe.conductor.ReviewExplicitProfile(context.Background(), model.RunSelection{Repository: repository, Subject: model.WorkingChanges(), Profile: "repository:local-docs"}); err != nil {
+	if _, err := probe.conductor.ReviewExplicitProfile(testContext(t), model.RunSelection{Repository: repository, Subject: model.WorkingChanges(), Profile: "repository:local-docs"}); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -31,7 +31,7 @@ func TestEvalRetryPublishesArtifactsUnderTheRetryAttemptNumber(t *testing.T) {
 	conductor.wait = func(context.Context, time.Duration) error { return nil }
 	selection := evalSelection(suite)
 	selection.Experiment.RetryPolicy.MaxAttempts = 3
-	run, err := conductor.RunEvalSuite(context.Background(), selection)
+	run, err := conductor.RunEvalSuite(testContext(t), selection)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -20,7 +20,7 @@ func TestEvalPreflightRejectsInvalidCaseBeforeHarnessLaunch(t *testing.T) {
 	suite := writeEvalTestSuite(t, []testEvalCase{{id: "invalid", unknownField: true}})
 	executor := successfulExecutor(cleanReview)
 	conductor := testEvalConductor(t, executor)
-	_, err := conductor.RunEvalSuite(context.Background(), evalSelection(suite))
+	_, err := conductor.RunEvalSuite(testContext(t), evalSelection(suite))
 	if err == nil || !strings.Contains(err.Error(), "unknown field") {
 		t.Fatalf("error = %v", err)
 	}
@@ -33,7 +33,7 @@ func TestEvalRecordsOrdinaryReviewsForEachExecutionCategory(t *testing.T) {
 	suite := writeEvalTestSuite(t, []testEvalCase{{id: "clean"}, {id: "findings"}, {id: "incomplete"}})
 	executor := &evalSequenceExecutor{outputs: []string{cleanReview, findingsReview, "not a result contract"}}
 	conductor := testEvalConductor(t, executor)
-	run, err := conductor.RunEvalSuite(context.Background(), evalSelection(suite))
+	run, err := conductor.RunEvalSuite(testContext(t), evalSelection(suite))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +59,7 @@ func TestEvalRetriesTransientFailureInsideSameReview(t *testing.T) {
 	conductor.wait = func(context.Context, time.Duration) error { return nil }
 	selection := evalSelection(suite)
 	selection.Experiment.RetryPolicy.MaxAttempts = 3
-	run, err := conductor.RunEvalSuite(context.Background(), selection)
+	run, err := conductor.RunEvalSuite(testContext(t), selection)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +100,7 @@ func TestEvalDoesNotRetryAuthenticationFailure(t *testing.T) {
 	conductor.wait = func(context.Context, time.Duration) error { return nil }
 	selection := evalSelection(suite)
 	selection.Experiment.RetryPolicy.MaxAttempts = 3
-	run, err := conductor.RunEvalSuite(context.Background(), selection)
+	run, err := conductor.RunEvalSuite(testContext(t), selection)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +128,7 @@ func TestEvalContinuesAfterRetryExhaustion(t *testing.T) {
 	conductor.wait = func(context.Context, time.Duration) error { return nil }
 	selection := evalSelection(suite)
 	selection.Experiment.RetryPolicy.MaxAttempts = 2
-	run, err := conductor.RunEvalSuite(context.Background(), selection)
+	run, err := conductor.RunEvalSuite(testContext(t), selection)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +157,7 @@ func TestEvalConcurrencyLimitBoundsActiveReviewersAndPreservesManifestOrder(t *t
 	conductor := testEvalConductor(t, executor)
 	selection := evalSelection(suite)
 	selection.Experiment.ConcurrencyLimit = 2
-	run, err := conductor.RunEvalSuite(context.Background(), selection)
+	run, err := conductor.RunEvalSuite(testContext(t), selection)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,7 +179,7 @@ func TestEvalConcurrencyLimitOneRemainsSequential(t *testing.T) {
 	suite := writeEvalTestSuite(t, []testEvalCase{{id: "first"}, {id: "second"}})
 	executor := &boundedEvalExecutor{delays: []time.Duration{5 * time.Millisecond, 5 * time.Millisecond}}
 	conductor := testEvalConductor(t, executor)
-	if _, err := conductor.RunEvalSuite(context.Background(), evalSelection(suite)); err != nil {
+	if _, err := conductor.RunEvalSuite(testContext(t), evalSelection(suite)); err != nil {
 		t.Fatal(err)
 	}
 	if executor.peak != 1 {
@@ -288,11 +288,11 @@ func assertSyntheticSubject(t *testing.T, suite string, index int, subject model
 func TestEvalRerunPreservesIndependentSuiteHistory(t *testing.T) {
 	suite := writeEvalTestSuite(t, []testEvalCase{{id: "case-one"}})
 	conductor := testEvalConductor(t, successfulExecutor(cleanReview))
-	first, err := conductor.RunEvalSuite(context.Background(), evalSelection(suite))
+	first, err := conductor.RunEvalSuite(testContext(t), evalSelection(suite))
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := conductor.RunEvalSuite(context.Background(), evalSelection(suite))
+	second, err := conductor.RunEvalSuite(testContext(t), evalSelection(suite))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -375,7 +375,7 @@ func TestCodeQualityEvalRejectsMismatchedProfileBeforeLaunch(t *testing.T) {
 	conductor := testEvalConductor(t, executor)
 	selection := evalSelection("global:code-quality")
 	selection.Experiment.Profile = "bugs"
-	if _, err := conductor.RunEvalSuite(context.Background(), selection); err == nil || !strings.Contains(err.Error(), "requires the code-quality Profile") {
+	if _, err := conductor.RunEvalSuite(testContext(t), selection); err == nil || !strings.Contains(err.Error(), "requires the code-quality Profile") {
 		t.Fatalf("error = %v", err)
 	}
 	if executor.attemptCount() != 0 {
@@ -404,7 +404,7 @@ func TestCodeQualityEvalSuiteAcceptsScopedCodeQualityProfile(t *testing.T) {
 func TestGeneralEvalReviewerReceivesMultiFileRepositoryWithoutAuthority(t *testing.T) {
 	executor := &evalSequenceExecutor{outputs: []string{cleanReview, cleanReview, cleanReview, cleanReview, cleanReview, cleanReview}}
 	conductor := testEvalConductor(t, executor)
-	run, err := conductor.RunEvalSuite(context.Background(), evalSelection("global:general-bugs"))
+	run, err := conductor.RunEvalSuite(testContext(t), evalSelection("global:general-bugs"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -423,7 +423,7 @@ func TestGeneralEvalReviewerReceivesMultiFileRepositoryWithoutAuthority(t *testi
 func runPackagedEval(t *testing.T, suite string, executor attemptExecutor) model.EvalSuiteRun {
 	t.Helper()
 	conductor := testEvalConductor(t, executor)
-	run, err := conductor.RunEvalSuite(context.Background(), evalSelection(suite))
+	run, err := conductor.RunEvalSuite(testContext(t), evalSelection(suite))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -606,7 +606,7 @@ func TestEvalRejectsRepositoryScopedProfileBecauseEvalResolvesGlobalOnly(t *test
 	conductor := testEvalConductor(t, executor)
 	selection := evalSelection("global:code-quality")
 	selection.Experiment.Profile = "repository:code-quality"
-	_, err := conductor.RunEvalSuite(context.Background(), selection)
+	_, err := conductor.RunEvalSuite(testContext(t), selection)
 	if err == nil || !strings.Contains(err.Error(), "resolve from global Configuration") {
 		t.Fatalf("error = %v, want the global-only eval Profile error", err)
 	}

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"reviewparty/internal/hostrun"
 	"reviewparty/internal/model"
 	"reviewparty/internal/result"
 	"reviewparty/internal/store"
@@ -162,7 +163,10 @@ func (runner *reviewRunner) executePass(ctx context.Context, pass passExecution)
 	attemptContext, cancel := context.WithTimeout(ctx, pass.deadline)
 	defer cancel()
 	prompt := pass.prompt
-	execution, cleanupErr := runner.executeAttempt(attemptContext, record, pass, prompt)
+	execution, err := runner.executeAttempt(attemptContext, record, pass, prompt)
+	if err != nil {
+		return record, err
+	}
 	completed := runner.now().UTC()
 	record.Timings.AttemptExecutionMS = elapsedMilliseconds(started, completed)
 
@@ -188,9 +192,6 @@ func (runner *reviewRunner) executePass(ctx context.Context, pass passExecution)
 	if err := runner.store.Save(record); err != nil {
 		cleanupErr := runner.publisher.removeArtifacts(attempt.Artifacts)
 		return record, errors.Join(err, cleanupErr)
-	}
-	if cleanupErr != nil {
-		return record, fmt.Errorf("Review %s was persisted but its Subject execution checkout could not be cleaned: %w", record.ID, cleanupErr)
 	}
 	return record, nil
 }
@@ -236,14 +237,7 @@ func applyAttemptResult(record *model.ReviewRecord, result model.ReviewResult, e
 	return outcome
 }
 
-func (runner *reviewRunner) executeAttempt(ctx context.Context, record model.ReviewRecord, pass passExecution, prompt string) (execution attemptExecution, returnErr error) {
-	checkout, err := pass.subject.PrepareExecution(string(record.ID) + "-1")
-	if err != nil {
-		return failedExecution(model.AttemptUnknownFailure, model.TerminationTransportFailure, model.PhaseHarnessLaunch, err.Error()), nil
-	}
-	defer func() {
-		returnErr = errors.Join(returnErr, checkout.Close())
-	}()
+func (runner *reviewRunner) executeAttempt(ctx context.Context, record model.ReviewRecord, pass passExecution, prompt string) (attemptExecution, error) {
 	if gate := attemptGateFromContext(ctx); gate != nil {
 		select {
 		case gate <- struct{}{}:
@@ -252,11 +246,42 @@ func (runner *reviewRunner) executeAttempt(ctx context.Context, record model.Rev
 			return contextExecution(ctx.Err()), nil
 		}
 	}
+	repository, err := executionRepository(ctx, pass.subject)
+	if err != nil {
+		return viewFailure(ctx, err)
+	}
 	if pass.onAttempt != nil {
 		pass.onAttempt(record.AttemptCount() + 1)
 	}
-	execution = pass.executor.Execute(ctx, attemptSpec{Repository: checkout.Repository, Prompt: prompt, Candidate: pass.profile.reviewer.candidate})
-	return execution, nil
+	return pass.executor.Execute(ctx, attemptSpec{Repository: repository, Prompt: prompt, Candidate: pass.profile.reviewer.candidate}), nil
+}
+
+// viewFailure classifies a view that could not be built: a missing run ends
+// the Review, a cancelled context is the caller's stop, and anything else is
+// a launch failure recorded on the Attempt.
+func viewFailure(ctx context.Context, err error) (attemptExecution, error) {
+	switch {
+	case errors.Is(err, hostrun.ErrNoRun):
+		return attemptExecution{}, err
+	case ctx.Err() != nil:
+		return contextExecution(ctx.Err()), nil
+	default:
+		return failedExecution(model.AttemptUnknownFailure, model.TerminationTransportFailure, model.PhaseHarnessLaunch, err.Error()), nil
+	}
+}
+
+// executionRepository is the directory a Reviewer reads: the repository
+// itself for working changes, else the run's view of the Subject, built once
+// per run and shared by every member that reviews the same content.
+func executionRepository(ctx context.Context, subject subject.Subject) (string, error) {
+	if repository, inPlace := subject.InPlace(); inPlace {
+		return repository, nil
+	}
+	run, err := hostrun.From(ctx)
+	if err != nil {
+		return "", err
+	}
+	return run.View(ctx, subject)
 }
 
 type attemptDraft struct {

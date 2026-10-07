@@ -49,7 +49,7 @@ func TestRunRecordsEveryMemberBeforeTheFirstLaunch(t *testing.T) {
 
 func TestStoppedBundleFinalizesMembersThatNeverStarted(t *testing.T) {
 	repository := changedTestRepository(t)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(testContext(t))
 	defer cancel()
 	executor := &scriptedExecutor{availability: availability{Available: true}}
 	executor.execute = func(context.Context, attemptSpec) attemptExecution {

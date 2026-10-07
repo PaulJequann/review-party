@@ -164,7 +164,7 @@ func unicodeChangedRepository(t *testing.T) string {
 func measuredPrompt(t *testing.T, repository string) int {
 	t.Helper()
 	harness := newSizeHarness(t, 0)
-	if _, err := harness.conductor.Review(context.Background(), testSelection(repository)); err != nil {
+	if _, err := harness.conductor.Review(testContext(t), testSelection(repository)); err != nil {
 		t.Fatal(err)
 	}
 	if harness.executor.attemptCount() != 1 {
@@ -178,7 +178,7 @@ func TestOversizedSubjectFailsBeforeAnyReviewerLaunches(t *testing.T) {
 	characters := measuredPrompt(t, repository)
 	harness := newSizeHarness(t, characters-1)
 
-	record, err := harness.conductor.Review(context.Background(), testSelection(repository))
+	record, err := harness.conductor.Review(testContext(t), testSelection(repository))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -204,7 +204,7 @@ func TestOversizedSubjectRecordIsFoundByHistoryTerminationFilter(t *testing.T) {
 	repository := unicodeChangedRepository(t)
 	characters := measuredPrompt(t, repository)
 	harness := newSizeHarness(t, characters-1)
-	record, err := harness.conductor.Review(context.Background(), testSelection(repository))
+	record, err := harness.conductor.Review(testContext(t), testSelection(repository))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,7 +236,7 @@ func TestSubjectWithinTheLimitLaunchesAndWarnsFromSixtyPercent(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			harness := newSizeHarness(t, test.limit)
 
-			record, err := harness.conductor.Review(context.Background(), testSelection(repository))
+			record, err := harness.conductor.Review(testContext(t), testSelection(repository))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -280,7 +280,7 @@ func TestCancelledReviewIsNotReportedAsInputTooLarge(t *testing.T) {
 	prepared := planned.preparedSubject.review(member.profile, member.timings)
 	gate := make(chan struct{}, 1)
 	gate <- struct{}{}
-	ctx, cancel := context.WithCancel(context.WithValue(context.Background(), attemptGateContextKey{}, gate))
+	ctx, cancel := context.WithCancel(context.WithValue(testContext(t), attemptGateContextKey{}, gate))
 	cancel()
 
 	record, err := harness.conductor.runPreparedReview(ctx, prepared, nil, time.Now())

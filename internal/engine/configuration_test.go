@@ -1,7 +1,6 @@
 package engine
 
 import (
-	"context"
 	"path/filepath"
 	"testing"
 	"time"
@@ -22,7 +21,7 @@ func TestSavedProfileReviewerPolicyFailsClosed(t *testing.T) {
 	})
 	executor := successfulExecutor(cleanReview)
 	conductor := newConfiguredTestConductor(t, manager, map[string]attemptExecutor{"grok": executor})
-	_, err := conductor.Review(context.Background(), model.RunSelection{Repository: repository, Subject: model.WorkingChanges(), Profile: "bugs"})
+	_, err := conductor.Review(testContext(t), model.RunSelection{Repository: repository, Subject: model.WorkingChanges(), Profile: "bugs"})
 	if err == nil {
 		t.Fatal("disabled saved Reviewer was accepted")
 	}

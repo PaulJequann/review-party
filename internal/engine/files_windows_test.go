@@ -10,7 +10,7 @@ func TestSavedProfileUsesPortableSourceOnWindows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	profile, err := conductor.resolveProfile("", "bugs")
+	profile, err := conductor.resolveProfile(profileRequest{name: "bugs"})
 	if err != nil {
 		t.Fatal(err)
 	}

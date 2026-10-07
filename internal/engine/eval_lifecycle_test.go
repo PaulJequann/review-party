@@ -31,7 +31,7 @@ func TestEvalPlansEveryRunBeforeFirstHarnessLaunch(t *testing.T) {
 		executor.onExecute = nil
 	}
 	conductor := newLifecycleTestConductor(t, observed, executor)
-	if _, err := conductor.RunEvalSuite(context.Background(), evalSelection(suite)); err != nil {
+	if _, err := conductor.RunEvalSuite(testContext(t), evalSelection(suite)); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -42,7 +42,7 @@ func TestEvalCaseIdentityMismatchStopsBeforeReviewerLaunch(t *testing.T) {
 	records := &mismatchedEvalLoadStore{observingEvalStore: observed}
 	executor := successfulExecutor(cleanReview)
 	conductor := newLifecycleTestConductor(t, records, executor)
-	run, err := conductor.RunEvalSuite(context.Background(), evalSelection(suite))
+	run, err := conductor.RunEvalSuite(testContext(t), evalSelection(suite))
 	if err == nil || !strings.Contains(err.Error(), "does not match prepared case") {
 		t.Fatalf("error = %v", err)
 	}
@@ -81,7 +81,7 @@ func TestEvalCheckpointFailuresPersistHonestState(t *testing.T) {
 			failing := &failingEvalCheckpointStore{observingEvalStore: observed, failAt: test.failAt}
 			executor := successfulExecutor(cleanReview)
 			conductor := newLifecycleTestConductor(t, failing, executor)
-			run, err := conductor.RunEvalSuite(context.Background(), evalSelection(suite))
+			run, err := conductor.RunEvalSuite(testContext(t), evalSelection(suite))
 			if err == nil || !strings.Contains(err.Error(), "injected checkpoint failure") {
 				t.Fatalf("error = %v", err)
 			}
@@ -116,7 +116,7 @@ func assertIncompleteTerminalCheckpoint(t *testing.T, ledger *store.LedgerRecord
 
 func TestStoppedEvalSuiteRejectsPendingCaseAdjudicationExplicitly(t *testing.T) {
 	suite := writeEvalTestSuite(t, []testEvalCase{{id: "first"}, {id: "second"}})
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(testContext(t))
 	executor := &evalSequenceExecutor{outputs: []string{cleanReview}, onExecute: cancel}
 	conductor := testEvalConductor(t, executor)
 	run, runErr := conductor.RunEvalSuite(ctx, evalSelection(suite))
@@ -131,7 +131,7 @@ func TestStoppedEvalSuiteRejectsPendingCaseAdjudicationExplicitly(t *testing.T) 
 
 func TestEvalCancellationStopsNewCasesAndPersistsHonestState(t *testing.T) {
 	suite := writeEvalTestSuite(t, []testEvalCase{{id: "first"}, {id: "second"}})
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(testContext(t))
 	executor := &evalSequenceExecutor{outputs: []string{cleanReview}, onExecute: cancel}
 	conductor := testEvalConductor(t, executor)
 	run, err := conductor.RunEvalSuite(ctx, evalSelection(suite))
@@ -148,7 +148,7 @@ func TestEvalSuiteDeadlineStopsNewCases(t *testing.T) {
 	conductor.evalDefaultDeadline = 20 * time.Millisecond
 	selection := evalSelection(suite)
 	selection.Experiment.Deadline = conductor.evalDefaultDeadline.String()
-	run, err := conductor.RunEvalSuite(context.Background(), selection)
+	run, err := conductor.RunEvalSuite(testContext(t), selection)
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("error = %v", err)
 	}
@@ -184,7 +184,7 @@ func (executor *deadlineEvalExecutor) Execute(ctx context.Context, _ attemptSpec
 
 func TestEvalReviewErrorTerminalizesActiveChildWithParent(t *testing.T) {
 	suite := writeEvalTestSuite(t, []testEvalCase{{id: "first"}, {id: "second"}})
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(testContext(t))
 	_, observed := newObservedEvalStore(t)
 	records := &cancellingEvalCheckpointStore{observingEvalStore: observed, cancel: cancel}
 	conductor := newLifecycleTestConductor(t, records, successfulExecutor(cleanReview))
@@ -379,7 +379,7 @@ func assertConcurrentEvalDrainsReviewers(t *testing.T, conductor *Conductor, sui
 	selection := evalSelection(suite)
 	selection.Experiment.ConcurrencyLimit = 3
 
-	_, err := conductor.RunEvalSuite(context.Background(), selection)
+	_, err := conductor.RunEvalSuite(testContext(t), selection)
 
 	if err == nil || !strings.Contains(err.Error(), "injected checkpoint failure") {
 		t.Fatalf("error = %v", err)

@@ -18,12 +18,12 @@ func TestReplayUsesFrozenProfileAndCreatesIndependentLineage(t *testing.T) {
 	repository, base, head := committedReviewFixture(t)
 	executor := successfulExecutor(cleanReview)
 	conductor := testConductor(t, executor, time.Second)
-	original, err := conductor.Review(context.Background(), model.RunSelection{Repository: repository, Subject: model.CommittedRange(base, head), Profile: "bugs"})
+	original, err := conductor.Review(testContext(t), model.RunSelection{Repository: repository, Subject: model.CommittedRange(base, head), Profile: "bugs"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	installChangedBugsProfile(t, repository)
-	replay, err := conductor.Replay(context.Background(), model.ReplaySelection{SourceReviewID: original.ID})
+	replay, err := conductor.Replay(testContext(t), model.ReplaySelection{SourceReviewID: original.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,11 +68,11 @@ func assertReplayLineage(t *testing.T, source *model.ReviewID, expected model.Re
 func TestReplayRejectsExecutionOverrides(t *testing.T) {
 	repository, base, head := committedReviewFixture(t)
 	conductor := testConductor(t, successfulExecutor(cleanReview), time.Second)
-	original, err := conductor.Review(context.Background(), model.RunSelection{Repository: repository, Subject: model.CommittedRange(base, head), Profile: "bugs"})
+	original, err := conductor.Review(testContext(t), model.RunSelection{Repository: repository, Subject: model.CommittedRange(base, head), Profile: "bugs"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = conductor.Replay(context.Background(), model.ReplaySelection{SourceReviewID: original.ID, Reviewer: "opencode"})
+	_, err = conductor.Replay(testContext(t), model.ReplaySelection{SourceReviewID: original.ID, Reviewer: "opencode"})
 	if err == nil || !strings.Contains(err.Error(), "does not accept") {
 		t.Fatalf("error = %v", err)
 	}
@@ -82,11 +82,11 @@ func TestReplayRejectsWorkingChangesBeforeLaunch(t *testing.T) {
 	repository := changedTestRepository(t)
 	executor := successfulExecutor(cleanReview)
 	conductor := testConductor(t, executor, time.Second)
-	original, err := conductor.Review(context.Background(), testSelection(repository))
+	original, err := conductor.Review(testContext(t), testSelection(repository))
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = conductor.Replay(context.Background(), model.ReplaySelection{SourceReviewID: original.ID})
+	_, err = conductor.Replay(testContext(t), model.ReplaySelection{SourceReviewID: original.ID})
 	if !errors.Is(err, ErrWorkingChangesReplayUnsupported) {
 		t.Fatalf("error = %v", err)
 	}
@@ -99,7 +99,7 @@ func TestReplayRejectsMissingCommitBeforeLaunch(t *testing.T) {
 	repository, base, head := committedReviewFixture(t)
 	executor := successfulExecutor(cleanReview)
 	conductor := testConductor(t, executor, time.Second)
-	original, err := conductor.Review(context.Background(), model.RunSelection{Repository: repository, Subject: model.CommittedRange(base, head), Profile: "bugs"})
+	original, err := conductor.Review(testContext(t), model.RunSelection{Repository: repository, Subject: model.CommittedRange(base, head), Profile: "bugs"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +107,7 @@ func TestReplayRejectsMissingCommitBeforeLaunch(t *testing.T) {
 	if err := conductor.store.Save(original); err != nil {
 		t.Fatal(err)
 	}
-	_, err = conductor.Replay(context.Background(), model.ReplaySelection{SourceReviewID: original.ID})
+	_, err = conductor.Replay(testContext(t), model.ReplaySelection{SourceReviewID: original.ID})
 	if err == nil {
 		t.Fatal("expected missing commit error")
 	}

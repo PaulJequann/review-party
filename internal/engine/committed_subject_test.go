@@ -4,13 +4,14 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reviewparty/internal/hostrun"
 	"reviewparty/internal/model"
 	"strings"
 	"testing"
 	"time"
 )
 
-func TestCommittedReviewExecutesAtRecordedHeadAndCleansCheckout(t *testing.T) {
+func TestCommittedReviewExecutesAtRecordedHeadInARuntimeView(t *testing.T) {
 	repository, base, head := committedReviewFixture(t)
 	writeTestFile(t, filepath.Join(repository, "review.go"), "package demo\n\nconst state = \"caller-mutation\"\n")
 	if err := os.WriteFile(filepath.Join(repository, ".env"), []byte("UNRELATED_SECRET=caller\n"), 0o600); err != nil {
@@ -22,12 +23,13 @@ func TestCommittedReviewExecutesAtRecordedHeadAndCleansCheckout(t *testing.T) {
 		assertCommittedExecutionView(t, spec.Repository)
 		return attemptExecution{AssistantText: cleanReview, Outcome: model.AttemptCompleted}
 	}}
-	record, err := testConductor(t, executor, time.Second).Review(context.Background(), model.RunSelection{Repository: repository, Subject: model.CommittedRange(base, head), Profile: "bugs"})
+	run := testRun(t)
+	record, err := testConductor(t, executor, time.Second).Review(hostrun.WithRun(context.Background(), run), model.RunSelection{Repository: repository, Subject: model.CommittedRange(base, head), Profile: "bugs"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	assertCommittedRecord(t, record, base, head)
-	assertPathAbsent(t, executionPath)
+	assertRuntimeView(t, run, executionPath)
 	caller, err := os.ReadFile(filepath.Join(repository, "review.go"))
 	if err != nil {
 		t.Fatal(err)
@@ -40,7 +42,7 @@ func TestCommittedReviewExecutesAtRecordedHeadAndCleansCheckout(t *testing.T) {
 func TestInvalidCommittedRangePreventsHarnessLaunch(t *testing.T) {
 	repository := testRepository(t)
 	executor := successfulExecutor(cleanReview)
-	_, err := testConductor(t, executor, time.Second).Review(context.Background(), model.RunSelection{Repository: repository, Subject: model.CommittedRange("missing-base", "HEAD"), Profile: "bugs"})
+	_, err := testConductor(t, executor, time.Second).Review(testContext(t), model.RunSelection{Repository: repository, Subject: model.CommittedRange("missing-base", "HEAD"), Profile: "bugs"})
 	if err == nil {
 		t.Fatal("expected invalid base error")
 	}
@@ -52,7 +54,7 @@ func TestInvalidCommittedRangePreventsHarnessLaunch(t *testing.T) {
 	}
 }
 
-func TestCommittedReviewCleansCheckoutAfterIncompleteAndDeadline(t *testing.T) {
+func TestCommittedReviewViewOutlivesIncompleteAttemptsUntilTheRunCloses(t *testing.T) {
 	cases := map[string]func(context.Context) attemptExecution{
 		"launch failure": func(context.Context) attemptExecution {
 			return failedExecution(model.AttemptReviewerUnavailable, model.TerminationReviewerUnavailable, model.PhaseHarnessLaunch, "launch failed")
@@ -60,7 +62,7 @@ func TestCommittedReviewCleansCheckoutAfterIncompleteAndDeadline(t *testing.T) {
 		"deadline": func(ctx context.Context) attemptExecution { <-ctx.Done(); return contextExecution(ctx.Err()) },
 	}
 	for name, run := range cases {
-		t.Run(name, func(t *testing.T) { assertIncompleteCheckoutCleanup(t, run) })
+		t.Run(name, func(t *testing.T) { assertIncompleteViewRetained(t, run) })
 	}
 }
 
@@ -75,21 +77,41 @@ func committedReviewFixture(t *testing.T) (repository, base, head string) {
 	return repository, base, head
 }
 
-func assertIncompleteCheckoutCleanup(t *testing.T, run func(context.Context) attemptExecution) {
+func assertIncompleteViewRetained(t *testing.T, execute func(context.Context) attemptExecution) {
 	t.Helper()
 	repository, base, _ := committedReviewFixture(t)
 	var executionPath string
 	executor := &scriptedExecutor{availability: availability{Available: true}, execute: func(ctx context.Context, spec attemptSpec) attemptExecution {
 		executionPath = spec.Repository
-		return run(ctx)
+		return execute(ctx)
 	}}
-	record, err := testConductor(t, executor, 10*time.Millisecond).Review(context.Background(), model.RunSelection{Repository: repository, Subject: model.CommittedRange(base, "HEAD"), Profile: "bugs"})
+	run := testRun(t)
+	record, err := testConductor(t, executor, 10*time.Millisecond).Review(hostrun.WithRun(context.Background(), run), model.RunSelection{Repository: repository, Subject: model.CommittedRange(base, "HEAD"), Profile: "bugs"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if record.Lifecycle != model.LifecycleIncomplete {
 		t.Fatalf("lifecycle = %s", record.Lifecycle)
 	}
+	assertRuntimeView(t, run, executionPath)
+}
+
+// assertRuntimeView checks that the Reviewer read a view inside the run's
+// directory, that it is still there after the Review, and that closing the
+// run removes it.
+func assertRuntimeView(t *testing.T, run *hostrun.Run, executionPath string) {
+	t.Helper()
+	runDir, err := run.TempDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if relative, err := filepath.Rel(filepath.Dir(runDir), executionPath); err != nil || strings.HasPrefix(relative, "..") {
+		t.Fatalf("execution path %s is outside the run directory %s", executionPath, filepath.Dir(runDir))
+	}
+	if _, err := os.Stat(executionPath); err != nil {
+		t.Fatalf("view removed before the run closed: %v", err)
+	}
+	run.Close()
 	assertPathAbsent(t, executionPath)
 }
 

@@ -76,7 +76,7 @@ func TestStatusListsAStandaloneReviewInFlight(t *testing.T) {
 	conductor = testPartyConductor(t, map[string]attemptExecutor{defaultReviewer: executor})
 	writeExecutableProfile(t, repository, "local-docs")
 
-	record, err := conductor.ReviewExplicitProfile(context.Background(), model.RunSelection{Repository: repository, Subject: model.WorkingChanges(), Profile: "repository:local-docs"})
+	record, err := conductor.ReviewExplicitProfile(testContext(t), model.RunSelection{Repository: repository, Subject: model.WorkingChanges(), Profile: "repository:local-docs"})
 	if err != nil {
 		t.Fatal(err)
 	}
