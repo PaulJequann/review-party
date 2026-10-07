@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"errors"
+	"iter"
 	"reflect"
 	"slices"
 	"strings"
@@ -34,6 +35,7 @@ type coverageStore struct {
 	loads    int
 	lines    map[model.ContentChange]int
 	binary   map[string]bool
+	absent   map[string]bool
 }
 
 type recordedCoverage struct {
@@ -112,6 +114,16 @@ func (fake *coverageStore) measure(_ string, delta []model.ContentChange) (subje
 	return lines, nil
 }
 
+func (fake *coverageStore) missingObjects(_ string, objects iter.Seq[string]) (map[string]bool, error) {
+	missing := map[string]bool{}
+	for object := range objects {
+		if fake.absent[object] {
+			missing[object] = true
+		}
+	}
+	return missing, nil
+}
+
 func (fake *coverageStore) CheckpointWaiver(key model.WaiverKey) (model.CheckpointWaiver, bool, error) {
 	for index := len(fake.waivers) - 1; index >= 0; index-- {
 		if fake.waivers[index].Key == key {
@@ -148,6 +160,7 @@ func newCoverageConductor(t *testing.T, recordStore store.RecordStore, selection
 	}
 	if fake, ok := recordStore.(*coverageStore); ok {
 		conductor.measureDelta = fake.measure
+		conductor.missingObjects = fake.missingObjects
 	}
 	return conductor, repository
 }

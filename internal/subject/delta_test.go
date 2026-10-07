@@ -4,6 +4,7 @@ import (
 	"errors"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -17,6 +18,23 @@ func blobOf(t *testing.T, repository string, content []byte) string {
 		t.Fatal(err)
 	}
 	return strings.TrimSpace(string(output))
+}
+
+func TestMissingObjectsNamesOnlyTheObjectsTheRepositoryLacks(t *testing.T) {
+	repository := testRepository(t)
+	kept := blobOf(t, repository, []byte("kept\n"))
+	pruned := strings.Repeat("ab", 20)
+
+	missing, err := MissingObjects(repository, slices.Values([]string{kept, pruned}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := map[string]bool{pruned: true}; !reflect.DeepEqual(missing, want) {
+		t.Fatalf("missing = %v, want %v", missing, want)
+	}
+	if missing, err := MissingObjects(repository, slices.Values([]string{})); err != nil || len(missing) != 0 {
+		t.Fatalf("missing of nothing = %v, %v", missing, err)
+	}
 }
 
 func TestMeasureDeltaCountsLinesBetweenBlobsPerPath(t *testing.T) {

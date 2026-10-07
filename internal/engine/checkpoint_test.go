@@ -225,6 +225,33 @@ func TestTheUnreviewedDeltaStartsFromTheNewestReviewedState(t *testing.T) {
 	}
 }
 
+func TestAReviewedStateWhoseBlobIsGoneIsUnreached(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		reviews []recordedCoverage
+		absent  map[string]bool
+		want    checkpointOutcome
+	}{
+		{
+			name:    "a pruned working-tree Review leaves the path unreviewed from the base",
+			reviews: []recordedCoverage{recorded(bugsSource, "rp_1", model.LifecycleCompleted, aGo(model.ZeroObjectID, a1))},
+			absent:  map[string]bool{a1: true},
+			want:    checkpointOutcome{State: CheckpointMissing, Declared: true, Spent: 1, Unreviewed: aGo(model.ZeroObjectID, a2)},
+		},
+		{
+			name:    "a pruned state in a chain falls back to the state before it",
+			reviews: []recordedCoverage{recorded(bugsSource, "rp_1", model.LifecycleCompleted, aGo(model.ZeroObjectID, a1)), recorded(bugsSource, "rp_2", model.LifecycleCompleted, aGo(a1, a3))},
+			absent:  map[string]bool{a3: true},
+			want:    checkpointOutcome{State: CheckpointMissing, Declared: true, ReviewIDs: []model.ReviewID{"rp_1"}, Spent: 2, Unreviewed: aGo(a1, a2)},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			conductor, repository := newCheckpointConductor(t, &coverageStore{reviews: test.reviews, absent: test.absent}, bounded(0, 9))
+			assertOutcome(t, checkPrePush(t, conductor, repository, aGo(model.ZeroObjectID, a2)), test.want)
+		})
+	}
+}
+
 func TestTheAllowanceDecidesBetweenResidualAndMissing(t *testing.T) {
 	reviewed := []recordedCoverage{recorded(bugsSource, "rp_1", model.LifecycleCompleted, aGo(model.ZeroObjectID, a1))}
 	for _, test := range []struct {

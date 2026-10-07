@@ -165,6 +165,22 @@ func TestCheckpointAllowanceAndBudgetDecideAfterAReview(t *testing.T) {
 	}
 }
 
+func TestCheckpointFallsBackWhenAReviewedBlobIsGone(t *testing.T) {
+	fixture := newCheckpointFixture(t)
+	fixture.declare("pre-push", "--unreviewed-lines", "1", "--review-budget", "3")
+	head := fixture.commit("one.go", "package app\n\nconst one = 1\n")
+	changes := fixture.rangeChanges(head).Changes
+	pruned := []model.ContentChange{{Path: "one.go", Before: changes[0].Before, After: strings.Repeat("ab", 20)}}
+	fixture.saveReview("rp_1725192000000_00000000000000e5", "bugs", model.LifecycleCompleted, pruned)
+	fixture.saveReview("rp_1725192000000_00000000000000e6", "docs", model.LifecycleCompleted, changes)
+
+	got := fixture.runWith("", false, "checkpoint", "check", "pre-push", "--base", fixture.base, "--repo", fixture.repository)
+	assertRunContains(t, got, commandRun{exit: 1, stdout: "bugs (repository): missing, 3 unreviewed lines in one.go; 1 of 3 Reviews spent\n"})
+	if got.stderr != "" {
+		t.Fatalf("pruned stderr = %q", got.stderr)
+	}
+}
+
 func TestCheckpointWaiverPolicies(t *testing.T) {
 	fixture := newCheckpointFixture(t)
 	fixture.commit("one.go", "package app\n\nconst one = 1\n")

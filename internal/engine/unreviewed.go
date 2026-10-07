@@ -82,9 +82,17 @@ func (conductor *Conductor) measureMembers(planned plannedSelection, declaration
 	if err != nil {
 		return nil, err
 	}
-	members := make([]boundMember, 0, len(planned.members))
+	sources := make([]string, 0, len(planned.members))
 	for _, slot := range planned.members {
-		coverage, reach, err := check.profile(slot.slot.Scope, slot.profile.revision.Name)
+		sources = append(sources, configuration.ProfileSource(slot.slot.Scope, slot.profile.revision.Name))
+	}
+	edges, err := check.loadEdges(sources)
+	if err != nil {
+		return nil, err
+	}
+	members := make([]boundMember, 0, len(planned.members))
+	for index, slot := range planned.members {
+		coverage, reach, err := check.profile(slot.slot.Scope, slot.profile.revision.Name, edges[sources[index]])
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", slot.slot.Origin, err)
 		}

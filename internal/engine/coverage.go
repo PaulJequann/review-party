@@ -63,6 +63,7 @@ type transitionLedger interface {
 
 // coverageCheck is one Checkpoint check's measurement of one content set
 // against a declaration. Delta sizes are measured once per distinct delta.
+// absent is the reviewed blobs the repository no longer has.
 type coverageCheck struct {
 	conductor   *Conductor
 	ledger      transitionLedger
@@ -71,6 +72,7 @@ type coverageCheck struct {
 	declaration configuration.Checkpoint
 	judge       *findingJudge
 	measured    map[string]subject.DeltaLines
+	absent      map[string]bool
 }
 
 // checkCoverage reports, per selected Profile in selection order, what that
@@ -89,22 +91,38 @@ func (conductor *Conductor) checkCoverage(repository string, content []model.Con
 	}
 	report := CoverageReport{}
 	var participants []profileReach
-	for _, profile := range resolved.Expanded {
-		entry, reach, err := check.profile(profile.Scope, profile.Profile)
-		if errors.Is(err, store.ErrReviewRecordStateNotInitialized) {
-			return CoverageReport{}, InitializationRequiredError{Repository: repository}
-		}
-		if err != nil {
-			return CoverageReport{}, fmt.Errorf("check coverage for Profile %q: %w", profile.Profile, err)
-		}
-		report.Profiles = append(report.Profiles, entry)
-		if len(entry.Unreviewed) > 0 {
-			participants = append(participants, reach)
-		}
+	if report.Profiles, participants, err = check.profiles(resolved.Expanded); err != nil {
+		return CoverageReport{}, err
 	}
 	report.Unreviewed = commonDelta(content, participants)
 	report.UnreviewedLines, err = check.measure(report.Unreviewed)
 	return report, err
+}
+
+// profiles reports each selected Profile in selection order, with the reach
+// of each one that has something unreviewed.
+func (check *coverageCheck) profiles(selected []configuration.ExpandedProfile) ([]ProfileCoverage, []profileReach, error) {
+	sources := make([]string, 0, len(selected))
+	for _, profile := range selected {
+		sources = append(sources, configuration.ProfileSource(profile.Scope, profile.Profile))
+	}
+	edges, err := check.loadEdges(sources)
+	if err != nil {
+		return nil, nil, err
+	}
+	var entries []ProfileCoverage
+	var participants []profileReach
+	for index, profile := range selected {
+		entry, reach, err := check.profile(profile.Scope, profile.Profile, edges[sources[index]])
+		if err != nil {
+			return nil, nil, fmt.Errorf("check coverage for Profile %q: %w", profile.Profile, err)
+		}
+		entries = append(entries, entry)
+		if len(entry.Unreviewed) > 0 {
+			participants = append(participants, reach)
+		}
+	}
+	return entries, participants, nil
 }
 
 func (conductor *Conductor) newCoverageCheck(repository string, content []model.ContentChange, declaration configuration.Checkpoint, judge *findingJudge) (*coverageCheck, error) {
@@ -115,26 +133,61 @@ func (conductor *Conductor) newCoverageCheck(repository string, content []model.
 	return &coverageCheck{conductor: conductor, ledger: ledger, repository: repository, content: content, declaration: declaration, judge: judge, measured: map[string]subject.DeltaLines{}}, nil
 }
 
+// loadEdges reads each Profile source's edges on the content's paths and
+// asks the repository once which reached blobs it no longer has, such as a
+// reviewed working-tree blob that git gc pruned. Such a state counts as
+// unreached, so the delta falls back to an older state: more, never less.
+func (check *coverageCheck) loadEdges(sources []string) (map[string][]store.ContentTransition, error) {
+	edges := map[string][]store.ContentTransition{}
+	if len(check.content) == 0 {
+		return edges, nil
+	}
+	paths := changedPaths(check.content)
+	for _, source := range sources {
+		transitions, err := check.ledger.ContentTransitions(store.TransitionQuery{ProfileSource: source, Paths: paths})
+		if errors.Is(err, store.ErrReviewRecordStateNotInitialized) {
+			return nil, InitializationRequiredError{Repository: check.repository}
+		}
+		if err != nil {
+			return nil, err
+		}
+		edges[source] = transitions
+	}
+	var err error
+	check.absent, err = check.conductor.missingObjects(check.repository, maps.Keys(reachedStates(edges)))
+	return edges, err
+}
+
+// reachedStates is every blob a completed Review reached on the edges.
+func reachedStates(edges map[string][]store.ContentTransition) map[string]bool {
+	reached := map[string]bool{}
+	for _, transitions := range edges {
+		for _, edge := range transitions {
+			if edge.Lifecycle == model.LifecycleCompleted && edge.After != model.ZeroObjectID {
+				reached[edge.After] = true
+			}
+		}
+	}
+	return reached
+}
+
 // profileReach is, per path, the states one Profile reached and when.
 type profileReach map[string]map[string]time.Time
 
-func (check *coverageCheck) profile(scope configuration.Scope, name string) (ProfileCoverage, profileReach, error) {
+func (check *coverageCheck) profile(scope configuration.Scope, name string, edges []store.ContentTransition) (ProfileCoverage, profileReach, error) {
 	entry := ProfileCoverage{Scope: scope, Profile: name, State: CoverageCovered}
 	reach := profileReach{}
 	if len(check.content) == 0 {
 		return entry, reach, nil
 	}
-	edges, err := check.ledger.ContentTransitions(store.TransitionQuery{ProfileSource: configuration.ProfileSource(scope, name), Paths: changedPaths(check.content)})
-	if err != nil {
-		return ProfileCoverage{}, nil, err
-	}
 	tally := newProfileTally()
 	for _, change := range check.content {
-		state := reviewedStates(edgesOf(edges, change.Path), change)
+		state := reviewedStates(edgesOf(edges, change.Path), change, check.absent)
 		reach[change.Path] = state.reached
 		tally.add(state, change)
 	}
 	tally.fill(&entry)
+	var err error
 	if entry.UnreviewedLines, err = check.measure(entry.Unreviewed); err != nil {
 		return ProfileCoverage{}, nil, err
 	}
@@ -219,8 +272,9 @@ type pathState struct {
 
 // reviewedStates searches breadth-first from the base. Among parallel edges
 // from one state the newest Review is the parent, so re-reviewing the same
-// content makes the newer Review the evidence.
-func reviewedStates(edges []store.ContentTransition, change model.ContentChange) pathState {
+// content makes the newer Review the evidence. An edge into an absent blob
+// spends budget and reaches nothing.
+func reviewedStates(edges []store.ContentTransition, change model.ContentChange, absent map[string]bool) pathState {
 	state := pathState{reached: map[string]time.Time{change.Before: {}}, reviewed: change.Before, spent: map[model.ReviewID]bool{}, running: map[model.ReviewID]bool{}}
 	parent := map[string]store.ContentTransition{}
 	queue := []string{change.Before}
@@ -228,19 +282,10 @@ func reviewedStates(edges []store.ContentTransition, change model.ContentChange)
 		node := queue[0]
 		queue = queue[1:]
 		for _, edge := range slices.Backward(edges) {
-			if edge.Before != node {
-				continue
+			if edge.Before == node && state.follow(edge, absent) {
+				parent[edge.After] = edge
+				queue = append(queue, edge.After)
 			}
-			state.spent[edge.Review] = true
-			if isInFlight(edge.Lifecycle) {
-				state.running[edge.Review] = true
-			}
-			if _, seen := state.reached[edge.After]; seen || edge.Lifecycle != model.LifecycleCompleted {
-				continue
-			}
-			state.reached[edge.After] = edge.CreatedAt
-			parent[edge.After] = edge
-			queue = append(queue, edge.After)
 		}
 	}
 	state.reviewed = newestReached(state.reached, change.After)
@@ -249,6 +294,21 @@ func reviewedStates(edges []store.ContentTransition, change model.ContentChange)
 	}
 	slices.Reverse(state.evidence)
 	return state
+}
+
+// follow spends the edge's Review and reports whether the edge reaches a new
+// state: its Review completed and its blob is still in the repository.
+func (state *pathState) follow(edge store.ContentTransition, absent map[string]bool) bool {
+	state.spent[edge.Review] = true
+	if isInFlight(edge.Lifecycle) {
+		state.running[edge.Review] = true
+	}
+	credits := edge.Lifecycle == model.LifecycleCompleted && !absent[edge.After]
+	if _, seen := state.reached[edge.After]; seen || !credits {
+		return false
+	}
+	state.reached[edge.After] = edge.CreatedAt
+	return true
 }
 
 // newestReached is the current state when it was reached, else the reached

@@ -11,6 +11,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"iter"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -125,26 +127,57 @@ func (root repositoryRoot) diffDeltaTrees(delta []model.ContentChange, options .
 	return output, nil
 }
 
+// MissingObjects is the set of the objects the repository no longer has,
+// such as a reviewed working-tree blob that git gc pruned.
+func MissingObjects(repository string, objects iter.Seq[string]) (map[string]bool, error) {
+	types, err := repositoryRoot(repository).objectTypes(objects)
+	if err != nil {
+		return nil, fmt.Errorf("check reviewed objects: %w", err)
+	}
+	missing := map[string]bool{}
+	for object := range objects {
+		if _, present := types[object]; !present {
+			missing[object] = true
+		}
+	}
+	return missing, nil
+}
+
 // deltaObjectTypes checks every non-zero side exists and learns its type, so
 // a nested repository's commit is listed as a gitlink rather than a blob.
 func (root repositoryRoot) deltaObjectTypes(delta []model.ContentChange) (map[string]string, error) {
 	paths := deltaObjectPaths(delta)
-	var input strings.Builder
-	for object := range paths {
-		input.WriteString(object + "\n")
-	}
-	output, err := gitInputOutput(string(root), []byte(input.String()), "cat-file", "--batch-check")
+	types, err := root.objectTypes(maps.Keys(paths))
 	if err != nil {
 		return nil, fmt.Errorf("check delta objects: %w", err)
 	}
+	for object, path := range paths {
+		if _, present := types[object]; !present {
+			return nil, fmt.Errorf("%w: %s of %s", ErrMissingObject, object, path)
+		}
+	}
+	return types, nil
+}
+
+// objectTypes maps each object the repository has to its type, in one
+// cat-file call however many objects are asked.
+func (root repositoryRoot) objectTypes(objects iter.Seq[string]) (map[string]string, error) {
 	types := map[string]string{}
+	var input strings.Builder
+	for object := range objects {
+		input.WriteString(object + "\n")
+	}
+	if input.Len() == 0 {
+		return types, nil
+	}
+	output, err := gitInputOutput(string(root), []byte(input.String()), "cat-file", "--batch-check")
+	if err != nil {
+		return nil, err
+	}
 	for line := range strings.SplitSeq(strings.TrimSpace(string(output)), "\n") {
 		object, kind, found := strings.Cut(line, " ")
-		if !found {
+		if !found || kind == "missing" {
 			continue
-		}
-		if kind == "missing" {
-			return nil, fmt.Errorf("%w: %s of %s", ErrMissingObject, object, paths[object])
 		}
 		types[object] = strings.Fields(kind)[0]
 	}
