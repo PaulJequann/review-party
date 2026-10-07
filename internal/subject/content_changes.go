@@ -212,8 +212,9 @@ func contentChangeSet(entries []rawDiffEntry) []model.ContentChange {
 }
 
 // hashWorktreeSides fills each working-tree After side with the object ID Git
-// would store for it, so a Working Changes Review matches the same content
-// once staged or committed.
+// stores for it, so a Working Changes Review matches the same content once
+// staged or committed. The objects are written so a later delta can be
+// measured from a reviewed working state.
 func (root repositoryRoot) hashWorktreeSides(entries []rawDiffEntry) error {
 	var batch []*rawDiffEntry
 	for index := range entries {
@@ -250,7 +251,7 @@ func (root repositoryRoot) worktreeObject(change model.ContentChange) (object st
 		if err != nil {
 			return "", false, err
 		}
-		output, err := gitInputOutput(repository, []byte(target), "hash-object", "--stdin", "--no-filters")
+		output, err := gitInputOutput(repository, []byte(target), "hash-object", "-w", "--stdin", "--no-filters")
 		return strings.TrimSpace(string(output)), false, err
 	case info.IsDir():
 		if _, err := os.Lstat(filepath.Join(location, ".git")); err != nil {
@@ -259,7 +260,7 @@ func (root repositoryRoot) worktreeObject(change model.ContentChange) (object st
 		output, err := gitOutput(location, "rev-parse", "--verify", "HEAD")
 		return strings.TrimSpace(string(output)), false, err
 	case strings.Contains(path, "\n"):
-		output, err := gitOutput(repository, "hash-object", "--", path)
+		output, err := gitOutput(repository, "hash-object", "-w", "--", path)
 		return strings.TrimSpace(string(output)), false, err
 	default:
 		return "", true, nil
@@ -276,7 +277,7 @@ func (root repositoryRoot) hashRegularFiles(entries []*rawDiffEntry) error {
 	for _, entry := range entries {
 		input.WriteString(entry.change.Path + "\n")
 	}
-	output, err := gitInputOutput(string(root), []byte(input.String()), "hash-object", "--stdin-paths")
+	output, err := gitInputOutput(string(root), []byte(input.String()), "hash-object", "-w", "--stdin-paths")
 	if err != nil {
 		return fmt.Errorf("hash working tree files: %w", err)
 	}

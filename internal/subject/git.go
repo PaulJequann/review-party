@@ -316,8 +316,15 @@ func gitOutput(repository string, args ...string) ([]byte, error) {
 }
 
 func gitInputOutput(repository string, input []byte, args ...string) ([]byte, error) {
+	return gitEnvInputOutput(repository, nil, input, args...)
+}
+
+func gitEnvInputOutput(repository string, env []string, input []byte, args ...string) ([]byte, error) {
 	command := exec.Command("git", args...)
 	command.Dir = repository
+	if len(env) > 0 {
+		command.Env = append(os.Environ(), env...)
+	}
 	if input != nil {
 		command.Stdin = bytes.NewReader(input)
 	}
