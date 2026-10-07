@@ -34,6 +34,8 @@ func ResolveSubject(repository string, reference model.SubjectReference) (Subjec
 		return Subject{ReviewSubject: resolved}, err
 	case model.SubjectCapturedChange:
 		return resolveCapturedChange(reference)
+	case model.SubjectUnreviewedDelta:
+		return Subject{}, fmt.Errorf("%s subjects are measured from reviewed state by run --unreviewed, not resolved from a reference", reference.Kind)
 	default:
 		return Subject{}, fmt.Errorf("unsupported review subject %q", reference.Kind)
 	}
@@ -316,15 +318,8 @@ func gitOutput(repository string, args ...string) ([]byte, error) {
 }
 
 func gitInputOutput(repository string, input []byte, args ...string) ([]byte, error) {
-	return gitEnvInputOutput(repository, nil, input, args...)
-}
-
-func gitEnvInputOutput(repository string, env []string, input []byte, args ...string) ([]byte, error) {
 	command := exec.Command("git", args...)
 	command.Dir = repository
-	if len(env) > 0 {
-		command.Env = append(os.Environ(), env...)
-	}
 	if input != nil {
 		command.Stdin = bytes.NewReader(input)
 	}

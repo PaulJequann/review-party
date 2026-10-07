@@ -136,7 +136,7 @@ func validateUnreviewedLines(value string) error {
 
 func validateReviewBudget(value string) error {
 	budget, err := strconv.Atoi(strings.TrimSpace(value))
-	if err != nil || budget < 1 || budget > configuration.MaxReviewBudget {
+	if err != nil || !configuration.ValidReviewBudget(budget) {
 		return fmt.Errorf("enter a whole number of Reviews from 1 to %d", configuration.MaxReviewBudget)
 	}
 	return nil

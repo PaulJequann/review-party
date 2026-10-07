@@ -98,6 +98,11 @@ const (
 	MaxReviewBudget        = 9
 )
 
+// ValidReviewBudget is the one definition of the budget's range.
+func ValidReviewBudget(budget int) bool {
+	return budget >= 1 && budget <= MaxReviewBudget
+}
+
 // NewCheckpoint returns a Checkpoint with the declared defaults: reviewed,
 // no allowance, a budget of three Reviews, human waivers, no exemptions, and
 // no integrations.
@@ -236,7 +241,7 @@ func validateCheckpoint(checkpoint Checkpoint) error {
 	if checkpoint.UnreviewedLines < 0 {
 		return checkpointFieldError{"unreviewed_lines", errors.New("must not be negative")}
 	}
-	if checkpoint.ReviewBudget < 1 || checkpoint.ReviewBudget > MaxReviewBudget {
+	if !ValidReviewBudget(checkpoint.ReviewBudget) {
 		return checkpointFieldError{"review_budget", fmt.Errorf("must be between 1 and %d", MaxReviewBudget)}
 	}
 	for _, pattern := range checkpoint.ExemptPaths {

@@ -6,11 +6,13 @@ package subject
 // paths it spans.
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -38,7 +40,7 @@ func MeasureDelta(repository string, delta []model.ContentChange) (DeltaLines, e
 	if len(delta) == 0 {
 		return lines, nil
 	}
-	output, err := diffDeltaTrees(repository, delta, "--numstat", "-z")
+	output, err := repositoryRoot(repository).diffDeltaTrees(delta, "--numstat", "-z")
 	if err != nil {
 		return DeltaLines{}, err
 	}
@@ -63,7 +65,7 @@ func DeltaPatch(repository string, delta []model.ContentChange) ([]byte, error) 
 	if len(delta) == 0 {
 		return nil, errors.New("delta is empty")
 	}
-	return diffDeltaTrees(repository, delta, "-p", "--binary", "--no-ext-diff")
+	return repositoryRoot(repository).diffDeltaTrees(delta, "-p", "--binary", "--no-ext-diff")
 }
 
 // ResolveUnreviewedDelta is the Subject a run --unreviewed reviews: the delta
@@ -93,8 +95,8 @@ func ResolveUnreviewedDelta(scope model.ReviewSubject, delta []model.ContentChan
 	}}, nil
 }
 
-func diffDeltaTrees(repository string, delta []model.ContentChange, options ...string) ([]byte, error) {
-	types, err := deltaObjectTypes(repository, delta)
+func (root repositoryRoot) diffDeltaTrees(delta []model.ContentChange, options ...string) (output []byte, returnErr error) {
+	types, err := root.deltaObjectTypes(delta)
 	if err != nil {
 		return nil, err
 	}
@@ -102,19 +104,21 @@ func diffDeltaTrees(repository string, delta []model.ContentChange, options ...s
 	if err != nil {
 		return nil, err
 	}
-	defer os.RemoveAll(scratch)
+	defer func() {
+		returnErr = errors.Join(returnErr, os.RemoveAll(scratch))
+	}()
 	var trees [2]string
 	for side, pick := range []func(model.ContentChange) string{
 		func(change model.ContentChange) string { return change.Before },
 		func(change model.ContentChange) string { return change.After },
 	} {
-		trees[side], err = writeDeltaTree(repository, filepath.Join(scratch, fmt.Sprint("index-", side)), delta, pick, types)
+		trees[side], err = writeDeltaTree(deltaIndex{repository: string(root), file: filepath.Join(scratch, fmt.Sprint("index-", side))}, delta, pick, types)
 		if err != nil {
 			return nil, err
 		}
 	}
 	arguments := append([]string{"diff-tree", "-r", "--no-renames"}, options...)
-	output, err := gitOutput(repository, append(arguments, trees[0], trees[1])...)
+	output, err = gitOutput(string(root), append(arguments, trees[0], trees[1])...)
 	if err != nil {
 		return nil, fmt.Errorf("diff delta: %w", err)
 	}
@@ -123,13 +127,13 @@ func diffDeltaTrees(repository string, delta []model.ContentChange, options ...s
 
 // deltaObjectTypes checks every non-zero side exists and learns its type, so
 // a nested repository's commit is listed as a gitlink rather than a blob.
-func deltaObjectTypes(repository string, delta []model.ContentChange) (map[string]string, error) {
+func (root repositoryRoot) deltaObjectTypes(delta []model.ContentChange) (map[string]string, error) {
 	paths := deltaObjectPaths(delta)
 	var input strings.Builder
 	for object := range paths {
 		input.WriteString(object + "\n")
 	}
-	output, err := gitInputOutput(repository, []byte(input.String()), "cat-file", "--batch-check")
+	output, err := gitInputOutput(string(root), []byte(input.String()), "cat-file", "--batch-check")
 	if err != nil {
 		return nil, fmt.Errorf("check delta objects: %w", err)
 	}
@@ -162,7 +166,7 @@ func deltaObjectPaths(delta []model.ContentChange) map[string]string {
 
 // writeDeltaTree stages one side of the delta into a private index and
 // writes it as a tree. Paths whose side is the zero ID are absent from it.
-func writeDeltaTree(repository, indexFile string, delta []model.ContentChange, pick func(model.ContentChange) string, types map[string]string) (string, error) {
+func writeDeltaTree(index deltaIndex, delta []model.ContentChange, pick func(model.ContentChange) string, types map[string]string) (string, error) {
 	var entries strings.Builder
 	for _, change := range delta {
 		object := pick(change)
@@ -175,13 +179,32 @@ func writeDeltaTree(repository, indexFile string, delta []model.ContentChange, p
 		}
 		entries.WriteString(mode + " " + object + "\t" + change.Path + "\n")
 	}
-	env := []string{"GIT_INDEX_FILE=" + indexFile}
-	if _, err := gitEnvInputOutput(repository, env, []byte(entries.String()), "update-index", "--index-info"); err != nil {
+	if _, err := index.git([]byte(entries.String()), "update-index", "--index-info"); err != nil {
 		return "", fmt.Errorf("stage delta side: %w", err)
 	}
-	tree, err := gitEnvInputOutput(repository, env, nil, "write-tree")
+	tree, err := index.git(nil, "write-tree")
 	if err != nil {
 		return "", fmt.Errorf("write delta side: %w", err)
 	}
 	return strings.TrimSpace(string(tree)), nil
+}
+
+// deltaIndex is a private index file in a repository, so staging a delta
+// side never touches the repository's own index.
+type deltaIndex struct {
+	repository string
+	file       string
+}
+
+func (index deltaIndex) git(input []byte, args ...string) ([]byte, error) {
+	command := exec.Command("git", args...)
+	command.Dir = index.repository
+	command.Env = append(os.Environ(), "GIT_INDEX_FILE="+index.file)
+	command.Stdin = bytes.NewReader(input)
+	output, err := command.Output()
+	var exitError *exec.ExitError
+	if errors.As(err, &exitError) {
+		return nil, fmt.Errorf("git %s: %s", strings.Join(args, " "), strings.TrimSpace(string(exitError.Stderr)))
+	}
+	return output, err
 }

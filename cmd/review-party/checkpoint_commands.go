@@ -405,6 +405,8 @@ func nextCheckpointStep(report checkpointReport, runCommand, configurationPath s
 		return "stop", ""
 	case engine.CheckpointUnjudged:
 		return "judge", fmt.Sprintf("review-party finding record %s%s", unjudgedReviews(report.Profiles)[0].Review, configurationArgument(configurationPath))
+	case engine.CheckpointCovered, engine.CheckpointResidual, engine.CheckpointExempt, engine.CheckpointWaived:
+		return "", ""
 	}
 	return "", ""
 }

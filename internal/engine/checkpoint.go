@@ -95,9 +95,6 @@ func (conductor *Conductor) CheckCheckpoint(_ context.Context, request Checkpoin
 	}
 	report.State = checkpointStateOf(report.Coverage)
 	report.WaiverKey = waiverKeyOf(request.Name, content, report.Coverage)
-	if !declared || report.State.Passes() {
-		return report, nil
-	}
 	return conductor.applyWaiver(report)
 }
 
@@ -129,7 +126,13 @@ func waiverKeyOf(name configuration.CheckpointName, content []model.ContentChang
 	return model.WaiverKey{Checkpoint: string(name), ContentDigest: model.ContentChangesDigest(union)}
 }
 
+// applyWaiver turns a declared Checkpoint's refusal into waived when a
+// recorded waiver matches the unreviewed delta. A pass or an undeclared
+// Checkpoint has nothing to waive.
 func (conductor *Conductor) applyWaiver(report CheckpointReport) (CheckpointReport, error) {
+	if report.Declaration == nil || report.State.Passes() {
+		return report, nil
+	}
 	ledger, ok := conductor.store.(waiverLedger)
 	if !ok {
 		return CheckpointReport{}, errors.New("checkpoint waivers require the SQLite ledger")
