@@ -170,11 +170,19 @@ func (runner *reviewRunner) executePass(ctx context.Context, pass passExecution)
 	result, parseErr := result.CanonicalReviewResultContract.Parse(execution.AssistantText)
 	record.Timings.ResultValidationMS = elapsedMilliseconds(validationStarted, runner.now().UTC())
 	outcome := applyAttemptResult(&record, result, execution, parseErr)
-	attempt, artifactErr := runner.buildAttempt(record.ID, prompt, pass.profile.reviewer.candidate, execution, outcome, started, completed)
+	attempt, artifactErr := runner.buildAttempt(attemptDraft{
+		reviewID:  record.ID,
+		number:    record.AttemptCount() + 1,
+		prompt:    prompt,
+		candidate: pass.profile.reviewer.candidate,
+		execution: execution,
+		outcome:   outcome,
+		started:   started,
+		completed: completed,
+	})
 	if artifactErr != nil {
 		return record, artifactErr
 	}
-	attempt.Number = record.AttemptCount() + 1
 	record.Passes[0].Attempts = append(record.Passes[0].Attempts, attempt)
 	runner.finalizeOperationalRecord(&record, pass.reviewStarted)
 	if err := runner.store.Save(record); err != nil {
@@ -251,21 +259,33 @@ func (runner *reviewRunner) executeAttempt(ctx context.Context, record model.Rev
 	return execution, nil
 }
 
-func (runner *reviewRunner) buildAttempt(id model.ReviewID, prompt string, candidate reviewerCandidate, execution attemptExecution, outcome model.AttemptOutcome, started, completed time.Time) (model.AttemptRecord, error) {
+type attemptDraft struct {
+	reviewID  model.ReviewID
+	number    int
+	prompt    string
+	candidate reviewerCandidate
+	execution attemptExecution
+	outcome   model.AttemptOutcome
+	started   time.Time
+	completed time.Time
+}
+
+func (runner *reviewRunner) buildAttempt(draft attemptDraft) (model.AttemptRecord, error) {
+	execution := draft.execution
 	attempt := model.AttemptRecord{
-		Number:       1,
-		Outcome:      outcome,
-		Provenance:   resolvedProvenance(candidate, execution),
+		Number:       draft.number,
+		Outcome:      draft.outcome,
+		Provenance:   resolvedProvenance(draft.candidate, execution),
 		Diagnostic:   execution.Diagnostic,
 		RawOutput:    boundedAttemptOutput(execution.AssistantText),
 		RetryAfterMS: execution.RetryAfter.Milliseconds(),
-		StartedAt:    started,
-		CompletedAt:  completed,
+		StartedAt:    draft.started,
+		CompletedAt:  draft.completed,
 	}
 	if runner.publisher == nil || runner.publisher.store == nil {
 		return attempt, nil
 	}
-	references, err := runner.publisher.publishAttemptArtifacts(id, attempt.Number, prompt, execution)
+	references, err := runner.publisher.publishAttemptArtifacts(draft.reviewID, attempt.Number, draft.prompt, execution)
 	if err != nil {
 		return model.AttemptRecord{}, err
 	}

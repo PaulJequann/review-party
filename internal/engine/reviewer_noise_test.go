@@ -7,7 +7,6 @@ import (
 	"reviewparty/internal/model"
 	"strings"
 	"testing"
-	"time"
 )
 
 const codexWebsocketNoise = "2026-09-25T23:03:05.817653Z ERROR codex_api::endpoint::responses_websocket: failed to connect to websocket: HTTP error: 405 Method Not Allowed, url: wss://chatgpt.com/backend-api/codex/responses\n" +
@@ -129,7 +128,7 @@ func TestReviewerNoiseIsPublishedAsAnAttemptArtifact(t *testing.T) {
 	publisher := newArtifactPublisher(mustNewArtifactStore(t, t.TempDir()))
 	runner := &reviewRunner{publisher: publisher}
 
-	attempt, err := runner.buildAttempt("rp_1723200000000_0123456789abcdef", "prompt", reviewerCandidate{}, attemptExecution{AssistantText: cleanReview, ReviewerNoise: codexWebsocketNoise}, model.AttemptCompleted, time.Time{}, time.Time{})
+	attempt, err := runner.buildAttempt(attemptDraft{reviewID: "rp_1723200000000_0123456789abcdef", number: 1, prompt: "prompt", execution: attemptExecution{AssistantText: cleanReview, ReviewerNoise: codexWebsocketNoise}, outcome: model.AttemptCompleted})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,7 +152,7 @@ func TestReviewerNoiseIsPublishedAsAnAttemptArtifact(t *testing.T) {
 func TestQuietAttemptPublishesNoNoiseArtifact(t *testing.T) {
 	runner := &reviewRunner{publisher: newArtifactPublisher(mustNewArtifactStore(t, t.TempDir()))}
 
-	attempt, err := runner.buildAttempt("rp_1723200000000_0123456789abcdef", "prompt", reviewerCandidate{}, attemptExecution{AssistantText: cleanReview}, model.AttemptCompleted, time.Time{}, time.Time{})
+	attempt, err := runner.buildAttempt(attemptDraft{reviewID: "rp_1723200000000_0123456789abcdef", number: 1, prompt: "prompt", execution: attemptExecution{AssistantText: cleanReview}, outcome: model.AttemptCompleted})
 	if err != nil {
 		t.Fatal(err)
 	}

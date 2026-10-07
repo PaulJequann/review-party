@@ -4,9 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
-	"os/signal"
-	"syscall"
 
 	"reviewparty/internal/configuration"
 	"reviewparty/internal/configurationhub" //nolint:depguard // Cobra is the terminal composition root for the dedicated Hub adapter.
@@ -77,5 +74,5 @@ func configurationHubContext(parent context.Context) (context.Context, context.C
 	if parent == nil {
 		parent = context.Background()
 	}
-	return signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
+	return signalContext(parent)
 }
