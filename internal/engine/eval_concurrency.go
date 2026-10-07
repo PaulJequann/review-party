@@ -31,17 +31,29 @@ func (conductor *Conductor) executeEvalCasesConcurrent(ctx context.Context, suit
 	results := make(chan concurrentEvalResult, len(suite.cases))
 	started, err := conductor.startConcurrentEvalCases(runContext, suite, ledger, &run, results)
 	if err != nil {
+		cancel()
+		awaitConcurrentEvalCases(results, started)
 		return conductor.stopEvalSuite(ledger, &run, evalFailureCategory(err), err)
 	}
 	for completed := 0; completed < started; completed++ {
 		next, err := conductor.acceptConcurrentEvalResult(ledger, suite, run, <-results)
 		if err != nil {
 			cancel()
+			awaitConcurrentEvalCases(results, started-completed-1)
 			return next, err
 		}
 		run = next
 	}
 	return run, nil
+}
+
+// awaitConcurrentEvalCases blocks until the remaining started cases have
+// reported, so no Reviewer is still running in a checkout when the caller
+// removes the suite's temporary directory.
+func awaitConcurrentEvalCases(results <-chan concurrentEvalResult, remaining int) {
+	for ; remaining > 0; remaining-- {
+		<-results
+	}
 }
 
 func (conductor *Conductor) startConcurrentEvalCases(ctx context.Context, suite loadedEvalSuite, ledger store.EvalRunStore, run *model.EvalSuiteRun, results chan<- concurrentEvalResult) (int, error) {

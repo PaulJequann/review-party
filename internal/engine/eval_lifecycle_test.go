@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -350,4 +351,99 @@ func loadStoredEvalRun(t *testing.T, ledger *store.LedgerRecordStore, id model.E
 		t.Fatal(err)
 	}
 	return run
+}
+
+func TestConcurrentEvalWaitsForStartedReviewersAfterResultFailure(t *testing.T) {
+	suite := writeEvalTestSuite(t, []testEvalCase{{id: "first"}, {id: "second"}, {id: "third"}})
+	_, observed := newObservedEvalStore(t)
+	failing := &failingEvalCheckpointStore{observingEvalStore: observed, failAt: 4}
+	executor := newLingeringEvalExecutor(3, true)
+	conductor := newLifecycleTestConductor(t, failing, executor)
+
+	assertConcurrentEvalDrainsReviewers(t, conductor, suite, executor)
+}
+
+func TestConcurrentEvalWaitsForStartedReviewersAfterStartFailure(t *testing.T) {
+	suite := writeEvalTestSuite(t, []testEvalCase{{id: "first"}, {id: "second"}})
+	_, observed := newObservedEvalStore(t)
+	executor := newLingeringEvalExecutor(1, false)
+	failing := &failingEvalCheckpointStore{observingEvalStore: observed, failAt: 2}
+	records := &startGatedEvalStore{failingEvalCheckpointStore: failing, gate: executor.allIn}
+	conductor := newLifecycleTestConductor(t, records, executor)
+
+	assertConcurrentEvalDrainsReviewers(t, conductor, suite, executor)
+}
+
+func assertConcurrentEvalDrainsReviewers(t *testing.T, conductor *Conductor, suite string, executor *lingeringEvalExecutor) {
+	t.Helper()
+	selection := evalSelection(suite)
+	selection.Experiment.ConcurrencyLimit = 3
+
+	_, err := conductor.RunEvalSuite(context.Background(), selection)
+
+	if err == nil || !strings.Contains(err.Error(), "injected checkpoint failure") {
+		t.Fatalf("error = %v", err)
+	}
+	if entered, finished := executor.counts(); entered != executor.expected || finished != entered {
+		t.Fatalf("reviewers entered=%d finished=%d at return, want %d entered and all finished", entered, finished, executor.expected)
+	}
+}
+
+type startGatedEvalStore struct {
+	*failingEvalCheckpointStore
+	gate <-chan struct{}
+}
+
+func (records *startGatedEvalStore) CheckpointEvalRun(run model.EvalSuiteRun, evalRun model.EvalRun) error {
+	if records.calls == records.failAt-1 {
+		<-records.gate
+	}
+	return records.failingEvalCheckpointStore.CheckpointEvalRun(run, evalRun)
+}
+
+type lingeringEvalExecutor struct {
+	mu             sync.Mutex
+	expected       int
+	firstCompletes bool
+	entered        int
+	finished       int
+	allIn          chan struct{}
+}
+
+func newLingeringEvalExecutor(expected int, firstCompletes bool) *lingeringEvalExecutor {
+	return &lingeringEvalExecutor{expected: expected, firstCompletes: firstCompletes, allIn: make(chan struct{})}
+}
+
+func (executor *lingeringEvalExecutor) Check(context.Context, reviewerCandidate) availability {
+	return availability{Available: true}
+}
+
+func (executor *lingeringEvalExecutor) Execute(ctx context.Context, _ attemptSpec) attemptExecution {
+	executor.mu.Lock()
+	executor.entered++
+	first := executor.entered == 1
+	if executor.entered == executor.expected {
+		close(executor.allIn)
+	}
+	executor.mu.Unlock()
+	defer executor.finish()
+	if first && executor.firstCompletes {
+		<-executor.allIn
+		return attemptExecution{Outcome: model.AttemptCompleted, AssistantText: cleanReview}
+	}
+	<-ctx.Done()
+	time.Sleep(50 * time.Millisecond)
+	return contextExecution(ctx.Err())
+}
+
+func (executor *lingeringEvalExecutor) finish() {
+	executor.mu.Lock()
+	executor.finished++
+	executor.mu.Unlock()
+}
+
+func (executor *lingeringEvalExecutor) counts() (int, int) {
+	executor.mu.Lock()
+	defer executor.mu.Unlock()
+	return executor.entered, executor.finished
 }
