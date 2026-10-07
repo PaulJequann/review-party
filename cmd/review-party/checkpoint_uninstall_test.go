@@ -355,23 +355,38 @@ func TestUninstallLeavesTheSharedCodexFileUnlessAsked(t *testing.T) {
 }
 
 func TestUninstallLeavesHooksInASharedHooksPathUnlessAsked(t *testing.T) {
-	fixture := newUninstallFixture(t)
-	hooks := t.TempDir()
-	fixture.git("config", "core.hooksPath", hooks)
-	fixture.install([]string{"git"})
-	installed := []string{filepath.Join(hooks, "pre-push"), filepath.Join(hooks, "pre-commit")}
+	tests := []struct {
+		name  string
+		hooks func(fixture uninstallFixture) string
+	}{
+		{name: "a clone's hooksPath outside it", hooks: func(fixture uninstallFixture) string {
+			hooks := fixture.t.TempDir()
+			fixture.git("config", "core.hooksPath", hooks)
+			return hooks
+		}},
+		{name: "a global hooksPath inside the clone", hooks: func(fixture uninstallFixture) string {
+			hooks := fixture.path("git-hooks")
+			global := filepath.Join(fixture.t.TempDir(), "gitconfig")
+			fixture.t.Setenv("GIT_CONFIG_GLOBAL", global)
+			fixture.git("config", "--file", global, "core.hooksPath", hooks)
+			return hooks
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newUninstallFixture(t)
+			hooks := test.hooks(fixture)
+			fixture.install([]string{"git"})
+			installed := []string{filepath.Join(hooks, "pre-push"), filepath.Join(hooks, "pre-commit")}
 
-	notes := ""
-	for _, hook := range installed {
-		notes += "note: " + hook + " may run review-party for other repositories on this machine; remove it with --shared\n"
+			notes := ""
+			for _, hook := range installed {
+				notes += "note: " + hook + " may run review-party for other repositories on this machine; remove it with --shared\n"
+			}
+			assertRun(t, fixture.uninstall("", false, "--yes"), commandRun{stdout: "Nothing to remove.\n" + notes})
+			assertRun(t, fixture.uninstall("", false, "--shared", "--yes"), commandRun{stdout: "git pre-push: delete the file install created at " + installed[0] + "\ngit pre-commit: delete the file install created at " + installed[1] + "\nUpdated 0 file(s); deleted 2 file(s).\n"})
+		})
 	}
-	assertRun(t, fixture.uninstall("", false, "--yes"), commandRun{stdout: "Nothing to remove.\n" + notes})
-	for _, hook := range installed {
-		if _, err := os.Stat(hook); err != nil {
-			t.Fatalf("uninstall without --shared removed %s: %v", hook, err)
-		}
-	}
-	assertRun(t, fixture.uninstall("", false, "--shared", "--yes"), commandRun{stdout: "git pre-push: delete the file install created at " + installed[0] + "\ngit pre-commit: delete the file install created at " + installed[1] + "\nUpdated 0 file(s); deleted 2 file(s).\n"})
 }
 
 func TestUninstallFromALinkedWorktreeRemovesTheCloneHooks(t *testing.T) {

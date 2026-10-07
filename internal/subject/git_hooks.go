@@ -66,10 +66,13 @@ func PushedRefBase(repository string, ref PushedRef) (string, error) {
 // and shared by linked worktrees; HooksPath is core.hooksPath as configured,
 // empty when unset. Common is the absolute git directory linked worktrees
 // share, whose hooks directory git runs while core.hooksPath is unset.
+// SharedHooksPath means core.hooksPath comes from configuration other
+// repositories read too, such as the global or system file.
 type HookLocations struct {
-	Directory string
-	HooksPath string
-	Common    string
+	Directory       string
+	HooksPath       string
+	SharedHooksPath bool
+	Common          string
 }
 
 func ResolveHookLocations(repository string) (HookLocations, error) {
@@ -77,15 +80,17 @@ func ResolveHookLocations(repository string) (HookLocations, error) {
 	if err != nil {
 		return HookLocations{}, fmt.Errorf("find the hooks directory: %w", err)
 	}
-	hooksPath, err := gitOutput(repository, "config", "--default", "", "--get", "core.hooksPath")
+	scoped, err := gitOutput(repository, "config", "--show-scope", "--default", "", "--get", "core.hooksPath")
 	if err != nil {
 		return HookLocations{}, fmt.Errorf("read core.hooksPath: %w", err)
 	}
 	directory, common, _ := strings.Cut(strings.TrimSuffix(string(directories), "\n"), "\n")
+	scope, hooksPath, _ := strings.Cut(strings.TrimSuffix(string(scoped), "\n"), "\t")
 	return HookLocations{
-		Directory: absoluteIn(repository, directory),
-		HooksPath: strings.TrimSuffix(string(hooksPath), "\n"),
-		Common:    absoluteIn(repository, common),
+		Directory:       absoluteIn(repository, directory),
+		HooksPath:       hooksPath,
+		SharedHooksPath: hooksPath != "" && scope != "local" && scope != "worktree",
+		Common:          absoluteIn(repository, common),
 	}, nil
 }
 

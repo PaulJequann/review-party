@@ -799,8 +799,9 @@ without one. Rerunning it is safe, and a run with nothing left prints
 of undeclared Checkpoints, and the agent entries and `agents-md` block once no
 Checkpoint is declared. `config checkpoint remove` offers that in a terminal
 and prints the command otherwise. `$CODEX_HOME/hooks.json` serves every
-repository on the machine, and a `core.hooksPath` outside the clone may serve
-several, so uninstall only names those hooks unless you pass `--shared`.
+repository on the machine, and a `core.hooksPath` outside the clone or set in
+global or system git configuration may serve several, so uninstall only names
+those hooks unless you pass `--shared`.
 
 `review-party doctor` reports what the declared Checkpoints still lack in this
 clone, one line per finding, each ending in `; fix: <command>`:

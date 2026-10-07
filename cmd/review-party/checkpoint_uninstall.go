@@ -31,8 +31,8 @@ reported for you to remove by hand.
 
 --undeclared removes only what no declared Checkpoint uses. --shared also
 removes the Codex entry in $CODEX_HOME/hooks.json and hooks in a
-core.hooksPath outside this clone, which other repositories may share.
-Rerunning is safe.`,
+core.hooksPath outside this clone or set in global or system git
+configuration, which other repositories may share. Rerunning is safe.`,
 		Example: "  review-party checkpoint uninstall\n  review-party checkpoint uninstall --undeclared --yes",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -46,7 +46,7 @@ Rerunning is safe.`,
 	addRepositoryFlag(command, "Git repository to remove Checkpoint Integrations from")
 	addConfigurationFlag(command)
 	command.Flags().Bool("undeclared", false, "Remove only what no declared Checkpoint uses")
-	command.Flags().Bool("shared", false, "Also remove the Codex entry in $CODEX_HOME/hooks.json and hooks in a core.hooksPath outside this clone")
+	command.Flags().Bool("shared", false, "Also remove the Codex entry in $CODEX_HOME/hooks.json and hooks in a core.hooksPath other repositories may share")
 	command.Flags().Bool("yes", false, "Remove without a confirmation prompt")
 	command.MarkFlagsMutuallyExclusive("undeclared", "shared")
 	return command
@@ -218,7 +218,8 @@ func gitUninstallSurfaces(root string, locations subject.HookLocations, name con
 	var surfaces []uninstallSurface
 	for _, directory := range []string{filepath.Join(root, ".husky"), locations.Directory, filepath.Join(locations.Common, "hooks")} {
 		path := filepath.Join(directory, string(name))
-		withheld := !shared && !insideRoot(resolvedPath(root), resolvedPath(path)) && !insideRoot(resolvedPath(locations.Common), resolvedPath(path))
+		outside := !insideRoot(resolvedPath(root), resolvedPath(path)) && !insideRoot(resolvedPath(locations.Common), resolvedPath(path))
+		withheld := !shared && (outside || directory == locations.Directory && locations.SharedHooksPath)
 		surfaces = append(surfaces, uninstallSurface{
 			integration: configuration.IntegrationGit, checkpoint: name, path: path,
 			created: created, remove: hookBlockRemoval(name), withheld: withheld,
@@ -228,17 +229,21 @@ func gitUninstallSurfaces(root string, locations subject.HookLocations, name con
 		if marker.tool != hookToolHusky {
 			surfaces = append(surfaces, uninstallSurface{
 				integration: configuration.IntegrationGit, checkpoint: name, path: filepath.Join(root, marker.path),
-				remove: func(content []byte) surfaceRemoval {
-					calls := managerHookCalls(content, name)
-					if len(calls) == 0 {
-						return surfaceRemoval{residue: content}
-					}
-					return surfaceRemoval{residue: content, left: leftByHand, manual: calls}
-				},
+				remove: managerHookRemoval(name),
 			})
 		}
 	}
 	return surfaces
+}
+
+func managerHookRemoval(name configuration.CheckpointName) func([]byte) surfaceRemoval {
+	return func(content []byte) surfaceRemoval {
+		calls := managerHookCalls(content, name)
+		if len(calls) == 0 {
+			return surfaceRemoval{residue: content}
+		}
+		return surfaceRemoval{residue: content, left: leftByHand, manual: calls}
+	}
 }
 
 func hookBlockRemoval(name configuration.CheckpointName) func([]byte) surfaceRemoval {
