@@ -268,9 +268,17 @@ func TestUninstallUndeclaredRemovesOnlyWhatNoDeclaredCheckpointUses(t *testing.T
 
 	removal := fixture.runWith("", false, "config", "checkpoint", "remove", "pre-commit", "--repo", fixture.repository, "--yes")
 	assertRunContains(t, removal, commandRun{stdout: "\nInstalled Checkpoint Integrations serve no declared Checkpoint; remove them with: " + command + "\n"})
+	assertRunContains(t, fixture.doctor(), commandRun{stdout: "\ngit pre-commit Integration in " + fixture.path(".git/hooks/pre-commit") + " serves no declared Checkpoint; fix: " + command + "\n"})
+	want := []undeclaredIntegration{{Integration: "git", Checkpoint: "pre-commit", Path: fixture.path(".git/hooks/pre-commit"), Fix: command}}
+	if got := decodeDoctor(t, fixture.doctor("--format", "json"), 0).Undeclared; !slices.Equal(got, want) {
+		t.Fatalf("json doctor undeclared = %+v, want %+v", got, want)
+	}
 	assertRun(t, fixture.uninstall("", false, "--undeclared", "--yes"), commandRun{stdout: "git pre-commit: delete the file install created at " + fixture.path(".git/hooks/pre-commit") + "\nUpdated 0 file(s); deleted 1 file(s).\n"})
 	if !strings.Contains(fixture.read(".git/hooks/pre-push"), checkpointHookBlock(configuration.CheckpointPrePush)) || !strings.Contains(fixture.read(".claude/settings.json"), "review-party checkpoint hook claude-code") {
 		t.Fatal("uninstall --undeclared removed what the declared pre-push Checkpoint uses")
+	}
+	if strings.Contains(fixture.doctor().stdout, "serves no declared Checkpoint") {
+		t.Fatal("doctor still flags Integrations after uninstall --undeclared")
 	}
 
 	fixture.runWith("", false, "config", "checkpoint", "remove", "pre-push", "--repo", fixture.repository, "--yes")

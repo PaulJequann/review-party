@@ -26,6 +26,7 @@ type doctorResult struct {
 	UnresolvedNames    []unresolvedName                `json:"unresolved_names"`
 	IntegrationGaps    []floorGap                      `json:"integration_gaps"`
 	ExemptionConflicts []exemptionConflict             `json:"exemption_conflicts"`
+	Undeclared         []undeclaredIntegration         `json:"undeclared_integrations"`
 	RecentWaivers      []model.CheckpointWaiver        `json:"recent_waivers"`
 	WaiversUnread      *waiversUnread                  `json:"waivers_unread,omitempty"`
 	Footprint          footprintSummary                `json:"footprint"`
@@ -36,10 +37,11 @@ func newDoctorCommand(streams commandIO) *cobra.Command {
 	cmd := &cobra.Command{Use: "doctor", Short: "Check configuration health, Template drift, and Checkpoint setup", Long: `Check configuration health and Template drift, then report what the
 repository's declared Checkpoints still lack in this clone. Each finding is
 one line ending in the command that fixes it. Unresolved names, missing or
-edited team-floor Integrations, a stale agents-md block, and Markdown
-exemptions a selected documentation Profile reviews are listed, followed by
-the Waivers recorded here in the last 30 days. The last line sums up what
-Review Party keeps on this host; review-party footprint lists it.
+edited team-floor Integrations, a stale agents-md block, Markdown exemptions
+a selected documentation Profile reviews, and installed Integrations no
+declared Checkpoint uses are listed, followed by the Waivers recorded here in
+the last 30 days. The last line sums up what Review Party keeps on this host;
+review-party footprint lists it.
 
 Doctor exits 1 only when the configuration is invalid. Findings exit 0, so
 the repository's instructions and the Caller decide whether one blocks.`, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
@@ -91,7 +93,7 @@ func (options doctorOptions) inspect(manager *configuration.Manager) (doctorResu
 	}
 	result := doctorResult{
 		Valid: validationErr == nil, Validation: validation, TemplateDrift: drift, Skipped: manager.SkippedTemplates(),
-		UnresolvedNames: []unresolvedName{}, IntegrationGaps: []floorGap{}, ExemptionConflicts: []exemptionConflict{}, RecentWaivers: []model.CheckpointWaiver{},
+		UnresolvedNames: []unresolvedName{}, IntegrationGaps: []floorGap{}, ExemptionConflicts: []exemptionConflict{}, Undeclared: []undeclaredIntegration{}, RecentWaivers: []model.CheckpointWaiver{},
 		invalid: validationErr,
 	}
 	result.Validation.Valid = validationErr == nil
