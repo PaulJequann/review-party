@@ -170,6 +170,7 @@ var packagedTemplateRevisions = map[string]string{
 	"bugs":          "bugs-v4",
 	"code-quality":  "code-quality-v1",
 	"documentation": "documentation-v1",
+	"test-audit":    "test-audit-v1",
 }
 
 func packagedTemplateIDs() []string {

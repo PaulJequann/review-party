@@ -30,13 +30,13 @@ complete executable Global Profiles for local dogfood with:
 ./scripts/sync-local-profiles.sh
 ```
 
-This command replaces the local `bugs`, `code-quality`, and `documentation`
-Profile metadata and instructions. It reads Template content and revisions from
-the checkout, and fixes execution to the dogfood Reviewer settings. Environment
-variables named `REVIEW_PARTY_DOGFOOD_REVIEWER`,
+This command replaces the local `bugs`, `code-quality`, `documentation`, and
+`test-audit` Profile metadata and instructions. It reads Template content and
+revisions from the checkout, and fixes execution to the dogfood Reviewer
+settings. Environment variables named `REVIEW_PARTY_DOGFOOD_REVIEWER`,
 `REVIEW_PARTY_DOGFOOD_MODEL`, `REVIEW_PARTY_DOGFOOD_EFFORT`, and
-`REVIEW_PARTY_DOGFOOD_DEADLINE` may explicitly select different settings. Pass
-a Profiles directory as the first argument to target an isolated configuration.
+`REVIEW_PARTY_DOGFOOD_DEADLINE` may explicitly select different settings. Pass a
+Profiles directory as the first argument to target an isolated configuration.
 The default dogfood Attempt deadline is eight minutes.
 
 Run the installed-binary smoke check from an isolated repository and isolated
@@ -283,11 +283,11 @@ deadline, and instructions. Ordinary `run`, explain, replay, and Party
 commands do not accept execution overrides. A different cost or quality choice is a
 differently named Profile.
 
-Packaged `bugs`, `code-quality`, and `documentation` material is available only
-as non-executable Templates. Global and Repository Configuration may still
-enable or disable known Reviewers and constrain accepted models. Review Party
-checks the saved Profile against that policy before launch and never substitutes
-a different Reviewer or model.
+Packaged `bugs`, `code-quality`, `documentation`, and `test-audit` material is
+available only as non-executable Templates. Global and Repository Configuration
+may still enable or disable known Reviewers and constrain accepted models.
+Review Party checks the saved Profile against that policy before launch and
+never substitutes a different Reviewer or model.
 
 The Hub and `review-party doctor --format json` report when a Profile's saved
 Template revision differs from the packaged revision. Drift never blocks a
@@ -818,10 +818,10 @@ as integrity failures. Treat artifacts as sensitive review context.
 
 ## Review Profiles
 
-Review Party packages non-executable `bugs`, `code-quality`, and `documentation`
-Templates. A Template supplies judgment instructions only. Profile Creation
-copies those instructions, then requires the Caller to choose a Reviewer, model,
-reasoning effort, and positive Attempt deadline.
+Review Party packages non-executable `bugs`, `code-quality`, `documentation`,
+and `test-audit` Templates. A Template supplies judgment instructions only.
+Profile Creation copies those instructions, then requires the Caller to choose a
+Reviewer, model, reasoning effort, and positive Attempt deadline.
 
 Every executable Profile is a two-file aggregate:
 

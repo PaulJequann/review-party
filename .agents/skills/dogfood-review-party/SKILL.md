@@ -50,8 +50,8 @@ XDG_CONFIG_HOME="$PWD/scratch/dogfood-config" \
   "$dogfood_binary" init --repo .
 ```
 
-The sync replaces `bugs`, `code-quality`, and `documentation`. `init` prepares
-record state and never creates Profiles.
+The sync replaces `bugs`, `code-quality`, `documentation`, and `test-audit`.
+`init` prepares record state and never creates Profiles.
 
 ## Run one cycle
 
