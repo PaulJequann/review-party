@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"syscall"
 	"testing"
 	"time"
@@ -30,8 +31,32 @@ func TestConfigurationHubContextCancelsOnHangup(t *testing.T) {
 }
 
 func TestSecondSignalTerminatesDuringCleanup(t *testing.T) {
+	child, lines := startSignalHelper(t, "default")
+	if err := child.Process.Signal(syscall.SIGHUP); err != nil {
+		t.Fatal(err)
+	}
+	awaitHelperLine(t, lines, "cleaning after "+syscall.SIGHUP.String()+" signal received")
+
+	exited := make(chan error, 1)
+	go func() { exited <- child.Wait() }()
+	assertKilledBy(t, signalUntilExit(t, child.Process, exited, syscall.SIGTERM), syscall.SIGTERM)
+}
+
+func TestHangupIgnoredAtStartStaysIgnored(t *testing.T) {
+	child, lines := startSignalHelper(t, "nohup")
+	if err := child.Process.Signal(syscall.SIGHUP); err != nil {
+		t.Fatal(err)
+	}
+	if err := child.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	awaitHelperLine(t, lines, "cleaning after "+syscall.SIGTERM.String()+" signal received")
+}
+
+func startSignalHelper(t *testing.T, mode string) (*exec.Cmd, *bufio.Scanner) {
+	t.Helper()
 	child := exec.Command(os.Args[0], "-test.run=^TestSignalContextHelperProcess$")
-	child.Env = append(os.Environ(), "REVIEW_PARTY_SIGNAL_HELPER=1")
+	child.Env = append(os.Environ(), "REVIEW_PARTY_SIGNAL_HELPER="+mode)
 	output, err := child.StdoutPipe()
 	if err != nil {
 		t.Fatal(err)
@@ -43,17 +68,11 @@ func TestSecondSignalTerminatesDuringCleanup(t *testing.T) {
 		if err := child.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
 			t.Error(err)
 		}
+		_ = child.Wait() //nolint:errcheck // The helper was killed; only reaping it matters.
 	})
 	lines := bufio.NewScanner(output)
 	awaitHelperLine(t, lines, "ready")
-	if err := child.Process.Signal(syscall.SIGHUP); err != nil {
-		t.Fatal(err)
-	}
-	awaitHelperLine(t, lines, "cleaning")
-
-	exited := make(chan error, 1)
-	go func() { exited <- child.Wait() }()
-	assertKilledBy(t, signalUntilExit(t, child.Process, exited, syscall.SIGTERM), syscall.SIGTERM)
+	return child, lines
 }
 
 func signalUntilExit(t *testing.T, process *os.Process, exited <-chan error, signal syscall.Signal) error {
@@ -74,14 +93,18 @@ func signalUntilExit(t *testing.T, process *os.Process, exited <-chan error, sig
 }
 
 func TestSignalContextHelperProcess(t *testing.T) {
-	if os.Getenv("REVIEW_PARTY_SIGNAL_HELPER") != "1" {
+	mode := os.Getenv("REVIEW_PARTY_SIGNAL_HELPER")
+	if mode == "" {
 		t.Skip("helper process")
+	}
+	if mode == "nohup" {
+		signal.Ignore(syscall.SIGHUP)
 	}
 	ctx, stop := signalContext(context.Background())
 	defer stop()
 	fmt.Println("ready")
 	<-ctx.Done()
-	fmt.Println("cleaning")
+	fmt.Println("cleaning after", context.Cause(ctx))
 	time.Sleep(time.Minute)
 	os.Exit(0)
 }
