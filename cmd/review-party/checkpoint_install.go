@@ -89,9 +89,6 @@ func executeCheckpointInstall(options hookInstallOptions, streams commandIO) int
 	return 0
 }
 
-// confirmation is the question a file-writing command asks before it writes.
-// --yes answers it; without a terminal the command stops with unconfirmed,
-// and a declined prompt stops it with declined.
 func (streams commandIO) confirmation(yes bool, question string, unconfirmed, declined error) func() (bool, error) {
 	return func() (bool, error) {
 		switch {
@@ -561,13 +558,21 @@ func (plan *hookInstallPlan) planManagerSnippet(name configuration.CheckpointNam
 	if err != nil {
 		return hookInstallStep{}, fmt.Errorf("read %s: %w", plan.location, err)
 	}
-	call := "review-party checkpoint hook git " + string(name)
-	for line := range strings.Lines(string(content)) {
-		if strings.Contains(line, call) && !strings.HasPrefix(strings.TrimSpace(line), "#") {
-			return hookInstallStep{checkpoint: name, path: plan.location, outcome: hookInstalled}, nil
-		}
+	if len(managerHookCalls(content, name)) > 0 {
+		return hookInstallStep{checkpoint: name, path: plan.location, outcome: hookInstalled}, nil
 	}
 	return hookInstallStep{checkpoint: name, path: plan.location, outcome: hookManual, manual: snippet}, nil
+}
+
+func managerHookCalls(content []byte, name configuration.CheckpointName) []string {
+	call := "review-party checkpoint hook git " + string(name)
+	var calls []string
+	for line := range strings.Lines(string(content)) {
+		if strings.Contains(line, call) && !strings.HasPrefix(strings.TrimSpace(line), "#") {
+			calls = append(calls, strings.TrimSpace(line))
+		}
+	}
+	return calls
 }
 
 // preCommitFrameworkEntry is the entry key of the local hook for
@@ -628,8 +633,6 @@ func (plan hookInstallPlan) applyConfirmed(root string, confirm func() (bool, er
 	return true, plan.apply(root)
 }
 
-// apply records the files it is about to create in root's clone, then
-// writes every file.
 func (plan hookInstallPlan) apply(root string) error {
 	paths := slices.Sorted(maps.Keys(plan.writes))
 	if err := recordCreations(root, paths); err != nil {

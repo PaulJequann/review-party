@@ -159,8 +159,7 @@ func (plan *hookInstallPlan) planAgentEntry(agent agentIntegration, name configu
 	if step.outcome != hookEntryAdded {
 		return step, nil
 	}
-	group := agentHookGroup{Matcher: agent.shellTool, Hooks: []agentHookHandler{agent.handler}}
-	updated, err := appendJSONArrayElement(content, []string{"hooks", "PreToolUse"}, group)
+	updated, err := appendJSONArrayElement(content, preToolUsePath, agent.group())
 	if err != nil {
 		return step, fmt.Errorf("add to %s: %w", plan.location, err)
 	}
@@ -169,6 +168,17 @@ func (plan *hookInstallPlan) planAgentEntry(agent agentIntegration, name configu
 	}
 	plan.writes[plan.location] = updated
 	return step, nil
+}
+
+var preToolUsePath = jsonPath{"hooks", "PreToolUse"}
+
+func (agent agentIntegration) group() agentHookGroup {
+	return agentHookGroup{Matcher: agent.shellTool, Hooks: []agentHookHandler{agent.handler}}
+}
+
+// hookCall is the command every form of the agent's review-party hook runs.
+func (agent agentIntegration) hookCall() string {
+	return "review-party checkpoint hook " + string(agent.integration)
 }
 
 // findAgentHookEntry reports hookInstalled when a group for the shell tool
@@ -183,10 +193,9 @@ func findAgentHookEntry(content []byte, agent agentIntegration) (hookOutcome, er
 	if err != nil {
 		return "", err
 	}
-	marker := "review-party checkpoint hook " + string(agent.integration)
 	outcome := hookEntryAdded
 	for _, entry := range entries {
-		if entry.handler.If != agent.handler.If || !strings.Contains(entry.handler.Command, marker) {
+		if entry.handler.If != agent.handler.If || !strings.Contains(entry.handler.Command, agent.hookCall()) {
 			continue
 		}
 		if entry.matcher == agent.shellTool && bytes.Equal(entry.canonical, want) {

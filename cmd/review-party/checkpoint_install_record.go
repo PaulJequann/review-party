@@ -8,6 +8,7 @@ package main
 // it goes with the clone, and is deleted once it lists nothing.
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -76,8 +77,6 @@ func recordCreations(root string, paths []string) error {
 	return record.save()
 }
 
-// missingDirectories lists directory and each parent that does not exist,
-// deepest first.
 func missingDirectories(directory string) []string {
 	var missing []string
 	for {
@@ -91,6 +90,34 @@ func missingDirectories(directory string) []string {
 		}
 		directory = parent
 	}
+}
+
+func removeCreated(files []createdFile) error {
+	var errs []error
+	var directories []string
+	for _, file := range files {
+		errs = append(errs, removeIfPresent(file.Path))
+		directories = append(directories, file.Directories...)
+	}
+	slices.SortFunc(directories, func(left, right string) int { return cmp.Compare(len(right), len(left)) })
+	for _, directory := range directories {
+		errs = append(errs, removeEmptyDirectory(directory))
+	}
+	return errors.Join(errs...)
+}
+
+func removeEmptyDirectory(directory string) error {
+	if entries, err := os.ReadDir(directory); err != nil || len(entries) > 0 {
+		return nil
+	}
+	return os.Remove(directory)
+}
+
+func removeIfPresent(path string) error {
+	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	return nil
 }
 
 func (record installRecord) created(path string) (createdFile, bool) {
@@ -113,8 +140,5 @@ func (record installRecord) save() error {
 		}
 		return replaceFile(record.path, append(content, '\n'), 0o644)
 	}
-	if err := os.Remove(record.path); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return err
-	}
-	return nil
+	return removeIfPresent(record.path)
 }

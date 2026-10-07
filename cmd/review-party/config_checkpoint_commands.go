@@ -55,7 +55,13 @@ Checkpoint asks a person to step in; declare it on one Checkpoint.`
 	addConfigMutationFlags(set, false, false, "")
 
 	remove := newConfigLeafCommand("remove <pre-push|pre-commit>", "Remove one Review Checkpoint", cobra.MatchAll(cobra.ExactArgs(1), cobra.OnlyValidArgs), func(cmd *cobra.Command, args []string) error {
-		return commandResult(publishCheckpointIntent(cmd, streams, configuration.RemoveCheckpoint{Name: configuration.CheckpointName(args[0])}))
+		code := publishCheckpointIntent(cmd, streams, configuration.RemoveCheckpoint{Name: configuration.CheckpointName(args[0])})
+		if code == 0 && stringFlag(cmd, "format") != "json" {
+			if err := offerUndeclaredUninstall(streams, uninstallOptions{repository: stringFlag(cmd, "repo"), configuration: stringFlag(cmd, "config"), yes: boolFlag(cmd, "yes")}); err != nil {
+				printCommandError(streams.errors, 0, fmt.Errorf("warning: %w", err))
+			}
+		}
+		return commandResult(code)
 	})
 	remove.ValidArgs = checkpointNameArguments()
 	addConfigMutationFlags(remove, false, false, "")

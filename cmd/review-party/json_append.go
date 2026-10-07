@@ -4,11 +4,14 @@ package main
 // entry must leave every existing byte where it was, so the appender reads the
 // objects along its path as ordered keys with raw value spans and splices the
 // new value in after the last existing child, in the file's own indentation.
+// Removal cuts the same spans back out, so removing what was appended restores
+// the document.
 
 import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -259,4 +262,100 @@ func (document jsonText) indentUnit() string {
 		}
 	}
 	return "  "
+}
+
+// removeJSONArrayElement removes every element equal to element from the
+// array found by following path's object keys, with the separator before
+// it. A container the removal would leave empty is removed from its parent
+// in turn, up to the root, which is left as {}. It reports whether it
+// removed anything; a document whose path holds something else is returned
+// as it is.
+func removeJSONArrayElement(document jsonText, path jsonPath, element any) ([]byte, bool, error) {
+	want, err := canonicalJSON(element)
+	if err != nil {
+		return nil, false, err
+	}
+	removed := false
+	for len(bytes.TrimSpace(document)) > 0 {
+		levels, err := document.elementLevels(path, want)
+		if err != nil || levels == nil {
+			return document, removed, err
+		}
+		document, removed = document.cut(levels), true
+	}
+	return document, removed, nil
+}
+
+// jsonLevel is one container along a path and the index of the child the
+// path continues through, or at the last level, the matching element.
+type jsonLevel struct {
+	container jsonContainer
+	index     int
+}
+
+func (document jsonText) elementLevels(path jsonPath, want []byte) ([]jsonLevel, error) {
+	levels, array, err := document.arrayAt(path)
+	if err != nil || levels == nil {
+		return nil, err
+	}
+	for index, child := range array.children {
+		canonical, err := canonicalJSON(json.RawMessage(document[child.start:child.end]))
+		if err != nil {
+			return nil, err
+		}
+		if bytes.Equal(canonical, want) {
+			return append(levels, jsonLevel{container: array, index: index}), nil
+		}
+	}
+	return nil, nil
+}
+
+func (document jsonText) arrayAt(path jsonPath) ([]jsonLevel, jsonContainer, error) {
+	container, err := document.container(jsonChild{}, jsonObject)
+	if err != nil {
+		return nil, container, fmt.Errorf("the document is not a JSON object: %w", err)
+	}
+	var levels []jsonLevel
+	for depth, key := range path {
+		index := slices.IndexFunc(container.children, func(child jsonChild) bool { return child.key == key })
+		if index < 0 {
+			return nil, container, nil
+		}
+		levels = append(levels, jsonLevel{container: container, index: index})
+		child, kind := container.children[index], jsonObject
+		if depth == len(path)-1 {
+			kind = jsonArray
+		}
+		if jsonKind(document[child.start]) != kind {
+			return nil, container, nil
+		}
+		if container, err = document.container(child, kind); err != nil {
+			return nil, container, err
+		}
+	}
+	return levels, container, nil
+}
+
+// cut removes the element levels lead to, or the outermost container that
+// holds nothing else, with the separator and line before it. A first child
+// takes the separator after it instead.
+func (document jsonText) cut(levels []jsonLevel) []byte {
+	level := len(levels) - 1
+	for level > 0 && len(levels[level].container.children) == 1 {
+		level--
+	}
+	container, index := levels[level].container, levels[level].index
+	start, end := container.open+1, container.close
+	switch {
+	case len(container.children) == 1:
+	case index > 0:
+		start, end = container.children[index-1].end, container.children[index].end
+	default:
+		start, end = document.skipSpace(start), document.skipSpace(document.skipSpace(container.children[0].end)+1)
+	}
+	return slices.Concat(document[:start], document[end:])
+}
+
+func (document jsonText) skipSpace(offset int) int {
+	return len(document) - len(bytes.TrimLeft(document[offset:], " \t\r\n"))
 }
