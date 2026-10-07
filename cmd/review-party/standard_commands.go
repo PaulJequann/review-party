@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -178,14 +179,23 @@ func newInitCommand(streams commandIO) *cobra.Command {
 		Short: "Bring a repository to a runnable state",
 		Long: "Prepare managed state, then make sure the repository's Review selection names Profiles and Parties that exist.\n\n" +
 			"In a terminal, init opens the first-use journey. Without a terminal, it prints each missing piece with the command that adds it. " +
-			"--profile and --party add names to the selection without the journey; an unqualified name resolves Repository before Global.",
-		Example: "  review-party init\n  review-party init --profile bugs --yes\n  review-party init --party crew --profile global:docs",
-		Args:    cobra.NoArgs,
+			"--profile and --party add names to the selection without the journey; an unqualified name resolves Repository before Global.\n\n" +
+			"--baseline adds the Review Party baseline: it creates each missing baseline Global Profile from its Template with the execution " +
+			"--reviewer, --model, --effort, and --deadline choose, then the Global Party baseline, then selects that Party. " +
+			"Each step is its own confirmed plan; existing Profiles are kept as they are.",
+		Example: "  review-party init\n  review-party init --profile bugs --yes\n  review-party init --party crew --profile global:docs\n" +
+			"  review-party init --baseline --reviewer codex --model gpt-5.6-luna --effort high --deadline 8m",
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			baseline, err := baselineFlags(cmd)
+			if err != nil {
+				return err
+			}
 			options := initOptions{
 				repository: stringFlag(cmd, "repo"), stateDirectory: stringFlag(cmd, "state-dir"), configuration: stringFlag(cmd, "config"),
 				backup: boolFlag(cmd, "backup-incompatible"), fresh: boolFlag(cmd, "fresh"), yes: boolFlag(cmd, "yes"),
-				accessible: boolFlag(cmd, "accessible"), setup: setup, discoveryService: defaultConfigurationDependencies().discoveryService,
+				accessible: boolFlag(cmd, "accessible"), setup: setup, baseline: baseline,
+				discoveryService: defaultConfigurationDependencies().discoveryService,
 			}
 			return commandResult(executeInit(cmd.Context(), options, streams))
 		},
@@ -196,13 +206,37 @@ func newInitCommand(streams commandIO) *cobra.Command {
 	cmd.Flags().Bool("fresh", false, "Initialize fresh state after a separately confirmed backup")
 	cmd.Flags().Var(setupTargetFlag{kind: configuration.ItemProfile, targets: &setup}, "profile", "Add a Profile to the Review selection; repeatable")
 	cmd.Flags().Var(setupTargetFlag{kind: configuration.ItemParty, targets: &setup}, "party", "Add a Party to the Review selection; repeatable")
+	cmd.Flags().Bool("baseline", false, "Add the Review Party baseline: its Global Profiles, the Global Party baseline, and its selection")
+	cmd.Flags().String("reviewer", "", "Reviewer for missing baseline Profiles; requires --baseline")
+	cmd.Flags().String("model", "", "Model for missing baseline Profiles; requires --baseline")
+	cmd.Flags().String("effort", "", "Reasoning Effort for missing baseline Profiles; requires --baseline")
+	cmd.Flags().String("deadline", "", "Attempt Deadline for missing baseline Profiles; requires --baseline")
 	cmd.Flags().Bool("yes", false, "Confirm setup writes and recovery steps")
 	cmd.Flags().Bool("accessible", false, "Use non-redrawing accessible forms in the first-use journey")
 	cmd.MarkFlagsMutuallyExclusive("backup-incompatible", "fresh")
 	cmd.MarkFlagsMutuallyExclusive("backup-incompatible", "profile")
 	cmd.MarkFlagsMutuallyExclusive("backup-incompatible", "party")
+	cmd.MarkFlagsMutuallyExclusive("backup-incompatible", "baseline")
+	cmd.MarkFlagsRequiredTogether("reviewer", "model", "effort", "deadline")
 	addConfigurationFlag(cmd)
 	return cmd
+}
+
+// baselineFlags reads --baseline and the execution its missing Profiles
+// share. It is nil without --baseline, which no execution flag may be given
+// without.
+func baselineFlags(cmd *cobra.Command) (*configuration.ProfileExecution, error) {
+	execution := configuration.ProfileExecution{
+		Reviewer: stringFlag(cmd, "reviewer"), Model: stringFlag(cmd, "model"),
+		ReasoningEffort: stringFlag(cmd, "effort"), AttemptDeadline: stringFlag(cmd, "deadline"),
+	}
+	if boolFlag(cmd, "baseline") {
+		return &execution, nil
+	}
+	if execution != (configuration.ProfileExecution{}) {
+		return nil, errors.New("--reviewer, --model, --effort, and --deadline choose baseline Profile execution and require --baseline")
+	}
+	return nil, nil
 }
 
 func showCommandHelp(cmd *cobra.Command, _ []string) error { return cmd.Help() }

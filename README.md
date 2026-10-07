@@ -79,12 +79,33 @@ Global Configuration:
 review-party init --repo .
 ```
 
+Start with the Review Party baseline. It is four Global Profiles created from
+the `bugs`, `code-quality`, `documentation`, and `test-audit` Templates, plus a
+Global Party named `baseline` that runs all four. `--baseline` creates whatever
+is missing, then adds `global:baseline` to the repository's Review selection.
+You choose one Reviewer, model, reasoning effort, and Attempt deadline for the
+Profiles it creates; `review-party config discover <reviewer>` lists models:
+
+```sh
+review-party init --repo . --baseline \
+  --reviewer codex --model gpt-5.6-luna --effort high --deadline 8m --yes
+```
+
+The execution flags are needed only while a baseline Profile is missing, and
+they are rejected without `--baseline`. Existing Profiles keep their own
+execution and instructions. Each step publishes through its own Plan, so a
+rerun finishes a stopped one and writes nothing once all three exist. A
+teammate who clones a repository that selects `global:baseline` runs the same
+command to create the Profiles and Party on their machine; the committed
+selection is not changed. A Global Party `baseline` with other members blocks
+the command until you edit or remove that file.
+
 In a terminal, `init` runs the first-use journey with the Configuration Hub's
 forms. When the repository's Review selection names Global Profiles or Parties
 that your Global Configuration lacks, it offers to create each one. A missing
 Profile starts from the Template of the same name when one exists. When the
-repository has no selection, it offers your existing Profiles and Parties, or
-Profile Creation. A chosen Global Party is offered as a Repository Party whose
+repository has no selection, it offers the Review Party baseline first, then
+your existing Profiles and Parties, or Profile Creation. A chosen Global Party is offered as a Repository Party whose
 members stay Global Profile references, so teammates bind Profiles rather than
 invent the Party's members. Each step publishes through its own reviewed Plan,
 so a cancelled `init` loses nothing a rerun cannot finish. Pass `--accessible`

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -133,4 +134,28 @@ func compileTestProfile(manager *configuration.Manager, name string, subject mod
 		return compiledProfile{}, err
 	}
 	return conductor.compileResolvedProfile(resolved)
+}
+
+func TestPackagedBaselineIsTheFourTemplatesAndPlansAsProfiles(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	options := reviewPartyConfigurationOptions()
+	options.GlobalRoot = t.TempDir()
+	manager := configuration.NewManager(options)
+	baseline, err := manager.Baseline("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if names := configuration.BaselineNames(baseline.Members); !slices.Equal(names, []string{"bugs", "code-quality", "documentation", "test-audit"}) {
+		t.Fatalf("baseline = %v", names)
+	}
+	plan, err := manager.PlanBaselineProfiles("", configuration.ProfileExecution{Reviewer: "grok", Model: "grok-4.5", ReasoningEffort: "high", AttemptDeadline: "8m"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !plan.Valid() {
+		t.Fatalf("baseline Profiles plan invalid: %s", plan.Reason())
+	}
+	if changes := plan.Changes(); len(changes) != len(baseline.Members) {
+		t.Fatalf("changes = %v", changes)
+	}
 }

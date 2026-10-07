@@ -166,8 +166,12 @@ The deterministic local operation that makes a Review Record ledger usable by ap
 _Avoid_: Legacy import, exposed records-directory setup, implicit inspect setup
 
 **Review Party Initialization**:
-The first-use operation that brings one repository to a runnable state. It prepares managed Review Record state and, where the repository still lacks them, leads the Caller through Profile Creation and the repository's Review selection, composing those operations rather than replacing them. Run without setup choices in a terminal, it opens the Configuration Hub's first-use journey; given explicit setup choices, it applies only those.
+The first-use operation that brings one repository to a runnable state. It prepares managed Review Record state and, where the repository still lacks them, leads the Caller through Profile Creation and the repository's Review selection, composing those operations rather than replacing them. It offers the Review Party baseline first. Run without setup choices in a terminal, it opens the Configuration Hub's first-use journey; given explicit setup choices, it applies only those.
 _Avoid_: Profile initialization, first Review, setup wizard
+
+**Review Party baseline**:
+The four Global Profiles created from the `bugs`, `code-quality`, `documentation`, and `test-audit` Templates, and the Global Party `baseline` composed of exactly those four. Review Party Initialization offers it; each Caller chooses the Reviewer, model, reasoning effort, and Execution Deadline its missing Profiles use. A repository adopts it only through a confirmed Review selection naming `global:baseline`.
+_Avoid_: Built-in Profiles, packaged Party, automatically enabled baseline
 
 **Configuration Hub**:
 The interactive control center for inspecting and changing Review Party configuration over time. It serves recurring customization as Reviewers, models, Profiles, and preferences change; first-use guidance is one journey through the Hub, entered through Review Party Initialization, rather than its defining purpose.
@@ -211,7 +215,7 @@ Manual model IDs remain valid Profile inputs. `config profile create` warns when
 the selected model is not immediately known.
 
 **Profile Creation**:
-The operation that saves one complete executable Review Profile from a Review Profile Template or blank instructions plus a Reviewer, model, reasoning effort, and Execution Deadline. Agents invoke it with `review-party config profile create`. Review Party Initialization may invoke it as one step, but it remains a separate operation with its own reviewed Plan.
+The operation that saves one complete executable Review Profile from a Review Profile Template or blank instructions plus a Reviewer, model, reasoning effort, and Execution Deadline. Agents invoke it with `review-party config profile create`. Review Party Initialization may invoke it as one step, but it remains a separate operation with its own reviewed Plan. For the Review Party baseline with one shared execution, one Plan creates every missing baseline Profile, all or none. A Caller who declines the shared execution in the first-use journey creates each member through its own Plan, and a rerun completes the rest.
 _Avoid_: Profile init, template selection alone, unnamed profile material
 
 **Incomplete Review**:

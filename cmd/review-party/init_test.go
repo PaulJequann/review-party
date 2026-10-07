@@ -18,9 +18,11 @@ import (
 type initFixture struct {
 	manager    *configuration.Manager
 	repository string
+	globalRoot string
+	templates  []configuration.Template
 }
 
-func newInitFixture(t *testing.T) initFixture {
+func newInitFixture(t *testing.T, templates ...configuration.Template) initFixture {
 	t.Helper()
 	isolateProfileCommandEnvironment(t)
 	repository, err := filepath.EvalSymlinks(t.TempDir())
@@ -28,11 +30,19 @@ func newInitFixture(t *testing.T) initFixture {
 		t.Fatal(err)
 	}
 	runProfileTestCommand(t, exec.Command("git", "-C", repository, "init", "--quiet"))
-	manager := configuration.NewManager(configuration.Options{
-		GlobalRoot: t.TempDir(), Reviewers: []string{"codex"},
+	return initFixture{repository: repository, templates: templates}.onMachine(t)
+}
+
+// onMachine is the same repository seen by a Caller with an empty Global
+// Configuration, as on a teammate's clone.
+func (fixture initFixture) onMachine(t *testing.T) initFixture {
+	t.Helper()
+	fixture.globalRoot = t.TempDir()
+	fixture.manager = configuration.NewManager(configuration.Options{
+		GlobalRoot: fixture.globalRoot, Reviewers: []string{"codex"}, Templates: fixture.templates,
 		ValidateName: func(string) error { return nil },
 	})
-	return initFixture{manager: manager, repository: repository}
+	return fixture
 }
 
 func (fixture initFixture) profile(t *testing.T, scope configuration.Scope, name string) {

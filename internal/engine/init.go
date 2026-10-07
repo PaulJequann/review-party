@@ -7,7 +7,9 @@ import (
 )
 
 // ReviewPartyInitialization selects the repository and managed-state choices
-// for first-use preparation. Initialization never creates Profile material.
+// for first-use preparation. This step prepares managed state only; Profiles,
+// Parties, and the Review selection are separate Plans the CLI publishes
+// after it.
 type ReviewPartyInitialization struct {
 	Repository              string
 	StateDirectory          string

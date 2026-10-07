@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 
 	"charm.land/huh/v2"
 
@@ -35,7 +36,11 @@ func (e *editor) firstUse() error {
 	if err != nil {
 		return err
 	}
-	for _, step := range append(e.selectionSteps(binding), e.checkpointsStep) {
+	steps, err := e.selectionSteps(binding)
+	if err != nil {
+		return err
+	}
+	for _, step := range append(steps, e.checkpointsStep) {
 		if err := e.firstUseStep(step); err != nil {
 			return err
 		}
@@ -44,16 +49,50 @@ func (e *editor) firstUse() error {
 }
 
 // selectionSteps choose a first Review selection, or bind each Global name a
-// declared selection lacks.
-func (e *editor) selectionSteps(binding configuration.SelectionBinding) []func() error {
+// declared selection lacks. One baseline step, first, binds every gap the
+// selected Review Party baseline closes; a blocked selected baseline is
+// reported instead.
+func (e *editor) selectionSteps(binding configuration.SelectionBinding) ([]func() error, error) {
 	if !binding.Declared {
-		return []func() error{e.chooseFirstReview}
+		return []func() error{e.chooseFirstReview}, nil
 	}
+	baseline, err := e.manager.Baseline(e.Repository)
+	if err != nil {
+		return nil, err
+	}
+	selection, _, err := e.manager.EffectiveReviewSelection(e.Repository)
+	if err != nil {
+		return nil, err
+	}
+	gaps := globalGaps(binding.Unresolved)
 	var steps []func() error
-	for _, missing := range globalGaps(binding.Unresolved) {
-		steps = append(steps, func() error { return e.bindMissing(missing) })
+	if step := e.baselineStep(baseline, selection, gaps); step != nil {
+		steps = append(steps, step)
 	}
-	return steps
+	for _, missing := range gaps {
+		if !baseline.Binds(selection, missing) {
+			steps = append(steps, func() error { return e.bindMissing(missing) })
+		}
+	}
+	return steps, nil
+}
+
+// baselineStep binds every gap the selected Review Party baseline closes, or
+// reports why that baseline is blocked. It is nil when the baseline has
+// nothing to do.
+func (e *editor) baselineStep(baseline configuration.Baseline, selection configuration.ReviewSelection, gaps []configuration.UnresolvedReferenceError) func() error {
+	if blocked := baseline.SelectionBlocked(selection); blocked != nil {
+		return func() error { return e.reportBaselineBlocked(blocked) }
+	}
+	if slices.ContainsFunc(gaps, func(missing configuration.UnresolvedReferenceError) bool { return baseline.Binds(selection, missing) }) {
+		return e.bindBaseline
+	}
+	return nil
+}
+
+func (e *editor) reportBaselineBlocked(blocked error) error {
+	_, err := fmt.Fprintf(e.Output, "Review Party baseline blocked: %v\n", blocked)
+	return err
 }
 
 // firstUseStep runs one journey step. A configuration failure is reported
@@ -127,12 +166,115 @@ func kindLabel(kind configuration.AuthoredItemKind) string {
 	return "Profile"
 }
 
+// bindBaseline creates what the selected Review Party baseline lacks on this
+// machine. It never edits the selection.
+func (e *editor) bindBaseline() error {
+	offer := true
+	title := "This repository selects the Review Party baseline, which your Global Configuration lacks. Create it now?"
+	if err := e.form(huh.NewConfirm().Title(title).Value(&offer)); err != nil || !offer {
+		return err
+	}
+	baseline, err := e.manager.Baseline(e.Repository)
+	if err != nil {
+		return err
+	}
+	_, err = e.completeBaseline(baseline, configuration.ReviewSelection{})
+	return err
+}
+
+// chooseBaseline completes the Review Party baseline and selects its Party.
+func (e *editor) chooseBaseline() error {
+	baseline, err := e.manager.Baseline(e.Repository)
+	if err != nil {
+		return err
+	}
+	selection, _, err := e.manager.EffectiveReviewSelection(e.Repository)
+	if err != nil {
+		return err
+	}
+	completed, err := e.completeBaseline(baseline, selection)
+	if err != nil || !completed {
+		return err
+	}
+	return e.publishReviewSelection(baseline.Select(selection))
+}
+
+// completeBaseline publishes the missing baseline Profiles, then the Global
+// Party baseline, each through its own Plan. It reports whether both are in
+// place.
+func (e *editor) completeBaseline(baseline configuration.Baseline, selection configuration.ReviewSelection) (bool, error) {
+	if blocked := baseline.Blocked(); blocked != nil {
+		return false, fmt.Errorf("Review Party baseline blocked: %w", blocked)
+	}
+	for _, note := range baseline.Notes(selection) {
+		if _, err := fmt.Fprintln(e.Output, note); err != nil {
+			return false, err
+		}
+	}
+	if created, err := e.createBaselineProfiles(baseline); err != nil || !created {
+		return false, err
+	}
+	plan, err := e.manager.PlanBaselineParty(e.Repository)
+	if err != nil {
+		return false, err
+	}
+	if plan.Unchanged() {
+		return true, nil
+	}
+	return e.reviewAndPublish(plan, func() error { return e.manager.Publish(plan) })
+}
+
+// createBaselineProfiles asks once whether every missing member shares one
+// execution, or, when the Caller declines, runs Profile Creation per member.
+func (e *editor) createBaselineProfiles(baseline configuration.Baseline) (bool, error) {
+	missing := baseline.MembersIn(configuration.BaselineMissing)
+	if len(missing) == 0 {
+		return true, nil
+	}
+	shared := true
+	title := fmt.Sprintf("Create the baseline Profiles %s with one Reviewer, Model, Reasoning Effort, and Attempt Deadline?",
+		strings.Join(configuration.BaselineNames(missing), ", "))
+	if err := e.form(huh.NewConfirm().Title(title).Value(&shared)); err != nil {
+		return false, err
+	}
+	if shared {
+		return e.createSharedBaselineProfiles(missing[0].Template.ID)
+	}
+	for _, member := range missing {
+		e.draftSet().profile = configuration.ProfileDraft{Target: configuration.ScopeGlobal, Name: member.Template.ID, TemplateID: member.Template.ID}
+		if _, err := e.publishNewProfile(member.Template.ID); err != nil {
+			return false, err
+		}
+	}
+	return true, nil
+}
+
+// createSharedBaselineProfiles asks for one execution, under the first
+// missing member's name, and publishes every missing member with it.
+func (e *editor) createSharedBaselineProfiles(name string) (bool, error) {
+	draft := configuration.ProfileDraft{Target: configuration.ScopeGlobal, Name: name}
+	if err := e.editProfileFields(&draft); err != nil {
+		return false, err
+	}
+	plan, err := e.manager.PlanBaselineProfiles(e.Repository, configuration.ProfileExecution{
+		Reviewer: draft.Reviewer, Model: draft.Model, ReasoningEffort: draft.ReasoningEffort, AttemptDeadline: draft.AttemptDeadline,
+	})
+	if err != nil {
+		return false, err
+	}
+	if plan.Valid() && e.ModelChoiceCheck != nil {
+		plan = plan.WithWarnings(e.ModelChoiceCheck(draft.Reviewer, draft.Model).Warning(draft.Reviewer, draft.Model))
+	}
+	return e.reviewAndPublish(plan, func() error { return e.manager.Publish(plan) })
+}
+
 // firstReview is one choice of what an unselected repository reviews. The
 // zero value means creating a new Profile.
 type firstReview struct {
-	kind  configuration.AuthoredItemKind
-	scope configuration.Scope
-	name  string
+	kind     configuration.AuthoredItemKind
+	scope    configuration.Scope
+	name     string
+	baseline bool
 }
 
 func (choice firstReview) item() configuration.SelectionItem {
@@ -148,10 +290,14 @@ func (e *editor) chooseFirstReview() error {
 		return err
 	}
 	var choice firstReview
-	if err := e.form(huh.NewSelect[firstReview]().Title("This repository has no Review selection. What should it review?").Options(options...).Value(&choice)); err != nil {
+	// Value precedes Options so that a Selected option wins over the zero
+	// choice, which is Profile Creation.
+	if err := e.form(huh.NewSelect[firstReview]().Title("This repository has no Review selection. What should it review?").Value(&choice).Options(options...)); err != nil {
 		return err
 	}
 	switch {
+	case choice.baseline:
+		return e.chooseBaseline()
 	case choice == firstReview{}:
 		reference, err := e.publishNewProfile("")
 		if err != nil {
@@ -164,8 +310,9 @@ func (e *editor) chooseFirstReview() error {
 	return e.addFirstReview(choice.scope, choice.item())
 }
 
-// firstReviewOptions offers every valid Party and Profile, Global first,
-// followed by Profile Creation.
+// firstReviewOptions offers the Review Party baseline when it can be
+// completed, then every valid Party and Profile, Global first, followed by
+// Profile Creation.
 func (e *editor) firstReviewOptions() ([]huh.Option[firstReview], error) {
 	parties, err := e.manager.PartyInventory(e.Repository)
 	if err != nil {
@@ -175,12 +322,36 @@ func (e *editor) firstReviewOptions() ([]huh.Option[firstReview], error) {
 	if err != nil {
 		return nil, err
 	}
-	var options []huh.Option[firstReview]
+	baseline, err := e.manager.Baseline(e.Repository)
+	if err != nil {
+		return nil, err
+	}
+	options, parties, err := e.offerBaseline(baseline, parties)
+	if err != nil {
+		return nil, err
+	}
 	for _, scope := range []configuration.Scope{configuration.ScopeGlobal, configuration.ScopeRepository} {
 		options = appendReviewOptions(options, scope, configuration.ItemParty, parties)
 		options = appendReviewOptions(options, scope, configuration.ItemProfile, profiles)
 	}
 	return append(options, huh.NewOption("Create a new Profile", firstReview{})), nil
+}
+
+// offerBaseline opens the first-review choices with the Review Party
+// baseline, which stands in for the Global Party baseline, or reports why the
+// baseline is blocked.
+func (e *editor) offerBaseline(baseline configuration.Baseline, parties []configuration.Definition[configuration.Party]) ([]huh.Option[firstReview], []configuration.Definition[configuration.Party], error) {
+	if !baseline.Offered() {
+		return nil, parties, nil
+	}
+	if blocked := baseline.Blocked(); blocked != nil {
+		return nil, parties, e.reportBaselineBlocked(blocked)
+	}
+	label := "Review Party baseline (" + strings.Join(configuration.BaselineNames(baseline.Members), ", ") + ")"
+	parties = slices.DeleteFunc(parties, func(party configuration.Definition[configuration.Party]) bool {
+		return party.Scope == configuration.ScopeGlobal && party.Name == configuration.BaselinePartyName
+	})
+	return []huh.Option[firstReview]{huh.NewOption(label, firstReview{baseline: true}).Selected(true)}, parties, nil
 }
 
 func appendReviewOptions[T any](options []huh.Option[firstReview], scope configuration.Scope, kind configuration.AuthoredItemKind, definitions []configuration.Definition[T]) []huh.Option[firstReview] {

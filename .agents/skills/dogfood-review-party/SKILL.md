@@ -51,7 +51,8 @@ XDG_CONFIG_HOME="$PWD/scratch/dogfood-config" \
 ```
 
 The sync replaces `bugs`, `code-quality`, `documentation`, and `test-audit`.
-`init` prepares record state and never creates Profiles.
+`init --repo .` without `--baseline` prepares record state and creates no
+Profiles.
 
 ## Run one cycle
 

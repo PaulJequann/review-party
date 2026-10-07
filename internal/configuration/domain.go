@@ -61,6 +61,7 @@ type Template struct {
 	Revision     string   `json:"revision"`
 	Instructions string   `json:"instructions"`
 	BundledFiles []string `json:"bundled_files,omitempty"`
+	Baseline     bool     `json:"baseline,omitempty"`
 }
 
 type TemplateDriftStatus string
