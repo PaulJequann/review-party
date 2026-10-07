@@ -101,7 +101,6 @@ func TestRepositoryCheckpointsRejectInvalidDeclarations(t *testing.T) {
 		{"negative allowance", `{"pre-push":{"requirement":"reviewed","unreviewed_lines":-1,"review_budget":3}}`, `unreviewed_lines: must not be negative`},
 		{"zero budget", `{"pre-push":{"requirement":"reviewed","unreviewed_lines":0,"review_budget":0}}`, `review_budget: must be between 1 and 9`},
 		{"budget over nine", `{"pre-push":{"requirement":"reviewed","unreviewed_lines":0,"review_budget":10}}`, `review_budget: must be between 1 and 9`},
-		{"small change limit is gone", `{"pre-push":{"requirement":"reviewed","unreviewed_lines":0,"review_budget":3,"small_change_lines":5}}`, `unknown field "small_change_lines"`},
 		{"malformed pattern", `{"pre-push":{"requirement":"reviewed","unreviewed_lines":0,"review_budget":3,"exempt_paths":["/docs/**"]}}`, `exempt_paths: pattern "/docs/**" must be relative`},
 		{"unknown field", `{"pre-push":{"requirement":"reviewed","unreviewed_lines":0,"review_budget":3,"bypass":true}}`, `unknown field "bypass"`},
 	} {

@@ -132,11 +132,13 @@ func TestAgentHookRefusesAnUnjudgedPushInEachAgentsForm(t *testing.T) {
 }
 
 func TestAgentsMDBlockAsksForVerdictsOnlyUnderJudged(t *testing.T) {
+	judged := configuration.NewCheckpoint()
+	judged.Requirement = configuration.RequirementJudged
 	declared := map[configuration.CheckpointName]configuration.Checkpoint{
-		configuration.CheckpointPreCommit: {Requirement: configuration.RequirementReviewed},
-		configuration.CheckpointPrePush:   {Requirement: configuration.RequirementJudged},
+		configuration.CheckpointPreCommit: configuration.NewCheckpoint(),
+		configuration.CheckpointPrePush:   judged,
 	}
-	want := "Before pushing, review the change with `review-party run --base <upstream> --head HEAD` and record a verdict for each Finding with `review-party finding record <id>`; the pre-push Checkpoint refuses a push until a completed Review covers it and every Finding has a verdict.\n" +
+	want := "Before pushing, review the change with `review-party run --base <upstream> --head HEAD` and record a verdict for each Finding with `review-party finding record <id>`; the pre-push Checkpoint refuses a push with more than 0 unreviewed lines or a Finding without a verdict. Every fix after a Review needs `review-party run --unreviewed --base <upstream> --head HEAD`. At most 3 Reviews per change; when the Checkpoint says stop, report the unreviewed lines and stop.\n" +
 		preCommitLine + helpLine
 	if got := agentsMDBody(declared, configuration.SortedCheckpointNames(declared)); got != want {
 		t.Fatalf("body =\n%s\nwant\n%s", got, want)

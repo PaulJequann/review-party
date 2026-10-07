@@ -10,10 +10,19 @@ import (
 )
 
 const (
-	prePushLine   = "Before pushing, review the change with `review-party run --base <upstream> --head HEAD`; the pre-push Checkpoint refuses a push no completed Review covers.\n"
-	preCommitLine = "Before committing, stage the change, stash any other changes, and review it with `review-party run`; the pre-commit Checkpoint refuses a commit whose staged content no completed Review covers.\n"
+	prePushLine   = "Before pushing, review the change with `review-party run --base <upstream> --head HEAD`; the pre-push Checkpoint refuses a push with more than 0 unreviewed lines. Every fix after a Review needs `review-party run --unreviewed --base <upstream> --head HEAD`. At most 3 Reviews per change; when the Checkpoint says stop, report the unreviewed lines and stop.\n"
+	preCommitLine = "Before committing, stage the change, stash any other changes, and review it with `review-party run`; the pre-commit Checkpoint refuses a commit with more than 0 unreviewed staged lines. Every fix after a Review needs `review-party run --unreviewed`. At most 3 Reviews per change; when the Checkpoint says stop, report the unreviewed lines and stop.\n"
 	helpLine      = "`review-party checkpoint --help` has details.\n"
 )
+
+func TestAgentsMDLineStatesTheAllowanceAndTheBudget(t *testing.T) {
+	checkpoint := configuration.NewCheckpoint()
+	checkpoint.UnreviewedLines, checkpoint.ReviewBudget = 40, 1
+	want := "Before pushing, review the change with `review-party run --base <upstream> --head HEAD`; the pre-push Checkpoint refuses a push with more than 40 unreviewed lines. Fixes of up to 40 lines after a Review need no new Review; a larger fix needs `review-party run --unreviewed --base <upstream> --head HEAD`. At most 1 Review per change; when the Checkpoint says stop, report the unreviewed lines and stop.\n"
+	if got := agentsMDLine(configuration.CheckpointPrePush, checkpoint); got != want {
+		t.Fatalf("line =\n%s\nwant\n%s", got, want)
+	}
+}
 
 func agentsMDBlock(lines ...string) string {
 	return "<!-- review-party checkpoints: begin -->\n" + strings.Join(lines, "") + helpLine + "<!-- review-party checkpoints: end -->\n"
