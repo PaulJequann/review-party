@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"hash"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,7 +21,8 @@ const emptyGitTree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 // private material needed to prepare one Reviewer execution view.
 type Subject struct {
 	model.ReviewSubject
-	capturedHead string
+	capturedHead   string
+	capturedDigest string
 }
 
 func ResolveSubject(repository string, reference model.SubjectReference) (Subject, error) {
@@ -52,10 +54,11 @@ func resolveCapturedChange(reference model.SubjectReference) (Subject, error) {
 	}
 	base := capturedDirectory(baseValue)
 	head := capturedDirectory(headValue)
-	if err := validateCapturedDirectory(base); err != nil {
+	if _, err := digestCapturedDirectory(base); err != nil {
 		return Subject{}, fmt.Errorf("validate captured base: %w", err)
 	}
-	if err := validateCapturedDirectory(head); err != nil {
+	digest, err := digestCapturedDirectory(head)
+	if err != nil {
 		return Subject{}, fmt.Errorf("validate captured head: %w", err)
 	}
 	patch, err := capturedDirectoryPatch(base, head)
@@ -71,32 +74,58 @@ func resolveCapturedChange(reference model.SubjectReference) (Subject, error) {
 	}
 	identity := sha256.Sum256(append([]byte(strings.Join(paths, "\x00")+"\x00"), patch...))
 	facts := model.SubjectFacts{ChangedFiles: len(paths)}
-	return Subject{ReviewSubject: model.ReviewSubject{Kind: model.SubjectCapturedChange, Repository: "eval://" + hex.EncodeToString(identity[:]), Identity: hex.EncodeToString(identity[:]), ChangedPaths: paths, Patch: string(patch), Facts: &facts}, capturedHead: string(head)}, nil
+	return Subject{ReviewSubject: model.ReviewSubject{Kind: model.SubjectCapturedChange, Repository: "eval://" + hex.EncodeToString(identity[:]), Identity: hex.EncodeToString(identity[:]), ChangedPaths: paths, Patch: string(patch), Facts: &facts}, capturedHead: string(head), capturedDigest: digest}, nil
 }
 
 type capturedDirectory string
 type capturedFile string
 
-func validateCapturedDirectory(directory capturedDirectory) error {
+// digestCapturedDirectory rejects symlinks and Git metadata and hashes every
+// file, not just the changed ones, so two captures sharing a patch never share
+// a view.
+func digestCapturedDirectory(directory capturedDirectory) (string, error) {
 	info, err := os.Stat(string(directory))
+	if err != nil {
+		return "", err
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("%q is not a directory", string(directory))
+	}
+	tree := capturedTree{root: string(directory), hash: sha256.New()}
+	err = filepath.WalkDir(tree.root, tree.visit)
+	return hex.EncodeToString(tree.hash.Sum(nil)), err
+}
+
+type capturedTree struct {
+	root string
+	hash hash.Hash
+}
+
+func (tree capturedTree) visit(path string, entry os.DirEntry, err error) error {
 	if err != nil {
 		return err
 	}
-	if !info.IsDir() {
-		return fmt.Errorf("%q is not a directory", string(directory))
+	if entry.Type()&os.ModeSymlink != 0 {
+		return fmt.Errorf("captured Subject contains symlink %q", path)
 	}
-	return filepath.WalkDir(string(directory), func(path string, entry os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if entry.Type()&os.ModeSymlink != 0 {
-			return fmt.Errorf("captured Subject contains symlink %q", path)
-		}
-		if entry.Name() == ".git" {
-			return fmt.Errorf("captured Subject contains forbidden Git metadata %q", path)
-		}
+	if entry.Name() == ".git" {
+		return fmt.Errorf("captured Subject contains forbidden Git metadata %q", path)
+	}
+	relative, err := filepath.Rel(tree.root, path)
+	if err != nil {
+		return err
+	}
+	if entry.IsDir() {
+		tree.hash.Write(fmt.Appendf(nil, "d %s\x00", filepath.ToSlash(relative)))
 		return nil
-	})
+	}
+	payload, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	tree.hash.Write(fmt.Appendf(nil, "f %s\x00%d\x00", filepath.ToSlash(relative), len(payload)))
+	tree.hash.Write(payload)
+	return nil
 }
 
 func capturedDirectoryPatch(base, head capturedDirectory) ([]byte, error) {

@@ -77,9 +77,6 @@ func TestCapturedSubjectCopiesItsHeadIntoAView(t *testing.T) {
 	if _, inPlace := resolved.InPlace(); inPlace {
 		t.Fatal("captured change reported as reviewed in place")
 	}
-	if resolved.ViewKey() != "captured:"+resolved.Identity {
-		t.Fatalf("view key = %q", resolved.ViewKey())
-	}
 	view := t.TempDir()
 	if err := resolved.BuildView(context.Background(), view); err != nil {
 		t.Fatal(err)
@@ -90,6 +87,35 @@ func TestCapturedSubjectCopiesItsHeadIntoAView(t *testing.T) {
 	}
 	if !strings.Contains(string(content), "head") {
 		t.Fatalf("view content = %q", content)
+	}
+}
+
+func TestCapturedViewKeyCoversUnchangedFiles(t *testing.T) {
+	capture := func(unchanged string) Subject {
+		base := t.TempDir()
+		head := t.TempDir()
+		for _, dir := range []string{base, head} {
+			writeTestFile(t, filepath.Join(dir, "helper.go"), unchanged)
+		}
+		writeTestFile(t, filepath.Join(base, "review.go"), "package demo\n\nconst state = \"base\"\n")
+		writeTestFile(t, filepath.Join(head, "review.go"), "package demo\n\nconst state = \"head\"\n")
+		resolved, err := ResolveSubject("", model.CapturedChange(base, head))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return resolved
+	}
+	first := capture("package demo\n\nconst helper = 1\n")
+	copied := capture("package demo\n\nconst helper = 1\n")
+	other := capture("package demo\n\nconst helper = 2\n")
+	if first.Identity != other.Identity {
+		t.Fatalf("captures with the same patch should share an identity: %s != %s", first.Identity, other.Identity)
+	}
+	if first.ViewKey() == other.ViewKey() {
+		t.Fatalf("captures with different unchanged files share view key %q", first.ViewKey())
+	}
+	if first.ViewKey() != copied.ViewKey() {
+		t.Fatalf("identical captures have different view keys: %q != %q", first.ViewKey(), copied.ViewKey())
 	}
 }
 

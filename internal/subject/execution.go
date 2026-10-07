@@ -27,7 +27,7 @@ func (subject Subject) InPlace() (string, bool) {
 
 func (subject Subject) ViewKey() string {
 	if subject.Kind == model.SubjectCapturedChange {
-		return "captured:" + subject.Identity
+		return "captured:" + subject.capturedDigest
 	}
 	return "git:" + subject.Repository + ":" + subject.HeadObject
 }
