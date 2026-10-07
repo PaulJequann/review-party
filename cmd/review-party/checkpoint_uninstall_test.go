@@ -401,6 +401,10 @@ func TestUninstallLeavesHooksInASharedHooksPathUnlessAsked(t *testing.T) {
 			fixture.git("config", "core.hooksPath", ".husky")
 			return fixture.path(".husky")
 		}},
+		{name: "a relative global hooksPath every sibling of the clone resolves into it", hooks: func(fixture uninstallFixture) string {
+			fixture.globalHooksPath(filepath.Join("..", filepath.Base(fixture.repository), "git-hooks"))
+			return fixture.path("git-hooks")
+		}},
 		{name: "a hooksPath inside the clone from a file its config includes", hooks: func(fixture uninstallFixture) string {
 			hooks := fixture.path("git-hooks")
 			included := filepath.Join(fixture.t.TempDir(), "included")

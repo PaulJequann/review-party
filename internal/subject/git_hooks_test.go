@@ -71,7 +71,7 @@ func assertPushedRefBase(t *testing.T, repository string, ref PushedRef, want st
 	}
 }
 
-func TestSharedHooksAreAbsolutePathsFromOutsideTheClonesOwnConfig(t *testing.T) {
+func TestSharedHooksAreThoseConfiguredOutsideTheClonesOwnConfigThatLeaveEachRepository(t *testing.T) {
 	tests := []struct {
 		name      string
 		configure func(t *testing.T, repository, global, hooks string)
@@ -96,7 +96,8 @@ func TestSharedHooksAreAbsolutePathsFromOutsideTheClonesOwnConfig(t *testing.T) 
 			runTestCommand(t, repository, "git", "config", "--file", global, "core.hooksPath", hooks)
 			runTestCommand(t, repository, "git", "config", "core.hooksPath", "hooks")
 		}},
-		{name: "the command line", shared: true, configure: func(t *testing.T, _, _, hooks string) {
+		{name: "the command line after the clone's own value", shared: true, configure: func(t *testing.T, repository, _, hooks string) {
+			runTestCommand(t, repository, "git", "config", "core.hooksPath", "hooks")
 			t.Setenv("GIT_CONFIG_COUNT", "1")
 			t.Setenv("GIT_CONFIG_KEY_0", "core.hooksPath")
 			t.Setenv("GIT_CONFIG_VALUE_0", hooks)
@@ -107,6 +108,12 @@ func TestSharedHooksAreAbsolutePathsFromOutsideTheClonesOwnConfig(t *testing.T) 
 		}},
 		{name: "a relative path in the global file", configure: func(t *testing.T, repository, global, _ string) {
 			runTestCommand(t, repository, "git", "config", "--file", global, "core.hooksPath", ".githooks")
+		}},
+		{name: "an empty value in the global file", configure: func(t *testing.T, repository, global, _ string) {
+			runTestCommand(t, repository, "git", "config", "--file", global, "core.hooksPath", "")
+		}},
+		{name: "a relative path in the global file that leaves each repository", shared: true, configure: func(t *testing.T, repository, global, _ string) {
+			runTestCommand(t, repository, "git", "config", "--file", global, "core.hooksPath", filepath.Join("..", filepath.Base(repository), "hooks"))
 		}},
 	}
 	for _, test := range tests {
@@ -122,8 +129,12 @@ func TestSharedHooksAreAbsolutePathsFromOutsideTheClonesOwnConfig(t *testing.T) 
 			if err != nil {
 				t.Fatal(err)
 			}
-			if shared := slices.Equal(locations.SharedHooks, []string{hooks}); shared != test.shared {
-				t.Fatalf("hook locations = %#v, want %s shared %t", locations, hooks, test.shared)
+			var want []string
+			if test.shared {
+				want = []string{hooks}
+			}
+			if !slices.Equal(locations.SharedHooks, want) {
+				t.Fatalf("shared hooks = %q, want %q", locations.SharedHooks, want)
 			}
 		})
 	}

@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strings"
 )
 
@@ -69,11 +68,12 @@ func PushedRefBase(repository string, ref PushedRef) (string, error) {
 // and shared by linked worktrees; HooksPath is core.hooksPath as configured,
 // with a leading ~ expanded, empty when unset. Common is the absolute git
 // directory linked worktrees share, whose hooks directory git runs while
-// core.hooksPath is unset. SharedHooks lists every absolute core.hooksPath
-// set in configuration other than this clone's own config or config.worktree
-// file, such as the global file or a file an include pulls in, whether or not
-// it wins here: other repositories may run hooks from each. A relative
-// core.hooksPath resolves inside each clone, so it is never shared.
+// core.hooksPath is unset. SharedHooks lists, resolved for this clone, every
+// core.hooksPath set in configuration other than this clone's own config or
+// config.worktree file, such as the global file or a file an include pulls in,
+// whether or not it wins here: other repositories may run hooks from each. Git
+// resolves a relative core.hooksPath from each repository's top directory, so
+// only one that stays inside it, or an empty one, serves no other repository.
 type HookLocations struct {
 	Directory   string
 	HooksPath   string
@@ -95,14 +95,11 @@ func ResolveHookLocations(repository string) (HookLocations, error) {
 		return HookLocations{}, err
 	}
 	locations := HookLocations{Directory: absoluteIn(repository, paths[0]), Common: absoluteIn(repository, paths[1])}
+	clone := cloneConfiguration{repository: repository, files: paths[2:]}
 	for _, value := range values {
 		locations.HooksPath = value.path
-		own := slices.ContainsFunc(paths[2:], func(config string) bool {
-			file, found := strings.CutPrefix(value.origin, "file:")
-			return found && sameFile(absoluteIn(repository, file), absoluteIn(repository, config))
-		})
-		if filepath.IsAbs(value.path) && !own {
-			locations.SharedHooks = append(locations.SharedHooks, value.path)
+		if clone.shares(value) {
+			locations.SharedHooks = append(locations.SharedHooks, absoluteIn(repository, value.path))
 		}
 	}
 	return locations, nil
@@ -111,6 +108,32 @@ func ResolveHookLocations(repository string) (HookLocations, error) {
 type configuredPath struct {
 	origin string
 	path   string
+}
+
+// cloneConfiguration is a clone's top directory and the configuration files
+// only it reads: its config and config.worktree.
+type cloneConfiguration struct {
+	repository string
+	files      []string
+}
+
+// shares reports whether other repositories may run hooks from a configured
+// value: it leaves each repository's top directory and is not set in one of
+// the clone's own files.
+func (clone cloneConfiguration) shares(value configuredPath) bool {
+	if value.path == "" || filepath.IsLocal(value.path) {
+		return false
+	}
+	file, found := strings.CutPrefix(value.origin, "file:")
+	if !found {
+		return true
+	}
+	for _, config := range clone.files {
+		if sameFile(absoluteIn(clone.repository, file), absoluteIn(clone.repository, config)) {
+			return false
+		}
+	}
+	return true
 }
 
 // configuredHooksPaths lists every core.hooksPath git reads for the clone,

@@ -32,9 +32,10 @@ reported for you to remove by hand.
 --undeclared removes only what no declared Checkpoint uses. --shared also
 changes files other repositories may share: the Codex entry in
 $CODEX_HOME/hooks.json, even inside this clone; any file that resolves outside
-this clone; and hooks in a directory an absolute core.hooksPath names anywhere
-but the clone's own config or config.worktree file, even one this clone
-overrides. Rerunning is safe.`,
+this clone; and hooks in a directory a core.hooksPath names anywhere but the
+clone's own config or config.worktree file, even one this clone overrides,
+unless it is a relative path that stays inside each repository. Rerunning is
+safe.`,
 		Example: "  review-party checkpoint uninstall\n  review-party checkpoint uninstall --undeclared --yes",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {

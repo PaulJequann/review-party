@@ -801,10 +801,13 @@ Checkpoint is declared. `config checkpoint remove` offers that in a terminal
 and prints the command otherwise. `$CODEX_HOME/hooks.json` serves every
 repository on the machine, even when it lies inside this clone. Any file that
 resolves outside the clone, such as a settings file or `AGENTS.md` symlinked to
-a dotfiles copy, may serve several. So may hooks in a directory an absolute
+a dotfiles copy, may serve several. So may hooks in a directory a
 `core.hooksPath` names anywhere but the clone's own `config` or
 `config.worktree` file (the global or system file, a file an include pulls in,
-or `git -c`), even when this clone overrides that value. Uninstall only names
+or `git -c`), even when this clone overrides that value. Git resolves a
+relative value from each repository's top directory, so only one that stays
+inside it, such as `.githooks`, is per repository; `../dotfiles/githooks`
+reaches the same directory from every sibling clone. Uninstall only names
 those files unless you pass `--shared`, and it compares resolved paths, so a
 symlink to one counts too.
 
