@@ -151,11 +151,11 @@ type uninstallSurface struct {
 	checkpoint  configuration.CheckpointName
 	path        string
 	created     []byte
-	remove      func(content []byte) removal
+	remove      func(content []byte) surfaceRemoval
 	withheld    bool
 }
 
-type removal struct {
+type surfaceRemoval struct {
 	residue []byte
 	removed removalOutcome
 	left    removalOutcome
@@ -225,12 +225,12 @@ func gitUninstallSurfaces(root string, locations subject.HookLocations, name con
 		if marker.tool != hookToolHusky {
 			surfaces = append(surfaces, uninstallSurface{
 				integration: configuration.IntegrationGit, checkpoint: name, path: filepath.Join(root, marker.path),
-				remove: func(content []byte) removal {
+				remove: func(content []byte) surfaceRemoval {
 					calls := managerHookCalls(content, name)
 					if len(calls) == 0 {
-						return removal{residue: content}
+						return surfaceRemoval{residue: content}
 					}
-					return removal{residue: content, left: leftByHand, manual: calls}
+					return surfaceRemoval{residue: content, left: leftByHand, manual: calls}
 				},
 			})
 		}
@@ -238,12 +238,12 @@ func gitUninstallSurfaces(root string, locations subject.HookLocations, name con
 	return surfaces
 }
 
-func hookBlockRemoval(name configuration.CheckpointName) func([]byte) removal {
+func hookBlockRemoval(name configuration.CheckpointName) func([]byte) surfaceRemoval {
 	block := checkpointHookBlock(name)
 	start, end := hookBlockMarkers(name)
 	traces := []string{start, end, "review-party checkpoint hook git " + string(name)}
-	return func(content []byte) removal {
-		result := removal{residue: content}
+	return func(content []byte) surfaceRemoval {
+		result := surfaceRemoval{residue: content}
 		if bytes.Contains(content, []byte(block)) {
 			result.residue, result.removed = bytes.ReplaceAll(content, []byte(block), nil), removedBlock
 		}
@@ -279,7 +279,7 @@ func insideRoot(root, path string) bool {
 	return err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
 }
 
-func (agent agentIntegration) removeEntry(content []byte) removal {
+func (agent agentIntegration) removeEntry(content []byte) surfaceRemoval {
 	residue, removed, err := removeJSONArrayElement(content, preToolUsePath, agent.group())
 	outcome := hookEntryAdded
 	if err == nil {
@@ -287,11 +287,11 @@ func (agent agentIntegration) removeEntry(content []byte) removal {
 	}
 	switch {
 	case err != nil && bytes.Contains(content, []byte(agent.hookCall())):
-		return removal{residue: content, left: leftByHand, manual: []string{"review-party cannot read the file: " + err.Error()}}
+		return surfaceRemoval{residue: content, left: leftByHand, manual: []string{"review-party cannot read the file: " + err.Error()}}
 	case err != nil:
-		return removal{residue: content}
+		return surfaceRemoval{residue: content}
 	}
-	result := removal{residue: residue}
+	result := surfaceRemoval{residue: residue}
 	if removed {
 		result.removed = removedEntry
 	}
@@ -301,15 +301,15 @@ func (agent agentIntegration) removeEntry(content []byte) removal {
 	return result
 }
 
-func removeAgentsMDBlock(content []byte) removal {
+func removeAgentsMDBlock(content []byte) surfaceRemoval {
 	lines := strings.SplitAfter(string(content), "\n")
 	sequence, at := agentsMDMarkers(lines)
 	switch sequence {
 	case "":
-		return removal{residue: content}
+		return surfaceRemoval{residue: content}
 	case "be":
 	default:
-		return removal{residue: content, left: leftMalformed, manual: []string{
+		return surfaceRemoval{residue: content, left: leftMalformed, manual: []string{
 			sequence.problem(),
 			"Delete the marker lines and the review-party lines between them, then rerun the uninstall.",
 		}}
@@ -318,7 +318,7 @@ func removeAgentsMDBlock(content []byte) removal {
 	if after == "" && strings.HasSuffix(before, "\n\n") {
 		before = before[:len(before)-1]
 	}
-	return removal{residue: []byte(before + after), removed: removedBlock}
+	return surfaceRemoval{residue: []byte(before + after), removed: removedBlock}
 }
 
 type uninstallStep struct {
@@ -363,19 +363,19 @@ func planUninstall(root string, scope uninstallScope) (uninstallPlan, error) {
 	return plan, nil
 }
 
-func (plan *uninstallPlan) withhold(surface uninstallSurface, result removal) {
+func (plan *uninstallPlan) withhold(surface uninstallSurface, result surfaceRemoval) {
 	if result.removed != "" || result.left.remains() {
 		plan.notes = append(plan.notes, "note: "+surface.path+" still runs review-party for every repository on this machine; remove it with --shared")
 	}
 }
 
-func (surface uninstallSurface) skeleton(result removal) bool {
+func (surface uninstallSurface) skeleton(result surfaceRemoval) bool {
 	return surface.created != nil && !result.left.remains() && bytes.Equal(result.residue, surface.remove(surface.created).residue)
 }
 
 // survey deletes a recorded file holding only install's skeleton even when its
 // block went earlier, so a rerun finishes what an interrupted one started.
-func (plan *uninstallPlan) survey(surface uninstallSurface, result removal) {
+func (plan *uninstallPlan) survey(surface uninstallSurface, result surfaceRemoval) {
 	skeleton := surface.skeleton(result)
 	created, recorded := plan.record.created(recordedPath(surface.path))
 	switch {
