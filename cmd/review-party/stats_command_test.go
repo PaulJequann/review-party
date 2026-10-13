@@ -50,13 +50,14 @@ func TestParseStatsSince(t *testing.T) {
 		"90m":                  now.Add(-90 * time.Minute),
 		"7d":                   now.AddDate(0, 0, -7),
 		"2w":                   now.AddDate(0, 0, -14),
+		"520w":                 now.AddDate(0, 0, -3640),
 		"2026-08-01T00:00:00Z": time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC),
 	} {
 		if got, err := parseStatsSince(text, now); err != nil || !got.Equal(want) {
 			t.Errorf("parseStatsSince(%q) = %v, %v; want %v", text, got, err, want)
 		}
 	}
-	for _, text := range []string{"", "0d", "-1h", "0s", "7 days", "2027-01-01T00:00:00Z"} {
+	for _, text := range []string{"", "0d", "-1h", "0s", "7 days", "2027-01-01T00:00:00Z", "1000000000d", "3653d", "2000-01-01T00:00:00Z"} {
 		if _, err := parseStatsSince(text, now); err == nil {
 			t.Errorf("parseStatsSince(%q) succeeded, want an error", text)
 		}

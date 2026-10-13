@@ -23,7 +23,8 @@ not been initialized.
 
 - `--since` takes a positive Go duration (`24h`, `90m`), a whole number of days
   or weeks (`7d`, `2w`), or an RFC3339 timestamp. Day and week windows step back
-  calendar days. The default is `7d`.
+  calendar days. The default is `7d`. A window reaches at most 10 years back;
+  a longer one is a usage error.
 - A Review is in the window when it was created between `window.since` and
   `window.until`, both inclusive.
   The `runs`, `status`, `terminations`, `duration_ms`, `failure_diagnostics`,

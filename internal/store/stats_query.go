@@ -19,6 +19,9 @@ func (s *LedgerRecordStore) Stats(query StatsQuery) (_ Stats, returnErr error) {
 	if !query.Since.Before(query.Now) {
 		return Stats{}, errors.New("stats window must start before it ends")
 	}
+	if query.Since.Before(query.Now.AddDate(-MaxStatsWindowYears, 0, 0)) {
+		return Stats{}, fmt.Errorf("stats window must span at most %d years", MaxStatsWindowYears)
+	}
 	tx, err := s.db.BeginTx(context.Background(), &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return Stats{}, fmt.Errorf("begin stats read: %w", err)

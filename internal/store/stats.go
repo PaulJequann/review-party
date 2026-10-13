@@ -15,6 +15,9 @@ import (
 // the version; renamed, removed, or redefined fields bump it.
 const StatsSchemaVersion = 1
 
+// MaxStatsWindowYears bounds a Stats window, which reports one entry per day.
+const MaxStatsWindowYears = 10
+
 const (
 	topFailureDiagnostics = 10
 	maxDiagnosticRunes    = 200

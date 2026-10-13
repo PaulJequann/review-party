@@ -61,6 +61,9 @@ func TestStatsRejectsAnEmptyWindow(t *testing.T) {
 	if _, err := ledger.Stats(StatsQuery{Since: statsNow, Now: statsNow}); err == nil {
 		t.Fatal("expected an empty window to fail")
 	}
+	if _, err := ledger.Stats(StatsQuery{Since: statsNow.AddDate(-MaxStatsWindowYears, 0, -1), Now: statsNow}); err == nil {
+		t.Fatal("expected a window longer than the maximum to fail")
+	}
 }
 
 // seedStatsLedger writes one Bundle in /repo with a findings Review and a

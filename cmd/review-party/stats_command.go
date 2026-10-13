@@ -79,13 +79,20 @@ var (
 )
 
 // parseStatsSince accepts a Go duration, a whole number of days or weeks, or
-// an RFC3339 timestamp, and returns a window start before now.
+// an RFC3339 timestamp, and returns a window start before now and no more
+// than store.MaxStatsWindowYears back.
 func parseStatsSince(text string, now time.Time) (time.Time, error) {
 	since, err := statsWindowStart(text, now)
-	if err != nil || !since.Before(now) {
-		return time.Time{}, fmt.Errorf("--since %q must be a positive duration such as 24h, 7d, or 2w, or a past RFC3339 timestamp", text)
+	if err != nil || !statsWindowFits(since, now) {
+		return time.Time{}, fmt.Errorf("--since %q must be a positive duration such as 24h, 7d, or 2w, or a past RFC3339 timestamp, at most %d years back", text, store.MaxStatsWindowYears)
 	}
 	return since, nil
+}
+
+// statsWindowFits reports whether a window start lies before now and within
+// store.MaxStatsWindowYears of it.
+func statsWindowFits(since, now time.Time) bool {
+	return since.Before(now) && !since.Before(now.AddDate(-store.MaxStatsWindowYears, 0, 0))
 }
 
 func statsWindowStart(text string, now time.Time) (time.Time, error) {
