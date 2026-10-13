@@ -28,7 +28,8 @@ func TestMain(m *testing.M) {
 	for key, value := range map[string]string{
 		"HOME": home, "XDG_CONFIG_HOME": filepath.Join(home, "config"),
 		"XDG_STATE_HOME": filepath.Join(home, "state"), "XDG_CACHE_HOME": filepath.Join(home, "cache"),
-		"TMPDIR": temp, "GIT_CONFIG_GLOBAL": gitConfig,
+		"APPDATA": filepath.Join(home, "AppData", "Roaming"),
+		"TMPDIR":  temp, "GIT_CONFIG_GLOBAL": gitConfig,
 	} {
 		if err := os.Setenv(key, value); err != nil {
 			panic(err)
@@ -50,6 +51,7 @@ func isolatedConfigRoot(t *testing.T) string {
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "config"))
 	t.Setenv("XDG_STATE_HOME", filepath.Join(home, "state"))
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, "cache"))
+	t.Setenv("APPDATA", filepath.Join(home, "AppData", "Roaming"))
 	root, err := os.UserConfigDir()
 	if err != nil {
 		t.Fatal(err)
