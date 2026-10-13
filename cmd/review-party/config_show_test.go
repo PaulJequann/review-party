@@ -6,7 +6,7 @@ import (
 )
 
 func TestConfigShowReportsEffectiveViewWithoutSavedSelection(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	isolatedConfigRoot(t)
 	repository := t.TempDir()
 
 	result := runConfigCommand(t, []string{"config", "show", "--repo", repository, "--format", "json"})

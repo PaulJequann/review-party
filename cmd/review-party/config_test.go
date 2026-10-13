@@ -9,8 +9,7 @@ import (
 )
 
 func TestConfigPathUsesGlobalConfigurationRoot(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", root)
+	root := isolatedConfigRoot(t)
 	var stdout, stderr bytes.Buffer
 	if exit := run(context.Background(), []string{"config", "path"}, &stdout, &stderr); exit != 0 {
 		t.Fatalf("exit = %d, stderr = %q", exit, stderr.String())

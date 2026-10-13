@@ -511,7 +511,7 @@ func lefthookCommand(name configuration.CheckpointName) string {
 		return "pre-commit:\n  commands:\n    review-party-checkpoint:\n      run: " + yamlSingleQuoted(run) + "\n"
 	}
 	run := []string{
-		"review_party_remote=$(cat <<'REVIEW_PARTY_REMOTE'", ":{1}", "REVIEW_PARTY_REMOTE", ")",
+		"IFS= read -r review_party_remote <<'REVIEW_PARTY_REMOTE'", ":{1}", "REVIEW_PARTY_REMOTE",
 		hookCommand{name, `review-party checkpoint hook git pre-push -- "${review_party_remote#:}"`}.guarded(),
 	}
 	return "pre-push:\n  commands:\n    review-party-checkpoint:\n      run: |\n        " + strings.Join(run, "\n        ") + "\n      use_stdin: true\n"

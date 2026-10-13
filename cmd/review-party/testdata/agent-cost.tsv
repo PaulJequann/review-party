@@ -15,7 +15,7 @@ error.finding.record.missing-finding	1	114	117	58
 error.finding.record.bad-verb	2	116	98	54
 finding.list.human.judged-3	0	59	388	112
 finding.list.json.judged-3	0	73	802	219
-help.finding.record	0	34	1020	264
+help.finding.record	0	34	965	250
 report.inspect.human.judged-1	0	69	1141	303
 report.inspect.json.judged-1	0	68	2147	554
 report.inspect.human.judged-3	0	69	1126	299

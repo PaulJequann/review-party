@@ -337,7 +337,7 @@ func TestCheckpointInstallPrintsTheLefthookSnippetWithoutEditingTheFile(t *testi
 // lefthookPrePushEntry is the pre-push snippet install prints for lefthook.
 func lefthookPrePushEntry() string {
 	return "pre-push:\n  commands:\n    review-party-checkpoint:\n      run: |\n" +
-		"        review_party_remote=$(cat <<'REVIEW_PARTY_REMOTE'\n        :{1}\n        REVIEW_PARTY_REMOTE\n        )\n" +
+		"        IFS= read -r review_party_remote <<'REVIEW_PARTY_REMOTE'\n        :{1}\n        REVIEW_PARTY_REMOTE\n" +
 		"        " + hookCommand{configuration.CheckpointPrePush, `review-party checkpoint hook git pre-push -- "${review_party_remote#:}"`}.guarded() + "\n" +
 		"      use_stdin: true\n"
 }

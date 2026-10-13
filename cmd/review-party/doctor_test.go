@@ -129,7 +129,7 @@ func TestDoctorNamesUnresolvedNamesAndStillFailsTheConfiguration(t *testing.T) {
 		"--model", "grok-4.5", "--effort", "high", "--deadline", "1m", "--yes",
 	})
 	requireConfigSuccess(t, []string{"config", "reviews", "add", "--scope", "global", "--profile", "bugs", "--repo", fixture.repository, "--yes"})
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	isolatedConfigRoot(t)
 
 	create := "review-party config profile create bugs --scope global --template bugs" + profileExecutionPlaceholders
 	assertRun(t, fixture.doctor(), commandRun{

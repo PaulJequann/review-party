@@ -53,9 +53,8 @@ type profileMutationCase struct {
 }
 
 func TestConfigShowReportsEffectiveSelectionAndProvenance(t *testing.T) {
-	configRoot := t.TempDir()
+	isolatedConfigRoot(t)
 	repository := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", configRoot)
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 
 	requireConfigSuccess(t, []string{
@@ -112,9 +111,8 @@ func TestConfigFileShowTerminatesPayloadWithoutNewline(t *testing.T) {
 
 func requireConfigFileShow(t *testing.T, payload, want string) {
 	t.Helper()
-	configRoot := t.TempDir()
+	isolatedConfigRoot(t)
 	repository := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", configRoot)
 	path := filepath.Join(repository, ".reviewparty", "config.json")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
@@ -133,9 +131,8 @@ func requireConfigFileShow(t *testing.T, payload, want string) {
 }
 
 func TestConfigValidateReportsInvalidScopeWithoutWriting(t *testing.T) {
-	configRoot := t.TempDir()
+	configRoot := isolatedConfigRoot(t)
 	repository := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", configRoot)
 	path := filepath.Join(repository, ".reviewparty", "config.json")
 	writeTestFile(t, testFile{path: path, contents: `{"schema_version":1,"unexpected":true}`})
 
@@ -149,8 +146,7 @@ func TestConfigValidateReportsInvalidScopeWithoutWriting(t *testing.T) {
 }
 
 func TestConfigValidateGlobalScopeChecksEffectiveReviewerPolicy(t *testing.T) {
-	configRoot := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", configRoot)
+	configRoot := isolatedConfigRoot(t)
 	path := filepath.Join(configRoot, "review-party", "config.json")
 	writeTestFile(t, testFile{path: path, contents: `{"schema_version":1,"reviewers":{"grok":{"model":"bad-model","allowed_models":["good-model"]}}}`})
 
@@ -164,9 +160,8 @@ func TestConfigValidateGlobalScopeChecksEffectiveReviewerPolicy(t *testing.T) {
 }
 
 func TestConfigValidateRepositoryScopeIncludesGlobalPolicy(t *testing.T) {
-	configRoot := t.TempDir()
+	configRoot := isolatedConfigRoot(t)
 	repository := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", configRoot)
 	globalPath := filepath.Join(configRoot, "review-party", "config.json")
 	writeTestFile(t, testFile{path: globalPath, contents: `{"schema_version":1,"reviewers":{"grok":{"model":"bad-model","allowed_models":["good-model"]}}}`})
 
@@ -182,8 +177,7 @@ func TestConfigValidateRepositoryScopeIncludesGlobalPolicy(t *testing.T) {
 }
 
 func TestConfigReviewsRejectAmbiguousSelectors(t *testing.T) {
-	configRoot := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", configRoot)
+	isolatedConfigRoot(t)
 	for _, test := range []struct {
 		name    string
 		command []string
@@ -209,9 +203,8 @@ func TestConfigReviewsRejectAmbiguousSelectors(t *testing.T) {
 }
 
 func TestConfigValidateReportsAbsentFilesInJSONWithoutWriting(t *testing.T) {
-	configRoot := t.TempDir()
+	configRoot := isolatedConfigRoot(t)
 	repository := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", configRoot)
 
 	result := runConfigCommand(t, []string{
 		"config", "validate", "--repo", repository, "--format", "json",
@@ -233,9 +226,8 @@ func TestConfigValidateReportsAbsentFilesInJSONWithoutWriting(t *testing.T) {
 }
 
 func TestConfigValidateReportsAbsentFilesInHumanOutput(t *testing.T) {
-	configRoot := t.TempDir()
+	configRoot := isolatedConfigRoot(t)
 	repository := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", configRoot)
 
 	result := runConfigCommand(t, []string{
 		"config", "validate", "--repo", repository, "--format", "human",
@@ -339,7 +331,7 @@ func TestProfileCreateRecognizesPackagedModelWithoutWarning(t *testing.T) {
 
 func requireProfileCreateWarnings(t *testing.T, name, model string, count int) {
 	t.Helper()
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	isolatedConfigRoot(t)
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	result := runConfigCommand(t, []string{
 		"config", "profile", "create", name, "--blank", "--instructions", "Review bugs.\n",
@@ -360,8 +352,7 @@ func requireProfileCreateWarnings(t *testing.T, name, model string, count int) {
 }
 
 func TestConfigMutationRequiresYesAndPublishesPlan(t *testing.T) {
-	configRoot := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", configRoot)
+	configRoot := isolatedConfigRoot(t)
 
 	arguments := []string{
 		"config", "profile", "create", "bugs", "--template", "bugs", "--reviewer", "grok",
@@ -376,9 +367,8 @@ func TestConfigMutationRequiresYesAndPublishesPlan(t *testing.T) {
 }
 
 func TestConfigPartyAndReviewSelectionCommandsUseSemanticPlans(t *testing.T) {
-	configRoot := t.TempDir()
+	isolatedConfigRoot(t)
 	repository := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", configRoot)
 
 	requireConfigSuccess(t, []string{
 		"config", "profile", "create", "bugs", "--blank", "--instructions", "Find bugs.\n", "--reviewer", "grok",
