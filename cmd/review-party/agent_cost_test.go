@@ -178,15 +178,16 @@ func measureAgentCost(t testing.TB, scenario agentCostScenario) agentCostRow {
 	stateHome := prepareAgentCostState(t, scenario)
 	var stdout, stderr bytes.Buffer
 	exit := execute(context.Background(), scenario.args, productionCommandIO(strings.NewReader(scenario.stdin), &stdout, &stderr))
-	if strings.Contains(stdout.String()+stderr.String(), stateHome) {
+	output := stdout.String() + stderr.String()
+	if strings.Contains(output, stateHome) {
 		t.Fatalf("%s output names the per-run state directory, so its bytes are not stable:\n%s%s", scenario.surface, stdout.String(), stderr.String())
 	}
+	// macOS puts the temporary HOME in this default path, so its length changes each run.
+	output = strings.ReplaceAll(output, defaultUserConfigurationPath(), "<user config>")
 	command := strings.Join(append([]string{"review-party"}, scenario.args...), " ")
-	return agentCostRow{surface: scenario.surface, exit: exit, inBytes: len(command) + len(scenario.stdin), outBytes: stdout.Len() + stderr.Len()}
+	return agentCostRow{surface: scenario.surface, exit: exit, inBytes: len(command) + len(scenario.stdin), outBytes: len(output)}
 }
 
-// prepareAgentCostState gives each scenario fresh state and a fixed configuration
-// path, since help text and command hints print the default configuration path.
 func prepareAgentCostState(t testing.TB, scenario agentCostScenario) string {
 	t.Helper()
 	stateHome := t.TempDir()

@@ -63,6 +63,5 @@ func runProfileTestCommand(t *testing.T, command *exec.Cmd) {
 
 func isolateProfileCommandEnvironment(t *testing.T) {
 	t.Helper()
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	isolatedConfigRoot(t)
 }

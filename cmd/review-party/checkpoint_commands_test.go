@@ -26,7 +26,7 @@ type checkpointFixture struct {
 
 func newCheckpointFixture(t *testing.T) checkpointFixture {
 	t.Helper()
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	isolatedConfigRoot(t)
 	stateHome := t.TempDir()
 	t.Setenv("XDG_STATE_HOME", stateHome)
 	repository := testGitRepository(t)

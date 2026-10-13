@@ -12,7 +12,7 @@ import (
 )
 
 func TestConfigProfileEditUpdatesModel(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	isolatedConfigRoot(t)
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	requireConfigSuccess(t, []string{
 		"config", "profile", "create", "bugs", "--blank", "--instructions", "Find bugs.\n", "--reviewer", "grok",
@@ -41,7 +41,7 @@ func TestConfigProfileEditUpdatesModel(t *testing.T) {
 }
 
 func TestConfigProfileEditRequiresAField(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	isolatedConfigRoot(t)
 	result := runConfigCommand(t, []string{"config", "profile", "edit", "bugs", "--yes", "--format", "json"})
 	if result.exitCode == 0 {
 		t.Fatal("fieldless edit succeeded")
@@ -65,7 +65,7 @@ func TestConfigProfileEditExposesFlags(t *testing.T) {
 }
 
 func TestConfigProfileEditWarnsWithRecordedReceipt(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	isolatedConfigRoot(t)
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	stateHome := t.TempDir()
 	t.Setenv("XDG_STATE_HOME", stateHome)

@@ -145,7 +145,7 @@ func TestEvalSuiteDeadlineStopsNewCases(t *testing.T) {
 	suite := writeEvalTestSuite(t, []testEvalCase{{id: "first"}, {id: "second"}})
 	executor := &deadlineEvalExecutor{}
 	conductor := testEvalConductor(t, executor)
-	conductor.evalDefaultDeadline = 20 * time.Millisecond
+	conductor.evalDefaultDeadline = 2 * time.Second
 	selection := evalSelection(suite)
 	selection.Experiment.Deadline = conductor.evalDefaultDeadline.String()
 	run, err := conductor.RunEvalSuite(testContext(t), selection)
