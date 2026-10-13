@@ -1,5 +1,7 @@
 # Documentation
 
+- [`stats-json.md`](stats-json.md) documents the `review-party stats --format json`
+  contract.
 - [`configuration-hub-implementation-plan.md`](configuration-hub-implementation-plan.md)
   orders the accepted Configuration Hub and CLI modernization work.
 - [`golangci-lint-implementation-plan.md`](golangci-lint-implementation-plan.md)

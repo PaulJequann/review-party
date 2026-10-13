@@ -11,8 +11,11 @@ import (
 
 // RecordCheckpointWaiver stores one Checkpoint Waiver.
 func (s *LedgerRecordStore) RecordCheckpointWaiver(waiver model.CheckpointWaiver) error {
-	_, err := s.db.Exec(`INSERT INTO checkpoint_waivers(id,checkpoint,content_digest,repository,reason,waived_by,created_at) VALUES(?,?,?,?,?,?,?)`,
-		waiver.ID, waiver.Key.Checkpoint, waiver.Key.ContentDigest, waiver.Repository, waiver.Reason, waiver.WaivedBy, waiver.CreatedAt.UTC())
+	err := retryBusyWrite(func() error {
+		_, err := s.db.Exec(`INSERT INTO checkpoint_waivers(id,checkpoint,content_digest,repository,reason,waived_by,created_at) VALUES(?,?,?,?,?,?,?)`,
+			waiver.ID, waiver.Key.Checkpoint, waiver.Key.ContentDigest, waiver.Repository, waiver.Reason, waiver.WaivedBy, waiver.CreatedAt.UTC())
+		return err
+	})
 	if err != nil {
 		return fmt.Errorf("record checkpoint waiver %q: %w", waiver.ID, err)
 	}

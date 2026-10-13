@@ -259,6 +259,21 @@ func (conductor *Conductor) History(_ context.Context, query store.HistoryQuery)
 	return page, err
 }
 
+// Stats reports ledger usage over one window without writing state.
+func (conductor *Conductor) Stats(_ context.Context, query store.StatsQuery) (store.Stats, error) {
+	ledger, ok := conductor.store.(interface {
+		Stats(store.StatsQuery) (store.Stats, error)
+	})
+	if !ok {
+		return store.Stats{}, fmt.Errorf("review stats requires the SQLite ledger")
+	}
+	stats, err := ledger.Stats(query)
+	if errors.Is(err, store.ErrReviewRecordStateNotInitialized) {
+		return store.Stats{}, InitializationRequiredError{Repository: "."}
+	}
+	return stats, err
+}
+
 // ledgerStateError tells the Caller to initialize when the ledger does not exist yet.
 func ledgerStateError(err error) error {
 	if errors.Is(err, store.ErrReviewRecordStateNotInitialized) {

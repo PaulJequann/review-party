@@ -377,8 +377,10 @@ func openLedgerRecordStore(directory string, prepare bool) (*LedgerRecordStore, 
 	}
 	// Reads reconstruct nested rows while their parent cursor is still open, so
 	// they need a second pooled connection. SQLite's busy timeout serializes the
-	// supported concurrent writer pattern.
+	// supported concurrent writer pattern. Idle connections stay open so the
+	// pool does not reapply connection pragmas on every operation.
 	db.SetMaxOpenConns(4)
+	db.SetMaxIdleConns(4)
 	store := &LedgerRecordStore{
 		db: db, directory: directory,
 		projection:             reviewRecordProjection{db: db},
@@ -395,7 +397,13 @@ func openLedgerRecordStore(directory string, prepare bool) (*LedgerRecordStore, 
 }
 
 func openLedgerDatabase(directory string, prepare bool) (*sql.DB, error) {
-	dsn := "file:" + filepath.ToSlash(filepath.Join(directory, ledgerFilename)) + "?_pragma=foreign_keys%3Don&_pragma=busy_timeout%3D5000"
+	// Every pooled connection waits on the busy timeout first, so the later
+	// pragmas and every write that follows queue behind other processes rather
+	// than fail. Write transactions begin IMMEDIATE: a deferred one that reads
+	// before writing cannot wait for the lock it upgrades to.
+	dsn := "file:" + filepath.ToSlash(filepath.Join(directory, ledgerFilename)) +
+		fmt.Sprintf("?_pragma=busy_timeout%%3D%d", ledgerBusyTimeoutMS) +
+		"&_pragma=foreign_keys%3Don&_pragma=journal_mode%3DWAL&_pragma=synchronous%3DFULL&_txlock=immediate"
 	if !prepare {
 		dsn += "&mode=rw"
 	}
@@ -452,10 +460,12 @@ func (s *LedgerRecordStore) restrictPermissions() error {
 func (s *LedgerRecordStore) Close() error { return s.db.Close() }
 
 func (s *LedgerRecordStore) configure() error {
-	for _, statement := range []string{"PRAGMA foreign_keys = ON", "PRAGMA busy_timeout = 5000", "PRAGMA journal_mode = WAL", "PRAGMA synchronous = FULL"} {
-		if _, err := s.db.Exec(statement); err != nil {
-			return fmt.Errorf("configure review ledger: %w", err)
-		}
+	var mode string
+	if err := s.db.QueryRow("PRAGMA journal_mode").Scan(&mode); err != nil {
+		return fmt.Errorf("configure review ledger: %w", err)
+	}
+	if mode != "wal" {
+		return fmt.Errorf("configure review ledger: journal mode is %q, want wal", mode)
 	}
 	return nil
 }
@@ -571,7 +581,7 @@ func applyMigration(tx *sql.Tx, version int, path string) error {
 }
 
 func (s *LedgerRecordStore) Save(record model.ReviewRecord) error {
-	return s.projection.save(record)
+	return retryBusyWrite(func() error { return s.projection.save(record) })
 }
 
 func (s *LedgerRecordStore) Load(id model.ReviewID) (model.ReviewRecord, error) {
@@ -583,15 +593,15 @@ func (s *LedgerRecordStore) LoadEvalRun(id model.EvalRunID) (model.EvalRun, erro
 }
 
 func (s *LedgerRecordStore) CreateEvalSuiteRun(run model.EvalSuiteRun, evalRuns []model.EvalRun) error {
-	return s.evalProjection.createSuiteRun(run, evalRuns)
+	return retryBusyWrite(func() error { return s.evalProjection.createSuiteRun(run, evalRuns) })
 }
 
 func (s *LedgerRecordStore) CheckpointEvalRun(run model.EvalSuiteRun, evalRun model.EvalRun) error {
-	return s.evalProjection.checkpoint(run, evalRun)
+	return retryBusyWrite(func() error { return s.evalProjection.checkpoint(run, evalRun) })
 }
 
 func (s *LedgerRecordStore) TerminateEvalSuiteRun(run model.EvalSuiteRun) error {
-	return s.evalProjection.terminateSuiteRun(run)
+	return retryBusyWrite(func() error { return s.evalProjection.terminateSuiteRun(run) })
 }
 
 func (s *LedgerRecordStore) LoadEvalSuiteRun(id model.EvalSuiteRunID) (model.EvalSuiteRun, error) {
@@ -599,11 +609,11 @@ func (s *LedgerRecordStore) LoadEvalSuiteRun(id model.EvalSuiteRunID) (model.Eva
 }
 
 func (s *LedgerRecordStore) CreateReviewBundle(bundle model.ReviewBundle, members []model.ReviewRecord) error {
-	return s.bundleProjection.create(bundle, members)
+	return retryBusyWrite(func() error { return s.bundleProjection.create(bundle, members) })
 }
 
 func (s *LedgerRecordStore) SaveReviewBundle(bundle model.ReviewBundle) error {
-	return s.bundleProjection.save(bundle)
+	return retryBusyWrite(func() error { return s.bundleProjection.save(bundle) })
 }
 
 func (s *LedgerRecordStore) LoadReviewBundle(id model.ReviewBundleID) (model.ReviewBundle, error) {
@@ -611,7 +621,7 @@ func (s *LedgerRecordStore) LoadReviewBundle(id model.ReviewBundleID) (model.Rev
 }
 
 func (s *LedgerRecordStore) PublishAdjudication(revision model.AdjudicationRevision) (published model.AdjudicationRevision, returnErr error) {
-	return s.adjudicationProjection.publish(revision)
+	return retryBusy(func() (model.AdjudicationRevision, error) { return s.adjudicationProjection.publish(revision) })
 }
 
 func (s *LedgerRecordStore) LoadAdjudication(id model.AdjudicationRevisionID) (model.AdjudicationRevision, error) {
@@ -619,7 +629,7 @@ func (s *LedgerRecordStore) LoadAdjudication(id model.AdjudicationRevisionID) (m
 }
 
 func (s *LedgerRecordStore) RecordMisses(records []MissRecord) ([]model.Miss, error) {
-	return s.missProjection.record(records)
+	return retryBusy(func() ([]model.Miss, error) { return s.missProjection.record(records) })
 }
 
 func (s *LedgerRecordStore) ListMisses(query MissQuery) ([]model.Miss, error) {
@@ -627,11 +637,11 @@ func (s *LedgerRecordStore) ListMisses(query MissQuery) ([]model.Miss, error) {
 }
 
 func (s *LedgerRecordStore) RemoveMisses(ids []model.MissID, removal model.MissRemoval) ([]MissRemovalOutcome, error) {
-	return s.missProjection.remove(ids, removal)
+	return retryBusy(func() ([]MissRemovalOutcome, error) { return s.missProjection.remove(ids, removal) })
 }
 
 func (s *LedgerRecordStore) RecordVerdicts(batch VerdictBatch) (VerdictTally, error) {
-	return s.verdictProjection.record(batch)
+	return retryBusy(func() (VerdictTally, error) { return s.verdictProjection.record(batch) })
 }
 
 func (s *LedgerRecordStore) ListVerdicts(query VerdictQuery) ([]model.FindingVerdict, error) {

@@ -14,8 +14,14 @@ const expiredEvidence = `FROM artifacts WHERE (review_id,pass_ordinal,attempt_or
 	ORDER BY MAX(attempts.completed_at) DESC LIMIT ?)`
 
 // ExpireEvidence removes the files before committing the forgotten rows, so a
-// failed removal leaves the rows for the next expiry to retry.
-func (s *LedgerRecordStore) ExpireEvidence(keep int, remove func([]model.ArtifactReference) error) (returnErr error) {
+// failed removal leaves the rows for the next expiry to retry. The immediate
+// transaction holds the write lock before any file is removed, so a busy
+// retry never repeats a removal.
+func (s *LedgerRecordStore) ExpireEvidence(keep int, remove func([]model.ArtifactReference) error) error {
+	return retryBusyWrite(func() error { return s.expireEvidence(keep, remove) })
+}
+
+func (s *LedgerRecordStore) expireEvidence(keep int, remove func([]model.ArtifactReference) error) (returnErr error) {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return fmt.Errorf("begin evidence expiry: %w", err)
