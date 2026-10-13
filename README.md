@@ -339,6 +339,24 @@ time and then Review ID. The default limit is 20 and the maximum is 200. JSON
 output contains `entries`, the applied `limit`, and `has_more`. History selects
 existing Reviews; it does not rerun or replay them.
 
+Summarize Review usage over a window for dashboards and digests:
+
+```sh
+review-party stats                      # last 7 days, all repositories
+review-party stats --since 24h --repo .
+review-party stats --since 2w --format json
+```
+
+`--since` takes a positive Go duration (`24h`, `90m`), a whole number of days
+or weeks (`7d`, `2w`), or an RFC3339 timestamp; the default is `7d`. `--repo`
+resolves like `history` and limits Reviews, Review Bundles, and Checkpoint
+Waivers to that repository. Stats reports runs per UTC day and by repository,
+Profile, Reviewer, and Bundle selection; outcomes; duration percentiles;
+normalized and grouped failure diagnostics; findings by severity; Verdict
+rates; Checkpoint Waivers; and Review Bundle completion. It only reads the
+ledger. The JSON form is a versioned contract documented in
+[`docs/stats-json.md`](docs/stats-json.md).
+
 Record a bug that a completed Review missed, so later work can measure what each
 Profile fails to catch:
 
@@ -864,7 +882,11 @@ Reviewer's declared size limit, ends the Review as incomplete without spawning
 the Reviewer when the input is over it, and warns on stderr from 60 percent of
 the limit. Review Records are persisted in the managed SQLite ledger at
 `$XDG_STATE_HOME/review-party/ledger.sqlite` (or the corresponding
-`$HOME/.local/state` fallback). The CLI intentionally exposes no storage-path
+`$HOME/.local/state` fallback). The ledger runs in WAL mode so concurrent
+`review-party` processes can share it: readers never block the writer, write
+transactions take the write lock when they begin, a connection waits up to 10
+seconds for a busy lock, and a write that still finds the ledger busy is retried
+with jittered backoff a bounded number of times. The CLI intentionally exposes no storage-path
 selector; isolate tests and experiments with `XDG_STATE_HOME`. The ledger
 schema is the pre-release initial schema plus migrations that
 `review-party init` applies in place. Schema 15 removes stored patches, raw

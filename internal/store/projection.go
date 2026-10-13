@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -186,7 +187,7 @@ func insertFinding(tx *sql.Tx, id model.ReviewID, finding model.Finding) error {
 }
 
 func (p reviewRecordProjection) load(id model.ReviewID) (record model.ReviewRecord, returnErr error) {
-	tx, err := p.db.Begin()
+	tx, err := p.db.BeginTx(context.Background(), &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return record, fmt.Errorf("begin review ledger read: %w", err)
 	}
