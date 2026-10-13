@@ -24,10 +24,12 @@ not been initialized.
 - `--since` takes a positive Go duration (`24h`, `90m`), a whole number of days
   or weeks (`7d`, `2w`), or an RFC3339 timestamp. Day and week windows step back
   calendar days. The default is `7d`.
-- A Review is in the window when it was created at or after `window.since`.
+- A Review is in the window when it was created between `window.since` and
+  `window.until`, both inclusive.
   The `runs`, `status`, `terminations`, `duration_ms`, `failure_diagnostics`,
   `findings`, and `verdicts` sections all describe that one cohort of Reviews.
-- Checkpoint Waivers and Review Bundles are counted by their own creation time.
+- Checkpoint Waivers and Review Bundles are counted by their own creation time,
+  within the same bounds.
 - `--repo` resolves to the canonical Git root and limits Reviews, Waivers, and
   Bundles to that repository.
 - Times are RFC3339 in UTC. Days are UTC calendar dates.
@@ -40,7 +42,7 @@ not been initialized.
 | --- | --- | --- |
 | `schema_version` | integer | The contract version described here. |
 | `window.since` | time | Start of the window, inclusive. |
-| `window.until` | time | When the report was taken. |
+| `window.until` | time | End of the window, inclusive: when the report was taken. |
 | `window.repository` | string | The `--repo` root. Omitted when every repository is counted. |
 | `runs.total` | integer | Reviews created in the window. |
 | `runs.per_day` | array of `{date, runs}` | One entry for every UTC date from `window.since` through `window.until`, oldest first, including days with `0` runs. |
@@ -60,9 +62,9 @@ not been initialized.
 | `findings.total` | integer | Findings in the window's Reviews. |
 | `findings.per_completed_review` | number or null | `findings.total` divided by completed Reviews. |
 | `findings.by_severity` | map of severity to integer | Findings by lowercased severity. |
-| `verdicts.judged` | integer | Findings with a recorded Verdict. |
-| `verdicts.unjudged` | integer | Findings without a Verdict. |
-| `verdicts.accepted`, `.rejected`, `.deferred` | integer | Findings by their latest Verdict. |
+| `verdicts.judged` | integer | Findings with a current Verdict: one recorded against the Finding's present text. A Verdict on text a later save replaced is stale and does not count. |
+| `verdicts.unjudged` | integer | Findings without a current Verdict. |
+| `verdicts.accepted`, `.rejected`, `.deferred` | integer | Findings by their latest current Verdict. |
 | `verdicts.accepted_rate`, `.rejected_rate`, `.deferred_rate` | number or null | Each count divided by `verdicts.judged`. |
 | `checkpoint_waivers.total` | integer | Checkpoint Waivers recorded in the window. |
 | `checkpoint_waivers.by_waived_by` | map of source to integer | Waivers by how they were granted, such as `terminal` or `non-interactive`. |

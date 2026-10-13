@@ -43,7 +43,18 @@ func (s *DeferredLedgerRecordStore) Stats(query StatsQuery) (Stats, error) {
 func reviewWindow(query StatsQuery) (string, []any) {
 	return whereClause([]queryFilter{
 		{"r.created_at >= ?", query.Since.UTC(), true},
+		{"r.created_at <= ?", query.Now.UTC(), true},
 		{"json_extract(r.subject,'$.repository') = ?", query.Repository, query.Repository != ""},
+	})
+}
+
+// recordWindow restricts a statement over a table with its own created_at and
+// repository columns, such as review_bundles or checkpoint_waivers.
+func recordWindow(query StatsQuery) (string, []any) {
+	return whereClause([]queryFilter{
+		{"created_at >= ?", query.Since.UTC(), true},
+		{"created_at <= ?", query.Now.UTC(), true},
+		{"repository = ?", query.Repository, query.Repository != ""},
 	})
 }
 
@@ -58,12 +69,11 @@ func readStatsRows(tx *sql.Tx, query StatsQuery) (rows statsRows, err error) {
 	if rows.failures, err = readStatsFailures(tx, query); err != nil {
 		return statsRows{}, err
 	}
-	if rows.severities, err = readCounts[string](tx, query, `SELECT lower(f.severity),COUNT(*) FROM findings f JOIN reviews r ON r.id=f.review_id`, "GROUP BY 1"); err != nil {
+	digests, err := readStatsFindings(tx, query, &rows)
+	if err != nil {
 		return statsRows{}, err
 	}
-	if rows.verdicts, err = readCounts[model.Verdict](tx, query, `SELECT v.verdict,COUNT(*) FROM finding_verdicts v JOIN reviews r ON r.id=v.review_id
-		JOIN findings f ON f.review_id=v.review_id AND f.ordinal=v.ordinal
-		AND v.seq=(SELECT MAX(seq) FROM finding_verdicts c WHERE c.review_id=v.review_id AND c.ordinal=v.ordinal)`, "GROUP BY 1"); err != nil {
+	if rows.verdicts, err = readCurrentVerdicts(tx, query, digests); err != nil {
 		return statsRows{}, err
 	}
 	if rows.waivers, err = readWaiverCounts(tx, query); err != nil {
@@ -153,18 +163,68 @@ func readStatsFailures(tx *sql.Tx, query StatsQuery) (_ []statsFailure, returnEr
 	return failures, result.Err()
 }
 
-// readCounts runs a two-column name/count statement over the Reviews in the
-// window; the statement must join reviews as r.
-func readCounts[Name ~string](tx *sql.Tx, query StatsQuery, statement, suffix string) (map[Name]int, error) {
+// statsFinding names one Finding by its Review and ordinal.
+type statsFinding struct {
+	review  model.ReviewID
+	ordinal int
+}
+
+// readStatsFindings counts the window's Findings by severity into rows and
+// returns the digest of each Finding's current text.
+func readStatsFindings(tx *sql.Tx, query StatsQuery, rows *statsRows) (_ map[statsFinding]string, returnErr error) {
 	where, arguments := reviewWindow(query)
-	return scanCounts[Name](tx, strings.Join([]string{statement, where, suffix}, " "), arguments)
+	result, err := tx.Query(`SELECT f.review_id,f.ordinal,f.severity,f.category,f.location,f.failure,f.evidence,f.fix,f.test
+		FROM findings f JOIN reviews r ON r.id=f.review_id`+where, arguments...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { returnErr = errors.Join(returnErr, result.Close()) }()
+	digests := map[statsFinding]string{}
+	rows.severities = map[string]int{}
+	for result.Next() {
+		var key statsFinding
+		var finding model.Finding
+		if err := result.Scan(&key.review, &key.ordinal, &finding.Severity, &finding.Category, &finding.Location, &finding.Failure, &finding.Evidence, &finding.Fix, &finding.Test); err != nil {
+			return nil, err
+		}
+		digests[key] = model.FindingDigest(finding)
+		rows.severities[strings.ToLower(finding.Severity)]++
+	}
+	return digests, result.Err()
+}
+
+// readCurrentVerdicts counts each Finding's current Verdict: the latest one
+// recorded against the text the Finding holds now. A Verdict on earlier text
+// is stale and leaves the Finding unjudged.
+func readCurrentVerdicts(tx *sql.Tx, query StatsQuery, digests map[statsFinding]string) (_ map[model.Verdict]int, returnErr error) {
+	where, arguments := reviewWindow(query)
+	result, err := tx.Query(`SELECT v.review_id,v.ordinal,v.finding_digest,v.verdict
+		FROM finding_verdicts v JOIN reviews r ON r.id=v.review_id`+where+` ORDER BY v.seq`, arguments...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { returnErr = errors.Join(returnErr, result.Close()) }()
+	current := map[statsFinding]model.Verdict{}
+	for result.Next() {
+		var key statsFinding
+		var digest string
+		var verdict model.Verdict
+		if err := result.Scan(&key.review, &key.ordinal, &digest, &verdict); err != nil {
+			return nil, err
+		}
+		if digests[key] == digest {
+			current[key] = verdict
+		}
+	}
+	counts := map[model.Verdict]int{}
+	for _, verdict := range current {
+		counts[verdict]++
+	}
+	return counts, result.Err()
 }
 
 func readWaiverCounts(tx *sql.Tx, query StatsQuery) (map[string]int, error) {
-	where, arguments := whereClause([]queryFilter{
-		{"created_at >= ?", query.Since.UTC(), true},
-		{"repository = ?", query.Repository, query.Repository != ""},
-	})
+	where, arguments := recordWindow(query)
 	return scanCounts[string](tx, "SELECT waived_by,COUNT(*) FROM checkpoint_waivers"+where+" GROUP BY 1", arguments)
 }
 
@@ -187,10 +247,7 @@ func scanCounts[Name ~string](tx *sql.Tx, statement string, arguments []any) (_ 
 }
 
 func readStatsBundles(tx *sql.Tx, query StatsQuery) (_ []statsBundle, returnErr error) {
-	where, arguments := whereClause([]queryFilter{
-		{"created_at >= ?", query.Since.UTC(), true},
-		{"repository = ?", query.Repository, query.Repository != ""},
-	})
+	where, arguments := recordWindow(query)
 	result, err := tx.Query("SELECT lifecycle FROM review_bundles"+where, arguments...)
 	if err != nil {
 		return nil, err

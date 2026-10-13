@@ -129,3 +129,31 @@ func TestDurationPercentilesUseNearestRankOverCompletedReviews(t *testing.T) {
 		t.Fatalf("durations = %+v, want %+v", got, want)
 	}
 }
+
+func TestStatsLeavesAFindingWithAStaleVerdictUnjudged(t *testing.T) {
+	ledger := newTestLedger(t, t.TempDir())
+	defer closeTestResource(t, ledger.Close)
+	seedStatsLedger(t, ledger)
+	rewritten := ledgerFixture(model.LifecycleCompleted)
+	rewritten.Timings = &model.ReviewTimings{TotalMS: 60000}
+	rewritten.Result.Findings[0].Failure = "rewritten failure"
+	saveTestReviews(t, ledger, rewritten)
+	stats, err := ledger.Stats(StatsQuery{Since: statsNow.AddDate(0, 0, -2), Now: statsNow})
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireStatsField(t, "verdicts", stats.Verdicts, VerdictStats{Unjudged: 1})
+}
+
+func TestStatsExcludesRecordsCreatedAfterTheWindow(t *testing.T) {
+	ledger := newTestLedger(t, t.TempDir())
+	defer closeTestResource(t, ledger.Close)
+	seedStatsLedger(t, ledger)
+	stats, err := ledger.Stats(StatsQuery{Since: statsNow.AddDate(0, 0, -30), Now: statsNow.AddDate(0, 0, -29)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireStatsField(t, "runs", stats.Runs.Total, 1)
+	requireStatsField(t, "waivers", stats.CheckpointWaivers.Total, 0)
+	requireStatsField(t, "bundles", stats.Bundles.Total, 0)
+}
