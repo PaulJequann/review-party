@@ -55,11 +55,12 @@ type Item struct {
 
 // Snapshot is the read-only material shown by the shell.
 type Snapshot struct {
-	Repository string
-	Items      []Item
-	Templates  []configuration.Template
-	Overview   []string
-	Warnings   []string
+	Repository    string
+	Items         []Item
+	Templates     []configuration.Template
+	ReviewChoices []configuration.SelectedDefinition
+	Overview      []string
+	Warnings      []string
 }
 
 type areaRenderer func(Model, areaSpec, *strings.Builder, renderOptions)
@@ -145,6 +146,7 @@ type Model struct {
 	view         viewState
 	drafts       draftSet
 	form         formAdapter
+	quit         *quitConfirmation
 	formKind     formKind
 	session      *formSession
 	status       string
@@ -177,8 +179,19 @@ func (Model) Init() tea.Cmd { return nil }
 
 func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	model.ensureSession()
+	if owned, ok := message.(formMessage); ok {
+		return model.updateOwnedForm(owned)
+	}
+	if model.quit != nil {
+		switch input := message.(type) {
+		case tea.KeyPressMsg:
+			return model.updateQuit(input)
+		case tea.KeyReleaseMsg, tea.PasteMsg:
+			return model, nil
+		}
+	}
 	if isCtrlC(message) {
-		return model, tea.Quit
+		return model.requestQuit()
 	}
 	if size, ok := message.(tea.WindowSizeMsg); ok {
 		return model.updateWindow(size)
@@ -205,6 +218,9 @@ func isCtrlC(message tea.Msg) bool {
 func (model Model) updateWindow(message tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
 	model.width = max(message.Width, 1)
 	model.height = max(message.Height, 1)
+	if model.quit != nil {
+		model.quit.form, _ = model.quit.form.Update(tea.WindowSizeMsg{Width: model.width, Height: model.height - 4})
+	}
 	if model.view == viewForm {
 		updated, command := model.updateForm(message)
 		return refreshHubModel(updated), command
@@ -275,6 +291,10 @@ func (model Model) updateKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 func (model Model) updatePlanPreviewKey(key string) (tea.Model, tea.Cmd) {
 	switch key {
+	case "up", "k":
+		model.viewport.ScrollUp(1)
+	case "down", "j":
+		model.viewport.ScrollDown(1)
 	case "p":
 		if model.pending == nil {
 			model.status = "No publish command is available."
@@ -295,7 +315,7 @@ func (model Model) updatePlanPreviewKey(key string) (tea.Model, tea.Cmd) {
 func (model Model) updateBrowser(key string) (tea.Model, tea.Cmd) {
 	switch key {
 	case "q", "ctrl+c":
-		return model, tea.Quit
+		return model.requestQuit()
 	case "up", "k", "down", "j":
 		model.moveBrowserCursor(key)
 	case "esc":
@@ -402,7 +422,7 @@ func (model Model) updateSearch(key string) Model {
 func (model Model) updateNavigation(key string) (tea.Model, tea.Cmd) {
 	switch key {
 	case "q", "ctrl+c":
-		return model, tea.Quit
+		return model.requestQuit()
 	case "up", "k", "down", "j":
 		model.moveAreaForKey(key)
 	case "enter":
@@ -469,6 +489,9 @@ func (model Model) View() tea.View {
 		model.refreshViewport()
 		content = model.renderViewportFrame(model.renderViewportWindow(), renderOptions{styled: true})
 	}
+	if model.quit != nil {
+		content = model.renderQuit()
+	}
 	view := tea.NewView(content)
 	view.AltScreen = true
 	view.WindowTitle = "Review Party Configuration Hub"
@@ -477,6 +500,9 @@ func (model Model) View() tea.View {
 
 // Render returns a deterministic text view and is also used by accessible mode.
 func (model Model) Render() string {
+	if model.quit != nil {
+		return stripANSI(model.renderQuit())
+	}
 	if model.view == viewForm {
 		return model.renderForm()
 	}
@@ -597,7 +623,9 @@ func (model Model) renderViewportBody(options renderOptions, footer string) stri
 		return model.renderMenuBody(options, footer)
 	case viewBrowser:
 		return model.renderBrowserBody(options, footer)
-	case viewForm, viewPlanPreview:
+	case viewPlanPreview:
+		return model.renderPlanPreviewBody(options)
+	case viewForm:
 		return ""
 	}
 	return ""

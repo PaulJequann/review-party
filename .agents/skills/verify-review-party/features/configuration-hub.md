@@ -116,7 +116,11 @@ procedure in `features/README.md`. Every capture below goes to
    `e` on `ui-bugs`. Send Enter on the Reviewer select, wait for the Model
    select, and capture `edit-model.txt`; the cursor must be on
    `gpt-5.6-luna [current]`. Send `C-[` until the menu returns.
-12. **Exit.** Send `q` and require the session to exit. The run-owned
+12. **Retain drafts.** Send `q` and wait for `Discard unfinished drafts and
+   exit?`. Capture `quit-confirmation.txt`. Accept the default `Keep working`
+   choice and require the same menu and unfinished drafts to remain.
+13. **Discard and exit.** Send `q` again, choose `Discard and exit`, and require
+   the session to exit without publishing either draft. The run-owned
    repository Profile at
    `$run_dir/runtime/repository/.reviewparty/profiles/ui-bugs/profile.json`
    must exist, and no `ui-bugs` Profile may exist in the Global configuration

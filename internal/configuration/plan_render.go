@@ -41,6 +41,14 @@ func RenderResolvedReviewsHuman(output io.Writer, resolved ResolvedReviews) erro
 	if _, err := fmt.Fprintln(output, "resolved review selection:"); err != nil {
 		return err
 	}
+	for _, entry := range resolved.Authored {
+		if _, err := fmt.Fprintf(output, "  selected [%s] %s %s\n", entry.Scope, entry.Kind, entry.Name); err != nil {
+			return err
+		}
+	}
+	if _, err := fmt.Fprintf(output, "  effective concurrency: %d\n", resolved.ConcurrencyLimit); err != nil {
+		return err
+	}
 	for _, line := range RenderResolvedReviewLinesHuman(resolved) {
 		if _, err := fmt.Fprintln(output, line); err != nil {
 			return err

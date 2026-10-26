@@ -225,6 +225,15 @@ func planRequestCommand(ctx context.Context, manager *configuration.Manager, rep
 		if err := configuration.RenderPlanHuman(&summary, plan); err != nil {
 			return planFailedMsg{kind: request.kind, err: err}
 		}
+		if request.kind == planReviews {
+			intent, err := reviewIntentFromForm(request.review.draft, request.review.selection)
+			if err != nil {
+				return planFailedMsg{kind: request.kind, err: err}
+			}
+			if err := renderReviewSelectionPreview(&summary, manager, repository, intent.Selection); err != nil {
+				return planFailedMsg{kind: request.kind, err: err}
+			}
+		}
 		return planReadyMsg{
 			kind: request.kind, summary: summary.String(), warnings: plan.Warnings(),
 			publish: publishPlanCommand(publishRequest{
@@ -390,11 +399,20 @@ func reviewIntentFromForm(draft reviewFormDraft, selection configuration.ReviewS
 }
 
 func addReviewIntent(draft reviewFormDraft, selection configuration.ReviewSelection) (configuration.SetReviewSelection, error) {
-	item := configuration.SelectionItem{Profile: draft.name}
-	if draft.kind == "party" {
-		item = configuration.SelectionItem{Party: draft.name}
+	choice := draft.choice
+	if choice.Scope != configuration.ScopeGlobal && choice.Scope != configuration.ScopeRepository {
+		return configuration.SetReviewSelection{}, fmt.Errorf("choose an existing scoped Profile or Party")
 	}
-	return configuration.AddReviewSelection(selection, configuration.Scope(draft.scope), item), nil
+	var item configuration.SelectionItem
+	switch choice.Kind {
+	case configuration.ItemProfile:
+		item.Profile = choice.Name
+	case configuration.ItemParty:
+		item.Party = choice.Name
+	default:
+		return configuration.SetReviewSelection{}, fmt.Errorf("choose a Profile or Party")
+	}
+	return configuration.AddReviewSelection(selection, choice.Scope, item), nil
 }
 
 func removeReviewIntent(draft reviewFormDraft, selection configuration.ReviewSelection) (configuration.SetReviewSelection, error) {

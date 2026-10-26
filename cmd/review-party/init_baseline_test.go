@@ -271,7 +271,7 @@ func TestInitBaselineBindsATeammateCloneWithoutTouchingRepositoryConfiguration(t
 	if !bytes.Equal(teammate.repositoryConfiguration(t), committed) {
 		t.Fatal("binding changed Repository Configuration")
 	}
-	if exit, stdout, _ := teammate.run(t, commandIO{}); exit != 0 || !strings.HasPrefix(stdout, "Repository is ready") {
+	if exit, stdout, _ := teammate.run(t, commandIO{}); exit != 0 || !strings.Contains(stdout, "Saved review configuration is ready.") {
 		t.Fatalf("after binding exit = %d, stdout = %q", exit, stdout)
 	}
 }

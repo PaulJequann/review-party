@@ -11,7 +11,8 @@ import (
 )
 
 type reviewFormDraft struct {
-	operation, scope, kind, name, index, from, to, concurrency string
+	operation, scope, index, from, to, concurrency string
+	choice                                         configuration.SelectedDefinition
 }
 
 func (e *editor) editReviews() error {
@@ -63,6 +64,10 @@ func (e *editor) publishReviewSelection(intent configuration.SetReviewSelection)
 }
 
 func renderReviewSelectionPreview(output io.Writer, manager *configuration.Manager, repository configuration.Repository, selection configuration.ReviewSelection) error {
+	if len(selection.Global) == 0 && len(selection.Repository) == 0 {
+		_, err := fmt.Fprintf(output, "resolved review selection:\n  No reviews selected.\n  effective concurrency: %d\n", selection.ConcurrencyLimit)
+		return err
+	}
 	resolved, err := manager.ResolveReviewSelection(repository, selection)
 	if err != nil {
 		return fmt.Errorf("resolve staged review selection: %w", err)
@@ -87,12 +92,19 @@ func (e *editor) reviewIntent(operation string, selection configuration.ReviewSe
 
 func (e *editor) addReview(selection configuration.ReviewSelection) (configuration.SetReviewSelection, error) {
 	draft := &e.draftSet().reviews
-	err := e.form(huh.NewSelect[string]().Title("Selection group").Options(scopeOptions()...).Value(&draft.scope), huh.NewSelect[string]().Title("Kind").Options(huh.NewOption("Profile", "profile"), huh.NewOption("Party", "party")).Value(&draft.kind), huh.NewInput().Title("Name").Value(&draft.name))
-	item := configuration.SelectionItem{Profile: draft.name}
-	if draft.kind == "party" {
-		item = configuration.SelectionItem{Party: draft.name}
+	options := reviewChoiceOptions(e.snapshot.ReviewChoices)
+	if len(options) == 0 {
+		return configuration.SetReviewSelection{}, fmt.Errorf("%s", emptyReviewChoices)
 	}
-	return configuration.AddReviewSelection(selection, configuration.Scope(draft.scope), item), err
+	if _, err := fmt.Fprintln(e.Output, addReviewDescription); err != nil {
+		return configuration.SetReviewSelection{}, err
+	}
+	if err := e.form(huh.NewSelect[configuration.SelectedDefinition]().
+		Title("Profile or Party to add").Description(addReviewDescription).
+		Options(options...).Value(&draft.choice)); err != nil {
+		return configuration.SetReviewSelection{}, err
+	}
+	return addReviewIntent(*draft, selection)
 }
 
 func (e *editor) removeReview(selection configuration.ReviewSelection) (configuration.SetReviewSelection, error) {

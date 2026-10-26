@@ -297,10 +297,15 @@ func (model *Model) openReviewFieldsForm() tea.Cmd {
 	var fields []huh.Field
 	switch draft.operation {
 	case "add":
+		options := reviewChoiceOptions(model.snapshot.ReviewChoices)
+		if len(options) == 0 {
+			model.toMenu()
+			model.status = emptyReviewChoices
+			return nil
+		}
 		fields = []huh.Field{
-			huh.NewSelect[string]().Title("Selection group").Options(scopeOptions()...).Value(&draft.scope),
-			huh.NewSelect[string]().Title("Kind").Options(huh.NewOption("Profile", "profile"), huh.NewOption("Party", "party")).Value(&draft.kind),
-			huh.NewInput().Title("Name").Value(&draft.name),
+			huh.NewSelect[configuration.SelectedDefinition]().Title("Profile or Party to add").
+				Description(addReviewDescription).Options(options...).Value(&draft.choice).WithHeight(8),
 		}
 	case "remove":
 		fields = []huh.Field{
@@ -619,6 +624,7 @@ func (model *Model) receivePlan(message planReadyMsg) (tea.Model, tea.Cmd) {
 	model.pendingKind = message.kind
 	model.pending = message.publish
 	model.planSummary = message.summary
+	model.viewport.GotoTop()
 	model.planWarnings = message.warnings
 	model.status = ""
 	model.view = viewPlanPreview

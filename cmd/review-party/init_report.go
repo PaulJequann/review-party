@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"io"
 	"path/filepath"
 	"slices"
@@ -64,7 +65,24 @@ func (report initReport) lines() ([]string, error) {
 	if lines := report.unresolvedLines(binding, baseline, selection); len(lines) > 0 {
 		return lines, nil
 	}
-	return []string{"Repository is ready: review-party run --repo " + shellWord(string(report.repository)) + report.config}, nil
+	if len(selection.Global)+len(selection.Repository) == 0 {
+		return report.selectionLines(baseline)
+	}
+	resolved, err := report.manager.ResolveRun(configuration.RunRequest{Repository: report.repository})
+	if err != nil {
+		return nil, err
+	}
+	profiles := make([]string, 0, len(resolved.Expanded))
+	for _, profile := range resolved.Expanded {
+		profiles = append(profiles, string(profile.Scope)+":"+profile.Profile)
+	}
+	return []string{
+		"Saved review configuration is ready.",
+		"Effective Profiles: " + strings.Join(profiles, ", "),
+		fmt.Sprintf("Repository concurrency: %d", resolved.ConcurrencyLimit),
+		"Reviewer access and execution are unverified.",
+		"Next: review-party run --repo " + shellWord(string(report.repository)) + report.config,
+	}, nil
 }
 
 // unresolvedLines names each definition a declared selection lacks, with a
