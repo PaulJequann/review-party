@@ -63,3 +63,69 @@ func TestPublicationRollsBackMixedFileAndProfileTransaction(t *testing.T) {
 		t.Fatalf("Profile survived rollback: %v", err)
 	}
 }
+
+func TestPublicationClosesOpenedRoots(t *testing.T) {
+	for _, failure := range []string{"none", "file-staging", "file-committed", "profile-staging", "profile-committed", "rollback"} {
+		t.Run(failure, func(t *testing.T) {
+			anchor := t.TempDir()
+			plan := publicationPlan{
+				files: []pendingWrite{{scope: ScopeGlobal, anchor: anchor, path: filepath.Join(anchor, "config.json"), payload: []byte("config")}},
+				profiles: []pendingProfilePublication{{
+					scope: ScopeGlobal, anchor: anchor, directory: filepath.Join(anchor, "profiles", "security"),
+					metadata: []byte("metadata"), instructions: []byte("instructions"),
+				}},
+			}
+			forced := errors.New("forced post-commit failure")
+			var roots []*os.Root
+			module := newPublicationModule()
+			module.writeFile = func(write *pendingWrite) error {
+				if failure == "file-staging" {
+					if err := os.Mkdir(write.path, 0o700); err != nil {
+						t.Fatal(err)
+					}
+				}
+				err := writeAtomically(write)
+				roots = append(roots, write.root)
+				if err == nil && failure == "file-committed" {
+					return forced
+				}
+				return err
+			}
+			module.writeProfile = func(profile *pendingProfilePublication) error {
+				if failure == "profile-staging" {
+					writeDocument(t, filepath.Dir(profile.directory), "obstructed")
+				}
+				err := writeProfileAtomically(profile)
+				roots = append(roots, profile.root)
+				if err == nil && failure == "rollback" {
+					if err := profile.root.Close(); err != nil {
+						t.Fatal(err)
+					}
+					return forced
+				}
+				if err == nil && failure == "profile-committed" {
+					return forced
+				}
+				return err
+			}
+			err := module.publish(plan)
+			if (err == nil) != (failure == "none") {
+				t.Fatalf("publication error = %v for failure %q", err, failure)
+			}
+			if failure == "rollback" && (!errors.Is(err, forced) || !errors.Is(err, os.ErrClosed)) {
+				t.Fatalf("publication error = %v, want commit and rollback failures", err)
+			}
+			for index, root := range roots {
+				if root == nil {
+					t.Fatalf("write %d did not open a root", index)
+				}
+				if _, err := root.Stat("."); !errors.Is(err, os.ErrClosed) {
+					t.Errorf("root %d survived publication: %v", index, err)
+				}
+			}
+			if plan.files[0].root != nil || plan.profiles[0].root != nil || plan.files[0].complete || plan.profiles[0].complete {
+				t.Fatal("publication mutated the reusable plan")
+			}
+		})
+	}
+}

@@ -10,15 +10,15 @@ import (
 )
 
 func TestGlobalProfilePublicationCreatesMissingAncestors(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("HOME/.config and XDG_CONFIG_HOME are Linux configuration paths")
+	}
 	for _, configHome := range []string{"", "config", "missing/nested/config"} {
 		t.Run("XDG="+configHome, func(t *testing.T) {
 			home := t.TempDir()
 			t.Setenv("HOME", home)
 			t.Setenv("XDG_CONFIG_HOME", "")
 			if configHome == "" {
-				if runtime.GOOS != "linux" {
-					t.Skip("HOME/.config is the Linux default")
-				}
 				if err := os.Unsetenv("XDG_CONFIG_HOME"); err != nil {
 					t.Fatal(err)
 				}
@@ -70,6 +70,31 @@ func TestGlobalConfigurationPublicationCreatesMissingAncestors(t *testing.T) {
 		t.Fatalf("state directory = %#v", effective.StateDirectory)
 	}
 	assertPublicationTreeModes(t, home, 0o700, 0o600)
+}
+
+func TestGlobalPublicationPreservesExistingIntermediateAncestorPermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permissions are not supported on Windows")
+	}
+	base := t.TempDir()
+	existing := filepath.Join(base, "shared", "config")
+	if err := os.MkdirAll(existing, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(existing, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	manager := testManager(t, filepath.Join(existing, "missing", "nested", "review-party"))
+	plan := requireProfilePlan(t, manager, ancestorProfileDraft(ScopeGlobal))
+	assertPublicationPathAbsent(t, filepath.Join(existing, "missing"))
+	if err := manager.Publish(plan); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(existing)
+	if err != nil || info.Mode().Perm() != 0o750 {
+		t.Fatalf("existing intermediate ancestor permissions changed: info %v, error %v", info, err)
+	}
+	assertPublicationTreeModes(t, existing, 0o700, 0o600)
 }
 
 func TestInvalidProfilePlanDoesNotCreateAncestors(t *testing.T) {
@@ -131,7 +156,7 @@ func assertPublicationTreeModes(t *testing.T, base string, directoryMode, fileMo
 		if entry.IsDir() {
 			want = directoryMode
 		}
-		if info.Mode().Perm() != want || strings.HasSuffix(entry.Name(), ".tmp") {
+		if (runtime.GOOS != "windows" && info.Mode().Perm() != want) || strings.HasSuffix(entry.Name(), ".tmp") {
 			t.Errorf("published path %q has mode %v, want %v and no staging debris", path, info.Mode().Perm(), want)
 		}
 		return nil

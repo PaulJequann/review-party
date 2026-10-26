@@ -35,6 +35,7 @@ func newPublicationModule() *publicationModule {
 type pendingProfilePublication struct {
 	scope        Scope
 	anchor       string
+	root         *os.Root
 	directory    string
 	metadata     []byte
 	instructions []byte
@@ -44,6 +45,7 @@ type pendingProfilePublication struct {
 type pendingWrite struct {
 	scope    Scope
 	anchor   string
+	root     *os.Root
 	path     string
 	payload  []byte
 	backup   []byte
@@ -75,21 +77,40 @@ type publicationAdapter[T any] struct {
 	description func(T) string
 }
 
-func (module *publicationModule) publish(plan publicationPlan) error {
-	files, err := publishBatch(plan.files, module.fileAdapter())
-	if err != nil {
+func (module *publicationModule) publish(plan publicationPlan) (returnErr error) {
+	// Roots belong to these transaction-local copies and stay open through rollback.
+	plan.files = append([]pendingWrite(nil), plan.files...)
+	plan.profiles = append([]pendingProfilePublication(nil), plan.profiles...)
+	defer func() {
+		returnErr = errors.Join(returnErr, plan.closeRoots())
+	}()
+	if err := publishBatch(plan.files, module.fileAdapter()); err != nil {
 		return err
 	}
-	if _, err := publishBatch(plan.profiles, module.profileAdapter()); err != nil {
-		return errors.Join(err, rollbackBatch(files, module.fileAdapter()))
+	if err := publishBatch(plan.profiles, module.profileAdapter()); err != nil {
+		return errors.Join(err, rollbackBatch(plan.files, module.fileAdapter()))
 	}
 	return nil
 }
 
-func publishBatch[T any](planned []T, adapter publicationAdapter[T]) ([]T, error) {
-	items := append([]T(nil), planned...)
+func (plan publicationPlan) closeRoots() error {
+	var failures []error
+	for _, write := range plan.files {
+		if write.root != nil {
+			failures = append(failures, write.root.Close())
+		}
+	}
+	for _, profile := range plan.profiles {
+		if profile.root != nil {
+			failures = append(failures, profile.root.Close())
+		}
+	}
+	return errors.Join(failures...)
+}
+
+func publishBatch[T any](items []T, adapter publicationAdapter[T]) error {
 	if err := prepareBatch(items, adapter); err != nil {
-		return nil, err
+		return err
 	}
 	return commitBatch(items, adapter)
 }
@@ -103,14 +124,14 @@ func prepareBatch[T any](items []T, adapter publicationAdapter[T]) error {
 	return nil
 }
 
-func commitBatch[T any](items []T, adapter publicationAdapter[T]) ([]T, error) {
+func commitBatch[T any](items []T, adapter publicationAdapter[T]) error {
 	for index := range items {
 		if err := adapter.commit(&items[index]); err != nil {
 			failure := fmt.Errorf("publish %s: %w", adapter.description(items[index]), err)
-			return nil, errors.Join(failure, rollbackBatch(items[:index+1], adapter))
+			return errors.Join(failure, rollbackBatch(items[:index+1], adapter))
 		}
 	}
-	return items, nil
+	return nil
 }
 
 func rollbackBatch[T any](items []T, adapter publicationAdapter[T]) error {
@@ -209,9 +230,7 @@ func writeProfileAtomically(publication *pendingProfilePublication) (returnErr e
 	if err != nil {
 		return err
 	}
-	defer func() {
-		returnErr = errors.Join(returnErr, root.Close())
-	}()
+	publication.root = root
 	relative, err := filepath.Rel(publication.anchor, publication.directory)
 	if err != nil {
 		return err
@@ -284,9 +303,7 @@ func writeAtomically(write *pendingWrite) (returnErr error) {
 	if err != nil {
 		return err
 	}
-	defer func() {
-		returnErr = errors.Join(returnErr, root.Close())
-	}()
+	write.root = root
 	relative, err := filepath.Rel(write.anchor, write.path)
 	if err != nil {
 		return err
@@ -330,14 +347,8 @@ func writeTemporaryPayload(file *os.File, payload []byte, permissions fs.FileMod
 	return file.Close()
 }
 
-func removeProfilePublication(publication pendingProfilePublication) (returnErr error) {
-	root, err := os.OpenRoot(publication.anchor)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		returnErr = errors.Join(returnErr, root.Close())
-	}()
+func removeProfilePublication(publication pendingProfilePublication) error {
+	root := publication.root
 	relative, err := filepath.Rel(publication.anchor, publication.directory)
 	if err != nil {
 		return err
@@ -348,14 +359,8 @@ func removeProfilePublication(publication pendingProfilePublication) (returnErr 
 	return syncRootedDirectory(root, filepath.Dir(relative))
 }
 
-func restoreFile(write pendingWrite) (returnErr error) {
-	root, err := os.OpenRoot(write.anchor)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		returnErr = errors.Join(returnErr, root.Close())
-	}()
+func restoreFile(write pendingWrite) error {
+	root := write.root
 	relative, err := filepath.Rel(write.anchor, write.path)
 	if err != nil {
 		return err

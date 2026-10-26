@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -14,7 +15,7 @@ func TestPublicationRootPreservesExistingSymlinkPrefixes(t *testing.T) {
 			base, target := t.TempDir(), t.TempDir()
 			link := filepath.Join(base, "linked")
 			if err := os.Symlink(target, link); err != nil {
-				t.Fatal(err)
+				t.Skipf("symlinks unavailable: %v", err)
 			}
 			manager := testManager(t, filepath.Join(link, suffix, "review-party"))
 			plan := requireProfilePlan(t, manager, ancestorProfileDraft(ScopeGlobal))
@@ -22,7 +23,9 @@ func TestPublicationRootPreservesExistingSymlinkPrefixes(t *testing.T) {
 				t.Fatal(err)
 			}
 			requireProfile(t, manager, ScopeGlobal, "security")
-			assertPrivateFile(t, filepath.Join(target, suffix, "review-party", "profiles", "security", "profile.json"))
+			if runtime.GOOS != "windows" {
+				assertPrivateFile(t, filepath.Join(target, suffix, "review-party", "profiles", "security", "profile.json"))
+			}
 		})
 	}
 }
@@ -37,6 +40,9 @@ func TestPublicationRootRejectsObstructedAncestors(t *testing.T) {
 				err = os.WriteFile(blocked, []byte("keep"), 0o600)
 			} else {
 				err = os.Symlink(filepath.Join(base, "absent"), blocked)
+				if err != nil {
+					t.Skipf("symlinks unavailable: %v", err)
+				}
 			}
 			if err != nil {
 				t.Fatal(err)
@@ -59,7 +65,7 @@ func TestPublicationChildRejectsSuffixSymlinks(t *testing.T) {
 				linkTarget = t.TempDir()
 			}
 			if err := os.Symlink(linkTarget, filepath.Join(base, "child")); err != nil {
-				t.Fatal(err)
+				t.Skipf("symlinks unavailable: %v", err)
 			}
 			parent := requirePublicationRoot(t, ScopeGlobal, base)
 			child, err := openPublicationChild(parent, "child")
@@ -79,7 +85,7 @@ func TestPublicationChildRetainsParentAfterPathReplacement(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(outside, path); err != nil {
-		t.Fatal(err)
+		t.Skipf("symlinks unavailable: %v", err)
 	}
 	child, err := openPublicationChild(parent, "config")
 	if err != nil {
@@ -104,6 +110,9 @@ func TestPublicationRootDoesNotCreateRepositoryAnchor(t *testing.T) {
 }
 
 func TestGlobalPublicationReportsAncestorPermissionFailure(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permissions are not supported on Windows")
+	}
 	if os.Geteuid() == 0 {
 		t.Skip("root bypasses directory permissions")
 	}
