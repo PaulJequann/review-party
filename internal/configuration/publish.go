@@ -205,7 +205,7 @@ func readCurrentContents(anchor, path string) ([]byte, fs.FileMode, bool, error)
 }
 
 func writeProfileAtomically(publication *pendingProfilePublication) (returnErr error) {
-	root, err := os.OpenRoot(publication.anchor)
+	root, err := openPublicationRoot(publication.scope, publication.anchor)
 	if err != nil {
 		return err
 	}
@@ -280,7 +280,7 @@ func syncRootedDirectory(root *os.Root, path string) (returnErr error) {
 }
 
 func writeAtomically(write *pendingWrite) (returnErr error) {
-	root, err := os.OpenRoot(write.anchor)
+	root, err := openPublicationRoot(write.scope, write.anchor)
 	if err != nil {
 		return err
 	}
