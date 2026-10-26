@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"reflect"
 	"strings"
 	"testing"
@@ -73,15 +74,15 @@ func (journey *checkpointJourney) run(t *testing.T, script ...string) string {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	return journey.runWithContext(t, ctx, script...)
+	return journey.runWithContext(t, ctx, newHoldingInput(strings.Join(script, "\n")))
 }
 
-func (journey *checkpointJourney) runWithContext(t *testing.T, ctx context.Context, script ...string) string {
+func (journey *checkpointJourney) runWithContext(t *testing.T, ctx context.Context, input io.ReadCloser) string {
 	t.Helper()
 	var output bytes.Buffer
 	err := RunFirstUse(journey.manager, RunOptions{
 		Context: ctx, Repository: journey.repository, Accessible: true, InstallCheckpointHooks: journey.installer.install, AgentsOnPath: journey.onPath,
-		Input: newHoldingInput(strings.Join(script, "\n")), Output: &output,
+		Input: input, Output: &output,
 	})
 	if err != nil || ctx.Err() != nil {
 		t.Fatalf("RunFirstUse: %v; context: %v\noutput:\n%s", err, ctx.Err(), output.String())
@@ -151,15 +152,16 @@ func TestFirstUseWarnsWhenMarkdownExemptionsSkipADocumentationProfile(t *testing
 func TestFirstUseDoesNotTakeAProfileNamedForDocsAsADocumentationReview(t *testing.T) {
 	journey := newTemplateCheckpointJourney(t, "docs", "bugs")
 
+	checkpoint := ""
+	requirement := ""
+	exemptions := "*.md"
+	allowance := "0"
+	budget := "3"
+	waiverPolicy := ""
+	teamFloor := "0"
+	publication := "n"
 	output := journey.run(t,
-		"",     // pre-push
-		"",     // requirement: reviewed
-		"*.md", // exemptions
-		"0",    // unreviewed lines
-		"3",    // review budget
-		"",     // waivers: human
-		"0",    // accept the team floor
-		"n",    // decline publication
+		checkpoint, requirement, exemptions, allowance, budget, waiverPolicy, teamFloor, publication,
 	)
 
 	if !strings.Contains(output, "Publish this complete plan?") || strings.Contains(output, "Setup stopped.") {

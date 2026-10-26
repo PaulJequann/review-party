@@ -49,7 +49,6 @@ func TestMain(m *testing.M) {
 	os.Exit(status)
 }
 
-// Clear caller routing once, before tests install their deliberate Git settings.
 func isolateGitTestEnvironment() {
 	output, err := exec.Command("git", "rev-parse", "--local-env-vars").Output()
 	if err != nil {

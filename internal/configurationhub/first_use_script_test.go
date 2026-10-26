@@ -12,9 +12,11 @@ import (
 func TestCheckpointJourneyRejectsAnExhaustedScript(t *testing.T) {
 	if os.Getenv("REVIEW_PARTY_EXHAUST_CHECKPOINT_SCRIPT") == "1" {
 		journey := newCheckpointJourney(t, "bugs")
-		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		journey.runWithContext(t, ctx, "")
+		input := newHoldingInput("")
+		input.onExhausted = cancel
+		journey.runWithContext(t, ctx, input)
 		return
 	}
 
@@ -23,13 +25,15 @@ func TestCheckpointJourneyRejectsAnExhaustedScript(t *testing.T) {
 	child := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestCheckpointJourneyRejectsAnExhaustedScript$", "-test.v")
 	child.Env = append(os.Environ(), "REVIEW_PARTY_EXHAUST_CHECKPOINT_SCRIPT=1")
 	output, err := child.CombinedOutput()
+	if ctx.Err() != nil {
+		t.Fatalf("fixture child exceeded hang guard: %v\n%s", ctx.Err(), output)
+	}
 	if err == nil {
 		t.Fatalf("exhausted script silently passed:\n%s", output)
 	}
 	for _, want := range []string{
-		"RunFirstUse: <nil>; context: context deadline exceeded",
+		"context: context canceled",
 		"What should the Checkpoint require?",
-		"Setup stopped.",
 	} {
 		if !strings.Contains(string(output), want) {
 			t.Errorf("missing diagnostic %q in child failure %v:\n%s", want, err, output)
