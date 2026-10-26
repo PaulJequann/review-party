@@ -67,10 +67,10 @@ func runFirstUse(t *testing.T, manager *configuration.Manager, repository config
 	var output bytes.Buffer
 	err := RunFirstUse(manager, RunOptions{
 		Context: ctx, Repository: repository, Accessible: true,
-		Input: newHoldingInput(strings.Join(script, "\n") + "\n"), Output: &output,
+		Input: newHoldingInput(strings.Join(script, "\n")), Output: &output,
 	})
-	if err != nil {
-		t.Fatalf("RunFirstUse: %v\noutput:\n%s", err, output.String())
+	if err != nil || ctx.Err() != nil {
+		t.Fatalf("RunFirstUse: %v; context: %v\noutput:\n%s", err, ctx.Err(), output.String())
 	}
 	return output.String()
 }

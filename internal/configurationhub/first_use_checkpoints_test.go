@@ -73,13 +73,18 @@ func (journey *checkpointJourney) run(t *testing.T, script ...string) string {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	return journey.runWithContext(t, ctx, script...)
+}
+
+func (journey *checkpointJourney) runWithContext(t *testing.T, ctx context.Context, script ...string) string {
+	t.Helper()
 	var output bytes.Buffer
 	err := RunFirstUse(journey.manager, RunOptions{
 		Context: ctx, Repository: journey.repository, Accessible: true, InstallCheckpointHooks: journey.installer.install, AgentsOnPath: journey.onPath,
-		Input: newHoldingInput(strings.Join(script, "\n") + "\n"), Output: &output,
+		Input: newHoldingInput(strings.Join(script, "\n")), Output: &output,
 	})
-	if err != nil {
-		t.Fatalf("RunFirstUse: %v\noutput:\n%s", err, output.String())
+	if err != nil || ctx.Err() != nil {
+		t.Fatalf("RunFirstUse: %v; context: %v\noutput:\n%s", err, ctx.Err(), output.String())
 	}
 	return output.String()
 }
@@ -146,7 +151,24 @@ func TestFirstUseWarnsWhenMarkdownExemptionsSkipADocumentationProfile(t *testing
 func TestFirstUseDoesNotTakeAProfileNamedForDocsAsADocumentationReview(t *testing.T) {
 	journey := newTemplateCheckpointJourney(t, "docs", "bugs")
 
-	output := journey.run(t, "", "", "*.md", "0", "", "0", "n")
+	output := journey.run(t,
+		"",     // pre-push
+		"",     // requirement: reviewed
+		"*.md", // exemptions
+		"0",    // unreviewed lines
+		"3",    // review budget
+		"",     // waivers: human
+		"0",    // accept the team floor
+		"n",    // decline publication
+	)
+
+	if !strings.Contains(output, "Publish this complete plan?") || strings.Contains(output, "Setup stopped.") {
+		t.Fatalf("did not reach the publication decision normally:\n%s", output)
+	}
+	declared, err := journey.manager.Checkpoints(journey.repository)
+	if err != nil || len(declared) != 0 || len(journey.installer.installs) != 0 {
+		t.Fatalf("declined plan declared %#v, error %v, installs %q", declared, err, journey.installer.installs)
+	}
 
 	if strings.Contains(output, "warning: exempting *.md") {
 		t.Fatalf("warned for a bugs Profile named docs:\n%s", output)

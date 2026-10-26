@@ -46,8 +46,8 @@ func TestAccessibleProfileFlowAsksForInstructionsAfterFields(t *testing.T) {
 			Input: newHoldingInput(input), Output: &output,
 		},
 	}
-	if err := editor.createProfile(); err != nil {
-		t.Fatalf("createProfile: %v\noutput:\n%s", err, output.String())
+	if err := editor.createProfile(); err != nil || ctx.Err() != nil {
+		t.Fatalf("createProfile: %v; context: %v\noutput:\n%s", err, ctx.Err(), output.String())
 	}
 
 	fieldsAt := strings.Index(output.String(), "Profile name")
