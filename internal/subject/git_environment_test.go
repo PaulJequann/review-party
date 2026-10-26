@@ -66,9 +66,9 @@ func TestGitFixtureChild(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(repository, ".git", "index")); err != nil {
 		t.Fatalf("fixture does not own its index: %v", err)
 	}
-	for _, key := range []string{"GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0", "GIT_CONFIG_KEY_99", "GIT_CONFIG_VALUE_99"} {
+	for _, key := range []string{"GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0", "GIT_CONFIG_KEY_99", "GIT_CONFIG_VALUE_99"} {
 		if _, found := os.LookupEnv(key); found {
-			t.Errorf("inherited config injection remains: %s", key)
+			t.Errorf("inherited Git routing remains: %s", key)
 		}
 	}
 	for _, key := range []string{"reviewparty.inheritedGlobal", "reviewparty.inheritedSystem"} {
