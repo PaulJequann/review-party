@@ -43,7 +43,7 @@ func TestRenderResolvedReviewsHuman(t *testing.T) {
 				{Scope: ScopeGlobal, Profile: "bugs", Origin: "reviews.global[0]"},
 				{Scope: ScopeRepository, Profile: "security", Origin: "reviews.repository[0]"},
 			}},
-			want: "resolved review selection:\n" +
+			want: "resolved review selection:\n  effective concurrency: 0\n" +
 				"  1. [global] bugs (reviews.global[0])\n" +
 				"  2. [repository] security (reviews.repository[0])\n",
 		},
@@ -53,7 +53,7 @@ func TestRenderResolvedReviewsHuman(t *testing.T) {
 				Expanded:     []ExpandedProfile{{Scope: ScopeGlobal, Profile: "bugs", Origin: "reviews.global[0]"}},
 				Deduplicated: []SkippedProfile{{Scope: ScopeGlobal, Profile: "bugs", Origin: "party baseline#0", KeptOrigin: "reviews.global[0]"}},
 			},
-			want: "resolved review selection:\n" +
+			want: "resolved review selection:\n  effective concurrency: 0\n" +
 				"  1. [global] bugs (reviews.global[0])\n" +
 				"  deduplicated [global] bugs from party baseline#0 (kept by reviews.global[0])\n",
 		},
@@ -62,13 +62,13 @@ func TestRenderResolvedReviewsHuman(t *testing.T) {
 			resolved: ResolvedReviews{Deduplicated: []SkippedProfile{{
 				Scope: ScopeRepository, Profile: "security", Origin: "same", KeptOrigin: "same",
 			}}},
-			want: "resolved review selection:\n" +
+			want: "resolved review selection:\n  effective concurrency: 0\n" +
 				"  deduplicated [repository] security from same\n",
 		},
 		{
 			name:     "warnings",
 			resolved: ResolvedReviews{Warnings: []ResolverWarning{{Message: "same name crosses scopes"}}},
-			want:     "resolved review selection:\n  warning: same name crosses scopes\n",
+			want:     "resolved review selection:\n  effective concurrency: 0\n  warning: same name crosses scopes\n",
 		},
 	}
 

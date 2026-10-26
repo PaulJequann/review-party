@@ -10,6 +10,7 @@ import (
 // be embedded directly in the tea.Model tree.
 type formAdapter struct {
 	form   *huh.Form
+	group  *huh.Group
 	width  int
 	height int
 }
@@ -17,19 +18,23 @@ type formAdapter struct {
 func newFormAdapter(fields []huh.Field, width, height int, theme huh.Theme) formAdapter {
 	width = max(width, 1)
 	height = max(height, 1)
-	form := huh.NewForm(huh.NewGroup(fields...)).
+	group := huh.NewGroup(fields...)
+	form := huh.NewForm(group).
 		WithWidth(max(width-4, 1)).
 		WithHeight(max(height-2, 1)).
 		WithTheme(theme).
 		WithShowHelp(false)
-	return formAdapter{form: form, width: width, height: height}
+	return formAdapter{form: form, group: group, width: width, height: height}
 }
 
 func (adapter formAdapter) Init() tea.Cmd {
 	if adapter.form == nil {
 		return nil
 	}
-	return adapter.form.Init()
+	// Activate the single group synchronously, then bind its messages to this
+	// form. Unowned Huh next-field messages can otherwise advance a newer form.
+	_ = adapter.form.Init()
+	return tea.Batch(adapter.command(adapter.group.Init()), tea.RequestWindowSize)
 }
 
 func (adapter formAdapter) Update(message tea.Msg) (formAdapter, tea.Cmd) {
@@ -50,7 +55,7 @@ func (adapter formAdapter) Update(message tea.Msg) (formAdapter, tea.Cmd) {
 	if key, ok := message.(tea.KeyPressMsg); ok && key.String() == "esc" {
 		adapter.form.State = huh.StateAborted
 	}
-	return adapter, command
+	return adapter, adapter.command(command)
 }
 
 func (adapter formAdapter) View() string {
@@ -65,4 +70,27 @@ func (adapter formAdapter) State() huh.FormState {
 		return huh.StateAborted
 	}
 	return adapter.form.State
+}
+
+// formMessage prevents a delayed update from an old form reaching its replacement.
+type formMessage struct {
+	form    *huh.Form
+	message tea.Msg
+}
+
+func (adapter formAdapter) command(command tea.Cmd) tea.Cmd {
+	if command == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		message := command()
+		if batch, ok := message.(tea.BatchMsg); ok {
+			commands := make([]tea.Cmd, 0, len(batch))
+			for _, child := range batch {
+				commands = append(commands, adapter.command(child))
+			}
+			return tea.BatchMsg(commands)
+		}
+		return formMessage{form: adapter.form, message: message}
+	}
 }

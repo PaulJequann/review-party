@@ -67,6 +67,9 @@ func printProfiles(output io.Writer, profiles []model.ProfileSummary, format str
 		return fmt.Errorf("unknown output format %q", format)
 	}
 	return writeCommandOutput(output, func(output *commandOutput) {
+		if len(profiles) == 0 {
+			output.write("No saved Review Profiles. Run review-party init --repo . in a terminal to create Profiles and select Reviews, or use review-party config profile create --help.\n")
+		}
 		for _, profile := range profiles {
 			if profile.Error != "" {
 				output.write("%s\tinvalid: %s\n", profile.Name, profile.Error)

@@ -69,6 +69,7 @@ func formHelpBindings() []bubbleskey.Binding {
 
 func planHelpBindings() []bubbleskey.Binding {
 	return []bubbleskey.Binding{
+		helpBinding("↑/↓", "scroll plan", "up", "down", "j", "k"),
 		helpBinding("p", "publish", "p"),
 		helpBinding("e", "revise", "e"),
 		helpBinding("esc", "cancel", "esc"),
@@ -91,6 +92,7 @@ func (model Model) browserHelpBindings() []bubbleskey.Binding {
 	case AreaProfiles:
 		bindings = append(bindings,
 			helpBinding("n", "new profile", "n"),
+			helpBinding("e", "edit execution", "e"),
 			helpBinding("p", "copy profile", "p"),
 		)
 	case AreaParties:

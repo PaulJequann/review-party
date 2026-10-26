@@ -126,7 +126,7 @@ func newRootCommand(streams commandIO) *cobra.Command {
 		Use:           "review-party",
 		Short:         "Run bounded code reviews through coding agents",
 		Long:          "Review Party resolves one repository's review selection into bounded agent runs and stores validated review records.",
-		Example:       "  review-party run --repo .\n  review-party run --profile code-quality --repo .\n  review-party config\n  review-party history --format json\n  review-party stats --since 7d --format json",
+		Example:       "  review-party init --repo .\n  review-party config show --repo .\n  review-party run --repo .\n  review-party run --profile code-quality --repo .\n  review-party config\n  review-party history --format json\n  review-party stats --since 7d --format json",
 		Version:       strings.SplitN(humanVersion(currentRuntimeProvenance()), "\n", 2)[0],
 		SilenceErrors: true,
 		SilenceUsage:  true,

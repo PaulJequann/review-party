@@ -3,52 +3,71 @@
 Review Party is an experimental code-review CLI for compiling named review
 profiles into bounded runs across different coding agents and transports.
 
-The accepted domain language lives in [`CONTEXT.md`](CONTEXT.md), and the
-confirmed product structure is captured in
-[`docs/product-model.md`](docs/product-model.md). Primary-source investigations
-live in [`docs/research`](docs/research/).
+## Install from the current checkout
 
-The accepted first implementation slice is documented in
-[`docs/design/conductor-v1.md`](docs/design/conductor-v1.md).
-
-## Local development installation
-
-Build and atomically install the current checkout into
-`${XDG_BIN_HOME:-$HOME/.local/bin}`:
+Install Go 1.26 or newer and Git, then run this from the checkout:
 
 ```sh
 ./scripts/install-local.sh
-review-party --version
+export PATH="${XDG_BIN_HOME:-$HOME/.local/bin}:$PATH"
 review-party version
 ```
 
-Pass a directory as the first argument to install elsewhere. The installer does
-not create configuration or state. Sync the tracked Profile Templates into
-complete executable Global Profiles for local dogfood with:
+The script builds and atomically installs `review-party` into
+`${XDG_BIN_HOME:-$HOME/.local/bin}`. Pass a directory as its first argument to
+install elsewhere, and add that directory to `PATH`. Re-run the script after
+updating the checkout. It does not create configuration or state.
+
+Install and authenticate the Reviewer CLI you intend to use, and choose a model
+that Reviewer accepts. Saving a Profile does not prove Reviewer access or a
+successful request. The examples below save `codex`, `gpt-5.6-luna`, `high`, and
+`8m`; choose execution settings available to you. Review Party never substitutes
+a different Reviewer or model.
+
+## Configure a repository and run its first Review
+
+The configuration terms describe separate choices:
+
+- A **Template** supplies judgment instructions. It cannot run.
+- A **Profile** saves instructions with a Reviewer, model, reasoning effort, and
+  Attempt deadline. It is executable.
+- A **Party** groups scoped Profile references in order, with a concurrency limit.
+- The **repository selection** chooses the Profiles and Parties for ordinary
+  `run`, with its own effective concurrency. Global definitions are reusable;
+  they run only when selected.
+
+From a Git repository, start initialization in a terminal:
 
 ```sh
-./scripts/sync-local-profiles.sh
+review-party init --repo .
 ```
 
-This command replaces the local `bugs`, `code-quality`, `documentation`, and
-`test-audit` Profile metadata and instructions. It reads Template content and
-revisions from the checkout, and fixes execution to the dogfood Reviewer
-settings. Environment variables named `REVIEW_PARTY_DOGFOOD_REVIEWER`,
-`REVIEW_PARTY_DOGFOOD_MODEL`, `REVIEW_PARTY_DOGFOOD_EFFORT`, and
-`REVIEW_PARTY_DOGFOOD_DEADLINE` may explicitly select different settings. Pass a
-Profiles directory as the first argument to target an isolated configuration.
-The default dogfood Attempt deadline is eight minutes.
-
-Run the installed-binary smoke check from an isolated repository and isolated
-XDG roots with:
+Choose the offered baseline or create Profiles and select them. The baseline is
+four Global Profiles and a Global Party named `baseline`. For explicit setup,
+choose the execution values yourself and authorize publication:
 
 ```sh
-./scripts/smoke-installed.sh "$(command -v review-party)"
+review-party init --repo . --baseline \
+  --reviewer codex --model gpt-5.6-luna --effort high --deadline 8m --yes
+review-party config show --repo .
+review-party profiles --repo .
 ```
 
-Review Party is pre-release. Re-run the installer and Profile sync after
-updating `main`, and use the installed binary rather than `go run` for ordinary
-dogfood Reviews.
+Inspect the selected Profiles and repository concurrency before running.
+Initialization reports saved configuration readiness and a next command;
+Reviewer access and execution remain unverified. `doctor` reports configuration
+and local integration facts, not a successful Review.
+
+When you want to start the Review, run:
+
+```sh
+review-party run --repo .
+```
+
+This command launches the selected Reviewers and may incur provider charges.
+The configuration walkthrough below does not need to execute it. Use
+`review-party config --repo .` to revisit configuration, or add `--accessible`
+for non-redrawing terminal prompts.
 
 ## Current CLI
 
@@ -117,8 +136,9 @@ personal hooks, preselecting the agents found on `PATH`. The journey ends with
 one line for each piece still missing.
 
 Without a terminal, `init` writes no configuration. It prints each missing
-piece on one line with the command that adds it, or
-`Repository is ready: review-party run --repo PATH`. A declared Checkpoint
+piece on one line with the command that adds it, or reports saved configuration readiness, the effective Profiles and concurrency,
+and `Next: review-party run --repo PATH`. Reviewer access and execution are
+unverified. A declared Checkpoint
 without a hook its Integrations list gets its own line naming `review-party
 checkpoint install <integration>`, or the snippet to add by hand when the git
 hook tool needs one. When a Checkpoint lists `codex`, a line names the Codex
@@ -184,10 +204,20 @@ Humans can open the recurring terminal shell for the current repository with
 `--accessible` for the same configuration operations through non-redrawing
 prompts in a terminal. An accessible form abort exits the Hub without
 publishing; ordinary focused-form cancellation returns to the Hub with its
-draft. Accessible mode still requires terminal input; non-TTY callers must use
+draft. With unfinished drafts, normal menu or browser `q` and deliberate
+`Ctrl+C` ask before discarding. The default keeps your work; choose No, Escape,
+or `Ctrl+C` in that confirmation to return to the same view. With no drafts,
+exit is direct. If a publication you already authorized finishes while the
+confirmation is open, the explicit exit confirmation remains until you answer
+or dismiss it, even if that publication cleared the last draft. Accessible
+explicit Exit also asks before discarding. EOF, canceled contexts, and terminal
+loss exit without a new prompt. Accessible mode still requires terminal input; non-TTY callers must use
 explicit commands. Opening, searching, navigating, cancelling an editor, and
-exiting the shell do not publish configuration. The Hub creates new Profiles
-and Parties; it does not edit existing definitions. It assembles Repository
+exiting the shell do not publish configuration. The Hub creates Profiles and
+Parties and edits an existing Profile's execution settings. In the normal
+Profiles browser, press `e` on a Profile to edit its Reviewer, model, effort,
+and deadline. Accessible mode offers `Edit an existing Profile` in Profiles.
+It assembles Repository
 Reviews and copies a Repository Profile only to Global Configuration. Each
 focused editor previews and confirms its Configuration Manager Plan before
 atomic publication. Instruction editing uses `$EDITOR`; export an argv-style
@@ -206,7 +236,10 @@ selected scope.
 
 For the shortest human path to a working repository selection, open the Hub,
 create a complete Profile from a Template, then add it under Repository Reviews
-and publish the reviewed changes:
+and publish the reviewed changes. Add offers valid existing Profiles and Parties
+with their scopes. It retains the current selection, and previews every authored
+entry, expanded Profile, deduplication fact, warning, and effective concurrency
+before publication:
 
 ```sh
 review-party config --repo .
@@ -227,6 +260,56 @@ review-party config reviews add --scope global --profile code-quality \
   --repo . --yes
 review-party config reviews set-concurrency 2 --repo . --yes
 ```
+
+### Create a custom daily Party
+
+Starting from the baseline above, create two Repository Profiles. These commands
+save configuration only and do not launch a Reviewer:
+
+```sh
+review-party config profile create daily-bugs --scope repository --repo . \
+  --template bugs --reviewer codex --model gpt-5.6-luna \
+  --effort high --deadline 8m --yes
+review-party config profile create daily-quality --scope repository --repo . \
+  --template code-quality --reviewer codex --model gpt-5.6-luna \
+  --effort high --deadline 8m --yes
+review-party config party create daily --scope repository --repo . \
+  --profile repository:daily-bugs --profile repository:daily-quality \
+  --concurrency-limit 2 --yes
+review-party config show --repo .
+```
+
+Inspect the authored selection before choosing an entry to remove. On this fresh
+baseline, `reviews.global` contains only `baseline`, at zero-based Global index
+0. An existing repository can have different entries and indices. Use its actual
+scope and index in the remove command.
+
+Add `repository:daily` first. Add retains baseline and any other selected entries;
+it does not switch the selection or adopt the Party's concurrency. After
+confirming baseline is Global entry 0, remove it, then explicitly set repository
+concurrency:
+
+```sh
+review-party config reviews add --scope repository --party repository:daily \
+  --repo . --yes
+review-party config reviews remove --scope global --index 0 --repo . --yes
+review-party config reviews set-concurrency 2 --repo . --yes
+review-party config show --repo .
+```
+
+For the fresh walkthrough, readback shows only Repository Party `daily`, expanded
+to `repository:daily-bugs` and `repository:daily-quality`, with repository
+concurrency 2. Other selections you retained also remain. These are separate
+publications; inspect again if you stop partway through.
+
+For one Review, select a Party without changing the saved repository selection:
+
+```sh
+review-party run --party repository:daily --repo .
+```
+
+This is a one-run selection override. It launches Reviewers when executed and
+uses the Party's concurrency. It does not override a Profile's execution settings.
 
 Run one exact saved Profile, one Party, or the repository's saved selection:
 
@@ -977,3 +1060,36 @@ displaying the warning. Copilot currently reports discovery as unsupported with
 its documented login action. Claude Code reports its authentication status and
 harness version but has no model-list interface, so its models are entered
 manually.
+
+## Contributor dogfood setup
+
+The accepted domain language lives in [`CONTEXT.md`](CONTEXT.md), and the product
+structure is captured in [`docs/product-model.md`](docs/product-model.md).
+Primary-source investigations live in [`docs/research`](docs/research/).
+
+Sync the tracked Profile Templates into
+complete executable Global Profiles for local dogfood with:
+
+```sh
+./scripts/sync-local-profiles.sh
+```
+
+This command replaces the local `bugs`, `code-quality`, `documentation`, and
+`test-audit` Profile metadata and instructions. It reads Template content and
+revisions from the checkout, and fixes execution to the dogfood Reviewer
+settings. Environment variables named `REVIEW_PARTY_DOGFOOD_REVIEWER`,
+`REVIEW_PARTY_DOGFOOD_MODEL`, `REVIEW_PARTY_DOGFOOD_EFFORT`, and
+`REVIEW_PARTY_DOGFOOD_DEADLINE` may explicitly select different settings. Pass a
+Profiles directory as the first argument to target an isolated configuration.
+The default dogfood Attempt deadline is eight minutes.
+
+Run the installed-binary smoke check from an isolated repository and isolated
+XDG roots with:
+
+```sh
+./scripts/smoke-installed.sh "$(command -v review-party)"
+```
+
+Review Party is pre-release. Re-run the installer and Profile sync after
+updating `main`, and use the installed binary rather than `go run` for ordinary
+dogfood Reviews.

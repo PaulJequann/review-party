@@ -166,6 +166,9 @@ func appendHubProfiles(snapshot *Snapshot, profiles []configuration.Definition[c
 		if profile.Err != nil {
 			detail = "invalid: " + profile.Err.Error()
 		}
+		if profile.Err == nil {
+			snapshot.ReviewChoices = append(snapshot.ReviewChoices, configuration.SelectedDefinition{Kind: configuration.ItemProfile, Name: profile.Name, Scope: profile.Scope})
+		}
 		snapshot.Items = append(snapshot.Items, Item{Scope: ItemScope(profile.Scope), Kind: itemProfile, Name: profile.Name, Detail: detail})
 	}
 }
@@ -175,6 +178,9 @@ func appendHubParties(snapshot *Snapshot, parties []configuration.Definition[con
 		detail := fmt.Sprintf("%s · concurrency %d", pluralizedCount("Profile", len(party.Value.Profiles)), party.Value.ConcurrencyLimit)
 		if party.Err != nil {
 			detail = "invalid: " + party.Err.Error()
+		}
+		if party.Err == nil {
+			snapshot.ReviewChoices = append(snapshot.ReviewChoices, configuration.SelectedDefinition{Kind: configuration.ItemParty, Name: party.Name, Scope: party.Scope})
 		}
 		snapshot.Items = append(snapshot.Items, Item{Scope: ItemScope(party.Scope), Kind: itemParty, Name: party.Name, Detail: detail})
 	}

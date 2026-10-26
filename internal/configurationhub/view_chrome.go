@@ -8,9 +8,11 @@ import (
 )
 
 func (model Model) renderPlanPreviewFrame(options renderOptions) string {
-	if model.showHelp {
-		return model.renderViewportFrame(model.renderHelpOverlay(options), options, model.renderPlanActionBar(options))
-	}
+	model.refreshViewport()
+	return model.renderViewportFrame(model.renderViewportWindow(), options, model.renderPlanActionBar(options))
+}
+
+func (model Model) renderPlanPreviewBody(options renderOptions) string {
 	var warnings strings.Builder
 	for _, warning := range model.planWarnings {
 		line := "▲ " + warning
@@ -27,11 +29,11 @@ func (model Model) renderPlanPreviewFrame(options renderOptions) string {
 	if warnings.Len() > 0 {
 		content = strings.TrimSuffix(warnings.String(), "\n") + "\n\n" + content
 	}
-	return model.renderViewportFrame(renderSizedBox(title, content, max(model.width, minBoxWidth), ""), options, model.renderPlanActionBar(options))
+	return renderSizedBox(title, content, max(model.width, minBoxWidth), "")
 }
 
 func (model Model) renderPlanActionBar(options renderOptions) string {
-	bar := renderActionHints(options, []actionHint{{key: "p", label: "publish"}, {key: "e", label: "revise"}, {key: "esc", label: "cancel"}})
+	bar := renderActionHints(options, []actionHint{{key: "↑/↓", label: "scroll"}, {key: "p", label: "publish"}, {key: "e", label: "revise"}, {key: "esc", label: "cancel"}})
 	return model.renderActionBarWithOutcome(bar, options)
 }
 

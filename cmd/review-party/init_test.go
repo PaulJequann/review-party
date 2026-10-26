@@ -192,7 +192,7 @@ func TestInitWithoutATerminalNamesEachDeclaredDefinitionThisCallerLacks(t *testi
 		t.Fatalf("stdout = %q, want %q", stdout, want)
 	}
 	_, stdout, _ = author.run(t, commandIO{})
-	if want := "Repository is ready: review-party run --repo " + author.repository + "\n"; stdout != want {
+	if want := expectedSavedReady(author.repository, "global:docs", 1, ""); stdout != want {
 		t.Fatalf("author stdout = %q, want %q", stdout, want)
 	}
 }
@@ -213,7 +213,7 @@ func TestInitInATerminalRunsTheFirstUseJourney(t *testing.T) {
 	if !slices.Equal(selection.Global, []configuration.SelectionItem{{Profile: "bugs"}}) {
 		t.Fatalf("selection = %#v, want the chosen Global Profile", selection)
 	}
-	if !strings.HasSuffix(stdout, "Repository is ready: review-party run --repo "+fixture.repository+"\n") {
+	if !strings.HasSuffix(stdout, expectedSavedReady(fixture.repository, "global:bugs", 1, "")) {
 		t.Fatalf("journey did not end with the remaining report:\n%s", stdout)
 	}
 }
@@ -234,7 +234,7 @@ func TestInitReportLeavesAHookOutsideTheTeamFloorToTheCaller(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, stdout, _ := fixture.run(t, commandIO{})
-	if want := "Repository is ready: review-party run --repo " + fixture.repository + "\n"; stdout != want {
+	if want := expectedSavedReady(fixture.repository, "global:docs", 1, ""); stdout != want {
 		t.Fatalf("stdout = %q, want only %q", stdout, want)
 	}
 }
@@ -246,7 +246,7 @@ func TestInitWithoutATerminalNamesEachCheckpointWithoutItsGitHook(t *testing.T) 
 		t.Fatalf("setup exit = %d, stderr = %q", exit, stderr)
 	}
 	fixture.declareCheckpoints(t, configuration.IntegrationGit, configuration.CheckpointPrePush, configuration.CheckpointPreCommit)
-	ready := "Repository is ready: review-party run --repo " + fixture.repository + "\n"
+	ready := expectedSavedReady(fixture.repository, "global:docs", 1, "")
 	install := "review-party checkpoint install git --repo " + fixture.repository + "\n"
 
 	_, stdout, _ := fixture.run(t, commandIO{})
@@ -295,7 +295,7 @@ func TestInitWithoutATerminalNamesTheHuskyActivationStep(t *testing.T) {
 		t.Fatal(err)
 	}
 	fixture.installHooks(t, configuration.IntegrationGit)
-	ready := "Repository is ready: review-party run --repo " + fixture.repository + "\n"
+	ready := expectedSavedReady(fixture.repository, "global:docs", 1, "")
 	if _, stdout, _ := fixture.run(t, commandIO{}); stdout != ready+"Checkpoint pre-push git hook does not run until husky is active in this clone: npx husky\n" {
 		t.Fatalf("inactive husky stdout = %q", stdout)
 	}
@@ -323,7 +323,7 @@ func TestInitReportHintsCarryAnAbsoluteConfiguration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "Repository is ready: review-party run --repo " + fixture.repository + configurationArgument(absolute) + "\n"
+	want := expectedSavedReady(fixture.repository, "global:docs", 1, configurationArgument(absolute))
 	if _, stdout, _ := fixture.run(t, commandIO{}, "--config", "relative.json"); stdout != want {
 		t.Fatalf("stdout = %q, want %q", stdout, want)
 	}
@@ -348,7 +348,7 @@ func TestInitWithoutATerminalNamesMissingAgentFloorHooks(t *testing.T) {
 	if err := fixture.manager.Publish(plan); err != nil {
 		t.Fatal(err)
 	}
-	ready := "Repository is ready: review-party run --repo " + fixture.repository + "\n"
+	ready := expectedSavedReady(fixture.repository, "global:docs", 1, "")
 	gitGap := "Checkpoint pre-commit has no git hook: review-party checkpoint install git --repo " + fixture.repository + "\n"
 
 	_, stdout, _ := fixture.run(t, commandIO{})
@@ -374,7 +374,7 @@ func TestInitWithoutATerminalNamesEachAgentsMDBlockGap(t *testing.T) {
 		t.Fatalf("setup exit = %d, stderr = %q", exit, stderr)
 	}
 	fixture.declareCheckpoints(t, configuration.IntegrationAgentsMD, configuration.CheckpointPrePush)
-	ready := "Repository is ready: review-party run --repo " + fixture.repository + "\n"
+	ready := expectedSavedReady(fixture.repository, "global:docs", 1, "")
 	install := "review-party checkpoint install agents-md --repo " + fixture.repository + "\n"
 	path := filepath.Join(fixture.repository, "AGENTS.md")
 
@@ -432,7 +432,7 @@ func TestInitInATerminalDeclaresACheckpointAndInstallsItsHook(t *testing.T) {
 	if err != nil || !strings.Contains(string(instructions), agentsMDBegin) {
 		t.Fatalf("AGENTS.md = %q, %v\n%s", instructions, err, stdout)
 	}
-	if !strings.HasSuffix(stdout, "Repository is ready: review-party run --repo "+fixture.repository+"\n") {
+	if !strings.HasSuffix(stdout, expectedSavedReady(fixture.repository, "global:bugs", 1, "")) {
 		t.Fatalf("an installed hook still reported missing:\n%s", stdout)
 	}
 }
