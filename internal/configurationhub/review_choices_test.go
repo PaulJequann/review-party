@@ -140,3 +140,58 @@ func TestRejectedStaleReviewChoiceRetainsDraft(t *testing.T) {
 		t.Fatalf("rejection lost draft: %#v", model.drafts.reviews)
 	}
 }
+
+func TestRemoveFinalReviewPreviewsAndPublishesInBothAdapters(t *testing.T) {
+	for _, accessible := range []bool{false, true} {
+		t.Run(fmt.Sprintf("accessible=%t", accessible), func(t *testing.T) {
+			manager := configuration.NewManager(configuration.Options{GlobalRoot: t.TempDir(), Reviewers: []string{"codex"}})
+			repository := configuration.Repository(t.TempDir())
+			publishPreviewProfile(t, manager, configuration.ScopeGlobal, "")
+			selection := configuration.ReviewSelection{ConcurrencyLimit: 2, Global: []configuration.SelectionItem{{Profile: "shared"}}}
+			plan, err := manager.Plan(repository, []configuration.Intent{configuration.SetReviewSelection{Selection: selection}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := manager.Publish(plan); err != nil {
+				t.Fatal(err)
+			}
+			draft := reviewFormDraft{operation: "remove", scope: "global", index: "0"}
+			message := planRequestCommand(context.Background(), manager, repository, nil, planRequest{
+				kind: planReviews, review: reviewPlanRequest{selection: selection, draft: draft},
+			})()
+			ready, ok := message.(planReadyMsg)
+			if !ok {
+				t.Fatalf("removing the final review did not produce a publishable preview: %#v", message)
+			}
+			for _, want := range []string{"No reviews selected", "effective concurrency: 2"} {
+				if !strings.Contains(ready.summary, want) {
+					t.Fatalf("preview lacks %q: %s", want, ready.summary)
+				}
+			}
+			before, _, err := manager.EffectiveReviewSelection(repository)
+			if err != nil || !reflect.DeepEqual(before, selection) {
+				t.Fatalf("preview published: %#v, %v", before, err)
+			}
+			if accessible {
+				var output bytes.Buffer
+				e := editor{manager: manager, RunOptions: RunOptions{Repository: repository, Accessible: true, Input: newLineInput("y\n"), Output: &output}}
+				intent, err := removeReviewIntent(draft, selection)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := e.publishReviewSelection(intent); err != nil {
+					t.Fatal(err)
+				}
+				if !strings.Contains(output.String(), "No reviews selected") {
+					t.Fatalf("accessible preview omitted empty workload: %s", output.String())
+				}
+			} else if result, ok := ready.publish().(publishResultMsg); !ok || result.err != nil || result.refreshErr != nil {
+				t.Fatalf("publish result = %#v", result)
+			}
+			after, source, err := manager.EffectiveReviewSelection(repository)
+			if err != nil || !source.Authored || len(after.Global)+len(after.Repository) != 0 || after.ConcurrencyLimit != 2 {
+				t.Fatalf("published selection = %#v, source = %#v, error = %v", after, source, err)
+			}
+		})
+	}
+}
