@@ -46,8 +46,8 @@ func TestAccessibleProfileFlowAsksForInstructionsAfterFields(t *testing.T) {
 			Input: newHoldingInput(input), Output: &output,
 		},
 	}
-	if err := editor.createProfile(); err != nil {
-		t.Fatalf("createProfile: %v\noutput:\n%s", err, output.String())
+	if err := editor.createProfile(); err != nil || ctx.Err() != nil {
+		t.Fatalf("createProfile: %v; context: %v\noutput:\n%s", err, ctx.Err(), output.String())
 	}
 
 	fieldsAt := strings.Index(output.String(), "Profile name")
@@ -68,10 +68,11 @@ func TestAccessibleProfileFlowAsksForInstructionsAfterFields(t *testing.T) {
 // blocks instead of returning EOF, so a stage-order mismatch aborts through
 // the context with output intact rather than panicking inside huh.
 type holdingInput struct {
-	lines   []string
-	next    int
-	release chan struct{}
-	once    sync.Once
+	lines       []string
+	next        int
+	release     chan struct{}
+	once        sync.Once
+	onExhausted func()
 }
 
 func newHoldingInput(script string) *holdingInput {
@@ -80,6 +81,9 @@ func newHoldingInput(script string) *holdingInput {
 
 func (input *holdingInput) Read(p []byte) (int, error) {
 	if input.next >= len(input.lines) {
+		if input.onExhausted != nil {
+			input.onExhausted()
+		}
 		<-input.release
 		return 0, io.EOF
 	}

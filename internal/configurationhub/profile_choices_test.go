@@ -135,8 +135,8 @@ func TestAccessibleProfileRefreshSelectsFreshModelAndEffort(t *testing.T) {
 		Context: ctx, Input: &signalAfterLines{holdingInput: newHoldingInput(input), remaining: 4, answered: answered},
 		Output: &output, Accessible: true, Discovery: service,
 	}}
-	if err := editor.createProfile(); err != nil {
-		t.Fatalf("create profile: %v\n%s", err, output.String())
+	if err := editor.createProfile(); err != nil || ctx.Err() != nil {
+		t.Fatalf("create profile: %v; context: %v\n%s", err, ctx.Err(), output.String())
 	}
 	profile, found, err := manager.LoadProfile(configuration.ScopeGlobal, "", "refreshed")
 	if err != nil || !found {
@@ -399,8 +399,8 @@ func TestAccessibleModelDefaultsToCurrentThenFirstModelThenRefresh(t *testing.T)
 				},
 			}
 			draft := configuration.ProfileDraft{Name: "bugs", Reviewer: "codex", Model: test.current}
-			if _, err := editor.editAccessibleModel(&draft, test.choices); err != nil {
-				t.Fatalf("edit model: %v\n%s", err, output.String())
+			if _, err := editor.editAccessibleModel(&draft, test.choices); err != nil || ctx.Err() != nil {
+				t.Fatalf("edit model: %v; context: %v\n%s", err, ctx.Err(), output.String())
 			}
 			if draft.Model != test.want {
 				t.Fatalf("model = %q, want %q\n%s", draft.Model, test.want, output.String())
