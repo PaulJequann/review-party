@@ -3,6 +3,7 @@ package configurationhub
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -147,7 +148,7 @@ func TestRemoveFinalReviewPreviewsAndPublishesInBothAdapters(t *testing.T) {
 			manager := configuration.NewManager(configuration.Options{GlobalRoot: t.TempDir(), Reviewers: []string{"codex"}})
 			repository := configuration.Repository(t.TempDir())
 			publishPreviewProfile(t, manager, configuration.ScopeGlobal, "")
-			selection := configuration.ReviewSelection{ConcurrencyLimit: 2, Global: []configuration.SelectionItem{{Profile: "shared"}}}
+			selection := configuration.ReviewSelection{ConcurrencyLimit: 2, Global: []configuration.SelectionItem{{Profile: "shared"}}, Repository: []configuration.SelectionItem{}}
 			plan, err := manager.Plan(repository, []configuration.Intent{configuration.SetReviewSelection{Selection: selection}})
 			if err != nil {
 				t.Fatal(err)
@@ -192,6 +193,28 @@ func TestRemoveFinalReviewPreviewsAndPublishesInBothAdapters(t *testing.T) {
 			if err != nil || !source.Authored || len(after.Global)+len(after.Repository) != 0 || after.ConcurrencyLimit != 2 {
 				t.Fatalf("published selection = %#v, source = %#v, error = %v", after, source, err)
 			}
+			if _, err := manager.ResolveReviewSelection(repository, after); !errors.Is(err, configuration.ErrNoRepositorySelection) {
+				t.Fatalf("empty selection became executable: %v", err)
+			}
 		})
+	}
+}
+
+func TestReviewPreviewRejectsUnresolvedDefinitions(t *testing.T) {
+	manager := configuration.NewManager(configuration.Options{GlobalRoot: t.TempDir(), Reviewers: []string{"codex"}})
+	repository := configuration.Repository(t.TempDir())
+	invalid := filepath.Join(string(repository), ".reviewparty", "profiles", "invalid")
+	if err := os.MkdirAll(invalid, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(invalid, "profile.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"missing", "invalid"} {
+		selection := configuration.ReviewSelection{ConcurrencyLimit: 2, Repository: []configuration.SelectionItem{{Profile: name}}}
+		var output bytes.Buffer
+		if err := renderReviewSelectionPreview(&output, manager, repository, selection); err == nil || !strings.Contains(err.Error(), "resolve staged review selection") {
+			t.Fatalf("preview accepted %s definition: %v", name, err)
+		}
 	}
 }

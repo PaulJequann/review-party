@@ -34,12 +34,16 @@ func (adapter formAdapter) Init() tea.Cmd {
 	// Activate the single group synchronously, then bind its messages to this
 	// form. Unowned Huh next-field messages can otherwise advance a newer form.
 	_ = adapter.form.Init()
-	return tea.Batch(adapter.command(adapter.group.Init()), tea.RequestWindowSize)
+	return tea.Batch(adapter.command(adapter.group.Init(), true), tea.RequestWindowSize)
 }
 
 func (adapter formAdapter) Update(message tea.Msg) (formAdapter, tea.Cmd) {
 	if adapter.form == nil {
 		return adapter, nil
+	}
+	owned, scoped := message.(formMessage)
+	if scoped {
+		message = owned.message
 	}
 	if size, ok := message.(tea.WindowSizeMsg); ok {
 		adapter.width = max(size.Width, 1)
@@ -55,7 +59,7 @@ func (adapter formAdapter) Update(message tea.Msg) (formAdapter, tea.Cmd) {
 	if key, ok := message.(tea.KeyPressMsg); ok && key.String() == "esc" {
 		adapter.form.State = huh.StateAborted
 	}
-	return adapter, adapter.command(command)
+	return adapter, adapter.command(command, scoped)
 }
 
 func (adapter formAdapter) View() string {
@@ -72,13 +76,12 @@ func (adapter formAdapter) State() huh.FormState {
 	return adapter.form.State
 }
 
-// formMessage prevents a delayed update from an old form reaching its replacement.
 type formMessage struct {
 	form    *huh.Form
 	message tea.Msg
 }
 
-func (adapter formAdapter) command(command tea.Cmd) tea.Cmd {
+func (adapter formAdapter) command(command tea.Cmd, scoped bool) tea.Cmd {
 	if command == nil {
 		return nil
 	}
@@ -87,10 +90,16 @@ func (adapter formAdapter) command(command tea.Cmd) tea.Cmd {
 		if batch, ok := message.(tea.BatchMsg); ok {
 			commands := make([]tea.Cmd, 0, len(batch))
 			for _, child := range batch {
-				commands = append(commands, adapter.command(child))
+				commands = append(commands, adapter.command(child, scoped))
 			}
 			return tea.BatchMsg(commands)
 		}
-		return formMessage{form: adapter.form, message: message}
+		// Huh navigation emits private group transitions after NextField and
+		// PrevField. Keep that command tree owned; ordinary field commands must
+		// reach Bubble Tea intact so its runtime can execute them.
+		if scoped || message == huh.NextField() || message == huh.PrevField() {
+			return formMessage{form: adapter.form, message: message}
+		}
+		return message
 	}
 }

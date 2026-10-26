@@ -115,7 +115,7 @@ func TestQuitOverlayAllowsBackgroundResultsAndResize(t *testing.T) {
 func TestOldFormMessagesCannotAdvanceNewFormOrQuit(t *testing.T) {
 	model := New(Snapshot{})
 	model.openForm(formParty, []huh.Field{huh.NewInput().Value(&model.session.party.name)})
-	message := model.form.command(huh.NextField)()
+	message := model.form.command(huh.NextField, false)()
 	model.drafts.profile = configuration.ProfileDraft{Name: "retained"}
 	updated, _ := model.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	model = requireHubModel(t, updated)
@@ -152,6 +152,20 @@ func settleQuit(t *testing.T, model Model, command tea.Cmd) (Model, bool) {
 		pending = append(pending, follow)
 	}
 	return model, false
+}
+
+func TestOldFormGroupCompletionCannotAdvanceReplacement(t *testing.T) {
+	model := New(Snapshot{})
+	model.openForm(formParty, []huh.Field{huh.NewInput().Value(&model.session.party.name)})
+	updated, completion := model.Update(model.form.command(huh.NextField, false)())
+	model = requireHubModel(t, updated)
+	model.session.copyName = "retained"
+	model.openForm(formCopy, []huh.Field{huh.NewInput().Value(&model.session.copyName)})
+	updated, _ = model.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+	model, quit := settleQuit(t, requireHubModel(t, updated), completion)
+	if quit || model.quit == nil || model.form.State() != huh.StateNormal || model.session.copyName != "retained" {
+		t.Fatal("stale group completion changed the replacement form or quit overlay")
+	}
 }
 
 func TestQuitDoesNotPasteIntoUnderlyingDraft(t *testing.T) {

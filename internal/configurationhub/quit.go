@@ -54,10 +54,10 @@ func (model Model) updateQuitForm(message tea.Msg) (tea.Model, tea.Cmd) {
 
 func (model Model) updateOwnedForm(message formMessage) (tea.Model, tea.Cmd) {
 	if model.quit != nil && message.form == model.quit.form.form {
-		return model.updateQuitForm(message.message)
+		return model.updateQuitForm(message)
 	}
 	if model.view == viewForm && message.form == model.form.form {
-		updated, command := model.updateForm(message.message)
+		updated, command := model.updateForm(message)
 		return refreshHubModel(updated), command
 	}
 	return model, nil

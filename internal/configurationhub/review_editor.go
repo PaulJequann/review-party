@@ -64,6 +64,10 @@ func (e *editor) publishReviewSelection(intent configuration.SetReviewSelection)
 }
 
 func renderReviewSelectionPreview(output io.Writer, manager *configuration.Manager, repository configuration.Repository, selection configuration.ReviewSelection) error {
+	if len(selection.Global) == 0 && len(selection.Repository) == 0 {
+		_, err := fmt.Fprintf(output, "resolved review selection:\n  No reviews selected.\n  effective concurrency: %d\n", selection.ConcurrencyLimit)
+		return err
+	}
 	resolved, err := manager.ResolveReviewSelection(repository, selection)
 	if err != nil {
 		return fmt.Errorf("resolve staged review selection: %w", err)
