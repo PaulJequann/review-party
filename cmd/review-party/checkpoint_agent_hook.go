@@ -101,9 +101,10 @@ Reads the PreToolUse event on standard input. A shell command with no git push
 or git commit exits 0 with no output before reading any configuration. A git
 push decides pre-push and a git commit decides pre-commit in the repository the
 command runs in. A refused Checkpoint prints a JSON PreToolUse deny whose
-reason names the next command, which %[1]s passes to the model. Setup,
-configuration, git, or parse errors print one warning as a JSON systemMessage.
-Both exit 0; only a failed write exits 1.`, adapter.agent, adapter.integration),
+reason names the next command, which %[1]s passes to the model. A declared
+Checkpoint whose check fails, such as on an unreadable review ledger, is denied
+the same way. Other setup, configuration, git, or parse errors print one
+warning as a JSON systemMessage. Both exit 0; only a failed write exits 1.`, adapter.agent, adapter.integration),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return commandResult(executeAgentHook(cmd.Context(), adapter, stringFlag(cmd, "config"), streams))

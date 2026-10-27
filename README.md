@@ -809,10 +809,12 @@ nothing, and a block someone edited is left alone.
 The hook refuses a change with unreviewed lines beyond the allowance, a spent
 budget, or unjudged Findings, with one line that names the Checkpoint and the
 next command. Only a spent budget adds the waive command, and only under
-`anyone`. When the hook
-cannot decide, because `review-party` is not on `PATH`, the configuration does
-not load, or git cannot name a base, it warns on one line and allows the push
-or commit.
+`anyone`. A declared Checkpoint whose check fails, for example on a review
+ledger it cannot read, is refused too, with one line that names the error: a
+Checkpoint that cannot be checked is not a pass. When the hook cannot tell
+whether a Checkpoint applies, because `review-party` is not on `PATH` or the
+configuration does not load, or when git cannot name a base, it warns on one
+line and allows the push or commit.
 
 Claude Code and Codex get the same Checkpoints from a `PreToolUse` hook that
 runs before the agent's shell runs `git push` or `git commit`:

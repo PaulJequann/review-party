@@ -121,6 +121,19 @@ func TestAgentHookRefusesCommitsItCannotSee(t *testing.T) {
 	assertRun(t, hook("git push origin main"), commandRun{})
 }
 
+func TestAgentHookRefusesADeclaredCheckpointItCannotCheck(t *testing.T) {
+	fixture := newCheckpointFixture(t)
+	fixture.declare("pre-push")
+	fixture.git("update-ref", "refs/remotes/origin/main", fixture.base)
+	fixture.commit("one.go", "package app\n\nconst one = 1\n")
+	fixture.dropWaiverRepositoryColumn()
+
+	refusal := denial("pre-push Checkpoint could not be checked: " + waiverColumnError + "; fix that and retry, or stop and ask a person").run()
+	for _, adapter := range agentIntegrations {
+		assertRun(t, fixture.agentHook(adapter.integration, codexEvent(t, toolCall{"Bash", "git push", fixture.repository})), refusal)
+	}
+}
+
 func TestAgentHookWarnsAndAllowsWithoutADecision(t *testing.T) {
 	fixture := newCheckpointFixture(t)
 	fixture.declare("pre-push")

@@ -199,10 +199,16 @@ malformed segment. Exemptions filter both the Checkpoint change and each
 candidate Review's recorded change before they are compared, so a Review of
 the code alone covers a push that also edits exempt files.
 
-**Hook error policy.** The git hook refuses, with exit 1, only when it reached
-a decision and the change does not pass. When `review-party` is missing, the
-configuration does not load, the ref lines do not parse, git fails, or no base
-can be found, the hook prints one warning line and exits 0. An undeclared
+**Hook error policy.** The git hook refuses, with exit 1, when it reached a
+decision and the change does not pass, and when a declared Checkpoint's check
+fails: `<checkpoint> Checkpoint could not be checked: <error>; fix that and
+retry, or stop and ask a person`. A Checkpoint the repository declared and the
+hook could not evaluate is incomplete, never a pass, and the refusal names no
+waiver because recording one needs the same review state. When
+`review-party` is missing, the configuration does not load, the ref lines do
+not parse, or no base can be found, the hook prints one warning line and exits
+0: it cannot tell whether a Checkpoint applies, or what content it would
+check. An undeclared
 Checkpoint exits 0 silently. A ref deletion is skipped. When this clone has
 the remote object, the base is its merge base with the pushed object, so a
 forced push does not count the commits it drops. A new branch, whose remote
@@ -254,7 +260,8 @@ same JSON deny on stdout with exit 0 and pass its reason to the model
 one table entry, and the decision is the git hook's. A refusal prints
 `{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision":
 "deny", "permissionDecisionReason": "<the git hook's line>"}}` and exits 0.
-An undecidable case prints `{"systemMessage": "warning: ..."}` and exits 0,
+A declared Checkpoint whose check fails is refused the same way. An
+undecidable case prints `{"systemMessage": "warning: ..."}` and exits 0,
 which both agents show without blocking. Only a failed write exits 1. Both
 agents also block on exit 2, but the hook never uses it, because an old
 `review-party`, a usage error, and a Go panic exit 2 too, and under Codex
