@@ -1,8 +1,10 @@
 package main
 
-// The git hook entry point decides one Checkpoint for git. It refuses only on
-// a decision: a declared Checkpoint whose change lacks its Reviews. Anything
-// that prevents a decision warns on one line and lets git continue.
+// The git hook entry point decides one Checkpoint for git. It refuses a
+// declared Checkpoint whose change lacks its Reviews, and one whose check
+// fails, since a declared Checkpoint that cannot be checked is not a pass.
+// Anything else that prevents a decision warns on one line and lets git
+// continue.
 
 import (
 	"context"
@@ -28,8 +30,9 @@ install git wires this command into the repository's hooks.
 pre-push reads the refs git sends on standard input and checks each pushed
 range; pre-commit checks the staged content. Exits 0 silently when the
 Checkpoint is not declared or passes, and 1 with one line naming the next
-command when it does not. Setup, configuration, or git errors warn on one
-line and exit 0, so a broken setup never stops a push or commit.`,
+command when it does not. A declared Checkpoint whose check fails, such as on
+an unreadable review ledger, also exits 1 with one line naming the error.
+Other setup, configuration, or git errors warn on one line and exit 0.`,
 		Args: cobra.MatchAll(cobra.MinimumNArgs(1), func(_ *cobra.Command, args []string) error {
 			_, err := configuration.ParseCheckpointName(args[0])
 			return err
@@ -152,16 +155,22 @@ func joinedWarning(warnings []error) hookDecision {
 func decideHookContent(ctx context.Context, options checkpointOptions) hookDecision {
 	target, err := openCheckpoint(options)
 	if err != nil {
-		return hookDecision{warning: err}
+		return uncheckedRefusal(options.name, err)
 	}
 	report, err := target.check(ctx, options.configuration)
 	if err != nil {
-		return hookDecision{warning: err}
+		return uncheckedRefusal(options.name, err)
 	}
 	if report.State.Passes() {
 		return hookDecision{}
 	}
 	return hookDecision{refusal: hookRefusal(report)}
+}
+
+// uncheckedRefusal refuses a declared Checkpoint whose check failed. It names
+// no waiver, since recording one needs the same review state.
+func uncheckedRefusal(name configuration.CheckpointName, err error) hookDecision {
+	return hookDecision{refusal: fmt.Sprintf("%s Checkpoint could not be checked: %v; fix that and retry, or stop and ask a person", name, err)}
 }
 
 // hookRefusal is the one line a refused hook prints. It names the unreviewed

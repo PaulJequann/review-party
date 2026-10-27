@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -87,6 +88,37 @@ func TestCheckpointHookWarnsAndAllowsWithoutADecision(t *testing.T) {
 
 	fixture.writeFile(".reviewparty/config.json", "{")
 	assertOneWarning(t, fixture.hook(pushLine(head, fixture.base), "pre-push", "origin", "url"))
+}
+
+func TestCheckpointHookRefusesADeclaredCheckpointItCannotCheck(t *testing.T) {
+	fixture := newCheckpointFixture(t)
+	fixture.declare("pre-push")
+	head := fixture.commit("one.go", "package app\n\nconst one = 1\n")
+	fixture.dropWaiverRepositoryColumn()
+
+	refusal := "review-party: pre-push Checkpoint could not be checked: " + waiverColumnError + "; fix that and retry, or stop and ask a person\n"
+	assertRun(t, fixture.hook(pushLine(head, fixture.base), "pre-push", "origin", "url"), commandRun{exit: 1, stderr: refusal})
+}
+
+const waiverColumnError = "find checkpoint waiver: SQL logic error: no such column: repository (1)"
+
+// dropWaiverRepositoryColumn leaves the ledger at the current schema version
+// with a checkpoint_waivers table that predates its repository column, as a
+// ledger migrated by an unmerged build of that migration does.
+func (fixture checkpointFixture) dropWaiverRepositoryColumn() {
+	fixture.t.Helper()
+	db, err := sql.Open("sqlite", filepath.Join(fixture.ledger, "ledger.sqlite"))
+	if err != nil {
+		fixture.t.Fatal(err)
+	}
+	defer func() {
+		if err := db.Close(); err != nil {
+			fixture.t.Fatal(err)
+		}
+	}()
+	if _, err := db.Exec("DROP INDEX checkpoint_waivers_repository; ALTER TABLE checkpoint_waivers DROP COLUMN repository"); err != nil {
+		fixture.t.Fatal(err)
+	}
 }
 
 // assertOneWarning fails unless the hook allowed with a single warning line.
