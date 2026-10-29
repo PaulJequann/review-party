@@ -30,7 +30,7 @@ func TestHubLabelsEverySearchResultWithItsScope(t *testing.T) {
 }
 
 func TestHubNavigationAndCancellationDoNotMutateSnapshot(t *testing.T) {
-	snapshot := Snapshot{Repository: "/repo", Overview: []string{"Repository Reviews: not configured"}}
+	snapshot := Snapshot{Repository: "/repo", Overview: []string{"Repository Configuration Reviews: no file; inherits Global Configuration"}}
 	model := New(snapshot)
 	updated, command := model.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
 	if command != nil {
@@ -76,19 +76,11 @@ func TestHubEnterOpensProfileBrowserAndNewOpensForm(t *testing.T) {
 }
 
 func TestHubReviewBrowserUsesHighlightedRowForRemoval(t *testing.T) {
-	model := New(Snapshot{Repository: "/repo", Items: []Item{
-		{Scope: "global", Kind: itemReview, Name: "one", Detail: "Profile", Selection: configuration.SelectionItem{Profile: "one"}},
-		{Scope: "global", Kind: itemReview, Name: "two", Detail: "Profile", Index: 1, Selection: configuration.SelectionItem{Profile: "two"}},
-	}})
+	model := New(reviewTestSnapshot(&configuration.ReviewSelection{ConcurrencyLimit: 2, Global: []configuration.SelectionItem{{Profile: "one"}, {Profile: "two"}}}, nil))
 	model.area = 3
-	updated, _ := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	model = requireHubModel(t, updated)
-	updated, _ = model.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
-	model = requireHubModel(t, updated)
-	updated, _ = model.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
-	model = requireHubModel(t, updated)
+	model = pressHubKeys(t, model, tea.KeyPressMsg{Code: tea.KeyEnter}, tea.KeyPressMsg{Code: 'j', Text: "j"}, tea.KeyPressMsg{Code: 'j', Text: "j"}, tea.KeyPressMsg{Code: 'r', Text: "r"})
 	want := reviewEntry{group: configuration.ScopeGlobal, index: 1, expect: configuration.SelectionItem{Profile: "two"}}
-	if model.drafts.reviews.operation != reviewRemove || model.drafts.reviews.reviewEntry != want {
+	if model.drafts.reviews.target != configuration.ScopeRepository || model.drafts.reviews.operation != reviewRemove || model.drafts.reviews.reviewEntry != want {
 		t.Fatalf("row-driven removal draft = %#v", model.drafts.reviews)
 	}
 	if model.formKind != formReviewFields {

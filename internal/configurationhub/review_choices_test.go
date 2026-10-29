@@ -40,7 +40,7 @@ func TestReviewChoicesUseValidScopedInventory(t *testing.T) {
 	for index, choice := range snapshot.ReviewChoices {
 		var output bytes.Buffer
 		e := editor{manager: manager, snapshot: snapshot, RunOptions: RunOptions{
-			Repository: repository, Accessible: true, Input: newLineInput(fmt.Sprintf("1\n%d\nn\n", index+1)), Output: &output,
+			Repository: repository, Accessible: true, Input: newLineInput(fmt.Sprintf("1\n1\n%d\nn\n", index+1)), Output: &output,
 		}}
 		if err := e.editReviews(); err != nil {
 			t.Fatal(err)
@@ -114,7 +114,7 @@ func TestEmptyReviewChoicesOfferCreationAndReturn(t *testing.T) {
 	if command := model.openReviewFieldsForm(); command != nil || model.view != viewMenu || !strings.Contains(model.status, "Create a Profile") {
 		t.Fatalf("empty inventory did not return with guidance: %s", model.status)
 	}
-	e := editor{RunOptions: RunOptions{Input: newLineInput("1\n"), Output: &bytes.Buffer{}, Accessible: true}}
+	e := editor{snapshot: reviewTestSnapshot(nil, nil), RunOptions: RunOptions{Input: newLineInput("1\n1\n"), Output: &bytes.Buffer{}, Accessible: true}}
 	if err := e.editReviews(); err == nil || !strings.Contains(err.Error(), "Create a Profile") {
 		t.Fatalf("accessible empty inventory = %v", err)
 	}
@@ -179,7 +179,7 @@ func TestRemoveFinalReviewPreviewsAndPublishesInBothAdapters(t *testing.T) {
 					t.Fatal(err)
 				}
 				var output bytes.Buffer
-				e := editor{manager: manager, snapshot: snapshot, RunOptions: RunOptions{Repository: repository, Accessible: true, Input: newLineInput("2\n1\ny\n"), Output: &output}}
+				e := editor{manager: manager, snapshot: snapshot, RunOptions: RunOptions{Repository: repository, Accessible: true, Input: newLineInput("1\n2\n1\ny\n"), Output: &output}}
 				if err := e.editReviews(); err != nil {
 					t.Fatal(err)
 				}

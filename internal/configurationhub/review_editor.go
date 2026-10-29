@@ -73,7 +73,13 @@ func planReviewEdit(manager *configuration.Manager, repository configuration.Rep
 		intent = configuration.InheritGlobalReviewSelection{}
 	}
 	plan, err := manager.Plan(repository, []configuration.Intent{intent})
-	return plan, selection, err
+	if err != nil {
+		return configuration.Plan{}, configuration.ReviewSelection{}, err
+	}
+	if plan.Unchanged() {
+		return configuration.Plan{}, configuration.ReviewSelection{}, fmt.Errorf("%s already holds this Review selection.", configurationTitle(draft.target))
+	}
+	return plan, selection, nil
 }
 
 func (draft reviewFormDraft) apply(selection configuration.ReviewSelection) (configuration.ReviewSelection, error) {
@@ -104,7 +110,7 @@ func (draft reviewFormDraft) apply(selection configuration.ReviewSelection) (con
 	case reviewInherit:
 		return selection, nil
 	}
-	return configuration.ReviewSelection{}, fmt.Errorf("unknown Repository Reviews operation %q", draft.operation)
+	return configuration.ReviewSelection{}, fmt.Errorf("unknown Review operation %q", draft.operation)
 }
 
 func (entry reviewEntry) verify(selection configuration.ReviewSelection) error {
@@ -131,28 +137,44 @@ func selectionItemFor(choice configuration.SelectedDefinition) (configuration.Se
 	return configuration.SelectionItem{}, errors.New("choose a Profile or Party")
 }
 
-func reviewOperationField(draft *reviewFormDraft) huh.Field {
-	return huh.NewSelect[reviewOperation]().Title("Repository Reviews").Options(
-		huh.NewOption("Add Profile or Party", reviewAdd),
-		huh.NewOption("Remove item", reviewRemove),
-		huh.NewOption("Move item", reviewMove),
-		huh.NewOption("Set concurrency", reviewConcurrency),
-	).Value(&draft.operation)
+func (operation reviewOperation) label() string {
+	switch operation {
+	case reviewAdd:
+		return "Add Profile or Party"
+	case reviewRemove:
+		return "Remove item"
+	case reviewMove:
+		return "Move item"
+	case reviewConcurrency:
+		return "Set concurrency"
+	case reviewInherit:
+		return "Inherit Global Configuration"
+	}
+	return operation.String()
+}
+
+// reviewOperationField offers only the operations the chosen file allows.
+func reviewOperationField(draft *reviewFormDraft, file ReviewFile) huh.Field {
+	var options []huh.Option[reviewOperation]
+	for _, operation := range file.operations() {
+		options = append(options, huh.NewOption(operation.label(), operation))
+	}
+	return huh.NewSelect[reviewOperation]().Title(configurationTitle(file.Target)).Options(options...).Value(&draft.operation)
 }
 
 func reviewFields(draft *reviewFormDraft, snapshot Snapshot) ([]huh.Field, error) {
 	switch draft.operation {
 	case reviewAdd:
-		options := reviewChoiceOptions(snapshot.ReviewChoices)
+		options := reviewChoiceOptions(snapshot.ChoicesFor(draft.target))
 		if len(options) == 0 {
 			return nil, errors.New(emptyReviewChoices)
 		}
 		return []huh.Field{huh.NewSelect[configuration.SelectedDefinition]().Title("Profile or Party to add").
 			Description(addReviewDescription).Options(options...).Value(&draft.choice).WithHeight(8)}, nil
 	case reviewRemove, reviewMove:
-		options := reviewEntryOptions(snapshot.Items)
+		options := reviewEntryOptions(snapshot.Items, draft.target)
 		if len(options) == 0 {
-			return nil, errors.New("No Repository Reviews are selected.")
+			return nil, fmt.Errorf("No Reviews are selected in %s.", configurationTitle(draft.target))
 		}
 		return []huh.Field{huh.NewSelect[reviewEntry]().Title("Selected item").Options(options...).Value(&draft.reviewEntry)}, nil
 	case reviewConcurrency:
@@ -160,13 +182,13 @@ func reviewFields(draft *reviewFormDraft, snapshot Snapshot) ([]huh.Field, error
 	case reviewInherit:
 		return nil, nil
 	}
-	return nil, fmt.Errorf("unknown Repository Reviews operation %q", draft.operation)
+	return nil, fmt.Errorf("unknown Review operation %q", draft.operation)
 }
 
 func reviewDestinationField(draft *reviewFormDraft, items []Item) huh.Field {
 	positions := func() []huh.Option[int] {
 		var options []huh.Option[int]
-		for _, option := range reviewEntryOptions(items) {
+		for _, option := range reviewEntryOptions(items, draft.target) {
 			if option.Value.group == draft.group {
 				options = append(options, huh.NewOption(option.Key, option.Value.index))
 			}
@@ -176,10 +198,10 @@ func reviewDestinationField(draft *reviewFormDraft, items []Item) huh.Field {
 	return huh.NewSelect[int]().Title("Move to").Options(positions()...).OptionsFunc(positions, &draft.group).Value(&draft.to)
 }
 
-func reviewEntryOptions(items []Item) []huh.Option[reviewEntry] {
+func reviewEntryOptions(items []Item, target configuration.Scope) []huh.Option[reviewEntry] {
 	var options []huh.Option[reviewEntry]
 	for _, item := range items {
-		if item.Kind != itemReview {
+		if item.Kind != itemReview || item.Target != target {
 			continue
 		}
 		options = append(options, huh.NewOption(fmt.Sprintf("[%s] %d. %s (%s)", item.Scope, item.Index+1, item.Name, item.Detail), item.entry()))
@@ -187,10 +209,36 @@ func reviewEntryOptions(items []Item) []huh.Option[reviewEntry] {
 	return options
 }
 
+// chooseReviewFile asks which configuration file to edit. A single file needs
+// no prompt.
+func (e *editor) chooseReviewFile() (ReviewFile, error) {
+	files := e.snapshot.Reviews.Files
+	switch len(files) {
+	case 0:
+		return ReviewFile{}, errors.New("No configuration file is available to edit.")
+	case 1:
+		return files[0], nil
+	}
+	var options []huh.Option[configuration.Scope]
+	for _, file := range files {
+		options = append(options, huh.NewOption(configurationTitle(file.Target)+" — "+e.snapshot.Reviews.headerState(file), file.Target))
+	}
+	target := files[0].Target
+	if err := e.form(huh.NewSelect[configuration.Scope]().Title("Configuration file").Options(options...).Value(&target)); err != nil {
+		return ReviewFile{}, err
+	}
+	file, _ := e.snapshot.Reviews.file(target)
+	return file, nil
+}
+
 func (e *editor) editReviews() error {
+	file, err := e.chooseReviewFile()
+	if err != nil {
+		return err
+	}
 	draft := &e.draftSet().reviews
-	draft.target = configuration.ScopeRepository
-	if err := e.form(reviewOperationField(draft)); err != nil {
+	draft.target = file.Target
+	if err := e.form(reviewOperationField(draft, file)); err != nil {
 		return err
 	}
 	fields, err := reviewFields(draft, e.snapshot)
@@ -202,8 +250,10 @@ func (e *editor) editReviews() error {
 			return err
 		}
 	}
-	if err := e.form(fields...); err != nil {
-		return err
+	if len(fields) > 0 {
+		if err := e.form(fields...); err != nil {
+			return err
+		}
 	}
 	if draft.operation == reviewMove {
 		if err := e.form(reviewDestinationField(draft, e.snapshot.Items)); err != nil {

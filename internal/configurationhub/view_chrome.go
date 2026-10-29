@@ -130,7 +130,7 @@ func (model Model) publishedTarget(kind planKind) string {
 	case planCopy:
 		return fmt.Sprintf("profile %q", model.drafts.copyName)
 	case planReviews:
-		return "Repository Reviews"
+		return configurationTitle(model.drafts.reviews.target) + " Reviews"
 	default:
 		return "configuration"
 	}
@@ -173,7 +173,9 @@ func (model Model) actionHints() []actionHint {
 	case AreaParties:
 		hints = append(hints, actionHint{key: "n", label: "new"})
 	case AreaReviews:
-		hints = append(hints, actionHint{key: "a", label: "add"}, actionHint{key: "r", label: "remove"}, actionHint{key: "m", label: "move"}, actionHint{key: "c", label: "concurrency"})
+		for _, binding := range model.cursorReviewKeys() {
+			hints = append(hints, actionHint{key: binding.key, label: binding.label})
+		}
 	case AreaOverview, AreaChanges, areaSearch, areaCopyProfile:
 	}
 	return append(hints,

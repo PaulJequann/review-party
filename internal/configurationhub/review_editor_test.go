@@ -171,7 +171,7 @@ func TestReviewEditorsPlanTheSameChangesForTheSameDraft(t *testing.T) {
 			input: func(snapshot Snapshot) string {
 				for index, choice := range snapshot.ReviewChoices {
 					if choice == daily {
-						return fmt.Sprintf("1\n%d\nn\n", index+1)
+						return fmt.Sprintf("1\n1\n%d\nn\n", index+1)
 					}
 				}
 				return ""
@@ -180,17 +180,17 @@ func TestReviewEditorsPlanTheSameChangesForTheSameDraft(t *testing.T) {
 		},
 		{
 			name:  "remove",
-			input: func(Snapshot) string { return "2\n2\nn\n" },
+			input: func(Snapshot) string { return "1\n2\n2\nn\n" },
 			draft: reviewFormDraft{operation: reviewRemove, reviewEntry: reviewEntry{group: configuration.ScopeRepository, index: 0, expect: sharedProfile}},
 		},
 		{
 			name:  "move",
-			input: func(Snapshot) string { return "3\n3\n1\nn\n" },
+			input: func(Snapshot) string { return "1\n3\n3\n1\nn\n" },
 			draft: reviewFormDraft{operation: reviewMove, reviewEntry: reviewEntry{group: configuration.ScopeRepository, index: 1, expect: dailyParty}, to: 0},
 		},
 		{
 			name:  "concurrency",
-			input: func(Snapshot) string { return "4\n4\nn\n" },
+			input: func(Snapshot) string { return "1\n4\n4\nn\n" },
 			draft: reviewFormDraft{operation: reviewConcurrency, concurrency: "4"},
 		},
 	}
@@ -236,13 +236,13 @@ func TestReviewEditorsPlanTheSameChangesForTheSameDraft(t *testing.T) {
 }
 
 func TestHubReviewBrowserMovesHighlightedRowWithinItsGroup(t *testing.T) {
-	model := New(Snapshot{Repository: "/repo", Items: []Item{
-		{Scope: "global", Kind: itemReview, Name: "one", Detail: "Profile", Selection: configuration.SelectionItem{Profile: "one"}},
-		{Scope: "global", Kind: itemReview, Name: "two", Detail: "Profile", Index: 1, Selection: configuration.SelectionItem{Profile: "two"}},
-		{Scope: "repository", Kind: itemReview, Name: "three", Detail: "Party", Selection: configuration.SelectionItem{Party: "three"}},
-	}})
+	model := New(reviewTestSnapshot(&configuration.ReviewSelection{
+		ConcurrencyLimit: 2,
+		Global:           []configuration.SelectionItem{{Profile: "one"}, {Profile: "two"}},
+		Repository:       []configuration.SelectionItem{{Party: "three"}},
+	}, nil))
 	model.area = 3
-	model = pressHubKeys(t, model, tea.KeyPressMsg{Code: tea.KeyEnter}, tea.KeyPressMsg{Code: 'm', Text: "m"}, tea.KeyPressMsg{Code: 'j', Text: "j"}, tea.KeyPressMsg{Code: tea.KeyEnter})
+	model = pressHubKeys(t, model, tea.KeyPressMsg{Code: tea.KeyEnter}, tea.KeyPressMsg{Code: 'j', Text: "j"}, tea.KeyPressMsg{Code: 'm', Text: "m"}, tea.KeyPressMsg{Code: 'j', Text: "j"}, tea.KeyPressMsg{Code: tea.KeyEnter})
 	want := reviewFormDraft{
 		target: configuration.ScopeRepository, operation: reviewMove, to: 1,
 		reviewEntry: reviewEntry{group: configuration.ScopeGlobal, index: 0, expect: configuration.SelectionItem{Profile: "one"}},
@@ -254,8 +254,8 @@ func TestHubReviewBrowserMovesHighlightedRowWithinItsGroup(t *testing.T) {
 	model.toMenu()
 	model.drafts.reviews = reviewFormDraft{}
 	model.area = 3
-	model = pressHubKeys(t, model, tea.KeyPressMsg{Code: tea.KeyEnter}, tea.KeyPressMsg{Code: 'j', Text: "j"}, tea.KeyPressMsg{Code: 'm', Text: "m"}, tea.KeyPressMsg{Code: 'j', Text: "j"}, tea.KeyPressMsg{Code: tea.KeyEnter})
-	if model.drafts.reviews != (reviewFormDraft{}) || !strings.Contains(model.status, "same selection group") {
+	model = pressHubKeys(t, model, tea.KeyPressMsg{Code: tea.KeyEnter}, tea.KeyPressMsg{Code: 'j', Text: "j"}, tea.KeyPressMsg{Code: 'j', Text: "j"}, tea.KeyPressMsg{Code: 'm', Text: "m"}, tea.KeyPressMsg{Code: 'j', Text: "j"}, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if model.drafts.reviews != (reviewFormDraft{}) || model.status != "Move within one group." {
 		t.Fatalf("cross-group move = %#v, status %q", model.drafts.reviews, model.status)
 	}
 }
@@ -268,8 +268,8 @@ func TestHubReviewBrowserEditsTheHighlightedDuplicateEntry(t *testing.T) {
 		keys []tea.KeyPressMsg
 		want []configuration.SelectionItem
 	}{
-		{name: "remove", keys: []tea.KeyPressMsg{enter, key('j'), key('j'), key('r')}, want: []configuration.SelectionItem{sharedProfile, dailyParty}},
-		{name: "move", keys: []tea.KeyPressMsg{enter, key('j'), key('j'), key('m'), key('k'), enter}, want: []configuration.SelectionItem{sharedProfile, sharedProfile, dailyParty}},
+		{name: "remove", keys: []tea.KeyPressMsg{enter, key('j'), key('j'), key('j'), key('r')}, want: []configuration.SelectionItem{sharedProfile, dailyParty}},
+		{name: "move", keys: []tea.KeyPressMsg{enter, key('j'), key('j'), key('j'), key('m'), key('k'), enter}, want: []configuration.SelectionItem{sharedProfile, sharedProfile, dailyParty}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

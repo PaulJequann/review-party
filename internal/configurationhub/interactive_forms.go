@@ -152,27 +152,32 @@ func (model *Model) openArea(area Area) tea.Cmd {
 	}
 }
 
-func (model *Model) openReviewOperation(operation reviewOperation) tea.Cmd {
+// openReviewFieldsFor opens an add or concurrency form for the file the
+// cursor row belongs to. The draft keeps that target until it is published.
+func (model *Model) openReviewFieldsFor(operation reviewOperation, target configuration.Scope) tea.Cmd {
 	model.session.reviews.operation = operation
-	return model.openForm(formReviewOperation, []huh.Field{
-		huh.NewNote().Title("Repository Reviews").Description("Choose the next selection change."),
-	})
+	model.session.reviews.target = target
+	return model.openReviewFieldsForm()
 }
 
 func (model Model) startRowReview(operation reviewOperation) (tea.Model, tea.Cmd) {
-	entry, found := model.cursorReviewEntry()
-	if !found {
-		model.status = "No Repository Review row is selected."
+	row, ok := model.cursorRow()
+	if !ok || row.Kind != itemReview {
+		model.status = "Choose a Review row."
 		return model, nil
 	}
-	draft := reviewFormDraft{target: configuration.ScopeRepository, operation: operation, reviewEntry: entry}
+	draft := reviewFormDraft{target: row.Target, operation: operation, reviewEntry: row.entry()}
 	if operation == reviewMove {
-		if model.moveFrom.group != entry.group {
-			model.status = "Choose a destination in the same selection group."
+		if model.moveFrom.Target != row.Target || model.moveFrom.Scope != row.Scope {
+			model.status = "Move within one group."
 			return model, nil
 		}
-		draft.reviewEntry, draft.to = model.moveFrom, entry.index
+		draft.reviewEntry, draft.to = model.moveFrom.entry(), row.Index
 	}
+	return model.startReviewPlan(draft)
+}
+
+func (model Model) startReviewPlan(draft reviewFormDraft) (tea.Model, tea.Cmd) {
 	model.session.reviews = draft
 	model.drafts.reviews = draft
 	return model.startPlan(planRequest{kind: planReviews, review: reviewPlanRequest{draft: draft}})
@@ -274,12 +279,21 @@ func (model *Model) openPartyForm() tea.Cmd {
 }
 
 func (model *Model) openReviewOperationForm() tea.Cmd {
-	return model.openForm(formReviewOperation, []huh.Field{reviewOperationField(&model.session.reviews)})
+	draft := &model.session.reviews
+	if draft.target == "" && len(model.snapshot.Targets) > 0 {
+		draft.target = model.snapshot.Targets[0]
+	}
+	file, ok := model.snapshot.Reviews.file(draft.target)
+	if !ok {
+		model.toMenu()
+		model.status = "No configuration file is open."
+		return nil
+	}
+	return model.openForm(formReviewOperation, []huh.Field{reviewOperationField(draft, file)})
 }
 
 func (model *Model) openReviewFieldsForm() tea.Cmd {
 	draft := &model.session.reviews
-	draft.target = configuration.ScopeRepository
 	fields, err := reviewFields(draft, model.snapshot)
 	if err != nil {
 		model.toMenu()
@@ -288,6 +302,13 @@ func (model *Model) openReviewFieldsForm() tea.Cmd {
 	}
 	if draft.operation == reviewMove {
 		fields = append(fields, reviewDestinationField(draft, model.snapshot.Items))
+	}
+	if len(fields) == 0 {
+		// Inherit has no fields; a refused inherit returns to the menu with the
+		// planner's fact in the status line and no draft left behind.
+		model.toMenu()
+		model.drafts.reviews = reviewFormDraft{}
+		return nil
 	}
 	return model.openForm(formReviewFields, fields)
 }

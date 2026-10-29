@@ -88,23 +88,33 @@ func buildSnapshot(manager *configuration.Manager, repository configuration.Repo
 		return snapshot, err
 	}
 	appendHubParties(&snapshot, parties)
-	selection, source, err := manager.EffectiveReviewSelection(repository)
+	loaded, err := manager.Load(repository)
 	if err != nil {
 		return snapshot, err
 	}
+	snapshot.Targets = hubTargets(repository)
+	snapshot.Reviews = newReviewsView(loaded, snapshot.Targets)
 	snapshot.Overview = append(snapshot.Overview,
 		fmt.Sprintf("Global: %s, %s", pluralizedCount("Profile", countHubProfiles(profiles, configuration.ScopeGlobal)), pluralizedCount("Party", countHubParties(parties, configuration.ScopeGlobal))),
 		fmt.Sprintf("Repository: %s, %s", pluralizedCount("Profile", countHubProfiles(profiles, configuration.ScopeRepository)), pluralizedCount("Party", countHubParties(parties, configuration.ScopeRepository))),
 	)
-	if !source.Authored {
-		snapshot.Overview = append(snapshot.Overview, "Repository Reviews: not configured")
-		return snapshot, nil
+	for _, file := range snapshot.Reviews.Files {
+		snapshot.Overview = append(snapshot.Overview, configurationTitle(file.Target)+" Reviews: "+snapshot.Reviews.headerState(file))
+		appendHubReviewFile(&snapshot, file)
 	}
-	snapshot.Overview = append(snapshot.Overview, fmt.Sprintf("Repository Reviews: %d selected · concurrency %d (%s)", len(selection.Global)+len(selection.Repository), selection.ConcurrencyLimit, source.Path))
-	appendHubReviews(&snapshot, "global", selection.Global)
-	appendHubReviews(&snapshot, "repository", selection.Repository)
-	appendResolvedPreview(manager, repository, &snapshot)
+	if loaded.ReviewSelection().Authored {
+		appendResolvedPreview(manager, repository, &snapshot)
+	}
 	return snapshot, nil
+}
+
+// hubTargets lists the files the Hub writes, Repository first. This is the
+// one place that reads an empty repository as "outside a repository".
+func hubTargets(repository configuration.Repository) []configuration.Scope {
+	if repository == "" {
+		return []configuration.Scope{configuration.ScopeGlobal}
+	}
+	return []configuration.Scope{configuration.ScopeRepository, configuration.ScopeGlobal}
 }
 
 func appendTemplateDrift(snapshot *Snapshot, drift []configuration.TemplateDrift) {
@@ -186,7 +196,22 @@ func appendHubParties(snapshot *Snapshot, parties []configuration.Definition[con
 	}
 }
 
-func appendHubReviews(snapshot *Snapshot, scope string, items []configuration.SelectionItem) {
+// appendHubReviewFile adds one file's header row and its selected items.
+// Index is the item's position in its selection group, so an invalid entry
+// still occupies its position.
+func appendHubReviewFile(snapshot *Snapshot, file ReviewFile) {
+	snapshot.Items = append(snapshot.Items, Item{
+		Target: file.Target, Scope: ItemScope(file.Target), Kind: itemReviewHeader, Index: -1,
+		Name: configurationTitle(file.Target), Detail: snapshot.Reviews.headerState(file),
+	})
+	if file.Selection == nil {
+		return
+	}
+	appendHubReviews(snapshot, file.Target, configuration.ScopeGlobal, file.Selection.Global)
+	appendHubReviews(snapshot, file.Target, configuration.ScopeRepository, file.Selection.Repository)
+}
+
+func appendHubReviews(snapshot *Snapshot, target, group configuration.Scope, items []configuration.SelectionItem) {
 	for index, item := range items {
 		name, err := item.Name()
 		if err != nil {
@@ -197,7 +222,7 @@ func appendHubReviews(snapshot *Snapshot, scope string, items []configuration.Se
 		if item.Party != "" {
 			detail = "Party"
 		}
-		snapshot.Items = append(snapshot.Items, Item{Scope: ItemScope(scope), Kind: itemReview, Name: name, Detail: detail, Index: index, Selection: item})
+		snapshot.Items = append(snapshot.Items, Item{Target: target, Scope: ItemScope(group), Kind: itemReview, Index: index, Name: name, Detail: detail, Selection: item})
 	}
 }
 

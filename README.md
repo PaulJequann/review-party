@@ -75,9 +75,9 @@ for non-redrawing terminal prompts.
 > through `review-party run` and explicit `review-party config ...` commands.
 > The recurring Hub, `review-party config`, opens its
 > scoped, searchable overview and focused Profile creation, Party creation,
-> Repository Reviews, and Repository-to-Global Profile-copy flows in a
-> terminal, and refuses without writes outside a terminal. The explicit
-> commands below remain the automation interface.
+> Global and Repository Configuration Reviews, and Repository-to-Global
+> Profile-copy flows in a terminal, and refuses without writes outside a
+> terminal. The explicit commands below remain the automation interface.
 > The transitional `review` and `party run` commands are replaced with no
 > aliases. See
 > [`docs/configuration-hub-implementation-plan.md`](docs/configuration-hub-implementation-plan.md).
@@ -248,8 +248,8 @@ match `--scope`: use `global:NAME` with `--scope global` and
 selected scope.
 
 For the shortest human path to a working repository selection, open the Hub,
-create a complete Profile from a Template, then add it under Repository Reviews
-and publish the reviewed changes. Add offers valid existing Profiles and Parties
+create a complete Profile from a Template, then add it under Reviews in the
+Repository Configuration and publish the reviewed changes. Add offers valid existing Profiles and Parties
 with their scopes. It retains the current selection, and previews every authored
 entry, expanded Profile, deduplication fact, warning, and effective concurrency
 before publication:

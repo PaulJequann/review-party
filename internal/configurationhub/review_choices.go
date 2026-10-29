@@ -8,8 +8,8 @@ import (
 	"reviewparty/internal/configuration"
 )
 
-const emptyReviewChoices = "No valid Profiles or Parties to add. Create a Profile in Profiles, then return to Repository Reviews."
-const addReviewDescription = "Adds to this repository's selection and retains existing entries. The scope identifies the saved definition. Review the full selection and concurrency before publishing."
+const emptyReviewChoices = "No valid Profiles or Parties to add. Create a Profile in Profiles, then return to Reviews."
+const addReviewDescription = "Adds to the chosen file's selection and retains existing entries. The scope identifies the saved definition. Review the full selection and concurrency before publishing."
 
 func reviewChoiceOptions(choices []configuration.SelectedDefinition) []huh.Option[configuration.SelectedDefinition] {
 	options := make([]huh.Option[configuration.SelectedDefinition], 0, len(choices))

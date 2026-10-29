@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 
 	bubbleshelp "charm.land/bubbles/v2/help"
@@ -27,7 +28,7 @@ const (
 	AreaOverview    Area = "Overview"
 	AreaProfiles    Area = "Profiles"
 	AreaParties     Area = "Parties"
-	AreaReviews     Area = "Repository Reviews"
+	AreaReviews     Area = "Reviews"
 	AreaChanges     Area = "Review Changes"
 	areaCopyProfile Area = "Copy Profile"
 	areaSearch      Area = "Search"
@@ -37,32 +38,43 @@ const (
 type ItemKind string
 
 const (
-	itemProfile ItemKind = "Profile"
-	itemParty   ItemKind = "Party"
-	itemReview  ItemKind = "Review"
+	itemProfile      ItemKind = "Profile"
+	itemParty        ItemKind = "Party"
+	itemReview       ItemKind = "Review"
+	itemReviewHeader ItemKind = "Review file"
 )
 
 // ItemScope labels the source of one Hub inventory item.
 type ItemScope string
 
-// Item is one searchable, explicitly scoped configuration value.
+// Item is one searchable, explicitly scoped configuration value. Review rows
+// also name the configuration file they belong to (Target) and their position
+// in that file's selection group (Index); a file header row has Index -1.
 type Item struct {
 	Scope     ItemScope
 	Kind      ItemKind
 	Name      string
 	Detail    string
+	Target    configuration.Scope
 	Index     int
 	Selection configuration.SelectionItem
 }
 
-// Snapshot is the read-only material shown by the shell.
+// Snapshot is the read-only material shown by the shell. Targets lists the
+// configuration files the Hub may write, in display order.
 type Snapshot struct {
 	Repository    string
+	Targets       []configuration.Scope
+	Reviews       ReviewsView
 	Items         []Item
 	Templates     []configuration.Template
 	ReviewChoices []configuration.SelectedDefinition
 	Overview      []string
 	Warnings      []string
+}
+
+func (snapshot Snapshot) writes(target configuration.Scope) bool {
+	return slices.Contains(snapshot.Targets, target)
 }
 
 type areaRenderer func(Model, areaSpec, *strings.Builder, renderOptions)
@@ -85,7 +97,7 @@ func newAreaSpecs() []areaSpec {
 		{area: AreaOverview, description: "See configuration counts, resolved reviews, and warnings.", menu: true, render: renderOverviewArea},
 		{area: AreaProfiles, kind: itemProfile, description: "Browse Profiles and create or edit one.", menu: true, action: (*editor).manageProfiles, render: renderInventoryArea},
 		{area: AreaParties, kind: itemParty, description: "Browse flat Parties and create one.", menu: true, action: (*editor).createParty, render: renderInventoryArea},
-		{area: AreaReviews, kind: itemReview, description: "Assemble the ordered Repository Review selection.", menu: true, action: (*editor).editReviews, render: renderInventoryArea},
+		{area: AreaReviews, kind: itemReview, description: "Assemble the ordered Review selection of each configuration file.", menu: true, action: (*editor).editReviews, render: renderInventoryArea},
 		{area: AreaChanges, description: "Review or discard unfinished drafts.", menu: true, action: (*editor).reviewDrafts, render: renderActionArea},
 		// Unlisted: reachable from the accessible-mode action select, not the menu.
 		{area: areaCopyProfile, description: "Copy a Repository Profile to Global Configuration.", action: (*editor).copyProfile, render: renderActionArea},
@@ -138,7 +150,7 @@ type Model struct {
 	browserArea  Area
 	cursor       int
 	moveReview   bool
-	moveFrom     reviewEntry
+	moveFrom     Item
 	query        string
 	searching    bool
 	width        int
@@ -339,32 +351,47 @@ func (model Model) browserAction(key string) (tea.Model, tea.Cmd) {
 		return model.browserEdit()
 	case "p":
 		return model.browserCopy()
-	case "a":
-		return model.browserReviewForm(reviewAdd)
 	default:
 		return model.browserReviewAction(key)
 	}
 }
 
 func (model Model) browserReviewAction(key string) (tea.Model, tea.Cmd) {
-	if model.browserArea != AreaReviews {
+	operation, bound := reviewKeyOperation(key)
+	if model.browserArea != AreaReviews || !bound {
 		return model, nil
 	}
-	switch key {
-	case "r":
+	row, ok := model.cursorRow()
+	if !ok {
+		model.status = "No configuration file is open."
+		return model, nil
+	}
+	if !slices.Contains(model.snapshot.rowOperations(row), operation) {
+		model.status = fmt.Sprintf("%s does not apply to this row.", operation.label())
+		return model, nil
+	}
+	switch operation {
+	case reviewAdd, reviewConcurrency:
+		return model.withForm(model.openReviewFieldsFor(operation, row.Target))
+	case reviewRemove:
 		return model.startRowReview(reviewRemove)
-	case "m":
-		model.moveFrom, _ = model.cursorReviewEntry()
-		model.moveReview = true
-		model.status = "Choose a destination, then press enter."
-	case "c":
-		return model.browserReviewForm(reviewConcurrency)
+	case reviewMove:
+		return model.beginRowMove(row)
+	case reviewInherit:
+		return model.startReviewPlan(reviewFormDraft{target: row.Target, operation: reviewInherit})
 	}
 	return model, nil
 }
 
+func (model Model) beginRowMove(row Item) (tea.Model, tea.Cmd) {
+	model.moveFrom = row
+	model.moveReview = true
+	model.status = "Choose a destination, then press enter."
+	return model, nil
+}
+
 func (model *Model) moveBrowserCursor(key string) {
-	items := model.visibleItems(model.browserKind())
+	items := model.browserRows()
 	if len(items) == 0 {
 		return
 	}
@@ -387,13 +414,6 @@ func (model Model) browserCopy() (tea.Model, tea.Cmd) {
 		return model, nil
 	}
 	return model.withForm(model.openCopyForm())
-}
-
-func (model Model) browserReviewForm(operation reviewOperation) (tea.Model, tea.Cmd) {
-	if model.browserArea != AreaReviews {
-		return model, nil
-	}
-	return model.withForm(model.openReviewOperation(operation))
 }
 
 func (model Model) updateSearch(key string) Model {
@@ -582,7 +602,7 @@ func (model Model) menuAreaCount(spec areaSpec) int {
 	case AreaParties:
 		return model.countItems(itemParty)
 	case AreaReviews:
-		return model.countItems(itemReview)
+		return model.snapshot.Reviews.inForceCount()
 	case AreaChanges:
 		return len(model.drafts.descriptions())
 	case areaSearch:
@@ -675,6 +695,9 @@ func (model Model) menuContextContent(spec areaSpec, options renderOptions) stri
 		if len(model.snapshot.Overview) > 0 || len(model.snapshot.Warnings) > 0 {
 			content += "\n\n" + model.overviewContext(options)
 		}
+	case spec.area == AreaReviews:
+		list, _ := renderReviewList(model.reviewRows(), -1, max(model.width, minBoxWidth), options)
+		content += "\n\n" + list
 	case spec.kind != "":
 		content += "\n\nInventory\n" + model.inventoryContext(spec.kind, options)
 	}
@@ -736,12 +759,14 @@ func (model Model) renderBrowserBody(options renderOptions, footer string) strin
 
 func (model Model) renderBrowserListPane(spec areaSpec, width int, options renderOptions, footer string) string {
 	var content strings.Builder
-	items := model.visibleItems(spec.kind)
-	if len(items) == 0 {
+	items := model.browserRows()
+	switch {
+	case model.browserArea == AreaReviews:
+		list, _ := renderReviewList(items, model.cursor, max(width-4, 1), options)
+		content.WriteString(list)
+	case len(items) == 0:
 		content.WriteString("No matching items.\n")
-	} else if model.browserArea == AreaReviews {
-		renderReviewRows(model, items, &content, options)
-	} else {
+	default:
 		renderRows(model, items, &content, options)
 	}
 	title := string(spec.area)
@@ -751,14 +776,12 @@ func (model Model) renderBrowserListPane(spec areaSpec, width int, options rende
 	return renderSizedBox(title, content.String(), width, footer)
 }
 
-func (model Model) renderBrowserDetailPane(spec areaSpec, width int, options renderOptions) string {
-	items := model.visibleItems(spec.kind)
+func (model Model) renderBrowserDetailPane(_ areaSpec, width int, options renderOptions) string {
 	var content strings.Builder
-	if len(items) == 0 {
+	if item, ok := model.cursorRow(); !ok {
 		content.WriteString("No row selected.")
 	} else {
-		item := items[min(model.cursor, len(items)-1)]
-		content.WriteString(renderInventoryItem(item, options))
+		content.WriteString(renderRowDetail(model.snapshot, item, options))
 		if item.Kind == itemProfile || item.Kind == itemParty {
 			for _, line := range model.snapshot.Overview {
 				content.WriteString("\n")
@@ -787,10 +810,11 @@ func (model Model) browserCursorLine() int {
 	if !ok || spec.kind == "" {
 		return 0
 	}
-	items := model.visibleItems(spec.kind)
+	items := model.browserRows()
 	innerWidth := max(newResponsiveLayout(max(model.width, minBoxWidth)).leftWidth-4, 1)
 	if model.browserArea == AreaReviews {
-		return model.reviewCursorLine(items, innerWidth)
+		_, line := renderReviewList(items, model.cursor, innerWidth, renderOptions{styled: true})
+		return line
 	}
 	return model.itemCursorLine(items, innerWidth)
 }
@@ -802,23 +826,6 @@ func (model Model) itemCursorLine(items []Item, width int) int {
 			return line
 		}
 		line += wrappedLineCount(renderRow(model, item, index, renderOptions{styled: true}), width)
-	}
-	return line
-}
-
-func (model Model) reviewCursorLine(items []Item, width int) int {
-	line := 1
-	for _, scope := range []ItemScope{"global", "repository"} {
-		line++
-		for index, item := range items {
-			if item.Scope != scope {
-				continue
-			}
-			if index == model.cursor {
-				return line
-			}
-			line += wrappedLineCount(renderRow(model, item, index, renderOptions{styled: true}), width)
-		}
 	}
 	return line
 }
@@ -844,40 +851,9 @@ func (model Model) browserKind() ItemKind {
 	return spec.kind
 }
 
-func (model Model) cursorReviewEntry() (reviewEntry, bool) {
-	items := model.visibleItems(itemReview)
-	if len(items) == 0 {
-		return reviewEntry{}, false
-	}
-	return items[min(model.cursor, len(items)-1)].entry(), true
-}
-
-func (item Item) entry() reviewEntry {
-	return reviewEntry{group: configuration.Scope(item.Scope), index: item.Index, expect: item.Selection}
-}
-
 func renderRows(model Model, items []Item, output *strings.Builder, options renderOptions) {
 	for index, item := range items {
 		fmt.Fprint(output, renderRow(model, item, index, options))
-	}
-}
-
-func renderReviewRows(model Model, items []Item, output *strings.Builder, options renderOptions) {
-	for _, scope := range []ItemScope{"global", "repository"} {
-		label := "Global"
-		if scope == ItemScope("repository") {
-			label = "Repository"
-		}
-		label += " selection"
-		if options.styled {
-			label = sectionTitleStyle.Render(label)
-		}
-		fmt.Fprintf(output, "%s\n", label)
-		for index, item := range items {
-			if item.Scope == scope {
-				fmt.Fprint(output, renderRow(model, item, index, options))
-			}
-		}
 	}
 }
 
@@ -953,7 +929,7 @@ func renderSearchArea(model Model, _ areaSpec, output *strings.Builder, options 
 func (model Model) renderSearchResults(output *strings.Builder, options renderOptions) {
 	matched := 0
 	for _, item := range model.snapshot.Items {
-		if !matches(item, model.query) {
+		if item.Kind == itemReviewHeader || !matches(item, model.query) {
 			continue
 		}
 		matched++

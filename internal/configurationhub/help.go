@@ -98,12 +98,9 @@ func (model Model) browserHelpBindings() []bubbleskey.Binding {
 	case AreaParties:
 		bindings = append(bindings, helpBinding("n", "new party", "n"))
 	case AreaReviews:
-		bindings = append(bindings,
-			helpBinding("a", "add review", "a"),
-			helpBinding("r", "remove review", "r"),
-			helpBinding("m", "move review", "m"),
-			helpBinding("c", "set concurrency", "c"),
-		)
+		for _, binding := range model.cursorReviewKeys() {
+			bindings = append(bindings, helpBinding(binding.key, binding.label, binding.key))
+		}
 	case AreaOverview, AreaChanges, areaSearch, areaCopyProfile:
 	}
 	return bindings
