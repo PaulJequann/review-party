@@ -60,8 +60,6 @@ type SetReviewSelection struct {
 // selection, so the Global one is in force for the repository.
 type InheritGlobalReviewSelection struct{}
 
-// refusesUnchanged is implemented by intents that exist only to change a
-// field, so planning one that changes nothing is an error, not an empty Plan.
 type refusesUnchanged interface {
 	unchangedFact() string
 }

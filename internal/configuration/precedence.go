@@ -5,9 +5,6 @@ import (
 	"strings"
 )
 
-// precedenceWarnings states what a plan changes about which file supplies the
-// Review selection and the Checkpoints in force for the repository, which the
-// edited fields alone do not show.
 func precedenceWarnings(before, after Loaded) []string {
 	var warnings []string
 	for _, warning := range []string{reviewSelectionPrecedence(before, after), checkpointPrecedence(before, after)} {

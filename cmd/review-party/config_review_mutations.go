@@ -106,8 +106,6 @@ func reviewsMutationOptionsFromCommand(cmd *cobra.Command) (configurationMutatio
 	return mutation, nil
 }
 
-// repositoryMutationOptions reads the flags of a command that only ever edits
-// Repository Configuration and so offers no --target.
 func repositoryMutationOptions(cmd *cobra.Command) configurationMutationOptions {
 	return configurationMutationOptions{
 		target: configuration.ScopeRepository, repository: stringFlag(cmd, "repo"), format: stringFlag(cmd, "format"),

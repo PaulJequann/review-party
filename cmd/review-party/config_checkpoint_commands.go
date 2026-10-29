@@ -103,8 +103,6 @@ func publishCheckpointIntent(cmd *cobra.Command, streams commandIO, intent func(
 	return publishIntent(options, streams, intent(options.target))
 }
 
-// offerUninstallAfter offers to remove installed Checkpoint Integrations that
-// a published change left serving no Checkpoint in force.
 func offerUninstallAfter(cmd *cobra.Command, streams commandIO, code int) int {
 	if code == 0 && stringFlag(cmd, "format") != "json" {
 		if err := offerUndeclaredUninstall(streams, uninstallOptions{repository: stringFlag(cmd, "repo"), configuration: stringFlag(cmd, "config"), yes: boolFlag(cmd, "yes")}); err != nil {
