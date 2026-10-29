@@ -2,6 +2,7 @@ package subject
 
 import (
 	"bytes"
+	"cmp"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -304,10 +305,24 @@ func newWorkingChangesSubject(root repositoryRoot, capture workingChangesCapture
 	}, Patch: string(capture.patch)}
 }
 
+// ErrNotRepository reports a directory that no git repository contains.
+var ErrNotRepository = errors.New("not a git repository")
+
+// ResolveRepositoryRoot returns the absolute root of the work tree containing
+// repository, or of the working directory when repository is empty.
 func ResolveRepositoryRoot(repository string) (string, error) {
-	root, err := gitOutput(repository, "rev-parse", "--show-toplevel")
-	if err != nil {
-		return "", fmt.Errorf("resolve repository root: %w", err)
+	args := []string{"rev-parse", "--show-toplevel"}
+	command := exec.Command("git", args...)
+	command.Dir = repository
+	// The C locale keeps git's "not a git repository" message untranslated.
+	command.Env = append(os.Environ(), "LC_ALL=C")
+	root, err := command.Output()
+	var exitError *exec.ExitError
+	switch {
+	case errors.As(err, &exitError) && bytes.HasPrefix(exitError.Stderr, []byte("fatal: not a git repository")):
+		return "", fmt.Errorf("resolve repository root: %s: %w", cmp.Or(repository, "."), ErrNotRepository)
+	case err != nil:
+		return "", fmt.Errorf("resolve repository root: %w", gitCommandError(args, err))
 	}
 	repositoryRoot, err := filepath.Abs(strings.TrimSpace(string(root)))
 	if err != nil {

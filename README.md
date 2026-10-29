@@ -215,7 +215,10 @@ containing one result per known Reviewer.
 Humans can open the recurring terminal shell for the current repository with
 `review-party config`; pass `--repo PATH` for another repository and use
 `--accessible` for the same configuration operations through non-redrawing
-prompts in a terminal. An accessible form abort exits the Hub without
+prompts in a terminal. Run outside every git repository without `--repo`, it
+opens on Global Configuration only, marked `[global only]`, with no Repository
+Configuration, Profile copy, or run preview; an explicit `--repo` must still
+name a repository. An accessible form abort exits the Hub without
 publishing; ordinary focused-form cancellation returns to the Hub with its
 draft. With unfinished drafts, normal menu or browser `q` and deliberate
 `Ctrl+C` ask before discarding. The default keeps your work; choose No, Escape,

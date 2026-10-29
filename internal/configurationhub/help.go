@@ -93,8 +93,10 @@ func (model Model) browserHelpBindings() []bubbleskey.Binding {
 		bindings = append(bindings,
 			helpBinding("n", "new profile", "n"),
 			helpBinding("e", "edit execution", "e"),
-			helpBinding("p", "copy profile", "p"),
 		)
+		if model.snapshot.copiesProfiles() {
+			bindings = append(bindings, helpBinding("p", "copy profile", "p"))
+		}
 	case AreaParties:
 		bindings = append(bindings, helpBinding("n", "new party", "n"))
 	case AreaReviews:

@@ -32,7 +32,7 @@ func TestAccessibleCopyProfileWithoutRepositoryProfilesReportsError(t *testing.T
 }
 
 func TestHubCopyWithoutRepositoryProfilesStaysInBrowser(t *testing.T) {
-	model := New(Snapshot{Repository: "/repo", Items: []Item{
+	model := New(Snapshot{Repository: "/repo", Targets: hubTargets("/repo"), Items: []Item{
 		{Scope: "global", Kind: itemProfile, Name: "quality", Detail: "codex / large"},
 	}})
 	model.area = 1

@@ -82,7 +82,7 @@ func TestAccessibleChooseActionRoutesCopyOption(t *testing.T) {
 	})
 	var output bytes.Buffer
 	// huh accessible selects take a one-based option number.
-	editor := editor{manager: manager, RunOptions: RunOptions{
+	editor := editor{manager: manager, snapshot: Snapshot{Targets: hubTargets("/repo")}, RunOptions: RunOptions{
 		Input: newLineInput("7\n"), Output: &output, Accessible: true,
 	}}
 	action, err := editor.chooseAction()
@@ -341,7 +341,7 @@ func TestReviewSelectionPreviewShowsProposedExpansion(t *testing.T) {
 		Repository:       []configuration.SelectionItem{{Profile: "shared"}, {Profile: "shared"}},
 	}
 	var output bytes.Buffer
-	if err := renderReviewSelectionPreview(&output, manager, repository, selection); err != nil {
+	if err := renderReviewSelectionPreview(&output, manager, repository, selection, false); err != nil {
 		t.Fatal(err)
 	}
 	preview := output.String()

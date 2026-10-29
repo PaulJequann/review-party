@@ -154,7 +154,8 @@ func newConfigCommand(streams commandIO) *cobra.Command {
 	dependencies := defaultConfigurationDependencies()
 	cmd := &cobra.Command{Use: "config", Short: "Open the Configuration Hub or use explicit configuration commands", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		options := configurationHubOptions{
-			repository: stringFlag(cmd, "repo"), configuration: stringFlag(cmd, "config"), accessible: boolFlag(cmd, "accessible"),
+			repository: stringFlag(cmd, "repo"), repositoryFlag: cmd.Flags().Changed("repo"),
+			configuration: stringFlag(cmd, "config"), accessible: boolFlag(cmd, "accessible"),
 			discoveryService: dependencies.discoveryService,
 		}
 		return commandResult(executeConfigurationHub(cmd.Context(), options, streams))

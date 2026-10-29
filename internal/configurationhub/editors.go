@@ -198,8 +198,10 @@ func (e *editor) chooseAction() (hubAction, error) {
 	for _, spec := range areas {
 		options = append(options, huh.NewOption(string(spec.area), string(spec.area)))
 	}
+	if e.snapshot.copiesProfiles() {
+		options = append(options, huh.NewOption("Copy a Repository Profile to Global Configuration", string(areaCopyProfile)))
+	}
 	options = append(options,
-		huh.NewOption("Copy a Repository Profile to Global Configuration", string(areaCopyProfile)),
 		huh.NewOption("Search scoped configuration", string(areaSearch)),
 		huh.NewOption("Exit", "exit"),
 	)
@@ -271,6 +273,13 @@ func (e *editor) reviewAndPublishWithPreview(plan configuration.Plan, publish fu
 	return true, nil
 }
 
-func scopeOptions() []huh.Option[string] {
-	return []huh.Option[string]{huh.NewOption("Global", string(configuration.ScopeGlobal)), huh.NewOption("Repository", string(configuration.ScopeRepository))}
+// scopeFields asks which configuration a new definition belongs to. With one
+// target there is nothing to ask: the scope is that target.
+func scopeFields(snapshot Snapshot, scope *string) []huh.Field {
+	if len(snapshot.Targets) == 1 {
+		*scope = string(snapshot.Targets[0])
+		return nil
+	}
+	options := []huh.Option[string]{huh.NewOption("Global", string(configuration.ScopeGlobal)), huh.NewOption("Repository", string(configuration.ScopeRepository))}
+	return []huh.Field{huh.NewSelect[string]().Title("Configuration scope").Options(options...).Value(scope)}
 }

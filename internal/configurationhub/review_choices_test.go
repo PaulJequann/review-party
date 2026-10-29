@@ -93,7 +93,7 @@ func TestReviewAddRetainsEntriesAndShowsFinalWorkloadInBothAdapters(t *testing.T
 		t.Fatalf("plan result = %#v", message)
 	}
 	var accessible bytes.Buffer
-	if err := renderReviewSelectionPreview(&accessible, manager, repository, added); err != nil {
+	if err := renderReviewSelectionPreview(&accessible, manager, repository, added, false); err != nil {
 		t.Fatal(err)
 	}
 	for _, preview := range []string{ready.summary, accessible.String()} {
@@ -213,7 +213,7 @@ func TestReviewPreviewRejectsUnresolvedDefinitions(t *testing.T) {
 	for _, name := range []string{"missing", "invalid"} {
 		selection := configuration.ReviewSelection{ConcurrencyLimit: 2, Repository: []configuration.SelectionItem{{Profile: name}}}
 		var output bytes.Buffer
-		if err := renderReviewSelectionPreview(&output, manager, repository, selection); err == nil || !strings.Contains(err.Error(), "resolve staged review selection") {
+		if err := renderReviewSelectionPreview(&output, manager, repository, selection, false); err == nil || !strings.Contains(err.Error(), "resolve staged review selection") {
 			t.Fatalf("preview accepted %s definition: %v", name, err)
 		}
 	}

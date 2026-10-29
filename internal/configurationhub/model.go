@@ -74,6 +74,7 @@ func (item Item) header() bool {
 // configuration files the Hub may write, in display order.
 type Snapshot struct {
 	Repository    string
+	GlobalPath    string
 	Targets       []configuration.Scope
 	Reviews       ReviewsView
 	Checkpoints   CheckpointsView
@@ -86,6 +87,12 @@ type Snapshot struct {
 
 func (snapshot Snapshot) writes(target configuration.Scope) bool {
 	return slices.Contains(snapshot.Targets, target)
+}
+
+// copiesProfiles reports whether Copy Profile has a Repository Profile to
+// read and a Global file to write.
+func (snapshot Snapshot) copiesProfiles() bool {
+	return snapshot.writes(configuration.ScopeRepository) && snapshot.writes(configuration.ScopeGlobal)
 }
 
 type areaRenderer func(Model, areaSpec, *strings.Builder, renderOptions)
@@ -446,7 +453,7 @@ func (model Model) browserNew() (tea.Model, tea.Cmd) {
 }
 
 func (model Model) browserCopy() (tea.Model, tea.Cmd) {
-	if model.browserArea != AreaProfiles {
+	if model.browserArea != AreaProfiles || !model.snapshot.copiesProfiles() {
 		return model, nil
 	}
 	return model.withForm(model.openCopyForm())
@@ -571,14 +578,16 @@ func (model Model) Render() string {
 
 func (model Model) renderTitleRow(options renderOptions) string {
 	title := "Review Party Configuration Hub"
-	badge := "[repository]"
-	repository := model.snapshot.Repository
+	badge, location, badgeStyle := "[repository]", model.snapshot.Repository, repositoryScopeStyle()
+	if !model.snapshot.writes(configuration.ScopeRepository) {
+		badge, location, badgeStyle = "[global only]", model.snapshot.GlobalPath, globalScopeStyle()
+	}
 	if options.styled {
 		title = sectionTitleStyle.Render(title)
-		badge = repositoryScopeStyle().Render(badge)
-		repository = metaStyle.Render(repository)
+		badge = badgeStyle.Render(badge)
+		location = metaStyle.Render(location)
 	}
-	return lipgloss.Wrap(title+"  "+badge+" "+repository, max(model.width, 1), " ")
+	return lipgloss.Wrap(title+"  "+badge+" "+location, max(model.width, 1), " ")
 }
 
 func (model Model) renderMenuRow(index int, spec areaSpec, rowWidth int, options renderOptions) string {

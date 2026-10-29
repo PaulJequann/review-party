@@ -16,8 +16,10 @@ type partyFormDraft struct {
 func (e *editor) createParty() error {
 	draft := &e.draftSet().party
 	if draft.scope == "" {
-		if err := e.form(huh.NewSelect[string]().Title("Configuration scope").Options(scopeOptions()...).Value(&draft.scope)); err != nil {
-			return err
+		if fields := scopeFields(e.snapshot, &draft.scope); len(fields) > 0 {
+			if err := e.form(fields...); err != nil {
+				return err
+			}
 		}
 	}
 	if err := e.form(e.partyFields(draft)...); err != nil {

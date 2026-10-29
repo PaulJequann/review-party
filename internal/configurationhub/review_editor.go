@@ -254,7 +254,7 @@ func (e *editor) publishReviewPlan(plan configuration.Plan, selection configurat
 		plan,
 		func() error { return e.manager.Publish(plan) },
 		func(output io.Writer) error {
-			return renderReviewSelectionPreview(output, e.manager, e.Repository, selection)
+			return renderReviewSelectionPreview(output, e.manager, e.Repository, selection, !e.snapshot.writes(configuration.ScopeRepository))
 		},
 	)
 	if published {
@@ -263,7 +263,15 @@ func (e *editor) publishReviewPlan(plan configuration.Plan, selection configurat
 	return err
 }
 
-func renderReviewSelectionPreview(output io.Writer, manager *configuration.Manager, repository configuration.Repository, selection configuration.ReviewSelection) error {
+// runPreviewAbsence replaces the resolved run preview outside a repository:
+// what a run resolves to depends on the repository it runs in.
+const runPreviewAbsence = "Run preview needs a repository"
+
+func renderReviewSelectionPreview(output io.Writer, manager *configuration.Manager, repository configuration.Repository, selection configuration.ReviewSelection, globalOnly bool) error {
+	if globalOnly {
+		_, err := fmt.Fprintf(output, "resolved review selection:\n  %s.\n", runPreviewAbsence)
+		return err
+	}
 	if len(selection.Global) == 0 && len(selection.Repository) == 0 {
 		_, err := fmt.Fprintf(output, "resolved review selection:\n  No reviews selected.\n  effective concurrency: %d\n", selection.ConcurrencyLimit)
 		return err

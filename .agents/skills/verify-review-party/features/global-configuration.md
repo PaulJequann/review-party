@@ -29,8 +29,8 @@ Review Party runs the Global Configuration's Review selection in every repositor
 - `validateReviewSelection` in `internal/configuration/domain_validation.go`
   rejects a Global `reviews.repository` group.
 
-Drift: none. Changing the Global selection from the Configuration Hub is
-deferred; the Hub edits the repository selection only.
+Drift: none. The Configuration Hub's Reviews area edits the Global selection
+too; `features/configuration-hub.md` covers that route.
 
 ## How to get to it (user POV)
 

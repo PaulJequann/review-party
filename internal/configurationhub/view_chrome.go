@@ -55,6 +55,13 @@ func (model Model) renderHeader(options renderOptions) string {
 	if model.status != "" {
 		lines = append(lines, model.renderStatus(options))
 	}
+	if !model.snapshot.writes(configuration.ScopeRepository) {
+		note := "Not in a git repository, so Repository Configuration is not available."
+		if options.styled {
+			note = metaStyle.Render(note)
+		}
+		lines = append(lines, lipgloss.Wrap(note, max(model.width, 1), " "))
+	}
 	if model.notice != "" {
 		notice := "▲ " + model.notice
 		if options.styled {
@@ -201,7 +208,10 @@ func (model Model) actionHints() []actionHint {
 	hints := []actionHint{{key: "↑/↓", label: "navigate"}}
 	switch model.browserArea {
 	case AreaProfiles:
-		hints = append(hints, actionHint{key: "n", label: "new"}, actionHint{key: "e", label: "edit"}, actionHint{key: "p", label: "copy"})
+		hints = append(hints, actionHint{key: "n", label: "new"}, actionHint{key: "e", label: "edit"})
+		if model.snapshot.copiesProfiles() {
+			hints = append(hints, actionHint{key: "p", label: "copy"})
+		}
 	case AreaParties:
 		hints = append(hints, actionHint{key: "n", label: "new"})
 	case AreaReviews:

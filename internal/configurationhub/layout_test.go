@@ -7,6 +7,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+
+	"reviewparty/internal/configuration"
 )
 
 func TestHubGoldenFramesFitTerminal(t *testing.T) {
@@ -72,7 +74,7 @@ func assertWideLayout(t *testing.T, width int) {
 
 func TestHubHeaderWrapsLongRepositoryWithoutClipping(t *testing.T) {
 	repository := "/tmp/review-party/scratch/repository-with-a-deliberately-long-name"
-	model := New(Snapshot{Repository: repository})
+	model := New(Snapshot{Repository: repository, Targets: hubTargets(configuration.Repository(repository))})
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	model = requireHubModel(t, updated)
 	assertFrameFitsTerminal(t, model, 80, 24)
@@ -132,7 +134,7 @@ func TestHubScrollIndicatorUsesViewportBoxFooter(t *testing.T) {
 }
 
 func TestHubHelpOverlayListsFocusedBindings(t *testing.T) {
-	model := New(Snapshot{Repository: "/repo"})
+	model := New(Snapshot{Repository: "/repo", Targets: hubTargets("/repo")})
 	model.area = 1
 	updated, _ := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	model = requireHubModel(t, updated)

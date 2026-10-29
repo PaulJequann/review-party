@@ -57,6 +57,7 @@ func TestRenderBoxDoesNotClipContentAndGuardsMinimumWidth(t *testing.T) {
 func TestHubRenderIsPlainText(t *testing.T) {
 	model := New(Snapshot{
 		Repository: "/repo",
+		Targets:    hubTargets("/repo"),
 		Items: []Item{
 			{Scope: "global", Kind: itemProfile, Name: "quality", Detail: "codex / large"},
 			{Scope: "repository", Kind: itemProfile, Name: "quality", Detail: "invalid: missing model"},

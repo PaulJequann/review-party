@@ -10,6 +10,8 @@ same configuration operations.
 - `HUB-SHELL-NAVIGATION`
 - `HUB-PLAN-PREVIEW-PUBLISH`
 - `HUB-ACCESSIBLE-PUBLISH`
+- `HUB-GLOBAL-TARGETS`
+- `HUB-GLOBAL-ONLY-LAUNCH`
 
 ## Source evidence
 
@@ -17,9 +19,18 @@ same configuration operations.
   `config`, the `--accessible` flag, and the explicit command family.
 - `executeConfigurationHub` in `cmd/review-party/config_hub.go` requires
   terminal input/output, resolves the repository, and routes the selected mode
-  through the Hub.
+  through the Hub. `resolveConfigurationHubRepository` opens the Hub with no
+  repository only when `--repo` was not given and git reports
+  `subject.ErrNotRepository`; an explicit `--repo` must name a repository.
+- `hubTargets` in `internal/configurationhub/snapshot.go` sets
+  `Snapshot.Targets` to Global and Repository, or to Global alone without a
+  repository. `Snapshot.writes` in `internal/configurationhub/model.go` gates
+  every Repository-only surface: the `[global only]` title badge and header
+  note, the Repository sections of Reviews and Checkpoints, Profile copy
+  (`copiesProfiles`), the scope question (`scopeFields` in `editors.go`), and
+  the resolved run preview, which becomes `runPreviewAbsence`.
 - `newAreaSpecs` in `internal/configurationhub/model.go` defines the Overview,
-  Profiles, Parties, Repository Reviews, and Review Changes areas;
+  Profiles, Parties, Reviews, Checkpoints, and Review Changes areas;
   `updateNavigation` and `openSelectedArea` own menu navigation and area
   opening; `View` owns the alt-screen title and terminal view.
 - `renderPlanPreviewFrame` and `renderPlanActionBar` in
@@ -46,6 +57,8 @@ both need live coverage.
 - Run `review-party config --accessible --repo PATH --config PATH` for
   non-redrawing prompts in a terminal.
 - Use the Profiles area to create a Profile, review its plan, and publish it.
+- Run `review-party config --config PATH` from a directory outside every git
+  repository to edit Global Configuration only.
 
 ## Driving it with the CLI
 
@@ -183,6 +196,51 @@ root. Use this read-only second view:
 Require the readback to contain the same identity and execution fields as the
 normal path. Run doctor before cleanup.
 
+### Global targets and the Global-only launch
+
+Use a fresh launched baseline. The run directory sits inside this checkout, so
+create a plain directory and stop git's upward search at its parent:
+
+```sh
+plain="$run_dir/runtime/plain"
+mkdir -p "$plain"
+tmux new-session -d -x 120 -y 30 -s "$session" -c "$plain" -- \
+  env TERM=xterm-256color EDITOR=true HOME="$home" XDG_CONFIG_HOME="$config_root" XDG_STATE_HOME="$state_root" \
+  GIT_CEILING_DIRECTORIES="$run_dir/runtime" "$binary" config --config "$config_file"
+```
+
+1. **Badge.** Wait for `[global only]`. Capture `global-only-menu.txt`; the
+   title must show `[global only]` and the Global path, the header must say
+   `Not in a git repository, so Repository Configuration is not available.`,
+   and Overview must show `Global:` counts, `Run preview needs a repository`,
+   and no `Repository` line.
+2. **Profile without a scope question.** Open Profiles and send `n`. Capture
+   `global-only-profile-form.txt`; the form must start at `Profile name` with
+   no `Configuration scope` field, and the browser footer and `?` help must
+   not offer copy. Complete the Profile as in the normal drive and publish it;
+   the plan names `global profiles`.
+3. **Global Review selection.** Open Reviews; the only section is
+   `Global Configuration`. Send `a`, choose the new Profile, and capture
+   `global-only-reviews-plan.txt`; it must show `global reviews` and
+   `Run preview needs a repository.` in place of the resolved selection.
+   Publish it.
+4. **Global Checkpoint.** Open Checkpoints; the only section is
+   `Global Configuration`, with no enrollment keys. Set `pre-push`, accept the
+   defaults with no Integrations, and publish. No undeclared-Integrations
+   notice appears.
+5. **Read back.** After each publish run
+   `review-party config file show --scope global --format json` through
+   `capture`; it must hold the Profile in `reviews.global` and the `pre-push`
+   Checkpoint.
+
+Repeat steps 1 to 4 with `config --accessible`: the Profile prompts start at
+`Profile name`, Reviews and Checkpoints open on `Global Configuration` with no
+file prompt, and the menu has no copy choice.
+
+Negative control: capture `review-party config --repo "$plain" --config
+"$config_file"` with `GIT_CEILING_DIRECTORIES="$run_dir/runtime"` in a
+terminal. It exits `1` with `not a git repository` and opens no Hub.
+
 Negative control: the non-TTY command above must fail at the terminal boundary
 before either positive route writes a Profile. Restore the baseline by running
 doctor after the control and by using a fresh run for each terminal route.
@@ -191,6 +249,9 @@ doctor after the control and by using a fresh run for each terminal route.
 
 - `config` without a terminal is expected to refuse with guidance; use the
   explicit `config` subcommands for automation.
+- A plain directory under the checkout is still inside a git work tree, so
+  the Global-only launch needs `GIT_CEILING_DIRECTORIES` at or above the plain
+  directory's parent. Without it the Hub opens on this checkout's repository.
 - The normal and accessible paths are different adapters. A successful
   accessible prompt run does not prove the Bubble Tea screen layout, and a
   screen-navigation run does not prove the line-oriented adapter.

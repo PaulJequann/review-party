@@ -57,7 +57,7 @@ today. Caller Agent hooks stay optional and unchanged in this design.
 
 ### Effective Review selection
 
-`effectiveReviewSelection` in `internal/configuration/domain_storage.go`
+`Loaded.ReviewSelection()` in `internal/configuration/domain_storage.go`
 returns the Repository selection when the Repository document is present and
 has `reviews`. Otherwise it returns the Global selection when the Global
 document has `reviews`, with `Source: SourceGlobal` and the Global path.
@@ -139,7 +139,7 @@ against the real binary in an isolated `HOME`.
 Files.
 
 - `internal/configuration/document.go`: allow `reviews` in Global scope.
-- `internal/configuration/domain_storage.go`: `effectiveReviewSelection`
+- `internal/configuration/domain_storage.go`: `Loaded.ReviewSelection()`
   falls back to Global; `validateReviewSelection` rejects a Global
   `repository` group.
 - `internal/configuration/selection.go`: `SelectionGlobalDefault`,
@@ -313,15 +313,19 @@ Checkpoint keeps its own fields.
   for the file. One more meaning for `--scope` on `reviews` would be ambiguous,
   so the file gets its own flag. Renaming the Profile and Reviewer flag to
   match is a follow-up.
-- **Configuration Hub deferred.** The TUI keeps editing Repository scope. The
-  `--target` flags cover the CLI path. A Hub scope switch is a follow-up.
+- **Configuration Hub edits both files.** The Reviews and Checkpoints areas
+  show one section per configuration file, and Profile and Party creation ask
+  which file to write. Without `--repo` outside every git repository, the Hub
+  opens on Global Configuration only, marked `[global only]`. It hides
+  Repository sections, Profile copy, and the scope question, and shows "Run
+  preview needs a repository" in place of the resolved run preview. An explicit
+  `--repo` must still name a repository, and `init` never falls back.
 
 ## Out of scope
 
 - Merging Global and Repository selections or Checkpoints.
 - A machine-wide git hook.
 - New Caller Agent Integrations or targets.
-- Hub forms for Global selection and Checkpoints.
 - Migration code for existing Repository Configuration.
 
 ## Needs sign-off

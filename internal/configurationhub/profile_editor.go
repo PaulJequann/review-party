@@ -81,8 +81,10 @@ func (e *editor) ensureProfileFlow() error {
 		return nil
 	}
 	var scope string
-	if err := e.form(huh.NewSelect[string]().Title("Configuration scope").Options(scopeOptions()...).Value(&scope)); err != nil {
-		return err
+	if fields := scopeFields(e.snapshot, &scope); len(fields) > 0 {
+		if err := e.form(fields...); err != nil {
+			return err
+		}
 	}
 	drafts.profile.Target = configuration.Scope(scope)
 	return nil

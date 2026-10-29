@@ -75,7 +75,8 @@ const (
 )
 
 type reviewPlanRequest struct {
-	draft reviewFormDraft
+	draft      reviewFormDraft
+	globalOnly bool
 }
 
 type publishRequest struct {
@@ -262,7 +263,7 @@ func buildPlan(manager *configuration.Manager, repository configuration.Reposito
 	case planReviews:
 		plan, selection, err := planReviewEdit(manager, repository, request.review.draft)
 		return plan, func(output io.Writer) error {
-			return renderReviewSelectionPreview(output, manager, repository, selection)
+			return renderReviewSelectionPreview(output, manager, repository, selection, request.review.globalOnly)
 		}, err
 	default:
 		return configuration.Plan{}, nil, fmt.Errorf("unknown plan kind %q", request.kind)

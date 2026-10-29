@@ -182,7 +182,7 @@ func (model Model) startRowReview(operation reviewOperation) (tea.Model, tea.Cmd
 func (model Model) startReviewPlan(draft reviewFormDraft) (tea.Model, tea.Cmd) {
 	model.session.reviews = draft
 	model.drafts.reviews = draft
-	return model.startPlan(planRequest{kind: planReviews, review: reviewPlanRequest{draft: draft}})
+	return model.startPlan(planRequest{kind: planReviews, review: reviewPlanRequest{draft: draft, globalOnly: !model.snapshot.writes(configuration.ScopeRepository)}})
 }
 
 func (model Model) startCheckpointPlan(draft checkpointFormDraft) (tea.Model, tea.Cmd) {
@@ -292,13 +292,12 @@ func (model *Model) openPartyForm() tea.Cmd {
 	profileSelect := huh.NewMultiSelect[string]().Title("Profiles").
 		OptionsFunc(func() []huh.Option[string] { return partyMemberOptions(options, draft.scope) }, &draft.scope).
 		Value(&draft.profileRefs).WithHeight(min(max(len(options)+1, 2), 8))
-	return model.openForm(formParty, []huh.Field{
-		huh.NewSelect[string]().Title("Configuration scope").Options(scopeOptions()...).Value(&draft.scope),
+	return model.openForm(formParty, append(scopeFields(model.snapshot, &draft.scope),
 		huh.NewInput().Title("Party name").Value(&draft.name),
 		huh.NewInput().Title("Description").Value(&draft.description),
 		profileSelect,
 		huh.NewInput().Title("Concurrency limit").Value(&draft.limit),
-	})
+	))
 }
 
 func (model *Model) openReviewFieldsForm() tea.Cmd {
@@ -491,7 +490,7 @@ func (model *Model) completePlanForm() (tea.Model, tea.Cmd) {
 	case formParty:
 		return model.startPlan(planRequest{kind: planParty, party: model.drafts.party})
 	case formReviewFields:
-		return model.startPlan(planRequest{kind: planReviews, review: reviewPlanRequest{draft: model.drafts.reviews}})
+		return model.startPlan(planRequest{kind: planReviews, review: reviewPlanRequest{draft: model.drafts.reviews, globalOnly: !model.snapshot.writes(configuration.ScopeRepository)}})
 	case formCheckpointFields:
 		return model.startPlan(planRequest{kind: planCheckpoints, checkpoint: model.drafts.checkpoints})
 	case formCopy:

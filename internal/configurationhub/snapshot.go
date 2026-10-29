@@ -93,16 +93,24 @@ func buildSnapshot(manager *configuration.Manager, repository configuration.Repo
 		return snapshot, err
 	}
 	snapshot.Targets = hubTargets(repository)
+	snapshot.GlobalPath, err = manager.ConfigPath(configuration.ScopeGlobal, repository)
+	if err != nil {
+		return snapshot, err
+	}
 	snapshot.Reviews = newReviewsView(loaded, snapshot.Targets)
-	snapshot.Overview = append(snapshot.Overview,
-		fmt.Sprintf("Global: %s, %s", pluralizedCount("Profile", countHubProfiles(profiles, configuration.ScopeGlobal)), pluralizedCount("Party", countHubParties(parties, configuration.ScopeGlobal))),
-		fmt.Sprintf("Repository: %s, %s", pluralizedCount("Profile", countHubProfiles(profiles, configuration.ScopeRepository)), pluralizedCount("Party", countHubParties(parties, configuration.ScopeRepository))),
-	)
+	for _, scope := range []configuration.Scope{configuration.ScopeGlobal, configuration.ScopeRepository} {
+		if snapshot.writes(scope) {
+			snapshot.Overview = append(snapshot.Overview, fmt.Sprintf("%s: %s, %s", scopeLabel(scope), pluralizedCount("Profile", countHubProfiles(profiles, scope)), pluralizedCount("Party", countHubParties(parties, scope))))
+		}
+	}
 	for _, file := range snapshot.Reviews.Files {
 		snapshot.Overview = append(snapshot.Overview, configurationTitle(file.Target)+" Reviews: "+snapshot.Reviews.headerState(file))
 		appendHubReviewFile(&snapshot, file)
 	}
-	if loaded.ReviewSelection().Authored {
+	switch {
+	case !snapshot.writes(configuration.ScopeRepository):
+		snapshot.Overview = append(snapshot.Overview, runPreviewAbsence)
+	case loaded.ReviewSelection().Authored:
 		appendResolvedPreview(manager, repository, &snapshot)
 	}
 	snapshot.Checkpoints = newCheckpointsView(loaded, snapshot.Targets)

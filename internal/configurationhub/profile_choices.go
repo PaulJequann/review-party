@@ -41,10 +41,9 @@ func (model *Model) openProfileModelForm() tea.Cmd {
 
 func (model *Model) openProfileFieldsForm() tea.Cmd {
 	state := &model.session.profile
-	fields := []huh.Field{
-		huh.NewSelect[string]().Title("Configuration scope").Options(scopeOptions()...).Value(&state.target),
+	fields := append(scopeFields(model.snapshot, &state.target),
 		huh.NewNote().Title("Profile details").Description("Choose a Reviewer. Model and effort choices follow."),
-	}
+	)
 	state.accessors = make(map[string]*profileFieldAccessor, len(profileFieldSpecs))
 	fields = append(fields, model.profileIdentityFields(state)...)
 	for _, name := range []string{"model", "effort", "deadline"} {

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 
@@ -13,6 +14,7 @@ import (
 
 type configurationHubOptions struct {
 	repository       string
+	repositoryFlag   bool
 	configuration    string
 	accessible       bool
 	discoveryService func() *discovery.Service
@@ -22,7 +24,7 @@ func executeConfigurationHub(parent context.Context, options configurationHubOpt
 	if !streams.interactive() {
 		return printConfigFailure("human", streams.output, streams.errors, fmt.Errorf("the Configuration Hub requires a terminal; use explicit 'review-party config' subcommands for automation"))
 	}
-	repository, err := resolveConfigurationHubRepository(options.repository)
+	repository, err := resolveConfigurationHubRepository(options.repository, options.repositoryFlag)
 	if err != nil {
 		return printFailure(streams.errors, fmt.Errorf("resolve repository: %w", err))
 	}
@@ -36,10 +38,11 @@ func executeConfigurationHub(parent context.Context, options configurationHubOpt
 	return 0
 }
 
-// runOptions wires the Hub's forms for a resolved repository to the terminal,
-// Profile receipts, model discovery, and the undeclared-Integrations check a
-// Checkpoints publish reports. The Hub and the init first-use
-// journey share it so both drive the same forms.
+// runOptions wires the Hub's forms for a resolved repository, or for none, to
+// the terminal, Profile receipts, model discovery, and the
+// undeclared-Integrations check a Checkpoints publish reports. Integrations
+// are installed per repository, so without one there is nothing to check. The
+// Hub and the init first-use journey share it so both drive the same forms.
 func (options configurationHubOptions) runOptions(ctx context.Context, manager *configuration.Manager, streams commandIO) configurationhub.RunOptions {
 	repository := options.repository
 	hubOptions := configurationhub.RunOptions{
@@ -48,12 +51,14 @@ func (options configurationHubOptions) runOptions(ctx context.Context, manager *
 		Input:      configurationHubInput(streams.input), Output: streams.output, Accessible: options.accessible,
 		Receipts: profileReceiptProvider(ctx, options.configuration),
 	}
-	hubOptions.UndeclaredIntegrations = func() (string, error) {
-		_, command, err := undeclaredIntegrations(repository, options.configuration, manager)
-		if command == "" {
-			return "", err
+	if repository != "" {
+		hubOptions.UndeclaredIntegrations = func() (string, error) {
+			_, command, err := undeclaredIntegrations(repository, options.configuration, manager)
+			if command == "" {
+				return "", err
+			}
+			return undeclaredIntegrationsNotice(command), nil
 		}
-		return undeclaredIntegrationsNotice(command), nil
 	}
 	if options.discoveryService != nil {
 		hubOptions.Discovery = options.discoveryService()
@@ -67,8 +72,15 @@ func (options configurationHubOptions) runOptions(ctx context.Context, manager *
 	return hubOptions
 }
 
-func resolveConfigurationHubRepository(repository string) (string, error) {
-	return subject.ResolveRepositoryRoot(repository)
+// resolveConfigurationHubRepository returns "" when a launch without --repo is
+// outside every git repository: the Hub then opens on Global Configuration
+// only. An explicit --repo must name a repository.
+func resolveConfigurationHubRepository(repository string, explicit bool) (string, error) {
+	root, err := subject.ResolveRepositoryRoot(repository)
+	if !explicit && errors.Is(err, subject.ErrNotRepository) {
+		return "", nil
+	}
+	return root, err
 }
 
 func configurationHubInput(input io.Reader) io.ReadCloser {

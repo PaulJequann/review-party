@@ -356,7 +356,7 @@ func requireProfileInputsEmpty(t *testing.T, state *profileFormState) {
 }
 
 func newPlanTestModel(planned, published *bool) Model {
-	model := New(Snapshot{Repository: "/repo", Items: []Item{
+	model := New(Snapshot{Repository: "/repo", Targets: hubTargets("/repo"), Items: []Item{
 		{Scope: "repository", Kind: itemProfile, Name: "quality", Detail: "codex / large"},
 	}})
 	model.area = 1
