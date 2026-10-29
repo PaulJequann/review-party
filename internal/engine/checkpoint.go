@@ -50,13 +50,16 @@ type CheckpointRequest struct {
 	Content    []model.ContentChange
 }
 
-// CheckpointReport is the Checkpoint-level answer. Declaration is nil when the
-// repository declares no such Checkpoint. Exemption is set when exempt paths
-// removed content. Waiver is set when state is waived. Coverage is empty when
-// exemptions alone decided the Checkpoint.
+// CheckpointReport is the Checkpoint-level answer. Declaration is nil when no
+// Checkpoint of that name is in force for the repository; otherwise Source and
+// DeclaredIn name the Configuration file that declares it. Exemption is set
+// when exempt paths removed content. Waiver is set when state is waived.
+// Coverage is empty when exemptions alone decided the Checkpoint.
 type CheckpointReport struct {
 	Name        configuration.CheckpointName
 	Declaration *configuration.Checkpoint
+	Source      configuration.Source
+	DeclaredIn  string
 	State       CheckpointState
 	Exemption   *CheckpointExemption
 	Waiver      *model.CheckpointWaiver
@@ -72,14 +75,15 @@ type waiverLedger interface {
 
 // CheckCheckpoint decides one Checkpoint for the content.
 func (conductor *Conductor) CheckCheckpoint(_ context.Context, request CheckpointRequest) (CheckpointReport, error) {
-	checkpoints, err := conductor.configuration.Checkpoints(configuration.Repository(request.Repository))
+	checkpoints, err := conductor.configuration.EffectiveCheckpoints(configuration.Repository(request.Repository))
 	if err != nil {
 		return CheckpointReport{}, err
 	}
 	report := CheckpointReport{Name: request.Name}
-	declaration, declared := checkpoints[request.Name]
+	declaration, declared := checkpoints.Value[request.Name]
 	if declared {
 		report.Declaration = &declaration
+		report.Source, report.DeclaredIn = checkpoints.Source, checkpoints.Path
 	}
 	content, exempt := partitionExempt(declaration, request.Content)
 	if len(exempt) > 0 {

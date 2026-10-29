@@ -36,11 +36,11 @@ func reportInitGaps(output io.Writer, manager *configuration.Manager, target con
 		return err
 	}
 	if report.target == configuration.ScopeRepository {
-		hooks, err := report.checkpointLines()
+		checkpoints, err := report.checkpointLines()
 		if err != nil {
 			return err
 		}
-		lines = append(lines, hooks...)
+		lines = append(lines, checkpoints...)
 	}
 	return writeCommandOutput(output, func(output *commandOutput) {
 		for _, line := range lines {
@@ -161,16 +161,19 @@ func (report initReport) baselineOfferLines(baseline configuration.Baseline) []s
 	return []string{label + ": " + report.baselineCommand(baseline)}
 }
 
-// checkpointLines names what each Checkpoint's team floor still lacks in the
-// team's files, with the command that installs it or the snippet a hook tool
-// needs by hand, then the Codex approval step when any floor lists codex. A
-// hook someone edited counts as in place.
 func (report initReport) checkpointLines() ([]string, error) {
-	gaps, err := planFloorGaps(report.manager, string(report.repository), report.configuration)
+	enrollment, err := report.manager.Enrollment(report.repository)
 	if err != nil {
 		return nil, err
 	}
 	var lines []string
+	if enrollment.Offered() {
+		lines = append(lines, "Enroll this repository in your Global Checkpoints: review-party init --enroll --yes --repo "+shellWord(string(report.repository))+report.config)
+	}
+	gaps, err := planFloorGaps(report.manager, string(report.repository), report.configuration)
+	if err != nil {
+		return nil, err
+	}
 	for _, gap := range gaps {
 		lines = append(lines, initGapLines(gap)...)
 	}

@@ -496,6 +496,8 @@ func TestConfigMutationCommandsExposeDocumentedFlags(t *testing.T) {
 		{path: []string{"config", "reviews", "remove"}, flags: []string{"scope", "target", "profile", "party", "index", "repo", "format", "config", "yes"}},
 		{path: []string{"config", "reviews", "move"}, flags: []string{"scope", "target", "from", "to", "repo", "format", "config", "yes"}},
 		{path: []string{"config", "reviews", "set-concurrency"}, flags: []string{"target", "repo", "format", "config", "yes"}},
+		{path: []string{"config", "checkpoint", "set"}, flags: []string{"requirement", "exempt", "unreviewed-lines", "review-budget", "waivers", "integration", "target", "repo", "format", "config", "yes"}},
+		{path: []string{"config", "checkpoint", "remove"}, flags: []string{"target", "repo", "format", "config", "yes"}},
 	}
 	for _, test := range tests {
 		requireCommandFlags(t, findCommand(t, root, test.path), test.path, test.flags)

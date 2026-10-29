@@ -30,10 +30,13 @@ func newConfigCheckpointCommand(streams commandIO) *cobra.Command {
 		for _, integration := range stringArrayFlag(cmd, "integration") {
 			checkpoint.Integrations = append(checkpoint.Integrations, configuration.IntegrationName(integration))
 		}
-		intent := configuration.SetCheckpoint{Name: configuration.CheckpointName(args[0]), Checkpoint: checkpoint}
-		return commandResult(publishCheckpointIntent(cmd, streams, intent))
+		return commandResult(publishCheckpointIntent(cmd, streams, func(target configuration.Scope) configuration.Intent {
+			return configuration.SetCheckpoint{Target: target, Name: configuration.CheckpointName(args[0]), Checkpoint: checkpoint}
+		}))
 	})
-	set.Long = `Create or replace one Review Checkpoint in Repository Configuration.
+	set.Long = `Create or replace one Review Checkpoint in Repository Configuration, or
+with --target global in Global Configuration, where it is in force for every
+enrolled repository whose own Configuration declares no checkpoints.
 
 Omitted flags take their defaults, so set replaces the whole declaration.
 --exempt takes slash-separated patterns relative to the repository root: * and
@@ -44,7 +47,7 @@ finding record, on every Finding of the Reviews that cover the change.
 --unreviewed-lines lets that many lines change after a Review without a new
 one. --review-budget caps the Reviews one change may spend before the
 Checkpoint asks a person to step in; declare it on one Checkpoint.`
-	set.Example = "  review-party config checkpoint set pre-push --exempt '*.md' --exempt 'docs/**' --integration git\n  review-party config checkpoint set pre-push --requirement judged --yes\n  review-party config checkpoint set pre-commit --unreviewed-lines 10 --review-budget 2 --waivers anyone --yes"
+	set.Example = "  review-party config checkpoint set pre-push --exempt '*.md' --exempt 'docs/**' --integration git\n  review-party config checkpoint set pre-push --requirement judged --yes\n  review-party config checkpoint set pre-commit --unreviewed-lines 10 --review-budget 2 --waivers anyone --yes\n  review-party config checkpoint set pre-push --target global --integration git --yes"
 	set.ValidArgs = checkpointNameArguments()
 	set.Flags().String("requirement", string(configuration.RequirementReviewed), "What the Checkpoint expects: reviewed, or judged for a verdict on every Finding too")
 	set.Flags().StringArray("exempt", nil, "Path pattern the Checkpoint does not require Reviews for; repeatable")
@@ -53,9 +56,12 @@ Checkpoint asks a person to step in; declare it on one Checkpoint.`
 	set.Flags().String("waivers", string(configuration.WaiversHuman), "Who may waive the Checkpoint: anyone, human, or none")
 	set.Flags().StringArray("integration", nil, "Integration the team installs for this Checkpoint: git, claude-code, codex, or agents-md; repeatable")
 	addConfigMutationFlags(set, false, false, "")
+	addSelectionTargetFlag(set)
 
 	remove := newConfigLeafCommand("remove <pre-push|pre-commit>", "Remove one Review Checkpoint", cobra.MatchAll(cobra.ExactArgs(1), cobra.OnlyValidArgs), func(cmd *cobra.Command, args []string) error {
-		code := publishCheckpointIntent(cmd, streams, configuration.RemoveCheckpoint{Name: configuration.CheckpointName(args[0])})
+		code := publishCheckpointIntent(cmd, streams, func(target configuration.Scope) configuration.Intent {
+			return configuration.RemoveCheckpoint{Target: target, Name: configuration.CheckpointName(args[0])}
+		})
 		if code == 0 && stringFlag(cmd, "format") != "json" {
 			if err := offerUndeclaredUninstall(streams, uninstallOptions{repository: stringFlag(cmd, "repo"), configuration: stringFlag(cmd, "config"), yes: boolFlag(cmd, "yes")}); err != nil {
 				printCommandError(streams.errors, 0, fmt.Errorf("warning: %w", err))
@@ -65,6 +71,7 @@ Checkpoint asks a person to step in; declare it on one Checkpoint.`
 	})
 	remove.ValidArgs = checkpointNameArguments()
 	addConfigMutationFlags(remove, false, false, "")
+	addSelectionTargetFlag(remove)
 	cmd.AddCommand(set, remove)
 	return cmd
 }
@@ -77,13 +84,13 @@ func stringArrayFlag(cmd *cobra.Command, name string) []string {
 	return values
 }
 
-func publishCheckpointIntent(cmd *cobra.Command, streams commandIO, intent configuration.Intent) int {
-	options := configurationMutationOptions{
-		repository: stringFlag(cmd, "repo"), format: stringFlag(cmd, "format"),
-		configuration: stringFlag(cmd, "config"), yes: boolFlag(cmd, "yes"),
+func publishCheckpointIntent(cmd *cobra.Command, streams commandIO, intent func(configuration.Scope) configuration.Intent) int {
+	options, err := reviewsMutationOptionsFromCommand(cmd)
+	if err != nil {
+		return printConfigFailure(options.format, streams.output, streams.errors, err)
 	}
 	return runConfigurationCommand(options.format, options.configuration, streams, func(manager *configuration.Manager) (int, error) {
-		plan, err := manager.Plan(configuration.Repository(options.repository), []configuration.Intent{intent})
+		plan, err := manager.Plan(configuration.Repository(options.repository), []configuration.Intent{intent(options.target)})
 		if err != nil {
 			return 0, err
 		}

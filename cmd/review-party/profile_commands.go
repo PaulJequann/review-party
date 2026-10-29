@@ -22,6 +22,7 @@ type initOptions struct {
 	yes              bool
 	accessible       bool
 	global           bool
+	enroll           bool
 	setup            []setupTarget
 	baseline         *configuration.ProfileExecution
 	discoveryService func() *discovery.Service
@@ -73,6 +74,8 @@ func executeInit(ctx context.Context, options initOptions, streams commandIO) in
 	manager := streams.configurationManager(options.configuration)
 	repository := configuration.Repository(result.Repository)
 	switch {
+	case options.enroll:
+		return enrollRepository(manager, repository, options, streams)
 	case options.hasSetup():
 		return initSetup{manager: manager, repository: repository, target: configuration.ScopeRepository, options: options, streams: streams}.apply()
 	case streams.interactive():
@@ -83,6 +86,25 @@ func executeInit(ctx context.Context, options initOptions, streams commandIO) in
 		if err := runFirstUseJourney(ctx, manager, hub, streams); err != nil {
 			return printFailure(streams.errors, err)
 		}
+	}
+	return failureCode(streams.errors, reportInitGaps(streams.output, manager, configuration.ScopeRepository, repository, options))
+}
+
+func enrollRepository(manager *configuration.Manager, repository configuration.Repository, options initOptions, streams commandIO) int {
+	plan, err := manager.PlanEnrollment(repository)
+	if err != nil {
+		return printFailure(streams.errors, err)
+	}
+	if plan.Unchanged() {
+		return printCommandOutput(streams.output, streams.errors, func(output *commandOutput) {
+			output.write("%s is already enrolled: it has a Repository Configuration file.\n", repository)
+		})
+	}
+	code := publishConfigurationPlan(manager, plan, configurationMutationOptions{
+		repository: string(repository), configuration: options.configuration, yes: options.yes, format: "human",
+	}, streams)
+	if code != 0 {
+		return code
 	}
 	return failureCode(streams.errors, reportInitGaps(streams.output, manager, configuration.ScopeRepository, repository, options))
 }

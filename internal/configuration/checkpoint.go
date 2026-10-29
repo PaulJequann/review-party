@@ -191,13 +191,81 @@ func SortedCheckpointNames(checkpoints map[CheckpointName]Checkpoint) []Checkpoi
 	return names
 }
 
-// Checkpoints returns the Checkpoints declared in Repository Configuration.
+// Checkpoints returns the Checkpoints in force for the repository.
 func (manager *Manager) Checkpoints(repository Repository) (map[CheckpointName]Checkpoint, error) {
-	loaded, err := manager.Load(repository)
+	effective, err := manager.EffectiveCheckpoints(repository)
 	if err != nil {
 		return nil, err
 	}
-	return loaded.Repository.Document.Checkpoints, nil
+	return effective.Value, nil
+}
+
+// EffectiveCheckpoints returns the Checkpoints in force for the repository
+// and the file that declares them. Repository Configuration that declares
+// checkpoints, even an empty object, replaces the Global ones as a whole. A
+// repository without that field takes the Global Checkpoints once it is
+// enrolled by having a Repository Configuration file; one without the file
+// has none.
+func (manager *Manager) EffectiveCheckpoints(repository Repository) (Value[map[CheckpointName]Checkpoint], error) {
+	loaded, err := manager.Load(repository)
+	if err != nil {
+		return Value[map[CheckpointName]Checkpoint]{}, err
+	}
+	if !loaded.Repository.Present {
+		return Value[map[CheckpointName]Checkpoint]{Source: SourcePackaged}, nil
+	}
+	for _, document := range []LoadedDocument{loaded.Repository, loaded.Global} {
+		if document.Document.Checkpoints != nil {
+			return Value[map[CheckpointName]Checkpoint]{Value: document.Document.Checkpoints, Authored: true, Source: sourceFor(document.Scope), Path: document.Path}, nil
+		}
+	}
+	return Value[map[CheckpointName]Checkpoint]{Source: SourcePackaged}, nil
+}
+
+// Enrollment is whether the repository has a Repository Configuration file,
+// which is what puts the Global Checkpoints in force for it.
+type Enrollment struct {
+	Enrolled          bool
+	GlobalCheckpoints map[CheckpointName]Checkpoint
+}
+
+// Offered reports whether enrolling would put Global Checkpoints in force.
+func (enrollment Enrollment) Offered() bool {
+	return !enrollment.Enrolled && len(enrollment.GlobalCheckpoints) > 0
+}
+
+// Enrollment reads whether the repository is enrolled and which Global
+// Checkpoints enrolling puts in force.
+func (manager *Manager) Enrollment(repository Repository) (Enrollment, error) {
+	loaded, err := manager.Load(repository)
+	if err != nil {
+		return Enrollment{}, err
+	}
+	return Enrollment{Enrolled: loaded.Repository.Present, GlobalCheckpoints: loaded.Global.Document.Checkpoints}, nil
+}
+
+// PlanEnrollment plans the Repository Configuration file that enrolls the
+// repository, holding only the schema version. An enrolled repository plans
+// no change.
+func (manager *Manager) PlanEnrollment(repository Repository) (Plan, error) {
+	loaded, err := manager.Load(repository)
+	if err != nil {
+		return Plan{}, err
+	}
+	if loaded.Repository.Present {
+		return Plan{state: &planState{owner: manager, valid: true}}, nil
+	}
+	path, anchor, err := manager.configPathAndAnchor(ScopeRepository, repository)
+	if err != nil {
+		return Plan{}, err
+	}
+	payload, err := renderDocument(Document{SchemaVersion: SchemaVersion})
+	if err != nil {
+		return Plan{}, err
+	}
+	change := Change{Field: "schema_version", Scope: ScopeRepository, Path: path, After: fmt.Sprint(SchemaVersion), HadAfter: true}
+	write := pendingWrite{scope: ScopeRepository, anchor: anchor, path: path, payload: payload}
+	return newFilePlan(manager, ScopeRepository, change, []pendingWrite{write}), nil
 }
 
 func validateCheckpoints(checkpoints map[CheckpointName]Checkpoint) error {
@@ -326,15 +394,19 @@ func segmentMatches(pattern, name string) bool {
 	return err == nil && matched
 }
 
-// SetCheckpoint creates or replaces one declared Checkpoint.
+// SetCheckpoint creates or replaces one declared Checkpoint in the Target
+// Configuration file.
 type SetCheckpoint struct {
+	Target     Scope
 	Name       CheckpointName
 	Checkpoint Checkpoint
 }
 
-// RemoveCheckpoint removes one declared Checkpoint.
+// RemoveCheckpoint removes one declared Checkpoint from the Target
+// Configuration file.
 type RemoveCheckpoint struct {
-	Name CheckpointName
+	Target Scope
+	Name   CheckpointName
 }
 
 func checkpointField(name CheckpointName) string { return "checkpoints." + string(name) }
@@ -351,7 +423,7 @@ func readCheckpoint(document Document, name CheckpointName) (string, bool) {
 	return string(payload), true
 }
 
-func (intent SetCheckpoint) intentScope() Scope  { return ScopeRepository }
+func (intent SetCheckpoint) intentScope() Scope  { return intent.Target }
 func (intent SetCheckpoint) intentField() string { return checkpointField(intent.Name) }
 func (intent SetCheckpoint) applyIntent(document *Document) {
 	checkpoints := make(map[CheckpointName]Checkpoint, len(document.Checkpoints)+1)
@@ -368,7 +440,7 @@ func (intent SetCheckpoint) readIntent(document Document) (string, bool) {
 	return readCheckpoint(document, intent.Name)
 }
 
-func (intent RemoveCheckpoint) intentScope() Scope  { return ScopeRepository }
+func (intent RemoveCheckpoint) intentScope() Scope  { return intent.Target }
 func (intent RemoveCheckpoint) intentField() string { return checkpointField(intent.Name) }
 func (intent RemoveCheckpoint) applyIntent(document *Document) {
 	checkpoints := map[CheckpointName]Checkpoint{}

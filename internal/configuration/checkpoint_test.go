@@ -116,19 +116,95 @@ func TestRepositoryCheckpointsRejectInvalidDeclarations(t *testing.T) {
 	}
 }
 
-func TestGlobalConfigurationRejectsCheckpoints(t *testing.T) {
+func TestGlobalCheckpointsAreInForceForEnrolledRepositories(t *testing.T) {
 	root := t.TempDir()
-	writeDocument(t, filepath.Join(root, "config.json"), `{"schema_version":1,"checkpoints":{}}`)
-	_, err := testManager(t, root).Load("")
-	var invalid InvalidDocumentError
-	if !errors.As(err, &invalid) {
-		t.Fatalf("error = %v", err)
+	global := filepath.Join(root, "config.json")
+	writeDocument(t, global, `{"schema_version":1,"checkpoints":{"pre-push":{"requirement":"reviewed","unreviewed_lines":0,"review_budget":3}}}`)
+	manager := testManager(t, root)
+	declared := map[CheckpointName]Checkpoint{CheckpointPrePush: {Requirement: RequirementReviewed, ReviewBudget: 3, Waivers: WaiversHuman}}
+
+	unenrolled := t.TempDir()
+	enrolled := t.TempDir()
+	writeDocument(t, filepath.Join(enrolled, ".reviewparty", "config.json"), `{"schema_version":1}`)
+	replacing := t.TempDir()
+	writeRepositoryCheckpoints(t, replacing, `{}`)
+	for _, test := range []struct {
+		name       string
+		repository string
+		want       Value[map[CheckpointName]Checkpoint]
+	}{
+		{"unenrolled repository has none", unenrolled, Value[map[CheckpointName]Checkpoint]{Source: SourcePackaged}},
+		{"enrolled repository takes the Global ones", enrolled, Value[map[CheckpointName]Checkpoint]{Value: declared, Authored: true, Source: SourceGlobal, Path: global}},
+		{"repository checkpoints replace them as a whole", replacing, Value[map[CheckpointName]Checkpoint]{Value: map[CheckpointName]Checkpoint{}, Authored: true, Source: SourceRepository, Path: filepath.Join(replacing, ".reviewparty", "config.json")}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			effective, err := manager.EffectiveCheckpoints(Repository(test.repository))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(effective, test.want) {
+				t.Fatalf("effective = %#v, want %#v", effective, test.want)
+			}
+		})
 	}
-	if invalid.Scope != ScopeGlobal {
-		t.Fatalf("scope = %s", invalid.Scope)
+}
+
+func TestGlobalCheckpointPlansEditGlobalConfiguration(t *testing.T) {
+	root := t.TempDir()
+	manager := testManager(t, root)
+	checkpoint := NewCheckpoint()
+	checkpoint.Integrations = []IntegrationName{IntegrationGit}
+	enrolled := t.TempDir()
+	writeDocument(t, filepath.Join(enrolled, ".reviewparty", "config.json"), `{"schema_version":1}`)
+
+	plan := planCheckpoints(t, manager, "", SetCheckpoint{Target: ScopeGlobal, Name: CheckpointPrePush, Checkpoint: checkpoint})
+	if changes := plan.Changes(); len(changes) != 1 || changes[0].Scope != ScopeGlobal || changes[0].Path != filepath.Join(root, "config.json") {
+		t.Fatalf("changes = %#v", changes)
 	}
-	if !strings.Contains(invalid.Reason, "checkpoints is a Repository Configuration field") {
-		t.Fatalf("reason = %s", invalid.Reason)
+	publishPlan(t, manager, plan)
+	declared, err := manager.Checkpoints(Repository(enrolled))
+	if err != nil || !reflect.DeepEqual(declared, map[CheckpointName]Checkpoint{CheckpointPrePush: checkpoint}) {
+		t.Fatalf("declared = %#v, %v", declared, err)
+	}
+
+	publishPlan(t, manager, planCheckpoints(t, manager, "", RemoveCheckpoint{Target: ScopeGlobal, Name: CheckpointPrePush}))
+	if declared, err = manager.Checkpoints(Repository(enrolled)); err != nil || len(declared) != 0 {
+		t.Fatalf("declared after remove = %#v, %v", declared, err)
+	}
+}
+
+func TestEnrollmentPlanWritesOnlyTheSchemaVersion(t *testing.T) {
+	root := t.TempDir()
+	manager := testManager(t, root)
+	repository := t.TempDir()
+	path := filepath.Join(repository, ".reviewparty", "config.json")
+
+	if enrollment, err := manager.Enrollment(Repository(repository)); err != nil || enrollment.Enrolled || enrollment.Offered() {
+		t.Fatalf("enrollment without Global Checkpoints = %#v, %v", enrollment, err)
+	}
+	writeDocument(t, filepath.Join(root, "config.json"), `{"schema_version":1,"checkpoints":{"pre-push":{"requirement":"reviewed","unreviewed_lines":0,"review_budget":3}}}`)
+	if enrollment, err := manager.Enrollment(Repository(repository)); err != nil || enrollment.Enrolled || !enrollment.Offered() {
+		t.Fatalf("enrollment with Global Checkpoints = %#v, %v", enrollment, err)
+	}
+
+	plan, err := manager.PlanEnrollment(Repository(repository))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Change{{Field: "schema_version", Scope: ScopeRepository, Path: path, After: "1", HadAfter: true}}
+	if !plan.Valid() || !reflect.DeepEqual(plan.Changes(), want) {
+		t.Fatalf("plan = %s %#v", plan.Reason(), plan.Changes())
+	}
+	publishPlan(t, manager, plan)
+	content, err := os.ReadFile(path)
+	if err != nil || string(content) != "{\n  \"schema_version\": 1\n}\n" {
+		t.Fatalf("content = %q, %v", content, err)
+	}
+	if enrollment, err := manager.Enrollment(Repository(repository)); err != nil || !enrollment.Enrolled || enrollment.Offered() {
+		t.Fatalf("enrollment after enrolling = %#v, %v", enrollment, err)
+	}
+	if again, err := manager.PlanEnrollment(Repository(repository)); err != nil || !again.Unchanged() {
+		t.Fatalf("second enrollment plan = %#v, %v", again.Changes(), err)
 	}
 }
 
@@ -159,7 +235,7 @@ func TestCheckpointPlansSetAndRemove(t *testing.T) {
 	checkpoint.ExemptPaths = []string{"docs/**"}
 	checkpoint.Integrations = []IntegrationName{IntegrationGit}
 
-	plan := planCheckpoints(t, manager, repository, SetCheckpoint{Name: CheckpointPrePush, Checkpoint: checkpoint})
+	plan := planCheckpoints(t, manager, repository, SetCheckpoint{Target: ScopeRepository, Name: CheckpointPrePush, Checkpoint: checkpoint})
 	change := plan.Changes()[0]
 	got := [3]string{change.Field, strconv.FormatBool(change.HadBefore), change.After}
 	if want := [3]string{"checkpoints.pre-push", "false", `{"requirement":"reviewed","exempt_paths":["docs/**"],"unreviewed_lines":0,"review_budget":3,"waivers":"human","integrations":["git"]}`}; got != want {
@@ -174,11 +250,11 @@ func TestCheckpointPlansSetAndRemove(t *testing.T) {
 		t.Fatalf("published document = %s", payload)
 	}
 
-	if again := planCheckpoints(t, manager, repository, SetCheckpoint{Name: CheckpointPrePush, Checkpoint: checkpoint}); len(again.Changes()) != 0 {
+	if again := planCheckpoints(t, manager, repository, SetCheckpoint{Target: ScopeRepository, Name: CheckpointPrePush, Checkpoint: checkpoint}); len(again.Changes()) != 0 {
 		t.Fatalf("replanning the same checkpoint = %#v", again.Changes())
 	}
 
-	publishPlan(t, manager, planCheckpoints(t, manager, repository, RemoveCheckpoint{Name: CheckpointPrePush}))
+	publishPlan(t, manager, planCheckpoints(t, manager, repository, RemoveCheckpoint{Target: ScopeRepository, Name: CheckpointPrePush}))
 	checkpoints, err := manager.Checkpoints(Repository(repository))
 	if err != nil || checkpoints != nil {
 		t.Fatalf("checkpoints after removal = %#v, %v", checkpoints, err)
@@ -186,7 +262,7 @@ func TestCheckpointPlansSetAndRemove(t *testing.T) {
 }
 
 func TestCheckpointPlanRejectsUnknownName(t *testing.T) {
-	plan, err := testManager(t, t.TempDir()).Plan(Repository(t.TempDir()), []Intent{SetCheckpoint{Name: "pre-merge", Checkpoint: NewCheckpoint()}})
+	plan, err := testManager(t, t.TempDir()).Plan(Repository(t.TempDir()), []Intent{SetCheckpoint{Target: ScopeRepository, Name: "pre-merge", Checkpoint: NewCheckpoint()}})
 	if err != nil {
 		t.Fatal(err)
 	}

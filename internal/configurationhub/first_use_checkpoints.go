@@ -19,9 +19,10 @@ import (
 // the result to the Hub's output.
 type HookInstaller func(integration configuration.IntegrationName, personal bool, confirm func() (bool, error)) error
 
-// checkpointsStep shows the declared Checkpoints or offers to declare one,
-// then offers the Integrations for whatever is declared.
 func (e *editor) checkpointsStep() error {
+	if err := e.offerEnrollment(); err != nil {
+		return err
+	}
 	declared, err := e.manager.Checkpoints(e.Repository)
 	switch {
 	case err != nil:
@@ -39,6 +40,30 @@ func (e *editor) checkpointsStep() error {
 		return err
 	}
 	return e.integrationsStep()
+}
+
+func (e *editor) offerEnrollment() error {
+	enrollment, err := e.manager.Enrollment(e.Repository)
+	if err != nil || !enrollment.Offered() {
+		return err
+	}
+	var summary strings.Builder
+	for _, name := range configuration.SortedCheckpointNames(enrollment.GlobalCheckpoints) {
+		summary.WriteString("Global Checkpoint " + enrollment.GlobalCheckpoints[name].Summary(name) + "\n")
+	}
+	if _, err := io.WriteString(e.Output, summary.String()); err != nil {
+		return err
+	}
+	var enroll bool
+	if err := e.form(huh.NewConfirm().Title("Enroll this repository in your Global Checkpoints?").Value(&enroll)); err != nil || !enroll {
+		return err
+	}
+	plan, err := e.manager.PlanEnrollment(e.Repository)
+	if err != nil {
+		return err
+	}
+	_, err = e.reviewAndPublish(plan, func() error { return e.manager.Publish(plan) })
+	return err
 }
 
 // checkpointDraft holds the form answers; numbers stay text until parsed.
@@ -110,7 +135,7 @@ func (e *editor) declareCheckpoint() error {
 	if err := e.warnDocumentationExemption(checkpoint); err != nil {
 		return err
 	}
-	plan, err := e.manager.Plan(e.Repository, []configuration.Intent{configuration.SetCheckpoint{Name: draft.name, Checkpoint: checkpoint}})
+	plan, err := e.manager.Plan(e.Repository, []configuration.Intent{configuration.SetCheckpoint{Target: configuration.ScopeRepository, Name: draft.name, Checkpoint: checkpoint}})
 	if err != nil {
 		return err
 	}

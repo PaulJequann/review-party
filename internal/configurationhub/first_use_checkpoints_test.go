@@ -5,6 +5,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -88,6 +90,41 @@ func (journey *checkpointJourney) runWithContext(t *testing.T, ctx context.Conte
 		t.Fatalf("RunFirstUse: %v; context: %v\noutput:\n%s", err, ctx.Err(), output.String())
 	}
 	return output.String()
+}
+
+func TestFirstUseEnrollsARepositoryInGlobalCheckpoints(t *testing.T) {
+	journey := &checkpointJourney{manager: firstUseManager(t), repository: configuration.Repository(t.TempDir())}
+	publishGlobalProfile(t, journey.manager, "bugs")
+	declared := configuration.NewCheckpoint()
+	declared.Integrations = []configuration.IntegrationName{configuration.IntegrationGit}
+	plan, err := journey.manager.Plan("", []configuration.Intent{
+		configuration.SetReviewSelection{Target: configuration.ScopeGlobal, Selection: configuration.ReviewSelection{ConcurrencyLimit: 1, Global: []configuration.SelectionItem{{Profile: "bugs"}}}},
+		configuration.SetCheckpoint{Target: configuration.ScopeGlobal, Name: configuration.CheckpointPrePush, Checkpoint: declared},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := journey.manager.Publish(plan); err != nil {
+		t.Fatal(err)
+	}
+
+	output := journey.run(t,
+		"y",
+		"y",
+		"",
+		"0",
+	)
+
+	content, err := os.ReadFile(filepath.Join(string(journey.repository), ".reviewparty", "config.json"))
+	if err != nil || string(content) != "{\n  \"schema_version\": 1\n}\n" {
+		t.Fatalf("repository configuration = %q, %v\noutput:\n%s", content, err, output)
+	}
+	if !strings.Contains(output, "Global Checkpoint "+declared.Summary(configuration.CheckpointPrePush)) {
+		t.Fatalf("output did not show the Global Checkpoint:\n%s", output)
+	}
+	if !reflect.DeepEqual(journey.installer.installs, []string{"git team true"}) {
+		t.Fatalf("installs = %q\noutput:\n%s", journey.installer.installs, output)
+	}
 }
 
 func TestFirstUseDeclaresACheckpointThenOffersItsHooks(t *testing.T) {
@@ -182,7 +219,7 @@ func TestFirstUseSummarizesDeclaredCheckpointsWithoutAskingAgain(t *testing.T) {
 	declared := configuration.NewCheckpoint()
 	declared.Waivers = configuration.WaiversNone
 	declared.Integrations = []configuration.IntegrationName{configuration.IntegrationGit}
-	plan, err := journey.manager.Plan(journey.repository, []configuration.Intent{configuration.SetCheckpoint{Name: configuration.CheckpointPreCommit, Checkpoint: declared}})
+	plan, err := journey.manager.Plan(journey.repository, []configuration.Intent{configuration.SetCheckpoint{Target: configuration.ScopeRepository, Name: configuration.CheckpointPreCommit, Checkpoint: declared}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -237,7 +274,7 @@ func TestFirstUseOffersAgentsOutsideTheFloorAsPersonalHooks(t *testing.T) {
 	journey.onPath = []configuration.IntegrationName{configuration.IntegrationClaudeCode, configuration.IntegrationCodex}
 	declared := configuration.NewCheckpoint()
 	declared.Integrations = []configuration.IntegrationName{configuration.IntegrationCodex}
-	plan, err := journey.manager.Plan(journey.repository, []configuration.Intent{configuration.SetCheckpoint{Name: configuration.CheckpointPrePush, Checkpoint: declared}})
+	plan, err := journey.manager.Plan(journey.repository, []configuration.Intent{configuration.SetCheckpoint{Target: configuration.ScopeRepository, Name: configuration.CheckpointPrePush, Checkpoint: declared}})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -757,12 +757,20 @@ See [`docs/design/party-v1.md`](docs/design/party-v1.md).
 A Review Checkpoint is a point in the workflow, before push or before commit,
 at which the repository expects its Review selection to have covered the
 change. A Checkpoint checks for completed Reviews. It never starts one. Declare
-Checkpoints in Repository Configuration, so the whole team shares them. Global
-Configuration rejects them.
+Checkpoints in Repository Configuration, so the whole team shares them, or with
+`--target global` in Global Configuration, where they apply to every enrolled
+repository. A repository is enrolled when it has a Repository Configuration
+file; `review-party init --enroll` writes one holding only the schema version,
+and `init` in an unenrolled repository prints that command when your Global
+Configuration declares Checkpoints. A Repository `checkpoints` field, even an
+empty one, replaces the Global ones as a whole. A hook in an unenrolled
+repository finds no Checkpoint and allows the push or commit silently.
 
 ```sh
 review-party config checkpoint set pre-push --exempt '*.md' --exempt 'docs/**' --waivers human
+review-party config checkpoint set pre-push --target global --integration git
 review-party config checkpoint remove pre-push
+review-party init --enroll --yes
 ```
 
 Both commands show the configuration Plan and confirm it in a terminal or with
@@ -833,7 +841,8 @@ nothing, and a block someone edited is left alone.
 
 The hook refuses a change with unreviewed lines beyond the allowance, a spent
 budget, or unjudged Findings, with one line that names the Checkpoint and the
-next command. Only a spent budget adds the waive command, and only under
+next command. When the Checkpoint comes from Global Configuration, the line and
+`checkpoint check` name that file. Only a spent budget adds the waive command, and only under
 `anyone`. A declared Checkpoint whose check fails, for example on a review
 ledger it cannot read, is refused too, with one line that names the error: a
 Checkpoint that cannot be checked is not a pass. When the hook cannot tell

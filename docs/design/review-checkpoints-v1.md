@@ -551,13 +551,14 @@ installed. Changing a Checkpoint's requirement makes its block stale.
 - The refusal for unjudged Findings says "needs a verdict on" instead of the
   "has no completed Review of" shape, since a completed Review exists.
 
-## Open questions
+## Resolved questions
 
-- **Personal Checkpoints.** A Caller who wants a Checkpoint in a shared
-  repository whose team declares none has nowhere to declare it. Global
-  Configuration applies to every repository. Recommendation: defer until
-  asked for; a solo repository declares Checkpoints in its own Repository
-  Configuration.
+- **Personal Checkpoints.** Global Configuration declares Checkpoints that
+  apply to every enrolled repository, where enrollment is the presence of the
+  Repository Configuration file. A Repository `checkpoints` field replaces
+  them as a whole. See
+  [ADR 0002](../adr/0002-caller-declared-checkpoints-for-enrolled-repositories.md)
+  and [`global-configuration-v1.md`](global-configuration-v1.md).
 
 ## Out of scope
 

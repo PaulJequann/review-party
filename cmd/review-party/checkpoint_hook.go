@@ -187,14 +187,14 @@ func hookRefusal(report checkpointReport) string {
 	var line string
 	switch report.nextLabel {
 	case "wait":
-		line = fmt.Sprintf("%s Checkpoint is waiting on a running Review of %s; wait: %s", report.Checkpoint, scope, report.NextCommand)
+		line = fmt.Sprintf("%s is waiting on a running Review of %s; wait: %s", report.label(), scope, report.NextCommand)
 	case "judge":
 		line = judgeRefusal(report, scope)
 	case "stop":
 		spent := spentProfile(report.Profiles)
-		line = fmt.Sprintf("%s Checkpoint: %s in %s exceed %d after %d of %d Reviews; stop and ask a person", report.Checkpoint, unreviewedLines(spent.UnreviewedLines, report.binary), scope, report.allowance, spent.BudgetSpent, spent.ReviewBudget)
+		line = fmt.Sprintf("%s: %s in %s exceed %d after %d of %d Reviews; stop and ask a person", report.label(), unreviewedLines(spent.UnreviewedLines, report.binary), scope, report.allowance, spent.BudgetSpent, spent.ReviewBudget)
 	default:
-		line = fmt.Sprintf("%s Checkpoint: %s in %s; next: %s", report.Checkpoint, unreviewedLines(report.UnreviewedLines, report.binary), scope, report.NextCommand)
+		line = fmt.Sprintf("%s: %s in %s; next: %s", report.label(), unreviewedLines(report.UnreviewedLines, report.binary), scope, report.NextCommand)
 	}
 	if report.WaiveCommand != "" {
 		line += "; or waive: " + report.WaiveCommand
@@ -206,7 +206,7 @@ func hookRefusal(report checkpointReport) string {
 // the rest, since each Review takes its own finding record command.
 func judgeRefusal(report checkpointReport, scope string) string {
 	unjudged := unjudgedReviews(report.Profiles)
-	line := fmt.Sprintf("%s Checkpoint needs a verdict on %s of %s for %s; judge: %s", report.Checkpoint, findingOrdinals(unjudged[0].Ordinals), unjudged[0].Review, scope, report.NextCommand)
+	line := fmt.Sprintf("%s needs a verdict on %s of %s for %s; judge: %s", report.label(), findingOrdinals(unjudged[0].Ordinals), unjudged[0].Review, scope, report.NextCommand)
 	switch more := len(unjudged) - 1; {
 	case more == 1:
 		line += "; 1 more Review needs verdicts"

@@ -199,9 +199,6 @@ func validateScopeFields(document Document, scope Scope) error {
 	if scope == ScopeRepository {
 		return validateRepositoryFields(document)
 	}
-	if document.Checkpoints != nil {
-		return errors.New("checkpoints is a Repository Configuration field; personal Checkpoints are not supported")
-	}
 	if document.StateDirectory != "" && !filepath.IsAbs(document.StateDirectory) {
 		return errors.New("state_directory must be an absolute path")
 	}

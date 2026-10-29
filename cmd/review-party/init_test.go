@@ -77,7 +77,7 @@ func (fixture initFixture) declareCheckpoints(t *testing.T, integration configur
 	for _, name := range names {
 		checkpoint := configuration.NewCheckpoint()
 		checkpoint.Integrations = []configuration.IntegrationName{integration}
-		intents = append(intents, configuration.SetCheckpoint{Name: name, Checkpoint: checkpoint})
+		intents = append(intents, configuration.SetCheckpoint{Target: configuration.ScopeRepository, Name: name, Checkpoint: checkpoint})
 	}
 	plan, err := fixture.manager.Plan(configuration.Repository(fixture.repository), intents)
 	if err != nil {
@@ -225,7 +225,7 @@ func TestInitReportLeavesAHookOutsideTheTeamFloorToTheCaller(t *testing.T) {
 		t.Fatalf("setup exit = %d, stderr = %q", exit, stderr)
 	}
 	plan, err := fixture.manager.Plan(configuration.Repository(fixture.repository), []configuration.Intent{
-		configuration.SetCheckpoint{Name: configuration.CheckpointPrePush, Checkpoint: configuration.NewCheckpoint()},
+		configuration.SetCheckpoint{Target: configuration.ScopeRepository, Name: configuration.CheckpointPrePush, Checkpoint: configuration.NewCheckpoint()},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -280,6 +280,50 @@ func TestInitWithoutATerminalNamesEachCheckpointWithoutItsGitHook(t *testing.T) 
 		"Checkpoint pre-commit git hook does not run until lefthook is active in this clone: lefthook install\n"
 	if stdout != want {
 		t.Fatalf("lefthook stdout = %q, want %q", stdout, want)
+	}
+}
+
+func (fixture initFixture) publishGlobal(t *testing.T, intents ...configuration.Intent) {
+	t.Helper()
+	plan, err := fixture.manager.Plan("", intents)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.manager.Publish(plan); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestInitEnrollsARepositoryInGlobalCheckpoints(t *testing.T) {
+	fixture := newInitFixture(t)
+	fixture.profile(t, configuration.ScopeGlobal, "docs")
+	checkpoint := configuration.NewCheckpoint()
+	checkpoint.Integrations = []configuration.IntegrationName{configuration.IntegrationGit}
+	fixture.publishGlobal(t,
+		configuration.SetReviewSelection{Target: configuration.ScopeGlobal, Selection: configuration.ReviewSelection{ConcurrencyLimit: 1, Global: []configuration.SelectionItem{{Profile: "docs"}}}},
+		configuration.SetCheckpoint{Target: configuration.ScopeGlobal, Name: configuration.CheckpointPrePush, Checkpoint: checkpoint},
+	)
+	ready := "Saved review configuration is ready.\nReview selection: Global Configuration " + filepath.Join(fixture.globalRoot, "config.json") + "\n" +
+		"Effective Profiles: global:docs\nRepository concurrency: 1\nReviewer access and execution are unverified.\nNext: review-party run --repo " + fixture.repository + "\n"
+	enroll := "Enroll this repository in your Global Checkpoints: review-party init --enroll --yes --repo " + fixture.repository + "\n"
+	install := "Checkpoint pre-push has no git hook: review-party checkpoint install git --repo " + fixture.repository + "\n"
+
+	if _, stdout, _ := fixture.run(t, commandIO{}); stdout != ready+enroll {
+		t.Fatalf("unenrolled stdout = %q, want %q", stdout, ready+enroll)
+	}
+
+	exit, stdout, stderr := fixture.run(t, commandIO{}, "--enroll", "--yes")
+	if exit != 0 || !strings.HasSuffix(stdout, ready+install) {
+		t.Fatalf("enroll = %d %q %q", exit, stdout, stderr)
+	}
+	if content := fixture.repositoryConfiguration(t); string(content) != "{\n  \"schema_version\": 1\n}\n" {
+		t.Fatalf("repository configuration = %q", content)
+	}
+	if _, stdout, _ = fixture.run(t, commandIO{}); stdout != ready+install {
+		t.Fatalf("enrolled stdout = %q, want %q", stdout, ready+install)
+	}
+	if _, stdout, _ = fixture.run(t, commandIO{}, "--enroll", "--yes"); stdout != fixture.repository+" is already enrolled: it has a Repository Configuration file.\n" {
+		t.Fatalf("second enroll stdout = %q", stdout)
 	}
 }
 
@@ -339,8 +383,8 @@ func TestInitWithoutATerminalNamesMissingAgentFloorHooks(t *testing.T) {
 	agents.Integrations = []configuration.IntegrationName{configuration.IntegrationClaudeCode, configuration.IntegrationCodex}
 	git.Integrations = []configuration.IntegrationName{configuration.IntegrationGit}
 	plan, err := fixture.manager.Plan(configuration.Repository(fixture.repository), []configuration.Intent{
-		configuration.SetCheckpoint{Name: configuration.CheckpointPrePush, Checkpoint: agents},
-		configuration.SetCheckpoint{Name: configuration.CheckpointPreCommit, Checkpoint: git},
+		configuration.SetCheckpoint{Target: configuration.ScopeRepository, Name: configuration.CheckpointPrePush, Checkpoint: agents},
+		configuration.SetCheckpoint{Target: configuration.ScopeRepository, Name: configuration.CheckpointPreCommit, Checkpoint: git},
 	})
 	if err != nil {
 		t.Fatal(err)

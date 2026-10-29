@@ -152,6 +152,7 @@ func checkpointOptionsFromCommand(cmd *cobra.Command, args []string) (checkpoint
 
 type checkpointReport struct {
 	Checkpoint      configuration.CheckpointName `json:"checkpoint"`
+	DeclaredIn      *checkpointSource            `json:"declared_in,omitempty"`
 	Base            string                       `json:"base,omitempty"`
 	Head            string                       `json:"head,omitempty"`
 	RangeSource     string                       `json:"range_source,omitempty"`
@@ -170,6 +171,25 @@ type checkpointReport struct {
 	commit          commitScope
 	allowance       int
 	binary          bool
+}
+
+type checkpointSource struct {
+	Source configuration.Source `json:"source"`
+	Path   string               `json:"path"`
+}
+
+// global reports whether the Checkpoint came from Global Configuration, the
+// one declaration the repository's own files do not show.
+func (source *checkpointSource) global() bool {
+	return source != nil && source.Source == configuration.SourceGlobal
+}
+
+func (report checkpointReport) label() string {
+	label := string(report.Checkpoint) + " Checkpoint"
+	if report.DeclaredIn.global() {
+		label += " (declared in " + report.DeclaredIn.Path + ")"
+	}
+	return label
 }
 
 type checkpointExemption struct {
@@ -359,6 +379,7 @@ func completeCheckpointReport(content checkpointContent, result engine.Checkpoin
 	report.binary = len(result.Coverage.UnreviewedLines.Binary) > 0
 	budget := 0
 	if result.Declaration != nil {
+		report.DeclaredIn = &checkpointSource{Source: result.Source, Path: result.DeclaredIn}
 		budget = result.Declaration.ReviewBudget
 		report.allowance = result.Declaration.UnreviewedLines
 		report.Waivers = result.Declaration.Waivers
@@ -443,6 +464,9 @@ func printHumanCheckpoint(output *commandOutput, report checkpointReport) {
 		output.write("%s checkpoint: staged changes\n", report.Checkpoint)
 	} else {
 		output.write("%s checkpoint: %s..%s (%s)\n", report.Checkpoint, report.Base, report.Head, rangeSourceDescriptions[report.RangeSource])
+	}
+	if report.DeclaredIn.global() {
+		output.write("declared in: %s %s\n", report.DeclaredIn.Source, report.DeclaredIn.Path)
 	}
 	if report.Exemption != nil {
 		output.write("exempt paths: %s\n", strings.Join(report.Exemption.ExemptPaths, ", "))

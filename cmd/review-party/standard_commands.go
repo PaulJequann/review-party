@@ -182,10 +182,11 @@ func newInitCommand(streams commandIO) *cobra.Command {
 			"--profile and --party add names to the selection without the journey; an unqualified name resolves Repository before Global.\n\n" +
 			"--global edits the Global Configuration's Review selection instead, which every repository without its own selection runs. " +
 			"It prepares no repository state and opens no journey.\n\n" +
+			"--enroll writes a Repository Configuration file holding only its schema version, which puts the Global Checkpoints in force for the repository.\n\n" +
 			"--baseline adds the Review Party baseline: it creates each missing baseline Global Profile from its Template with the execution " +
 			"--reviewer, --model, --effort, and --deadline choose, then the Global Party baseline, then selects that Party. " +
 			"Each step is its own confirmed plan; existing Profiles are kept as they are.",
-		Example: "  review-party init\n  review-party init --profile bugs --yes\n  review-party init --party crew --profile global:docs\n" +
+		Example: "  review-party init\n  review-party init --profile bugs --yes\n  review-party init --enroll --yes\n  review-party init --party crew --profile global:docs\n" +
 			"  review-party init --baseline --reviewer codex --model gpt-5.6-luna --effort high --deadline 8m\n" +
 			"  review-party init --global --baseline --reviewer codex --model gpt-5.6-luna --effort high --deadline 8m",
 		Args: cobra.NoArgs,
@@ -197,7 +198,7 @@ func newInitCommand(streams commandIO) *cobra.Command {
 			options := initOptions{
 				repository: stringFlag(cmd, "repo"), stateDirectory: stringFlag(cmd, "state-dir"), configuration: stringFlag(cmd, "config"),
 				backup: boolFlag(cmd, "backup-incompatible"), fresh: boolFlag(cmd, "fresh"), yes: boolFlag(cmd, "yes"),
-				accessible: boolFlag(cmd, "accessible"), global: boolFlag(cmd, "global"), setup: setup, baseline: baseline,
+				accessible: boolFlag(cmd, "accessible"), global: boolFlag(cmd, "global"), enroll: boolFlag(cmd, "enroll"), setup: setup, baseline: baseline,
 				discoveryService: defaultConfigurationDependencies().discoveryService,
 			}
 			return commandResult(executeInit(cmd.Context(), options, streams))
@@ -217,8 +218,12 @@ func newInitCommand(streams commandIO) *cobra.Command {
 	cmd.Flags().Bool("yes", false, "Confirm setup writes and recovery steps")
 	cmd.Flags().Bool("accessible", false, "Use non-redrawing accessible forms in the first-use journey")
 	cmd.Flags().Bool("global", false, "Edit the Global Configuration's Review selection; reads no repository")
-	for _, flag := range []string{"repo", "state-dir", "backup-incompatible", "fresh", "accessible"} {
+	cmd.Flags().Bool("enroll", false, "Write the Repository Configuration file that puts the Global Checkpoints in force")
+	for _, flag := range []string{"repo", "state-dir", "backup-incompatible", "fresh", "accessible", "enroll"} {
 		cmd.MarkFlagsMutuallyExclusive("global", flag)
+	}
+	for _, flag := range []string{"profile", "party", "baseline", "accessible"} {
+		cmd.MarkFlagsMutuallyExclusive("enroll", flag)
 	}
 	cmd.MarkFlagsMutuallyExclusive("backup-incompatible", "fresh")
 	cmd.MarkFlagsMutuallyExclusive("backup-incompatible", "profile")
