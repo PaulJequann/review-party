@@ -51,6 +51,7 @@ type Item struct {
 	Kind      ItemKind
 	Name      string
 	Detail    string
+	Index     int
 	Selection configuration.SelectionItem
 }
 
@@ -848,13 +849,11 @@ func (model Model) cursorReviewEntry() (reviewEntry, bool) {
 	if len(items) == 0 {
 		return reviewEntry{}, false
 	}
-	item := items[min(model.cursor, len(items)-1)]
-	for _, option := range reviewEntryOptions(model.snapshot.Items) {
-		if option.Value.group == configuration.Scope(item.Scope) && option.Value.expect == item.Selection {
-			return option.Value, true
-		}
-	}
-	return reviewEntry{}, false
+	return items[min(model.cursor, len(items)-1)].entry(), true
+}
+
+func (item Item) entry() reviewEntry {
+	return reviewEntry{group: configuration.Scope(item.Scope), index: item.Index, expect: item.Selection}
 }
 
 func renderRows(model Model, items []Item, output *strings.Builder, options renderOptions) {

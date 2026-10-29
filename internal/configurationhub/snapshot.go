@@ -187,7 +187,7 @@ func appendHubParties(snapshot *Snapshot, parties []configuration.Definition[con
 }
 
 func appendHubReviews(snapshot *Snapshot, scope string, items []configuration.SelectionItem) {
-	for _, item := range items {
+	for index, item := range items {
 		name, err := item.Name()
 		if err != nil {
 			snapshot.Warnings = append(snapshot.Warnings, err.Error())
@@ -197,7 +197,7 @@ func appendHubReviews(snapshot *Snapshot, scope string, items []configuration.Se
 		if item.Party != "" {
 			detail = "Party"
 		}
-		snapshot.Items = append(snapshot.Items, Item{Scope: ItemScope(scope), Kind: itemReview, Name: name, Detail: detail, Selection: item})
+		snapshot.Items = append(snapshot.Items, Item{Scope: ItemScope(scope), Kind: itemReview, Name: name, Detail: detail, Index: index, Selection: item})
 	}
 }
 

@@ -78,7 +78,7 @@ func TestHubEnterOpensProfileBrowserAndNewOpensForm(t *testing.T) {
 func TestHubReviewBrowserUsesHighlightedRowForRemoval(t *testing.T) {
 	model := New(Snapshot{Repository: "/repo", Items: []Item{
 		{Scope: "global", Kind: itemReview, Name: "one", Detail: "Profile", Selection: configuration.SelectionItem{Profile: "one"}},
-		{Scope: "global", Kind: itemReview, Name: "two", Detail: "Profile", Selection: configuration.SelectionItem{Profile: "two"}},
+		{Scope: "global", Kind: itemReview, Name: "two", Detail: "Profile", Index: 1, Selection: configuration.SelectionItem{Profile: "two"}},
 	}})
 	model.area = 3
 	updated, _ := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})

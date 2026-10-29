@@ -178,15 +178,11 @@ func reviewDestinationField(draft *reviewFormDraft, items []Item) huh.Field {
 
 func reviewEntryOptions(items []Item) []huh.Option[reviewEntry] {
 	var options []huh.Option[reviewEntry]
-	counts := map[configuration.Scope]int{}
 	for _, item := range items {
 		if item.Kind != itemReview {
 			continue
 		}
-		group := configuration.Scope(item.Scope)
-		entry := reviewEntry{group: group, index: counts[group], expect: item.Selection}
-		counts[group]++
-		options = append(options, huh.NewOption(fmt.Sprintf("[%s] %d. %s (%s)", group, entry.index+1, item.Name, item.Detail), entry))
+		options = append(options, huh.NewOption(fmt.Sprintf("[%s] %d. %s (%s)", item.Scope, item.Index+1, item.Name, item.Detail), item.entry()))
 	}
 	return options
 }

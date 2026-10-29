@@ -238,7 +238,7 @@ func TestReviewEditorsPlanTheSameChangesForTheSameDraft(t *testing.T) {
 func TestHubReviewBrowserMovesHighlightedRowWithinItsGroup(t *testing.T) {
 	model := New(Snapshot{Repository: "/repo", Items: []Item{
 		{Scope: "global", Kind: itemReview, Name: "one", Detail: "Profile", Selection: configuration.SelectionItem{Profile: "one"}},
-		{Scope: "global", Kind: itemReview, Name: "two", Detail: "Profile", Selection: configuration.SelectionItem{Profile: "two"}},
+		{Scope: "global", Kind: itemReview, Name: "two", Detail: "Profile", Index: 1, Selection: configuration.SelectionItem{Profile: "two"}},
 		{Scope: "repository", Kind: itemReview, Name: "three", Detail: "Party", Selection: configuration.SelectionItem{Party: "three"}},
 	}})
 	model.area = 3
@@ -257,6 +257,37 @@ func TestHubReviewBrowserMovesHighlightedRowWithinItsGroup(t *testing.T) {
 	model = pressHubKeys(t, model, tea.KeyPressMsg{Code: tea.KeyEnter}, tea.KeyPressMsg{Code: 'j', Text: "j"}, tea.KeyPressMsg{Code: 'm', Text: "m"}, tea.KeyPressMsg{Code: 'j', Text: "j"}, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if model.drafts.reviews != (reviewFormDraft{}) || !strings.Contains(model.status, "same selection group") {
 		t.Fatalf("cross-group move = %#v, status %q", model.drafts.reviews, model.status)
+	}
+}
+
+func TestHubReviewBrowserEditsTheHighlightedDuplicateEntry(t *testing.T) {
+	enter := tea.KeyPressMsg{Code: tea.KeyEnter}
+	key := func(code rune) tea.KeyPressMsg { return tea.KeyPressMsg{Code: code, Text: string(code)} }
+	tests := []struct {
+		name string
+		keys []tea.KeyPressMsg
+		want []configuration.SelectionItem
+	}{
+		{name: "remove", keys: []tea.KeyPressMsg{enter, key('j'), key('j'), key('r')}, want: []configuration.SelectionItem{sharedProfile, dailyParty}},
+		{name: "move", keys: []tea.KeyPressMsg{enter, key('j'), key('j'), key('m'), key('k'), enter}, want: []configuration.SelectionItem{sharedProfile, sharedProfile, dailyParty}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			manager, repository := reviewFixture(t)
+			publishScopedSelection(t, manager, repository, configuration.ScopeRepository, configuration.ReviewSelection{
+				ConcurrencyLimit: 2, Global: []configuration.SelectionItem{}, Repository: []configuration.SelectionItem{sharedProfile, dailyParty, sharedProfile},
+			})
+			snapshot, err := buildSnapshot(manager, repository)
+			if err != nil {
+				t.Fatal(err)
+			}
+			model := New(snapshot)
+			model.area = 3
+			model = pressHubKeys(t, model, test.keys...)
+			if selection := publishReviewEdit(t, manager, repository, model.drafts.reviews); !reflect.DeepEqual(selection.Repository, test.want) {
+				t.Fatalf("Repository selection = %#v, want %#v", selection.Repository, test.want)
+			}
+		})
 	}
 }
 
