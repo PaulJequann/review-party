@@ -31,7 +31,7 @@ func (model Model) renderPlanPreviewBody(options renderOptions) string {
 	if warnings.Len() > 0 {
 		content = strings.TrimSuffix(warnings.String(), "\n") + "\n\n" + content
 	}
-	return renderSizedBox(title, content, max(model.width, minBoxWidth), "")
+	return renderSizedBox(title, "\n"+content+"\n", min(max(model.width, minBoxWidth), 92), "")
 }
 
 func (model Model) renderPlanActionBar(options renderOptions) string {

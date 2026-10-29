@@ -222,9 +222,7 @@ func TestReviewEditorsPlanTheSameChangesForTheSameDraft(t *testing.T) {
 				t.Fatalf("plan = valid %v, %d changes, error %v", plan.Valid(), len(plan.Changes()), err)
 			}
 			var interactive bytes.Buffer
-			if err := configuration.RenderPlanHuman(&interactive, plan); err != nil {
-				t.Fatal(err)
-			}
+			interactive.WriteString(renderPlanConfirmation(plan, configuration.ProfileDraft{}))
 			if err := preview(&interactive); err != nil {
 				t.Fatal(err)
 			}

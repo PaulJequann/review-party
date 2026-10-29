@@ -7,6 +7,7 @@ import (
 	"io"
 	"strings"
 
+	tea "charm.land/bubbletea/v2"
 	"charm.land/huh/v2"
 
 	"reviewparty/internal/configuration"
@@ -107,10 +108,16 @@ func (e *editor) form(fields ...huh.Field) error {
 	case e.Accessible:
 		return runAccessibleForm(ctx, form, input)
 	case e.standalone:
-		return form.RunWithContext(ctx)
+		return form.WithViewHook(firstUseFormView).RunWithContext(ctx)
 	default:
 		return errors.New("interactive forms must be hosted by the Configuration Hub")
 	}
+}
+
+func firstUseFormView(view tea.View) tea.View {
+	view.AltScreen = true
+	view.WindowTitle = "Review Party setup"
+	return view
 }
 
 func runAccessibleForm(ctx context.Context, form *huh.Form, input io.ReadCloser) error {
@@ -251,19 +258,34 @@ func (e *editor) reviewAndPublishWithPreview(plan configuration.Plan, publish fu
 	if !plan.Valid() {
 		return false, fmt.Errorf("invalid configuration plan: %s", plan.Reason())
 	}
-	if err := configuration.RenderPlanHuman(e.Output, plan); err != nil {
+	draft := configuration.ProfileDraft{}
+	if e.drafts != nil {
+		draft = e.drafts.profile
+	}
+	var summary strings.Builder
+	summary.WriteString(renderPlanConfirmation(plan, draft))
+	if err := configuration.RenderPlanWarningsHuman(&summary, plan.Warnings()); err != nil {
 		return false, err
 	}
-	if err := configuration.RenderPlanWarningsHuman(e.Output, plan.Warnings()); err != nil {
-		return false, err
-	}
-	if err := preview(e.Output); err != nil {
+	if err := preview(&summary); err != nil {
 		return false, err
 	}
 	var confirm bool
-	if err := e.form(huh.NewConfirm().Title("Publish this complete plan?").Value(&confirm)); err != nil {
-		return false, err
+	if e.standalone && !e.Accessible {
+		var err error
+		confirm, err = runFirstUseConfirmation(e.RunOptions, summary.String())
+		if err != nil {
+			return false, err
+		}
+	} else {
+		if _, err := io.WriteString(e.Output, summary.String()); err != nil {
+			return false, err
+		}
+		if err := e.form(huh.NewConfirm().Title("Publish this complete plan?").Value(&confirm)); err != nil {
+			return false, err
+		}
 	}
+
 	if !confirm {
 		return false, nil
 	}

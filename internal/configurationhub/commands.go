@@ -221,9 +221,7 @@ func planRequestCommand(ctx context.Context, manager *configuration.Manager, rep
 			return planFailedMsg{kind: request.kind, err: fmt.Errorf("invalid configuration plan: %s", plan.Reason())}
 		}
 		var summary strings.Builder
-		if err := configuration.RenderPlanHuman(&summary, plan); err != nil {
-			return planFailedMsg{kind: request.kind, err: err}
-		}
+		summary.WriteString(renderPlanConfirmation(plan, request.profile))
 		if preview != nil {
 			if err := preview(&summary); err != nil {
 				return planFailedMsg{kind: request.kind, err: err}

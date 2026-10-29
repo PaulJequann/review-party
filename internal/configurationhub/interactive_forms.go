@@ -252,22 +252,14 @@ func (model *Model) openProfileSourceForm() tea.Cmd {
 	})
 }
 
-func (model Model) profileTemplateOptions() []huh.Option[string] {
-	options := make([]huh.Option[string], 0, len(model.snapshot.Templates))
-	for _, template := range model.snapshot.Templates {
-		options = append(options, huh.NewOption(template.ID+" (Review Profile Template "+template.Revision+")", template.ID))
-	}
-	return options
-}
-
 func (model *Model) openProfileTemplateForm() tea.Cmd {
-	options := model.profileTemplateOptions()
-	if len(options) == 0 {
+	templates := model.snapshot.Templates
+	if len(templates) == 0 {
 		model.status = "No Review Profile Templates are available. Choose blank instructions."
 		return model.openProfileSourceForm()
 	}
 	return model.openForm(formProfileTemplate, []huh.Field{
-		huh.NewSelect[string]().Title("Template").Options(options...).Value(&model.session.templateID),
+		newTemplatePicker(templates, &model.session.templateID),
 	})
 }
 

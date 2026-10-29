@@ -182,14 +182,6 @@ var profileFieldSpecs = [...]profileFieldSpec{
 	},
 }
 
-func profileTemplateOptions(templates []configuration.Template) []huh.Option[string] {
-	options := make([]huh.Option[string], 0, len(templates))
-	for _, template := range templates {
-		options = append(options, huh.NewOption(template.ID+" ("+template.Revision+")", template.ID))
-	}
-	return options
-}
-
 func (e *editor) chooseProfileSource(draft *configuration.ProfileDraft, suggestedTemplate string) error {
 	var source string
 	if err := e.form(huh.NewSelect[string]().Title("Instruction source").Options(huh.NewOption("Template", "template"), huh.NewOption("Blank", "blank")).Value(&source)); err != nil {
@@ -206,12 +198,12 @@ func (e *editor) chooseProfileSource(draft *configuration.ProfileDraft, suggeste
 }
 
 func (e *editor) chooseProfileTemplate(draft *configuration.ProfileDraft, suggestedTemplate string) error {
-	templates := profileTemplateOptions(e.manager.Templates())
+	templates := e.manager.Templates()
 	if len(templates) == 0 {
 		return fmt.Errorf("no Review Profile Templates are available; choose blank instructions")
 	}
 	templateID := suggestedTemplate
-	if err := e.form(huh.NewSelect[string]().Title("Template").Options(templates...).Value(&templateID)); err != nil {
+	if err := e.form(newTemplatePicker(templates, &templateID)); err != nil {
 		return err
 	}
 	template, found := e.manager.Template(templateID)
