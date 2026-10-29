@@ -153,6 +153,7 @@ func TestBrokenSkillsAreReportedAsSkippedTemplates(t *testing.T) {
 	writeDocument(t, filepath.Join(skills, "empty", "SKILL.md"), "---\nname: empty\n---\n")
 	writeDocument(t, filepath.Join(skills, "huge", "SKILL.md"), strings.Repeat("x", MaximumDocumentBytes+1))
 	writeDocument(t, filepath.Join(skills, "notes", "README.md"), "No skill here.")
+	writeDocument(t, filepath.Join(skills, "archive.zip"), "PK")
 
 	skipped := SkillTemplates([]string{skills}).Skipped
 

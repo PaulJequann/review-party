@@ -36,7 +36,8 @@ type doctorResult struct {
 func newDoctorCommand(streams commandIO) *cobra.Command {
 	cmd := &cobra.Command{Use: "doctor", Short: "Check configuration health, Template drift, and Checkpoint setup", Long: `Check configuration health and Template drift, then report what the
 repository's declared Checkpoints still lack in this clone. Each finding is
-one line ending in the command that fixes it. Unresolved names, missing or
+one line ending in the command that fixes it, or the steps to take by hand
+when no command can. Unresolved names, missing or
 edited team-floor Integrations, a stale agents-md block, Markdown exemptions
 a selected documentation Profile reviews, and installed Integrations no
 declared Checkpoint uses are listed, followed by the Waivers recorded here in

@@ -903,13 +903,16 @@ review-party checkpoint install agents-md
 It writes a block between `<!-- review-party checkpoints: begin -->` and
 `<!-- review-party checkpoints: end -->` into `AGENTS.md` at the repository
 root, or into `CLAUDE.md` when only that exists. The block has one line per
-declared Checkpoint naming the command that satisfies it, adds `review-party
-finding record <id>` under `judged`, and mentions waivers only under `anyone`. A missing block is appended after one blank line, and the
-rest of the file keeps every byte. After a Checkpoint declaration changes, the
-block is stale and the installer replaces only the lines between the markers,
-which a terminal confirms and which needs `--yes` without one. Unbalanced or
-repeated markers are left for you to fix by hand. `--integration agents-md` on
-`config checkpoint set` lists the block in the team floor.
+declared Checkpoint telling the agent to run `review-party checkpoint check
+<name>` before the hook would, and to run the next command a refusal prints.
+The check reads the Checkpoint's settings, so the block depends only on which
+Checkpoints are declared. A missing block is appended after one blank line,
+and the rest of the file keeps every byte. Declaring or removing a Checkpoint
+makes the block stale, and the installer then replaces only the lines between
+the markers, which a terminal confirms and which needs `--yes` without one.
+Changing a Checkpoint's settings leaves an installed block in place. Unbalanced
+or repeated markers are left for you to fix by hand. `--integration agents-md`
+on `config checkpoint set` lists the block in the team floor.
 
 `review-party checkpoint uninstall` takes back out what the installers added,
 and nothing else:

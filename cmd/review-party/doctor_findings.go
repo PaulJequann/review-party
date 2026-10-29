@@ -194,6 +194,10 @@ func (result doctorResult) findingLines() []string {
 		lines = append(lines, name.label+", selected by "+name.SelectedBy+"; fix: "+name.Fix)
 	}
 	for _, gap := range result.IntegrationGaps {
+		if len(gap.Manual) > 0 {
+			lines = append(lines, initGapLines(gap)...)
+			continue
+		}
 		lines = append(lines, gap.summary()+"; fix: "+gap.Fix)
 	}
 	for _, conflict := range result.ExemptionConflicts {

@@ -122,6 +122,18 @@ func TestDoctorReportsAStaleAgentsMDBlock(t *testing.T) {
 	assertRun(t, fixture.doctor(), commandRun{stdout: "configuration is valid\nCheckpoint pre-push" + stale + "Checkpoint pre-commit" + stale})
 }
 
+func TestDoctorReportsACodexDirectoryTakenByAFile(t *testing.T) {
+	fixture := newCheckpointFixture(t)
+	fixture.writeFile(".codex", "")
+	assertRun(t, fixture.doctor(), commandRun{stdout: "configuration is valid\n"})
+
+	fixture.declare("pre-push", "--integration", "codex")
+	hooks := filepath.Join(fixture.repository, ".codex", "hooks.json")
+	assertRun(t, fixture.doctor(), commandRun{stdout: "configuration is valid\n" +
+		"Checkpoint pre-push has no codex hook, and Codex needs it added to " + hooks + " by hand:\n" +
+		"  " + filepath.Join(fixture.repository, ".codex") + " is not a directory; move or delete it, then rerun the install.\n"})
+}
+
 func TestDoctorNamesUnresolvedNamesAndStillFailsTheConfiguration(t *testing.T) {
 	fixture := newCheckpointFixture(t)
 	requireConfigSuccess(t, []string{

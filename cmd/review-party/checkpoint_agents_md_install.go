@@ -1,10 +1,10 @@
 package main
 
 // The agents-md Integration keeps one marked block in the repository's agent
-// instructions that tells a Caller Agent how to satisfy each declared
-// Checkpoint before a hook would refuse. The block is generated from the
-// declaration, so a changed declaration leaves it stale and the installer
-// replaces only the lines between its markers.
+// instructions that tells a Caller Agent to check each declared Checkpoint
+// before a hook would refuse. The block is generated from the declared
+// Checkpoint names alone, so only declaring or removing a Checkpoint leaves it
+// stale, and the installer then replaces only the lines between its markers.
 
 import (
 	"fmt"
@@ -26,15 +26,18 @@ const (
 func newAgentsMDInstallCommand(streams commandIO) *cobra.Command {
 	command := &cobra.Command{
 		Use:   string(configuration.IntegrationAgentsMD),
-		Short: "Write the AGENTS.md block that tells agents how to satisfy every declared Checkpoint",
-		Long: `Write a marked block, generated from the declared Checkpoints, into AGENTS.md at
-the repository root. A repository with CLAUDE.md and no AGENTS.md gets the
-block in CLAUDE.md; one with neither gets a new AGENTS.md.
+		Short: "Write the AGENTS.md block that tells agents to check every declared Checkpoint",
+		Long: `Write a marked block into AGENTS.md at the repository root. It has one line per
+declared Checkpoint telling the agent to run review-party checkpoint check
+before the action the Checkpoint guards and to follow what the check prints. A
+repository with CLAUDE.md and no AGENTS.md gets the block in CLAUDE.md; one
+with neither gets a new AGENTS.md.
 
-A missing block is appended after one blank line. A block that no longer
-matches the declaration is replaced between its markers, and nothing outside
-them changes. Markers that are unbalanced or repeated are left for you to fix
-by hand. Rerunning is safe.`,
+A missing block is appended after one blank line. The block depends only on
+which Checkpoints are declared, so changing a Checkpoint's settings leaves it
+in place; declaring or removing one makes it stale, and the installer replaces
+the lines between its markers and nothing outside them. Markers that are
+unbalanced or repeated are left for you to fix by hand. Rerunning is safe.`,
 		Example: "  review-party checkpoint install agents-md\n  review-party checkpoint install agents-md --yes",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -79,7 +82,7 @@ func planAgentsMDInstall(target hookInstallTarget, manager *configuration.Manage
 	if err != nil {
 		return hookInstallPlan{}, err
 	}
-	outcome, updated, manual := placeAgentsMDBlock(string(content), found, agentsMDBody(declared, names))
+	outcome, updated, manual := placeAgentsMDBlock(string(content), found, agentsMDBody(names))
 	if updated != string(content) {
 		plan.writes[plan.location] = []byte(updated)
 	}
@@ -89,68 +92,23 @@ func planAgentsMDInstall(target hookInstallTarget, manager *configuration.Manage
 	return plan, nil
 }
 
-// agentsMDInstruction is what one Checkpoint's line tells the agent to do
-// before the action the Checkpoint guards: the first Review, the Review of
-// what a fix left unreviewed, and what the Checkpoint counts.
-type agentsMDInstruction struct {
-	before   string
-	review   string
-	followUp string
-	action   string
-	lines    string
-}
-
-var agentsMDInstructions = map[configuration.CheckpointName]agentsMDInstruction{
-	configuration.CheckpointPreCommit: {before: "Before committing", review: "stage the change, stash any other changes, and review it with `review-party run`", followUp: "`review-party run --unreviewed`", action: "commit", lines: "unreviewed staged lines"},
-	configuration.CheckpointPrePush:   {before: "Before pushing", review: "review the change with `review-party run --base <upstream> --head HEAD`", followUp: "`review-party run --unreviewed --base <upstream> --head HEAD`", action: "push", lines: "unreviewed lines"},
+// agentsMDLines tells the agent, per Checkpoint, to run the check before the
+// action the Checkpoint guards. The check carries the declaration's details
+// and prints the next command, so the lines do not repeat them.
+var agentsMDLines = map[configuration.CheckpointName]string{
+	configuration.CheckpointPreCommit: "Before committing, stage the change and run `review-party checkpoint check pre-commit`; when it refuses, run the next command it prints and check again.\n",
+	configuration.CheckpointPrePush:   "Before pushing, run `review-party checkpoint check pre-push`; when it refuses, run the next command it prints and check again.\n",
 }
 
 // agentsMDBody is the text between the markers: one line per declared
 // Checkpoint, then where to read more.
-func agentsMDBody(declared map[configuration.CheckpointName]configuration.Checkpoint, names []configuration.CheckpointName) string {
+func agentsMDBody(names []configuration.CheckpointName) string {
 	var body strings.Builder
 	for _, name := range names {
-		body.WriteString(agentsMDLine(name, declared[name]))
+		body.WriteString(agentsMDLines[name])
 	}
 	body.WriteString("`review-party checkpoint --help` has details.\n")
 	return body.String()
-}
-
-// agentsMDLine names the commands that satisfy one Checkpoint, what it
-// refuses, the fix allowance, and the budget. Waivers are mentioned only
-// where any caller may record one, as the refusal does.
-func agentsMDLine(name configuration.CheckpointName, checkpoint configuration.Checkpoint) string {
-	instruction := agentsMDInstructions[name]
-	var line strings.Builder
-	fmt.Fprintf(&line, "%s, %s", instruction.before, instruction.review)
-	refuses := fmt.Sprintf("more than %d %s", checkpoint.UnreviewedLines, instruction.lines)
-	if checkpoint.Requirement == configuration.RequirementJudged {
-		line.WriteString(" and record a verdict for each Finding with `review-party finding record <id>`")
-		refuses += " or a Finding without a verdict"
-	}
-	fmt.Fprintf(&line, "; the %s Checkpoint refuses a %s with %s. %s", name, instruction.action, refuses, instruction.fixRule(checkpoint.UnreviewedLines))
-	fmt.Fprintf(&line, " At most %s per change; when the Checkpoint says stop, report the unreviewed lines and stop.", countedReviews(checkpoint.ReviewBudget))
-	if checkpoint.Waivers == configuration.WaiversAnyone {
-		line.WriteString(" When a Review does not fit, waive it with `review-party checkpoint waive " + string(name) + ` --reason "<why>"` + "`.")
-	}
-	line.WriteString("\n")
-	return line.String()
-}
-
-// fixRule tells the agent when a fix after a Review needs the Review of what
-// it left unreviewed.
-func (instruction agentsMDInstruction) fixRule(allowance int) string {
-	if allowance == 0 {
-		return "Every fix after a Review needs " + instruction.followUp + "."
-	}
-	return fmt.Sprintf("Fixes of up to %d lines after a Review need no new Review; a larger fix needs %s.", allowance, instruction.followUp)
-}
-
-func countedReviews(count int) string {
-	if count == 1 {
-		return "1 Review"
-	}
-	return fmt.Sprintf("%d Reviews", count)
 }
 
 // placeAgentsMDBlock decides what the block needs in the file's content and

@@ -60,3 +60,25 @@ func TestCheckpointInstallGitInstallsForAGlobalCheckpoint(t *testing.T) {
 		t.Fatal("the pre-push hook does not run the Checkpoint hook")
 	}
 }
+
+func TestRunHintsAtTheMissingGitHookOnceAndOnlyWhenItIsMissing(t *testing.T) {
+	fixture := newCheckpointFixture(t)
+	if result := fixture.runWith("", false, "config", "checkpoint", "set", "pre-push", "--integration", "git", "--target", "global", "--yes"); result.exit != 0 {
+		t.Fatalf("declare = %+v", result)
+	}
+	run := func() commandRun {
+		return fixture.runWith("", false, "run", "--profile", "missing", "--repo", fixture.repository)
+	}
+	hint := "warning: the pre-push Checkpoint has no git hook in this clone; install it with review-party init --repo " + shellWord(fixture.repository) + "\n"
+
+	result := run()
+	if result.exit == 0 || strings.Count(result.stderr, hint) != 1 {
+		t.Fatalf("run without a hook = %+v", result)
+	}
+
+	fixture.installIntegration("git")
+	result = run()
+	if result.exit == 0 || strings.Contains(result.stderr, "no git hook") {
+		t.Fatalf("run with a hook = %+v", result)
+	}
+}

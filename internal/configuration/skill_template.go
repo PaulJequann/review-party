@@ -45,7 +45,11 @@ func (set *SkillTemplateSet) addRoot(root string, seen map[string]bool) {
 		if seen[name] || strings.HasPrefix(name, ".") {
 			continue
 		}
-		template, skipped, found := loadSkillTemplate(filepath.Join(root, name), name)
+		directory := filepath.Join(root, name)
+		if info, err := os.Stat(directory); err != nil || !info.IsDir() {
+			continue
+		}
+		template, skipped, found := loadSkillTemplate(directory, name)
 		if !found {
 			continue
 		}

@@ -130,17 +130,3 @@ func TestAgentHookRefusesAnUnjudgedPushInEachAgentsForm(t *testing.T) {
 	fixture.recordVerdicts(judgedDocs, "1 accept reworded\n")
 	assertRun(t, fixture.agentHook(configuration.IntegrationCodex, codexEvent(t, toolCall{"Bash", "git push", fixture.repository})), commandRun{})
 }
-
-func TestAgentsMDBlockAsksForVerdictsOnlyUnderJudged(t *testing.T) {
-	judged := configuration.NewCheckpoint()
-	judged.Requirement = configuration.RequirementJudged
-	declared := map[configuration.CheckpointName]configuration.Checkpoint{
-		configuration.CheckpointPreCommit: configuration.NewCheckpoint(),
-		configuration.CheckpointPrePush:   judged,
-	}
-	want := "Before pushing, review the change with `review-party run --base <upstream> --head HEAD` and record a verdict for each Finding with `review-party finding record <id>`; the pre-push Checkpoint refuses a push with more than 0 unreviewed lines or a Finding without a verdict. Every fix after a Review needs `review-party run --unreviewed --base <upstream> --head HEAD`. At most 3 Reviews per change; when the Checkpoint says stop, report the unreviewed lines and stop.\n" +
-		preCommitLine + helpLine
-	if got := agentsMDBody(declared, configuration.SortedCheckpointNames(declared)); got != want {
-		t.Fatalf("body =\n%s\nwant\n%s", got, want)
-	}
-}

@@ -150,11 +150,12 @@ entries also end in `|| true`, so no exit status from an old or broken
 
 ### AGENTS.md block
 
-The block is generated from the declared Checkpoints and stays about three
-lines, for example: "Before pushing, review the change with `review-party run
---base <upstream> --head HEAD`; the pre-push Checkpoint refuses a push no
-completed Review covers. `review-party checkpoint --help` has details." Its
-job is to make the agent review before the hook would refuse.
+The block is generated from the declared Checkpoint names and stays about
+three lines, for example: "Before pushing, run `review-party checkpoint check
+pre-push`; when it refuses, run the next command it prints and check again.
+`review-party checkpoint --help` has details." Its job is to make the agent
+check before the hook would refuse. The check reads the Checkpoint's settings
+at run time, so the block carries none of them.
 
 ## Initialization and doctor
 
@@ -400,12 +401,14 @@ that is the file its agents already read. A repository with both uses
 `AGENTS.md`, and one with neither gets a new `AGENTS.md` that holds only the
 block. The installer never writes the block into both files.
 
-**Stale rule.** The body is generated from the declared Checkpoints, one line
-per Checkpoint in name order and one line pointing at `review-party checkpoint
---help`. A Waiver command is added to a Checkpoint's line only under
-`anyone`, as the refusal does. The block is installed when the lines between
-the markers equal that body byte for byte. Any other content is stale,
-including a hand edit, because the block is generated. Replacing it rewrites
+**Stale rule.** The body is generated from the declared Checkpoint names, one
+fixed line per Checkpoint in name order and one line pointing at `review-party
+checkpoint --help`. A Checkpoint's settings, such as its requirement, waiver
+policy, allowance, and budget, do not appear in the body, because `review-party
+checkpoint check` reads them when it runs. Changing them leaves an installed
+block installed. The block is installed when the lines between the markers
+equal that body byte for byte. Any other content is stale, including a hand
+edit, because the block is generated. Replacing it rewrites
 only the lines between the markers, after a terminal confirms or under
 `--yes`, and a rerun without either exits 2 and writes nothing. A missing
 block is appended after exactly one blank line. Repeated markers, a lone
@@ -533,13 +536,10 @@ the same form that asks for exemptions and the waiver policy, with `reviewed`
 as the default. The doctor fix for a Markdown exemption repeats
 `--requirement judged`, so running it keeps the requirement.
 
-**AGENTS.md block.** Under `judged`, a Checkpoint's line reads, for pre-push,
-"Before pushing, review the change with `review-party run --base <upstream>
---head HEAD` and record a verdict for each Finding with `review-party finding
-record <id>`; the pre-push Checkpoint refuses a push until a completed Review
-covers it and every Finding has a verdict." Under `reviewed`, the line is the
-slice 5 line byte for byte, so blocks installed before this slice stay
-installed. Changing a Checkpoint's requirement makes its block stale.
+**AGENTS.md block.** The block does not change under `judged`. Its line sends
+the agent to `review-party checkpoint check`, whose refusal names the verdict
+the Checkpoint still needs and the `review-party finding record` command that
+records it. Changing a Checkpoint's requirement leaves its block installed.
 
 **Deviations.**
 

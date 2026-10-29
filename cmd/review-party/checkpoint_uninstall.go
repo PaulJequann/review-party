@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 
 	"github.com/spf13/cobra"
 
@@ -397,7 +398,7 @@ func planUninstall(root string, scope uninstallScope) (uninstallPlan, error) {
 	for _, surface := range surfaces {
 		content, err := os.ReadFile(surface.path)
 		switch {
-		case errors.Is(err, fs.ErrNotExist):
+		case errors.Is(err, fs.ErrNotExist), errors.Is(err, syscall.ENOTDIR):
 			plan.record.forget(recordedPath(surface.path))
 		case err != nil:
 			return uninstallPlan{}, fmt.Errorf("read %s: %w", surface.path, err)

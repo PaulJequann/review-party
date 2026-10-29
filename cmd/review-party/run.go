@@ -8,8 +8,10 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"reviewparty/internal/configuration"
 	"reviewparty/internal/engine"
 	"reviewparty/internal/model"
+	"reviewparty/internal/subject"
 )
 
 // reviewSubjectReference turns the committed-range flags into one Subject
@@ -61,6 +63,9 @@ unreviewed.`,
 			defer renderer.stop()
 			options.progress = sink
 			options.warn = newRunWarningSink(streams.errors)
+			if hint := missingGitHookHint(streams, options.repository, options.configuration); hint != "" {
+				options.warn(hint)
+			}
 			return commandResult(executeRun(cmd.Context(), options, streams.output, streams.errors))
 		},
 	}
@@ -73,6 +78,34 @@ unreviewed.`,
 	cmd.MarkFlagsMutuallyExclusive("profile", "party")
 	addReviewFlags(cmd)
 	return cmd
+}
+
+// missingGitHookHint is the one stderr line run prints when the pre-push
+// Checkpoint in force lists the git Integration and this clone has no hook for
+// it, the case of a repository enrolled in Global Checkpoints and never
+// initialized here. It names init, which installs every missing Integration.
+// The hint is advice, so a failure to compute it prints nothing rather than
+// failing the run.
+func missingGitHookHint(streams commandIO, repository, configurationPath string) string {
+	root, err := subject.ResolveRepositoryRoot(repository)
+	if err != nil {
+		return ""
+	}
+	manager := streams.configurationManager(configurationPath)
+	declared, err := manager.Checkpoints(configuration.Repository(root))
+	if err != nil || !declared[configuration.CheckpointPrePush].Integrates(configuration.IntegrationGit) {
+		return ""
+	}
+	gaps, err := integrationGaps(manager, declared, hookInstallTarget{root: root, configuration: configurationPath, integration: configuration.IntegrationGit})
+	if err != nil {
+		return ""
+	}
+	for _, gap := range gaps {
+		if gap.Checkpoint == configuration.CheckpointPrePush && gap.State == gapMissing {
+			return "warning: the pre-push Checkpoint has no git hook in this clone; install it with review-party init --repo " + shellWord(root) + configurationArgument(configurationPath)
+		}
+	}
+	return ""
 }
 
 type runOptions struct {

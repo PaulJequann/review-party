@@ -14,11 +14,13 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/spf13/cobra"
 
@@ -150,6 +152,10 @@ func (plan *hookInstallPlan) planAgentEntry(agent agentIntegration, name configu
 		return step, nil
 	}
 	content, found, err := plan.pending(plan.location)
+	if errors.Is(err, syscall.ENOTDIR) {
+		step.outcome, step.manual = hookManual, []string{filepath.Dir(plan.location) + " is not a directory; move or delete it, then rerun the install."}
+		return step, nil
+	}
 	if err != nil {
 		return step, err
 	}

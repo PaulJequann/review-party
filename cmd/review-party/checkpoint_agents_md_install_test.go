@@ -10,19 +10,10 @@ import (
 )
 
 const (
-	prePushLine   = "Before pushing, review the change with `review-party run --base <upstream> --head HEAD`; the pre-push Checkpoint refuses a push with more than 0 unreviewed lines. Every fix after a Review needs `review-party run --unreviewed --base <upstream> --head HEAD`. At most 3 Reviews per change; when the Checkpoint says stop, report the unreviewed lines and stop.\n"
-	preCommitLine = "Before committing, stage the change, stash any other changes, and review it with `review-party run`; the pre-commit Checkpoint refuses a commit with more than 0 unreviewed staged lines. Every fix after a Review needs `review-party run --unreviewed`. At most 3 Reviews per change; when the Checkpoint says stop, report the unreviewed lines and stop.\n"
+	prePushLine   = "Before pushing, run `review-party checkpoint check pre-push`; when it refuses, run the next command it prints and check again.\n"
+	preCommitLine = "Before committing, stage the change and run `review-party checkpoint check pre-commit`; when it refuses, run the next command it prints and check again.\n"
 	helpLine      = "`review-party checkpoint --help` has details.\n"
 )
-
-func TestAgentsMDLineStatesTheAllowanceAndTheBudget(t *testing.T) {
-	checkpoint := configuration.NewCheckpoint()
-	checkpoint.UnreviewedLines, checkpoint.ReviewBudget = 40, 1
-	want := "Before pushing, review the change with `review-party run --base <upstream> --head HEAD`; the pre-push Checkpoint refuses a push with more than 40 unreviewed lines. Fixes of up to 40 lines after a Review need no new Review; a larger fix needs `review-party run --unreviewed --base <upstream> --head HEAD`. At most 1 Review per change; when the Checkpoint says stop, report the unreviewed lines and stop.\n"
-	if got := agentsMDLine(configuration.CheckpointPrePush, checkpoint); got != want {
-		t.Fatalf("line =\n%s\nwant\n%s", got, want)
-	}
-}
 
 func agentsMDBlock(lines ...string) string {
 	return "<!-- review-party checkpoints: begin -->\n" + strings.Join(lines, "") + helpLine + "<!-- review-party checkpoints: end -->\n"
@@ -62,9 +53,21 @@ func TestAgentsMDInstallReplacesOnlyAStaleBlockAfterConfirmation(t *testing.T) {
 
 	result := fixture.runWith("y\n", true, "checkpoint", "install", "agents-md", "--repo", fixture.repository)
 	assertRun(t, result, commandRun{stdout: plan + "Write these files? [y/N] Wrote 1 file(s).\n"})
-	waive := strings.TrimSuffix(preCommitLine, "\n") + " When a Review does not fit, waive it with `review-party checkpoint waive pre-commit --reason \"<why>\"`.\n"
-	if got, want := fixture.read("AGENTS.md"), before+agentsMDBlock(prePushLine, waive)+after; got != want {
+	if got, want := fixture.read("AGENTS.md"), before+agentsMDBlock(prePushLine, preCommitLine)+after; got != want {
 		t.Fatalf("AGENTS.md =\n%s\nwant\n%s", got, want)
+	}
+}
+
+func TestAgentsMDBlockIgnoresCheckpointSettings(t *testing.T) {
+	fixture := newHookInstallFixture(t, configuration.CheckpointPrePush)
+	path := filepath.Join(fixture.repository, "AGENTS.md")
+	assertRun(t, fixture.installAgent("agents-md", "--yes"), commandRun{stdout: "pre-push: create " + path + " (agent instructions)\nWrote 1 file(s).\n"})
+	installed := fixture.read("AGENTS.md")
+
+	fixture.declare("pre-push", "--waivers", "anyone", "--requirement", "judged", "--unreviewed-lines", "40", "--review-budget", "1")
+	assertRun(t, fixture.installAgent("agents-md"), commandRun{stdout: "pre-push: already installed in " + path + " (agent instructions)\n"})
+	if got := fixture.read("AGENTS.md"); got != installed {
+		t.Fatalf("changed Checkpoint settings rewrote AGENTS.md:\n%s", got)
 	}
 }
 

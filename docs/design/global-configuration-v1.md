@@ -216,39 +216,53 @@ hook prints nothing.
 
 ### PR 3. AGENTS.md block, run hint, and doctor fixes
 
+The plan said a fixed block. Reading `internal/engine/checkpoint.go` refuted
+the premise: `review-party checkpoint check` on an undeclared Checkpoint runs
+a strict check, so a fixed block that named both checks would misdirect agents
+in a repository that declares only `pre-push`. The block is instead generated
+from the declared Checkpoint names alone, one fixed line per name sending the
+agent to `review-party checkpoint check <name>`, which reads the settings at
+run time. Declaring or removing a Checkpoint still makes the block stale, so
+the stale path stays.
+
 Files.
 
-- `cmd/review-party/checkpoint_agents_md_install.go`: fixed body; delete
-  `agentsMDInstructions`, `agentsMDBody`, and `agentsMDLine`.
-- `cmd/review-party/checkpoint_install.go` and `floor_gaps.go`: delete
-  `hookBlockStale` and `gapStale`.
-- `cmd/review-party/run.go`: the missing-hook line, computed from
-  `planFloorGaps` for `git` only.
-- `cmd/review-party/footprint.go`: `existingDirectory` returns the
-  "not a directory" error that `runtimeItems` propagates and `doctor` aborts
-  on. The path becomes a footprint item carrying the error, and the inventory
-  continues.
+- `cmd/review-party/checkpoint_agents_md_install.go`: `agentsMDLines` keyed
+  by Checkpoint name and `agentsMDBody(names)`; delete the settings-driven
+  generator (`agentsMDInstructions`, `agentsMDInstruction`, `agentsMDLine`,
+  `fixRule`, `countedReviews`). `hookBlockStale` and `gapStale` stay.
+- `cmd/review-party/run.go`: `missingGitHookHint`, one stderr line computed
+  from `integrationGaps` for `git` only when the effective `pre-push` lists
+  `git` and the hook is missing. It names `review-party init`.
+- `cmd/review-party/checkpoint_agent_install.go`: `planAgentEntry` turns a
+  `.codex` or `.claude` entry that is not a directory into a by-hand step
+  instead of an error. This is where `doctor` aborted; `footprint.go` never
+  did, so it is unchanged.
+- `cmd/review-party/checkpoint_uninstall.go`: `planUninstall` treats a
+  non-directory parent as nothing installed, so `doctor` also survives it with
+  nothing declared.
+- `cmd/review-party/doctor_findings.go`: a gap with by-hand steps lists them
+  as `init` does.
 - `internal/configuration/skill_template.go`: `addRoot` skips an entry that
   is not a directory before calling `loadSkillTemplate`, so a stray file under
   a skills root is not a skipped Template.
 
 Tests.
 
-- `cmd/review-party/checkpoint_agents_md_install_test.go`: the block is
-  byte-identical across two different declarations; an installed block is a
-  no-op on rerun.
-- `cmd/review-party/checkpoint_uninstall_test.go`: uninstall still removes the
-  block.
-- `cmd/review-party/footprint_test.go` and `doctor_test.go`: a zero-byte
-  `.codex` yields an item with an error and exit 0.
+- `cmd/review-party/checkpoint_agents_md_install_test.go`: changing every
+  Checkpoint setting leaves the installed block byte-identical; declaring a
+  Checkpoint makes it stale.
+- `cmd/review-party/doctor_test.go`: a zero-byte `.codex` yields exit 0, no
+  finding with nothing declared, and the by-hand finding with `codex`
+  declared.
 - `internal/configuration/skill_template_test.go`: a `.zip` under the skills
   root yields no skipped Template.
-- `cmd/review-party/run_test.go`: the hint appears exactly when the effective
-  `pre-push` lists `git` and no hook is installed.
+- `cmd/review-party/checkpoint_global_test.go`: the hint appears once when the
+  effective `pre-push` lists `git` and no hook is installed, and not after the
+  install.
 
-Verification on the binary. `doctor` in a copy of the repository that
-triggered the abort exits 0 with the finding. `run` in an enrolled repository
-without the hook prints the hint once.
+Verification on the binary. `scratch/verify-pr3.sh` runs the doctor, hint,
+block, and skills-root cases against the built binary in an isolated HOME.
 
 ### PR 4. Remove `defaults.reviewer`
 
