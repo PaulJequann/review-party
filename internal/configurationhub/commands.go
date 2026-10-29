@@ -230,8 +230,6 @@ func planRequestCommand(ctx context.Context, manager *configuration.Manager, rep
 	}
 }
 
-// buildPlan stages one request. The preview, when present, renders what the
-// staged change resolves to beneath the plan summary.
 func buildPlan(manager *configuration.Manager, repository configuration.Repository, modelChoiceCheck func(string, string) configuration.ModelChoiceCheck, request planRequest) (configuration.Plan, func(io.Writer) error, error) {
 	if manager == nil {
 		return configuration.Plan{}, nil, errors.New("Configuration Hub manager is unavailable")

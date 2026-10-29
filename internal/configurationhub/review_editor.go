@@ -38,8 +38,6 @@ func (operation reviewOperation) String() string {
 	return fmt.Sprintf("reviewOperation(%d)", int(operation))
 }
 
-// reviewEntry names one selected item by position and records the item the
-// position held when chosen, so an edit refuses a selection that changed.
 type reviewEntry struct {
 	group  configuration.Scope
 	index  int
@@ -57,8 +55,6 @@ type reviewFormDraft struct {
 
 var errStaleReviewSelection = errors.New("The selection changed; reopen Reviews.")
 
-// planReviewEdit is the one Review selection planner both Hub hosts call. It
-// returns the staged selection so callers can preview its resolution.
 func planReviewEdit(manager *configuration.Manager, repository configuration.Repository, draft reviewFormDraft) (configuration.Plan, configuration.ReviewSelection, error) {
 	base := draft.target
 	if draft.operation == reviewInherit {
@@ -144,8 +140,6 @@ func reviewOperationField(draft *reviewFormDraft) huh.Field {
 	).Value(&draft.operation)
 }
 
-// reviewFields builds the fields one operation needs. A move also needs
-// reviewDestinationField, which depends on the chosen entry.
 func reviewFields(draft *reviewFormDraft, snapshot Snapshot) ([]huh.Field, error) {
 	switch draft.operation {
 	case reviewAdd:
