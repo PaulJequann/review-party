@@ -252,13 +252,14 @@ without the hook prints the hint once.
 
 ### PR 4. Remove `defaults.reviewer`
 
-`defaults.reviewer` is validated and resolved into `Effective.DefaultReviewer`
-but no run path reads it. `profiles.go` prints a Reviewer default that comes
-from the engine catalog, not from this field. Pre-release policy prefers
-removal over keeping an inert field. This PR deletes the field, its intent,
-its `config` subcommand, and its tests, and `config validate` rejects it as
-unknown. It needs path approval for the deletions and the user's confirmation
-that the field has no planned use.
+Dropped. The premise was that no run path reads `defaults.reviewer`. It is
+false: `applyConfiguredEvalReviewer` in `internal/engine/eval_configuration.go`
+gives `review-party eval run` the configured default Reviewer, and through it
+the Reviewer's model, when the experiment names none.
+`TestEvalUserConfigurationControlsRuntimeDefaultsAndFlagsOverride` covers that
+on purpose. Removing the field would change eval behavior, so the field stays
+and is documented as the eval default Reviewer. Removing it is a separate
+decision the Caller can take with the eval fallback replaced.
 
 ## Migration of this machine
 
@@ -315,7 +316,7 @@ Checkpoint keeps its own fields.
    presence.
 2. The flag and command names `--target global`, `init --global`, and
    `init --enroll`.
-3. PR 3 deletes the stale-block code paths and PR 4 deletes
-   `defaults.reviewer`. Both need path-specific deletion approval.
+3. PR 3 deletes the stale-block code paths. It needs path-specific deletion
+   approval. PR 4 is dropped; see its section.
 4. PR order. PR 1 alone already removes the duplicated selections on the
    audited machine.
