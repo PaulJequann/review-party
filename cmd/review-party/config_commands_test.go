@@ -159,6 +159,22 @@ func TestConfigValidateGlobalScopeChecksEffectiveReviewerPolicy(t *testing.T) {
 	}
 }
 
+func TestConfigValidateGlobalScopeResolvesTheGlobalSelection(t *testing.T) {
+	configRoot := isolatedConfigRoot(t)
+	path := filepath.Join(configRoot, "review-party", "config.json")
+	writeTestFile(t, testFile{path: path, contents: `{"schema_version":1,"reviews":{"concurrency_limit":1,"global":[{"profile":"missing"}],"repository":[]}}`})
+
+	result := runConfigCommand(t, []string{
+		"config", "validate", "--scope", "global", "--format", "json",
+	})
+	if result.exitCode == 0 {
+		t.Fatalf("config validate succeeded, output = %q", result.stdout)
+	}
+	if !strings.Contains(result.stdout, `profile \"missing\" was not found in global Configuration`) || !strings.Contains(result.stdout, path) {
+		t.Fatalf("validation result = %q, missing the unresolved selection diagnostic", result.stdout)
+	}
+}
+
 func TestConfigValidateRepositoryScopeIncludesGlobalPolicy(t *testing.T) {
 	configRoot := isolatedConfigRoot(t)
 	repository := t.TempDir()

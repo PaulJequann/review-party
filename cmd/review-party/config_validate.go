@@ -82,21 +82,21 @@ func validateConfiguration(manager *configuration.Manager, requested string, rep
 	if err := validateAuthoredDefinitions(manager, definitionRepository, scopes); err != nil {
 		return result, err
 	}
-	if err := validateEffectiveConfiguration(manager, repository, scopes, loaded); err != nil {
+	if err := validateEffectiveConfiguration(manager, definitionRepository, loaded); err != nil {
 		return result, err
 	}
 	return result, nil
 }
 
-func validateEffectiveConfiguration(manager *configuration.Manager, repository configuration.Repository, scopes []configuration.Scope, inspection configuration.AuthoredInspection) error {
+// validateEffectiveConfiguration resolves the reviewer policy and the Review
+// selection the inspected scopes give a run. An empty repository means only
+// the Global scope was requested, so a Global selection resolves against
+// Global definitions alone. No selection at all is valid.
+func validateEffectiveConfiguration(manager *configuration.Manager, repository configuration.Repository, inspection configuration.AuthoredInspection) error {
 	if _, err := manager.ResolveAuthored(configuration.Request{Repository: repository}, inspection); err != nil {
 		return err
 	}
-	if !containsScope(scopes, configuration.ScopeRepository) {
-		return nil
-	}
-	var err error
-	_, err = manager.ResolveRunAuthored(configuration.RunRequest{Repository: repository}, inspection)
+	_, err := manager.ResolveRunAuthored(configuration.RunRequest{Repository: repository}, inspection)
 	if errors.Is(err, configuration.ErrNoReviewSelection) {
 		return nil
 	}
