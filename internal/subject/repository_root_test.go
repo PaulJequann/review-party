@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -45,5 +46,28 @@ func TestResolveRepositoryRootKeepsOtherFailuresDistinct(t *testing.T) {
 				t.Fatalf("ResolveRepositoryRoot(%s) = %v, want an error other than ErrNotRepository", name, err)
 			}
 		})
+	}
+}
+
+func TestResolveRepositoryRootKeepsBrokenRepositoryMetadataDistinct(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing")
+	brokenLink := t.TempDir()
+	if err := os.WriteFile(filepath.Join(brokenLink, ".git"), []byte("gitdir: "+missing+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Run("worktree link to a missing git directory", func(t *testing.T) {
+		assertBrokenRepository(t, brokenLink, brokenLink)
+	})
+	t.Run("GIT_DIR naming a missing git directory", func(t *testing.T) {
+		t.Setenv("GIT_DIR", missing)
+		assertBrokenRepository(t, t.TempDir(), missing)
+	})
+}
+
+func assertBrokenRepository(t *testing.T, directory, named string) {
+	t.Helper()
+	_, err := ResolveRepositoryRoot(directory)
+	if err == nil || errors.Is(err, ErrNotRepository) || !strings.Contains(err.Error(), named) {
+		t.Fatalf("ResolveRepositoryRoot = %v, want an error naming %s other than ErrNotRepository", err, named)
 	}
 }

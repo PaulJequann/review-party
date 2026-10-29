@@ -314,12 +314,14 @@ func ResolveRepositoryRoot(repository string) (string, error) {
 	args := []string{"rev-parse", "--show-toplevel"}
 	command := exec.Command("git", args...)
 	command.Dir = repository
-	// The C locale keeps git's "not a git repository" message untranslated.
+	// The C locale keeps git's discovery failure untranslated. Only that
+	// failure means no repository; a broken GIT_DIR or worktree link keeps
+	// its own error.
 	command.Env = append(os.Environ(), "LC_ALL=C")
 	root, err := command.Output()
 	var exitError *exec.ExitError
 	switch {
-	case errors.As(err, &exitError) && bytes.HasPrefix(exitError.Stderr, []byte("fatal: not a git repository")):
+	case errors.As(err, &exitError) && bytes.HasPrefix(exitError.Stderr, []byte("fatal: not a git repository (or any ")):
 		return "", fmt.Errorf("resolve repository root: %s: %w", cmp.Or(repository, "."), ErrNotRepository)
 	case err != nil:
 		return "", fmt.Errorf("resolve repository root: %w", gitCommandError(args, err))
