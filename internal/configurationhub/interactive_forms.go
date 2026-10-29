@@ -31,7 +31,6 @@ const (
 	formEditor                 formKind = "editor"
 	formParty                  formKind = "party"
 	formReviewOperation        formKind = "review-operation"
-	formReviewLoading          formKind = "review-loading"
 	formReviewFields           formKind = "review-fields"
 	formCopy                   formKind = "copy"
 	formChanges                formKind = "changes"
@@ -46,7 +45,6 @@ type formSession struct {
 	copyName             string
 	editProfile          string
 	reviews              reviewFormDraft
-	reviewSelection      configuration.ReviewSelection
 	source               string
 	templateID           string
 	templateInstructions string
@@ -154,36 +152,30 @@ func (model *Model) openArea(area Area) tea.Cmd {
 	}
 }
 
-func (model *Model) openReviewOperation(operation string) tea.Cmd {
+func (model *Model) openReviewOperation(operation reviewOperation) tea.Cmd {
 	model.session.reviews.operation = operation
 	return model.openForm(formReviewOperation, []huh.Field{
 		huh.NewNote().Title("Repository Reviews").Description("Choose the next selection change."),
 	})
 }
 
-func (model Model) startRowReview(operation string) (tea.Model, tea.Cmd) {
-	items := model.visibleItems(itemReview)
-	if len(items) == 0 {
+func (model Model) startRowReview(operation reviewOperation) (tea.Model, tea.Cmd) {
+	entry, found := model.cursorReviewEntry()
+	if !found {
 		model.status = "No Repository Review row is selected."
 		return model, nil
 	}
-	item := items[min(model.cursor, len(items)-1)]
-	index := model.currentReviewIndex()
-	model.session.reviews = reviewFormDraft{operation: operation, scope: string(item.Scope), index: strconv.Itoa(index)}
-	if operation == "move" {
-		model.session.reviews.from = strconv.Itoa(model.moveFrom)
-		model.session.reviews.to = strconv.Itoa(index)
+	draft := reviewFormDraft{target: configuration.ScopeRepository, operation: operation, reviewEntry: entry}
+	if operation == reviewMove {
+		if model.moveFrom.group != entry.group {
+			model.status = "Choose a destination in the same selection group."
+			return model, nil
+		}
+		draft.reviewEntry, draft.to = model.moveFrom, entry.index
 	}
-	model.rowReview = true
-	model.drafts.reviews = model.session.reviews
-	model.formKind = formReviewLoading
-	model.view = viewForm
-	model.form = formAdapter{}
-	if model.runtime == nil || model.runtime.commands.loadReviewSelection == nil {
-		model.session.reviewSelection = configuration.DefaultReviewSelection()
-		return model.startPlan(planRequest{kind: planReviews, review: reviewPlanRequest{selection: model.session.reviewSelection, draft: model.drafts.reviews}})
-	}
-	return model, model.runtime.commands.loadReviewSelection()
+	model.session.reviews = draft
+	model.drafts.reviews = draft
+	return model.startPlan(planRequest{kind: planReviews, review: reviewPlanRequest{draft: draft}})
 }
 
 func (model *Model) openForm(kind formKind, fields []huh.Field) tea.Cmd {
@@ -282,47 +274,20 @@ func (model *Model) openPartyForm() tea.Cmd {
 }
 
 func (model *Model) openReviewOperationForm() tea.Cmd {
-	return model.openForm(formReviewOperation, []huh.Field{
-		huh.NewSelect[string]().Title("Repository Reviews").Options(
-			huh.NewOption("Add Profile or Party", "add"),
-			huh.NewOption("Remove item", "remove"),
-			huh.NewOption("Move item", "move"),
-			huh.NewOption("Set concurrency", "concurrency"),
-		).Value(&model.session.reviews.operation),
-	})
+	return model.openForm(formReviewOperation, []huh.Field{reviewOperationField(&model.session.reviews)})
 }
 
 func (model *Model) openReviewFieldsForm() tea.Cmd {
 	draft := &model.session.reviews
-	var fields []huh.Field
-	switch draft.operation {
-	case "add":
-		options := reviewChoiceOptions(model.snapshot.ReviewChoices)
-		if len(options) == 0 {
-			model.toMenu()
-			model.status = emptyReviewChoices
-			return nil
-		}
-		fields = []huh.Field{
-			huh.NewSelect[configuration.SelectedDefinition]().Title("Profile or Party to add").
-				Description(addReviewDescription).Options(options...).Value(&draft.choice).WithHeight(8),
-		}
-	case "remove":
-		fields = []huh.Field{
-			huh.NewSelect[string]().Title("Selection group").Options(scopeOptions()...).Value(&draft.scope),
-			huh.NewInput().Title("Zero-based index").Value(&draft.index),
-		}
-	case "move":
-		fields = []huh.Field{
-			huh.NewSelect[string]().Title("Selection group").Options(scopeOptions()...).Value(&draft.scope),
-			huh.NewInput().Title("From index").Value(&draft.from),
-			huh.NewInput().Title("To index").Value(&draft.to),
-		}
-	case "concurrency":
-		fields = []huh.Field{huh.NewInput().Title("Concurrency limit").Validate(validatePositiveInteger).Value(&draft.concurrency)}
-	default:
-		model.status = fmt.Sprintf("unknown Repository Reviews operation %q", draft.operation)
-		return model.openReviewOperationForm()
+	draft.target = configuration.ScopeRepository
+	fields, err := reviewFields(draft, model.snapshot)
+	if err != nil {
+		model.toMenu()
+		model.status = err.Error()
+		return nil
+	}
+	if draft.operation == reviewMove {
+		fields = append(fields, reviewDestinationField(draft, model.snapshot.Items))
 	}
 	return model.openForm(formReviewFields, fields)
 }
@@ -400,7 +365,7 @@ func (model *Model) syncFormDraft() {
 		model.drafts.profile = state.draft
 	case formParty:
 		model.drafts.party = model.session.party
-	case formReviewOperation, formReviewLoading, formReviewFields:
+	case formReviewOperation, formReviewFields:
 		model.drafts.reviews = model.session.reviews
 	case formCopy:
 		model.drafts.copyName = model.session.copyName
@@ -440,8 +405,8 @@ func (model *Model) completeForm() (tea.Model, tea.Cmd) {
 	case formParty, formReviewFields, formCopy:
 		return model.completePlanForm()
 	case formReviewOperation:
-		return model.completeReviewOperationForm()
-	case formNone, formProfileChoicesLoading, formProfileTemplateLoading, formEditor, formReviewLoading, formPlanning,
+		return model.withForm(model.openReviewFieldsForm())
+	case formNone, formProfileChoicesLoading, formProfileTemplateLoading, formEditor, formPlanning,
 		formProfileEditLoading:
 		// These states do not accept a completed form.
 	}
@@ -461,7 +426,7 @@ func (model *Model) completeProfileForm() (tea.Model, tea.Cmd) {
 	case formProfileInstructions:
 		return model.completeProfileInstructionsForm()
 	case formNone, formOverview, formProfileChoicesLoading, formProfileTemplateLoading, formEditor, formParty,
-		formReviewOperation, formReviewLoading, formReviewFields, formCopy, formChanges,
+		formReviewOperation, formReviewFields, formCopy, formChanges,
 		formPlanning, formProfileEdit, formProfileEditLoading:
 		// Only profile forms reach this dispatcher.
 	}
@@ -482,7 +447,7 @@ func (model *Model) completeProfileChoiceForm() (tea.Model, tea.Cmd) {
 		return model.completeProfileExecutionForm()
 	case formNone, formOverview, formProfileFields, formProfileChoicesLoading, formProfileSource,
 		formProfileTemplate, formProfileTemplateLoading, formProfileInstructions, formEditor,
-		formParty, formReviewOperation, formReviewLoading, formReviewFields, formCopy, formChanges,
+		formParty, formReviewOperation, formReviewFields, formCopy, formChanges,
 		formPlanning, formProfileEdit, formProfileEditLoading:
 		return *model, nil
 	}
@@ -494,16 +459,13 @@ func (model *Model) completePlanForm() (tea.Model, tea.Cmd) {
 	case formParty:
 		return model.startPlan(planRequest{kind: planParty, party: model.drafts.party})
 	case formReviewFields:
-		return model.startPlan(planRequest{kind: planReviews, review: reviewPlanRequest{
-			selection: model.session.reviewSelection,
-			draft:     model.drafts.reviews,
-		}})
+		return model.startPlan(planRequest{kind: planReviews, review: reviewPlanRequest{draft: model.drafts.reviews}})
 	case formCopy:
 		return model.startPlan(planRequest{kind: planCopy, copy: model.drafts.copyName})
 	case formNone, formOverview, formProfileFields, formProfileSource, formProfileTemplate,
 		formProfileChoicesLoading, formProfileModel, formProfileModelManual, formProfileEffort,
 		formProfileEffortManual, formProfileDeadline, formProfileTemplateLoading, formProfileInstructions, formEditor, formReviewOperation,
-		formReviewLoading, formChanges, formPlanning, formProfileEdit, formProfileEditLoading:
+		formChanges, formPlanning, formProfileEdit, formProfileEditLoading:
 		// Only plan-producing forms reach this dispatcher.
 	}
 	return *model, nil
@@ -553,15 +515,6 @@ func (model *Model) completeProfileInstructionsForm() (tea.Model, tea.Cmd) {
 	}
 	model.syncFormDraft()
 	return model.startPlan(planRequest{kind: planProfile, profile: model.drafts.profile})
-}
-
-func (model *Model) completeReviewOperationForm() (tea.Model, tea.Cmd) {
-	model.formKind = formReviewLoading
-	if model.runtime == nil || model.runtime.commands.loadReviewSelection == nil {
-		model.session.reviewSelection = configuration.DefaultReviewSelection()
-		return model.withForm(model.openReviewFieldsForm())
-	}
-	return model.withForm(model.runtime.commands.loadReviewSelection())
 }
 
 func (model *Model) startPlan(request planRequest) (tea.Model, tea.Cmd) {
@@ -658,22 +611,6 @@ func (model *Model) receivePublishResult(message publishResultMsg) (tea.Model, t
 	}
 	model.toMenu()
 	return *model, nil
-}
-
-func (model *Model) receiveReviewSelection(message reviewSelectionLoadedMsg) (tea.Model, tea.Cmd) {
-	if model.formKind != formReviewLoading {
-		return *model, nil
-	}
-	if message.err != nil {
-		model.status = fmt.Sprintf("Loading Repository Reviews failed: %v", message.err)
-		return model.withForm(model.openReviewOperationForm())
-	}
-	model.session.reviewSelection = message.selection
-	if model.rowReview {
-		model.rowReview = false
-		return model.startPlan(planRequest{kind: planReviews, review: reviewPlanRequest{selection: message.selection, draft: model.drafts.reviews}})
-	}
-	return model.withForm(model.openReviewFieldsForm())
 }
 
 func (model *Model) receiveTemplate(message templateLoadedMsg) (tea.Model, tea.Cmd) {

@@ -1,61 +1,238 @@
 package configurationhub
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"strconv"
+	"strings"
 
 	"charm.land/huh/v2"
 
 	"reviewparty/internal/configuration"
 )
 
+type reviewOperation int
+
+const (
+	reviewAdd reviewOperation = iota + 1
+	reviewRemove
+	reviewMove
+	reviewConcurrency
+	reviewInherit
+)
+
+func (operation reviewOperation) String() string {
+	switch operation {
+	case reviewAdd:
+		return "add"
+	case reviewRemove:
+		return "remove"
+	case reviewMove:
+		return "move"
+	case reviewConcurrency:
+		return "concurrency"
+	case reviewInherit:
+		return "inherit"
+	}
+	return fmt.Sprintf("reviewOperation(%d)", int(operation))
+}
+
+// reviewEntry names one selected item by position and records the item the
+// position held when chosen, so an edit refuses a selection that changed.
+type reviewEntry struct {
+	group  configuration.Scope
+	index  int
+	expect configuration.SelectionItem
+}
+
 type reviewFormDraft struct {
-	operation, scope, index, from, to, concurrency string
-	choice                                         configuration.SelectedDefinition
+	target    configuration.Scope
+	operation reviewOperation
+	reviewEntry
+	to          int
+	choice      configuration.SelectedDefinition
+	concurrency string
+}
+
+var errStaleReviewSelection = errors.New("The selection changed; reopen Reviews.")
+
+// planReviewEdit is the one Review selection planner both Hub hosts call. It
+// returns the staged selection so callers can preview its resolution.
+func planReviewEdit(manager *configuration.Manager, repository configuration.Repository, draft reviewFormDraft) (configuration.Plan, configuration.ReviewSelection, error) {
+	base := draft.target
+	if draft.operation == reviewInherit {
+		base = configuration.ScopeGlobal
+	}
+	selection, err := manager.ReviewSelectionToEdit(base, repository)
+	if err != nil {
+		return configuration.Plan{}, configuration.ReviewSelection{}, err
+	}
+	selection, err = draft.apply(selection)
+	if err != nil {
+		return configuration.Plan{}, configuration.ReviewSelection{}, err
+	}
+	var intent configuration.Intent = configuration.SetReviewSelection{Target: draft.target, Selection: selection}
+	if draft.operation == reviewInherit {
+		intent = configuration.InheritGlobalReviewSelection{}
+	}
+	plan, err := manager.Plan(repository, []configuration.Intent{intent})
+	return plan, selection, err
+}
+
+func (draft reviewFormDraft) apply(selection configuration.ReviewSelection) (configuration.ReviewSelection, error) {
+	switch draft.operation {
+	case reviewAdd:
+		item, err := selectionItemFor(draft.choice)
+		if err != nil {
+			return configuration.ReviewSelection{}, err
+		}
+		return configuration.AddReviewSelection(selection, draft.choice.Scope, item), nil
+	case reviewRemove:
+		if err := draft.verify(selection); err != nil {
+			return configuration.ReviewSelection{}, err
+		}
+		return configuration.RemoveReviewSelection(selection, draft.group, draft.index)
+	case reviewMove:
+		if err := draft.verify(selection); err != nil {
+			return configuration.ReviewSelection{}, err
+		}
+		return configuration.MoveReviewSelection(selection, draft.group, draft.index, draft.to)
+	case reviewConcurrency:
+		limit, err := strconv.Atoi(strings.TrimSpace(draft.concurrency))
+		if err != nil {
+			return configuration.ReviewSelection{}, fmt.Errorf("invalid concurrency limit: %w", err)
+		}
+		selection.ConcurrencyLimit = limit
+		return selection, nil
+	case reviewInherit:
+		return selection, nil
+	}
+	return configuration.ReviewSelection{}, fmt.Errorf("unknown Repository Reviews operation %q", draft.operation)
+}
+
+func (entry reviewEntry) verify(selection configuration.ReviewSelection) error {
+	items := selection.Global
+	if entry.group == configuration.ScopeRepository {
+		items = selection.Repository
+	}
+	if entry.index < 0 || entry.index >= len(items) || items[entry.index] != entry.expect {
+		return errStaleReviewSelection
+	}
+	return nil
+}
+
+func selectionItemFor(choice configuration.SelectedDefinition) (configuration.SelectionItem, error) {
+	if choice.Scope != configuration.ScopeGlobal && choice.Scope != configuration.ScopeRepository {
+		return configuration.SelectionItem{}, errors.New("choose an existing scoped Profile or Party")
+	}
+	switch choice.Kind {
+	case configuration.ItemProfile:
+		return configuration.SelectionItem{Profile: choice.Name}, nil
+	case configuration.ItemParty:
+		return configuration.SelectionItem{Party: choice.Name}, nil
+	}
+	return configuration.SelectionItem{}, errors.New("choose a Profile or Party")
+}
+
+func reviewOperationField(draft *reviewFormDraft) huh.Field {
+	return huh.NewSelect[reviewOperation]().Title("Repository Reviews").Options(
+		huh.NewOption("Add Profile or Party", reviewAdd),
+		huh.NewOption("Remove item", reviewRemove),
+		huh.NewOption("Move item", reviewMove),
+		huh.NewOption("Set concurrency", reviewConcurrency),
+	).Value(&draft.operation)
+}
+
+// reviewFields builds the fields one operation needs. A move also needs
+// reviewDestinationField, which depends on the chosen entry.
+func reviewFields(draft *reviewFormDraft, snapshot Snapshot) ([]huh.Field, error) {
+	switch draft.operation {
+	case reviewAdd:
+		options := reviewChoiceOptions(snapshot.ReviewChoices)
+		if len(options) == 0 {
+			return nil, errors.New(emptyReviewChoices)
+		}
+		return []huh.Field{huh.NewSelect[configuration.SelectedDefinition]().Title("Profile or Party to add").
+			Description(addReviewDescription).Options(options...).Value(&draft.choice).WithHeight(8)}, nil
+	case reviewRemove, reviewMove:
+		options := reviewEntryOptions(snapshot.Items)
+		if len(options) == 0 {
+			return nil, errors.New("No Repository Reviews are selected.")
+		}
+		return []huh.Field{huh.NewSelect[reviewEntry]().Title("Selected item").Options(options...).Value(&draft.reviewEntry)}, nil
+	case reviewConcurrency:
+		return []huh.Field{huh.NewInput().Title("Concurrency limit").Validate(validatePositiveInteger).Value(&draft.concurrency)}, nil
+	case reviewInherit:
+		return nil, nil
+	}
+	return nil, fmt.Errorf("unknown Repository Reviews operation %q", draft.operation)
+}
+
+func reviewDestinationField(draft *reviewFormDraft, items []Item) huh.Field {
+	positions := func() []huh.Option[int] {
+		var options []huh.Option[int]
+		for _, option := range reviewEntryOptions(items) {
+			if option.Value.group == draft.group {
+				options = append(options, huh.NewOption(option.Key, option.Value.index))
+			}
+		}
+		return options
+	}
+	return huh.NewSelect[int]().Title("Move to").Options(positions()...).OptionsFunc(positions, &draft.group).Value(&draft.to)
+}
+
+func reviewEntryOptions(items []Item) []huh.Option[reviewEntry] {
+	var options []huh.Option[reviewEntry]
+	counts := map[configuration.Scope]int{}
+	for _, item := range items {
+		if item.Kind != itemReview {
+			continue
+		}
+		group := configuration.Scope(item.Scope)
+		entry := reviewEntry{group: group, index: counts[group], expect: item.Selection}
+		counts[group]++
+		options = append(options, huh.NewOption(fmt.Sprintf("[%s] %d. %s (%s)", group, entry.index+1, item.Name, item.Detail), entry))
+	}
+	return options
 }
 
 func (e *editor) editReviews() error {
 	draft := &e.draftSet().reviews
-	if err := e.form(huh.NewSelect[string]().Title("Repository Reviews").Options(
-		huh.NewOption("Add Profile or Party", "add"), huh.NewOption("Remove item", "remove"),
-		huh.NewOption("Move item", "move"), huh.NewOption("Set concurrency", "concurrency"),
-	).Value(&draft.operation)); err != nil {
+	draft.target = configuration.ScopeRepository
+	if err := e.form(reviewOperationField(draft)); err != nil {
 		return err
 	}
-	selection, err := e.currentReviewSelection()
+	fields, err := reviewFields(draft, e.snapshot)
 	if err != nil {
 		return err
 	}
-	selection, err = e.reviewSelection(draft.operation, selection)
+	if draft.operation == reviewAdd {
+		if _, err := fmt.Fprintln(e.Output, addReviewDescription); err != nil {
+			return err
+		}
+	}
+	if err := e.form(fields...); err != nil {
+		return err
+	}
+	if draft.operation == reviewMove {
+		if err := e.form(reviewDestinationField(draft, e.snapshot.Items)); err != nil {
+			return err
+		}
+	}
+	plan, selection, err := planReviewEdit(e.manager, e.Repository, *draft)
 	if err != nil {
 		return err
 	}
-	return e.publishReviewSelection(selection)
+	return e.publishReviewPlan(plan, selection)
 }
 
-func (e *editor) currentReviewSelection() (configuration.ReviewSelection, error) {
-	selection, _, err := e.manager.EffectiveReviewSelection(e.Repository)
-	if err != nil {
-		return configuration.ReviewSelection{}, err
-	}
-	if selection.ConcurrencyLimit == 0 {
-		selection = configuration.DefaultReviewSelection()
-	}
-	return selection, nil
-}
-
-func (e *editor) publishReviewSelection(selection configuration.ReviewSelection) error {
-	intent := configuration.SetReviewSelection{Target: configuration.ScopeRepository, Selection: selection}
-	plan, err := e.manager.Plan(e.Repository, []configuration.Intent{intent})
-	if err != nil {
-		return err
-	}
+func (e *editor) publishReviewPlan(plan configuration.Plan, selection configuration.ReviewSelection) error {
 	published, err := e.reviewAndPublishWithPreview(
 		plan,
 		func() error { return e.manager.Publish(plan) },
 		func(output io.Writer) error {
-			return renderReviewSelectionPreview(output, e.manager, e.Repository, intent.Selection)
+			return renderReviewSelectionPreview(output, e.manager, e.Repository, selection)
 		},
 	)
 	if published {
@@ -74,82 +251,4 @@ func renderReviewSelectionPreview(output io.Writer, manager *configuration.Manag
 		return fmt.Errorf("resolve staged review selection: %w", err)
 	}
 	return configuration.RenderResolvedReviewsHuman(output, resolved)
-}
-
-func (e *editor) reviewSelection(operation string, selection configuration.ReviewSelection) (configuration.ReviewSelection, error) {
-	switch operation {
-	case "add":
-		return e.addReview(selection)
-	case "remove":
-		return e.removeReview(selection)
-	case "move":
-		return e.moveReview(selection)
-	case "concurrency":
-		return e.concurrencyReview(selection)
-	default:
-		return configuration.ReviewSelection{}, fmt.Errorf("unknown Repository Reviews operation %q", operation)
-	}
-}
-
-func (e *editor) addReview(selection configuration.ReviewSelection) (configuration.ReviewSelection, error) {
-	draft := &e.draftSet().reviews
-	options := reviewChoiceOptions(e.snapshot.ReviewChoices)
-	if len(options) == 0 {
-		return configuration.ReviewSelection{}, fmt.Errorf("%s", emptyReviewChoices)
-	}
-	if _, err := fmt.Fprintln(e.Output, addReviewDescription); err != nil {
-		return configuration.ReviewSelection{}, err
-	}
-	if err := e.form(huh.NewSelect[configuration.SelectedDefinition]().
-		Title("Profile or Party to add").Description(addReviewDescription).
-		Options(options...).Value(&draft.choice)); err != nil {
-		return configuration.ReviewSelection{}, err
-	}
-	return addReviewSelection(*draft, selection)
-}
-
-func (e *editor) removeReview(selection configuration.ReviewSelection) (configuration.ReviewSelection, error) {
-	draft := &e.draftSet().reviews
-	if err := e.reviewScope(draft, huh.NewInput().Title("Zero-based index").Value(&draft.index)); err != nil {
-		return configuration.ReviewSelection{}, err
-	}
-	index, err := strconv.Atoi(draft.index)
-	if err != nil {
-		return configuration.ReviewSelection{}, err
-	}
-	return configuration.RemoveReviewSelection(selection, configuration.Scope(draft.scope), index)
-}
-
-func (e *editor) moveReview(selection configuration.ReviewSelection) (configuration.ReviewSelection, error) {
-	draft := &e.draftSet().reviews
-	if err := e.reviewScope(draft, huh.NewInput().Title("From index").Value(&draft.from), huh.NewInput().Title("To index").Value(&draft.to)); err != nil {
-		return configuration.ReviewSelection{}, err
-	}
-	from, err := strconv.Atoi(draft.from)
-	if err != nil {
-		return configuration.ReviewSelection{}, err
-	}
-	to, err := strconv.Atoi(draft.to)
-	if err != nil {
-		return configuration.ReviewSelection{}, err
-	}
-	return configuration.MoveReviewSelection(selection, configuration.Scope(draft.scope), from, to)
-}
-
-func (e *editor) reviewScope(draft *reviewFormDraft, fields ...huh.Field) error {
-	fields = append([]huh.Field{huh.NewSelect[string]().Title("Selection group").Options(scopeOptions()...).Value(&draft.scope)}, fields...)
-	return e.form(fields...)
-}
-
-func (e *editor) concurrencyReview(selection configuration.ReviewSelection) (configuration.ReviewSelection, error) {
-	draft := &e.draftSet().reviews
-	if err := e.form(huh.NewInput().Title("Concurrency limit").Value(&draft.concurrency)); err != nil {
-		return configuration.ReviewSelection{}, err
-	}
-	limit, err := strconv.Atoi(draft.concurrency)
-	if err != nil {
-		return configuration.ReviewSelection{}, err
-	}
-	selection.ConcurrencyLimit = limit
-	return selection, nil
 }

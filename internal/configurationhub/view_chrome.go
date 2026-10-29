@@ -106,7 +106,7 @@ func formArea(kind formKind) Area {
 		return AreaProfiles
 	case formParty:
 		return AreaParties
-	case formReviewOperation, formReviewLoading, formReviewFields:
+	case formReviewOperation, formReviewFields:
 		return AreaReviews
 	case formCopy:
 		return AreaProfiles
@@ -243,7 +243,7 @@ func (model Model) renderFormFrame(options renderOptions) string {
 		case formNone, formOverview, formProfileFields, formProfileSource, formProfileTemplate,
 			formProfileChoicesLoading, formProfileModel, formProfileModelManual, formProfileEffort,
 			formProfileEffortManual, formProfileDeadline, formProfileTemplateLoading, formProfileInstructions, formParty, formReviewOperation,
-			formReviewLoading, formReviewFields, formCopy, formChanges, formProfileEdit, formProfileEditLoading:
+			formReviewFields, formCopy, formChanges, formProfileEdit, formProfileEditLoading:
 			// The active form supplies the content.
 		}
 	}

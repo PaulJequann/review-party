@@ -77,8 +77,8 @@ func TestHubEnterOpensProfileBrowserAndNewOpensForm(t *testing.T) {
 
 func TestHubReviewBrowserUsesHighlightedRowForRemoval(t *testing.T) {
 	model := New(Snapshot{Repository: "/repo", Items: []Item{
-		{Scope: "global", Kind: itemReview, Name: "one", Detail: "Profile"},
-		{Scope: "global", Kind: itemReview, Name: "two", Detail: "Profile"},
+		{Scope: "global", Kind: itemReview, Name: "one", Detail: "Profile", Selection: configuration.SelectionItem{Profile: "one"}},
+		{Scope: "global", Kind: itemReview, Name: "two", Detail: "Profile", Selection: configuration.SelectionItem{Profile: "two"}},
 	}})
 	model.area = 3
 	updated, _ := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -87,7 +87,8 @@ func TestHubReviewBrowserUsesHighlightedRowForRemoval(t *testing.T) {
 	model = requireHubModel(t, updated)
 	updated, _ = model.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	model = requireHubModel(t, updated)
-	if model.drafts.reviews.index != "1" || model.drafts.reviews.scope != "global" {
+	want := reviewEntry{group: configuration.ScopeGlobal, index: 1, expect: configuration.SelectionItem{Profile: "two"}}
+	if model.drafts.reviews.operation != reviewRemove || model.drafts.reviews.reviewEntry != want {
 		t.Fatalf("row-driven removal draft = %#v", model.drafts.reviews)
 	}
 	if model.formKind != formReviewFields {
@@ -428,7 +429,7 @@ func TestProfilePlanCommandUsesRepositoryForRepositoryProfile(t *testing.T) {
 		Target: configuration.ScopeRepository, Name: "quality", Reviewer: "codex", Model: "luna",
 		ReasoningEffort: "high", AttemptDeadline: "8m", Instructions: "Review carefully.",
 	}}
-	plan, err := buildPlan(manager, repository, nil, request)
+	plan, _, err := buildPlan(manager, repository, nil, request)
 	if err != nil {
 		t.Fatalf("build profile plan: %v", err)
 	}

@@ -16,10 +16,9 @@ import (
 )
 
 type hubCommands struct {
-	plan                func(planRequest) tea.Cmd
-	loadReviewSelection func() tea.Cmd
-	loadTemplate        func(string) tea.Cmd
-	loadProfile         func(scope, name string) tea.Cmd
+	plan         func(planRequest) tea.Cmd
+	loadTemplate func(string) tea.Cmd
+	loadProfile  func(scope, name string) tea.Cmd
 }
 
 type hubRuntime struct {
@@ -73,8 +72,7 @@ const (
 )
 
 type reviewPlanRequest struct {
-	selection configuration.ReviewSelection
-	draft     reviewFormDraft
+	draft reviewFormDraft
 }
 
 type publishRequest struct {
@@ -105,11 +103,6 @@ type publishResultMsg struct {
 	err        error
 }
 
-type reviewSelectionLoadedMsg struct {
-	selection configuration.ReviewSelection
-	err       error
-}
-
 type templateLoadedMsg struct {
 	template configuration.Template
 	found    bool
@@ -137,9 +130,6 @@ func newHubRuntime(options RunOptions, manager *configuration.Manager) *hubRunti
 		commands: hubCommands{
 			plan: func(request planRequest) tea.Cmd {
 				return planRequestCommand(options.Context, manager, options.Repository, options.ModelChoiceCheck, request)
-			},
-			loadReviewSelection: func() tea.Cmd {
-				return loadReviewSelectionCommand(options.Context, manager, options.Repository)
 			},
 			loadTemplate: func(id string) tea.Cmd {
 				return loadTemplateCommand(options.Context, manager, id)
@@ -214,7 +204,7 @@ func planRequestCommand(ctx context.Context, manager *configuration.Manager, rep
 		if err := contextError(ctx); err != nil {
 			return planFailedMsg{kind: request.kind, err: err}
 		}
-		plan, err := buildPlan(manager, repository, modelChoiceCheck, request)
+		plan, preview, err := buildPlan(manager, repository, modelChoiceCheck, request)
 		if err != nil {
 			return planFailedMsg{kind: request.kind, err: err}
 		}
@@ -225,12 +215,8 @@ func planRequestCommand(ctx context.Context, manager *configuration.Manager, rep
 		if err := configuration.RenderPlanHuman(&summary, plan); err != nil {
 			return planFailedMsg{kind: request.kind, err: err}
 		}
-		if request.kind == planReviews {
-			selection, err := reviewSelectionFromForm(request.review.draft, request.review.selection)
-			if err != nil {
-				return planFailedMsg{kind: request.kind, err: err}
-			}
-			if err := renderReviewSelectionPreview(&summary, manager, repository, selection); err != nil {
+		if preview != nil {
+			if err := preview(&summary); err != nil {
 				return planFailedMsg{kind: request.kind, err: err}
 			}
 		}
@@ -244,30 +230,33 @@ func planRequestCommand(ctx context.Context, manager *configuration.Manager, rep
 	}
 }
 
-func buildPlan(manager *configuration.Manager, repository configuration.Repository, modelChoiceCheck func(string, string) configuration.ModelChoiceCheck, request planRequest) (configuration.Plan, error) {
+// buildPlan stages one request. The preview, when present, renders what the
+// staged change resolves to beneath the plan summary.
+func buildPlan(manager *configuration.Manager, repository configuration.Repository, modelChoiceCheck func(string, string) configuration.ModelChoiceCheck, request planRequest) (configuration.Plan, func(io.Writer) error, error) {
 	if manager == nil {
-		return configuration.Plan{}, errors.New("Configuration Hub manager is unavailable")
+		return configuration.Plan{}, nil, errors.New("Configuration Hub manager is unavailable")
 	}
 	switch request.kind {
 	case planProfile, planProfileEdit:
-		return buildProfilePlan(manager, repository, modelChoiceCheck, request)
+		plan, err := buildProfilePlan(manager, repository, modelChoiceCheck, request)
+		return plan, nil, err
 	case planParty:
 		draft, err := partyDraftFromForm(request.party)
 		if err != nil {
-			return configuration.Plan{}, err
+			return configuration.Plan{}, nil, err
 		}
-		return manager.PlanPartyCreation(repository, draft)
+		plan, err := manager.PlanPartyCreation(repository, draft)
+		return plan, nil, err
 	case planCopy:
-		return manager.PlanProfileCopy(repository, configuration.ScopeRepository, configuration.ScopeGlobal, request.copy)
+		plan, err := manager.PlanProfileCopy(repository, configuration.ScopeRepository, configuration.ScopeGlobal, request.copy)
+		return plan, nil, err
 	case planReviews:
-		selection, err := reviewSelectionFromForm(request.review.draft, request.review.selection)
-		if err != nil {
-			return configuration.Plan{}, err
-		}
-		intent := configuration.SetReviewSelection{Target: configuration.ScopeRepository, Selection: selection}
-		return manager.Plan(repository, []configuration.Intent{intent})
+		plan, selection, err := planReviewEdit(manager, repository, request.review.draft)
+		return plan, func(output io.Writer) error {
+			return renderReviewSelectionPreview(output, manager, repository, selection)
+		}, err
 	default:
-		return configuration.Plan{}, fmt.Errorf("unknown plan kind %q", request.kind)
+		return configuration.Plan{}, nil, fmt.Errorf("unknown plan kind %q", request.kind)
 	}
 }
 
@@ -295,25 +284,6 @@ func publishPlanCommand(request publishRequest) tea.Cmd {
 			attachReceipts(&snapshot, request.receipts)
 		}
 		return publishResultMsg{kind: request.kind, snapshot: snapshot, refreshErr: refreshErr}
-	}
-}
-
-func loadReviewSelectionCommand(ctx context.Context, manager *configuration.Manager, repository configuration.Repository) tea.Cmd {
-	return func() tea.Msg {
-		if err := contextError(ctx); err != nil {
-			return reviewSelectionLoadedMsg{err: err}
-		}
-		if manager == nil {
-			return reviewSelectionLoadedMsg{err: errors.New("Configuration Hub manager is unavailable")}
-		}
-		selection, _, err := manager.EffectiveReviewSelection(repository)
-		if err != nil {
-			return reviewSelectionLoadedMsg{err: err}
-		}
-		if selection.ConcurrencyLimit == 0 {
-			selection = configuration.DefaultReviewSelection()
-		}
-		return reviewSelectionLoadedMsg{selection: selection}
 	}
 }
 
@@ -382,65 +352,4 @@ func partyDraftFromForm(draft partyFormDraft) (configuration.PartyDraft, error) 
 		ConcurrencyLimit: limit,
 		Profiles:         profiles,
 	}, nil
-}
-
-func reviewSelectionFromForm(draft reviewFormDraft, selection configuration.ReviewSelection) (configuration.ReviewSelection, error) {
-	switch draft.operation {
-	case "add":
-		return addReviewSelection(draft, selection)
-	case "remove":
-		return removeReviewSelection(draft, selection)
-	case "move":
-		return moveReviewSelection(draft, selection)
-	case "concurrency":
-		return concurrencyReviewSelection(draft, selection)
-	default:
-		return configuration.ReviewSelection{}, fmt.Errorf("unknown Repository Reviews operation %q", draft.operation)
-	}
-}
-
-func addReviewSelection(draft reviewFormDraft, selection configuration.ReviewSelection) (configuration.ReviewSelection, error) {
-	choice := draft.choice
-	if choice.Scope != configuration.ScopeGlobal && choice.Scope != configuration.ScopeRepository {
-		return configuration.ReviewSelection{}, fmt.Errorf("choose an existing scoped Profile or Party")
-	}
-	var item configuration.SelectionItem
-	switch choice.Kind {
-	case configuration.ItemProfile:
-		item.Profile = choice.Name
-	case configuration.ItemParty:
-		item.Party = choice.Name
-	default:
-		return configuration.ReviewSelection{}, fmt.Errorf("choose a Profile or Party")
-	}
-	return configuration.AddReviewSelection(selection, choice.Scope, item), nil
-}
-
-func removeReviewSelection(draft reviewFormDraft, selection configuration.ReviewSelection) (configuration.ReviewSelection, error) {
-	index, err := strconv.Atoi(draft.index)
-	if err != nil {
-		return configuration.ReviewSelection{}, err
-	}
-	return configuration.RemoveReviewSelection(selection, configuration.Scope(draft.scope), index)
-}
-
-func moveReviewSelection(draft reviewFormDraft, selection configuration.ReviewSelection) (configuration.ReviewSelection, error) {
-	from, err := strconv.Atoi(draft.from)
-	if err != nil {
-		return configuration.ReviewSelection{}, err
-	}
-	to, err := strconv.Atoi(draft.to)
-	if err != nil {
-		return configuration.ReviewSelection{}, err
-	}
-	return configuration.MoveReviewSelection(selection, configuration.Scope(draft.scope), from, to)
-}
-
-func concurrencyReviewSelection(draft reviewFormDraft, selection configuration.ReviewSelection) (configuration.ReviewSelection, error) {
-	limit, err := strconv.Atoi(draft.concurrency)
-	if err != nil {
-		return configuration.ReviewSelection{}, err
-	}
-	selection.ConcurrencyLimit = limit
-	return selection, nil
 }

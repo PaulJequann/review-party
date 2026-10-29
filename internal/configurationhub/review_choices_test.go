@@ -38,18 +38,15 @@ func TestReviewChoicesUseValidScopedInventory(t *testing.T) {
 		t.Fatalf("choices = %#v, want %#v", snapshot.ReviewChoices, want)
 	}
 	for index, choice := range snapshot.ReviewChoices {
-		draft := reviewFormDraft{operation: "add", choice: choice}
 		var output bytes.Buffer
-		e := editor{snapshot: snapshot, drafts: &draftSet{reviews: draft}, RunOptions: RunOptions{
-			Accessible: true, Input: newLineInput(fmt.Sprintf("%d\n", index+1)), Output: &output,
+		e := editor{manager: manager, snapshot: snapshot, RunOptions: RunOptions{
+			Repository: repository, Accessible: true, Input: newLineInput(fmt.Sprintf("1\n%d\nn\n", index+1)), Output: &output,
 		}}
-		interactive, err := e.addReview(configuration.DefaultReviewSelection())
-		if err != nil {
+		if err := e.editReviews(); err != nil {
 			t.Fatal(err)
 		}
-		normal, err := addReviewSelection(e.draftSet().reviews, configuration.DefaultReviewSelection())
-		if err != nil || !reflect.DeepEqual(interactive, normal) || !reflect.DeepEqual(e.draftSet().reviews.choice, choice) {
-			t.Fatalf("adapters disagree: %#v, %#v, %v", interactive, normal, err)
+		if draft := e.draftSet().reviews; draft.operation != reviewAdd || draft.choice != choice {
+			t.Fatalf("accessible draft = %#v, want add %#v", draft, choice)
 		}
 		for _, label := range []string{"[global] profile shared", "[repository] profile shared", "retains existing entries"} {
 			if !strings.Contains(output.String(), label) {
@@ -77,18 +74,19 @@ func TestReviewAddRetainsEntriesAndShowsFinalWorkloadInBothAdapters(t *testing.T
 	if err := manager.Publish(plan); err != nil {
 		t.Fatal(err)
 	}
-	selection := configuration.ReviewSelection{ConcurrencyLimit: 2, Global: []configuration.SelectionItem{{Profile: "shared"}}}
-	draft := reviewFormDraft{operation: "add", choice: configuration.SelectedDefinition{Kind: configuration.ItemParty, Scope: configuration.ScopeRepository, Name: "daily"}}
-	added, err := addReviewSelection(draft, selection)
+	selection := configuration.ReviewSelection{ConcurrencyLimit: 2, Global: []configuration.SelectionItem{{Profile: "shared"}}, Repository: []configuration.SelectionItem{}}
+	publishSelection(t, manager, repository, selection)
+	draft := reviewFormDraft{target: configuration.ScopeRepository, operation: reviewAdd, choice: configuration.SelectedDefinition{Kind: configuration.ItemParty, Scope: configuration.ScopeRepository, Name: "daily"}}
+	_, added, err := planReviewEdit(manager, repository, draft)
 	if err != nil {
 		t.Fatal(err)
 	}
-	again, err := addReviewSelection(draft, added)
+	again, err := draft.apply(added)
 	if err != nil || !reflect.DeepEqual(added, again) {
 		t.Fatalf("Add changed existing deduplication: %#v, %v", again, err)
 	}
 	message := planRequestCommand(context.Background(), manager, repository, nil, planRequest{
-		kind: planReviews, review: reviewPlanRequest{selection: selection, draft: draft},
+		kind: planReviews, review: reviewPlanRequest{draft: draft},
 	})()
 	ready, ok := message.(planReadyMsg)
 	if !ok {
@@ -105,19 +103,19 @@ func TestReviewAddRetainsEntriesAndShowsFinalWorkloadInBothAdapters(t *testing.T
 			}
 		}
 	}
-	if _, source, err := manager.EffectiveReviewSelection(repository); err != nil || source.Authored {
-		t.Fatalf("preview wrote a selection: %#v, %v", source, err)
+	if current, _, err := manager.EffectiveReviewSelection(repository); err != nil || !reflect.DeepEqual(current, selection) {
+		t.Fatalf("preview wrote a selection: %#v, %v", current, err)
 	}
 }
 
 func TestEmptyReviewChoicesOfferCreationAndReturn(t *testing.T) {
 	model := New(Snapshot{Items: []Item{{Kind: itemProfile, Detail: "looks valid", Name: "invalid"}}})
-	model.session.reviews.operation = "add"
+	model.session.reviews.operation = reviewAdd
 	if command := model.openReviewFieldsForm(); command != nil || model.view != viewMenu || !strings.Contains(model.status, "Create a Profile") {
 		t.Fatalf("empty inventory did not return with guidance: %s", model.status)
 	}
-	e := editor{RunOptions: RunOptions{Input: newLineInput(""), Output: &bytes.Buffer{}, Accessible: true}}
-	if _, err := e.addReview(configuration.DefaultReviewSelection()); err == nil || !strings.Contains(err.Error(), "Create a Profile") {
+	e := editor{RunOptions: RunOptions{Input: newLineInput("1\n"), Output: &bytes.Buffer{}, Accessible: true}}
+	if err := e.editReviews(); err == nil || !strings.Contains(err.Error(), "Create a Profile") {
 		t.Fatalf("accessible empty inventory = %v", err)
 	}
 }
@@ -125,9 +123,9 @@ func TestEmptyReviewChoicesOfferCreationAndReturn(t *testing.T) {
 func TestRejectedStaleReviewChoiceRetainsDraft(t *testing.T) {
 	manager := configuration.NewManager(configuration.Options{GlobalRoot: t.TempDir(), Reviewers: []string{"codex"}})
 	repository := configuration.Repository(t.TempDir())
-	draft := reviewFormDraft{operation: "add", choice: configuration.SelectedDefinition{Kind: configuration.ItemProfile, Scope: configuration.ScopeRepository, Name: "vanished"}}
+	draft := reviewFormDraft{target: configuration.ScopeRepository, operation: reviewAdd, choice: configuration.SelectedDefinition{Kind: configuration.ItemProfile, Scope: configuration.ScopeRepository, Name: "vanished"}}
 	message := planRequestCommand(context.Background(), manager, repository, nil, planRequest{
-		kind: planReviews, review: reviewPlanRequest{selection: configuration.DefaultReviewSelection(), draft: draft},
+		kind: planReviews, review: reviewPlanRequest{draft: draft},
 	})()
 	if _, ok := message.(planFailedMsg); !ok {
 		t.Fatalf("missing definition was accepted: %#v", message)
@@ -156,9 +154,11 @@ func TestRemoveFinalReviewPreviewsAndPublishesInBothAdapters(t *testing.T) {
 			if err := manager.Publish(plan); err != nil {
 				t.Fatal(err)
 			}
-			draft := reviewFormDraft{operation: "remove", scope: "global", index: "0"}
+			draft := reviewFormDraft{target: configuration.ScopeRepository, operation: reviewRemove, reviewEntry: reviewEntry{
+				group: configuration.ScopeGlobal, expect: configuration.SelectionItem{Profile: "shared"},
+			}}
 			message := planRequestCommand(context.Background(), manager, repository, nil, planRequest{
-				kind: planReviews, review: reviewPlanRequest{selection: selection, draft: draft},
+				kind: planReviews, review: reviewPlanRequest{draft: draft},
 			})()
 			ready, ok := message.(planReadyMsg)
 			if !ok {
@@ -174,13 +174,13 @@ func TestRemoveFinalReviewPreviewsAndPublishesInBothAdapters(t *testing.T) {
 				t.Fatalf("preview published: %#v, %v", before, err)
 			}
 			if accessible {
-				var output bytes.Buffer
-				e := editor{manager: manager, RunOptions: RunOptions{Repository: repository, Accessible: true, Input: newLineInput("y\n"), Output: &output}}
-				removed, err := removeReviewSelection(draft, selection)
+				snapshot, err := buildSnapshot(manager, repository)
 				if err != nil {
 					t.Fatal(err)
 				}
-				if err := e.publishReviewSelection(removed); err != nil {
+				var output bytes.Buffer
+				e := editor{manager: manager, snapshot: snapshot, RunOptions: RunOptions{Repository: repository, Accessible: true, Input: newLineInput("2\n1\ny\n"), Output: &output}}
+				if err := e.editReviews(); err != nil {
 					t.Fatal(err)
 				}
 				if !strings.Contains(output.String(), "No reviews selected") {

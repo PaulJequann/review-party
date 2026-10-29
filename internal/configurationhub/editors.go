@@ -45,7 +45,7 @@ func (drafts draftSet) descriptions() []string {
 		result = append(result, fmt.Sprintf("Copy Profile %q", drafts.copyName))
 	}
 	if drafts.reviews != (reviewFormDraft{}) {
-		result = append(result, "Repository Reviews "+drafts.reviews.operation)
+		result = append(result, "Repository Reviews "+drafts.reviews.operation.String())
 	}
 	return result
 }

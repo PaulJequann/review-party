@@ -196,7 +196,12 @@ func (e *editor) chooseBaseline() error {
 	if err != nil || !completed {
 		return err
 	}
-	return e.publishReviewSelection(baseline.Select(selection))
+	selection = baseline.Select(selection)
+	plan, err := e.manager.Plan(e.Repository, []configuration.Intent{configuration.SetReviewSelection{Target: configuration.ScopeRepository, Selection: selection}})
+	if err != nil {
+		return err
+	}
+	return e.publishReviewPlan(plan, selection)
 }
 
 // completeBaseline publishes the missing baseline Profiles, then the Global
@@ -277,11 +282,8 @@ type firstReview struct {
 	baseline bool
 }
 
-func (choice firstReview) item() configuration.SelectionItem {
-	if choice.kind == configuration.ItemParty {
-		return configuration.SelectionItem{Party: choice.name}
-	}
-	return configuration.SelectionItem{Profile: choice.name}
+func (choice firstReview) definition() configuration.SelectedDefinition {
+	return configuration.SelectedDefinition{Kind: choice.kind, Name: choice.name, Scope: choice.scope}
 }
 
 func (e *editor) chooseFirstReview() error {
@@ -307,7 +309,7 @@ func (e *editor) chooseFirstReview() error {
 	case choice.kind == configuration.ItemParty && choice.scope == configuration.ScopeGlobal:
 		return e.selectGlobalParty(choice.name)
 	}
-	return e.addFirstReview(choice.scope, choice.item())
+	return e.addFirstReview(choice.definition())
 }
 
 // firstReviewOptions offers the Review Party baseline when it can be
@@ -379,13 +381,13 @@ func (e *editor) selectGlobalParty(name string) error {
 		return err
 	}
 	if !save {
-		return e.addFirstReview(configuration.ScopeGlobal, configuration.SelectionItem{Party: name})
+		return e.addFirstReview(configuration.SelectedDefinition{Kind: configuration.ItemParty, Name: name, Scope: configuration.ScopeGlobal})
 	}
 	saved, err := e.saveRepositoryParty(name)
 	if err != nil || !saved {
 		return err
 	}
-	return e.addFirstReview(configuration.ScopeRepository, configuration.SelectionItem{Party: name})
+	return e.addFirstReview(configuration.SelectedDefinition{Kind: configuration.ItemParty, Name: name, Scope: configuration.ScopeRepository})
 }
 
 // offerRepositoryParty asks whether to save the Global Party in the
@@ -425,10 +427,10 @@ func (e *editor) saveRepositoryParty(name string) (bool, error) {
 	return err == nil, err
 }
 
-func (e *editor) addFirstReview(group configuration.Scope, item configuration.SelectionItem) error {
-	selection, err := e.currentReviewSelection()
+func (e *editor) addFirstReview(choice configuration.SelectedDefinition) error {
+	plan, selection, err := planReviewEdit(e.manager, e.Repository, reviewFormDraft{target: configuration.ScopeRepository, operation: reviewAdd, choice: choice})
 	if err != nil {
 		return err
 	}
-	return e.publishReviewSelection(configuration.AddReviewSelection(selection, group, item))
+	return e.publishReviewPlan(plan, selection)
 }

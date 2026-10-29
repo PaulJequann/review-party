@@ -47,10 +47,11 @@ type ItemScope string
 
 // Item is one searchable, explicitly scoped configuration value.
 type Item struct {
-	Scope  ItemScope
-	Kind   ItemKind
-	Name   string
-	Detail string
+	Scope     ItemScope
+	Kind      ItemKind
+	Name      string
+	Detail    string
+	Selection configuration.SelectionItem
 }
 
 // Snapshot is the read-only material shown by the shell.
@@ -136,8 +137,7 @@ type Model struct {
 	browserArea  Area
 	cursor       int
 	moveReview   bool
-	moveFrom     int
-	rowReview    bool
+	moveFrom     reviewEntry
 	query        string
 	searching    bool
 	width        int
@@ -249,9 +249,6 @@ func (model Model) updateConfigMessage(message tea.Msg) (tea.Model, tea.Cmd, boo
 	case publishResultMsg:
 		model, command := model.receivePublishResult(message)
 		return model, command, true
-	case reviewSelectionLoadedMsg:
-		model, command := model.receiveReviewSelection(message)
-		return model, command, true
 	case templateLoadedMsg:
 		model, command := model.receiveTemplate(message)
 		return model, command, true
@@ -325,7 +322,7 @@ func (model Model) updateBrowser(key string) (tea.Model, tea.Cmd) {
 	case "enter":
 		if model.moveReview {
 			model.moveReview = false
-			return model.startRowReview("move")
+			return model.startRowReview(reviewMove)
 		}
 	default:
 		return model.browserAction(key)
@@ -342,7 +339,7 @@ func (model Model) browserAction(key string) (tea.Model, tea.Cmd) {
 	case "p":
 		return model.browserCopy()
 	case "a":
-		return model.browserReviewForm("add")
+		return model.browserReviewForm(reviewAdd)
 	default:
 		return model.browserReviewAction(key)
 	}
@@ -354,13 +351,13 @@ func (model Model) browserReviewAction(key string) (tea.Model, tea.Cmd) {
 	}
 	switch key {
 	case "r":
-		return model.startRowReview("remove")
+		return model.startRowReview(reviewRemove)
 	case "m":
-		model.moveFrom = model.currentReviewIndex()
+		model.moveFrom, _ = model.cursorReviewEntry()
 		model.moveReview = true
 		model.status = "Choose a destination, then press enter."
 	case "c":
-		return model.browserReviewForm("concurrency")
+		return model.browserReviewForm(reviewConcurrency)
 	}
 	return model, nil
 }
@@ -391,7 +388,7 @@ func (model Model) browserCopy() (tea.Model, tea.Cmd) {
 	return model.withForm(model.openCopyForm())
 }
 
-func (model Model) browserReviewForm(operation string) (tea.Model, tea.Cmd) {
+func (model Model) browserReviewForm(operation reviewOperation) (tea.Model, tea.Cmd) {
 	if model.browserArea != AreaReviews {
 		return model, nil
 	}
@@ -846,18 +843,18 @@ func (model Model) browserKind() ItemKind {
 	return spec.kind
 }
 
-func (model Model) currentReviewIndex() int {
+func (model Model) cursorReviewEntry() (reviewEntry, bool) {
 	items := model.visibleItems(itemReview)
-	if len(items) == 0 || model.cursor >= len(items) {
-		return -1
+	if len(items) == 0 {
+		return reviewEntry{}, false
 	}
-	index := 0
-	for _, item := range items[:model.cursor] {
-		if item.Scope == items[model.cursor].Scope {
-			index++
+	item := items[min(model.cursor, len(items)-1)]
+	for _, option := range reviewEntryOptions(model.snapshot.Items) {
+		if option.Value.group == configuration.Scope(item.Scope) && option.Value.expect == item.Selection {
+			return option.Value, true
 		}
 	}
-	return index
+	return reviewEntry{}, false
 }
 
 func renderRows(model Model, items []Item, output *strings.Builder, options renderOptions) {

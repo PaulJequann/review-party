@@ -197,7 +197,7 @@ func appendHubReviews(snapshot *Snapshot, scope string, items []configuration.Se
 		if item.Party != "" {
 			detail = "Party"
 		}
-		snapshot.Items = append(snapshot.Items, Item{Scope: ItemScope(scope), Kind: itemReview, Name: name, Detail: detail})
+		snapshot.Items = append(snapshot.Items, Item{Scope: ItemScope(scope), Kind: itemReview, Name: name, Detail: detail, Selection: item})
 	}
 }
 
