@@ -152,8 +152,6 @@ func (model *Model) openArea(area Area) tea.Cmd {
 	}
 }
 
-// openReviewFieldsFor opens an add or concurrency form for the file the
-// cursor row belongs to. The draft keeps that target until it is published.
 func (model *Model) openReviewFieldsFor(operation reviewOperation, target configuration.Scope) tea.Cmd {
 	model.session.reviews.operation = operation
 	model.session.reviews.target = target
@@ -304,8 +302,6 @@ func (model *Model) openReviewFieldsForm() tea.Cmd {
 		fields = append(fields, reviewDestinationField(draft, model.snapshot.Items))
 	}
 	if len(fields) == 0 {
-		// Inherit has no fields; a refused inherit returns to the menu with the
-		// planner's fact in the status line and no draft left behind.
 		model.toMenu()
 		model.drafts.reviews = reviewFormDraft{}
 		return nil

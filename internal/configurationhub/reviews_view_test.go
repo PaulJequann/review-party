@@ -12,9 +12,6 @@ import (
 	"reviewparty/internal/configuration"
 )
 
-// reviewTestSnapshot builds the Reviews rows a repository checkout shows, the
-// way buildSnapshot does, without a Manager. A nil selection is a file that
-// declares no Reviews.
 func reviewTestSnapshot(repository, global *configuration.ReviewSelection) Snapshot {
 	snapshot := Snapshot{Repository: "/repo", Targets: hubTargets("/repo")}
 	snapshot.Reviews = ReviewsView{Files: []ReviewFile{
@@ -115,7 +112,7 @@ func TestSnapshotReviewsViewReflectsEachRepositoryState(t *testing.T) {
 				}
 			}
 			rows := reviewRows(snapshot, configuration.ScopeRepository)
-			if len(rows) != test.rows || rows[0].Kind != itemReviewHeader || rows[0].Index != -1 || rows[0].Detail != test.repository {
+			if len(rows) != test.rows || rows[0].Kind != itemReviewHeader || rows[0].Detail != test.repository {
 				t.Fatalf("repository rows = %#v", rows)
 			}
 			globalRows := reviewRows(snapshot, configuration.ScopeGlobal)
@@ -460,8 +457,6 @@ func publishHubForm(t *testing.T, model Model) Model {
 	return publishHubPlanCommand(t, model, command)
 }
 
-// publishHubPlan presses the key that plans directly from a row, then
-// publishes the plan it produces.
 func publishHubPlan(t *testing.T, model Model, key tea.KeyPressMsg) Model {
 	t.Helper()
 	model, command := pressHubKey(t, model, key)

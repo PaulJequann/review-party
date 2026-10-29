@@ -78,8 +78,6 @@ func (view ReviewsView) inForceCount() int {
 	return len(file.Selection.Global) + len(file.Selection.Repository)
 }
 
-// headerState is the one description of a file's Review state. The TUI
-// section header, the Overview, and the accessible file prompt all show it.
 func (view ReviewsView) headerState(file ReviewFile) string {
 	repository := file.Target == configuration.ScopeRepository
 	switch {
@@ -109,7 +107,6 @@ func (file ReviewFile) hasItems() bool {
 	return file.declares() && len(file.Selection.Global)+len(file.Selection.Repository) > 0
 }
 
-// operations lists what an edit of this file can do, in prompt order.
 func (file ReviewFile) operations() []reviewOperation {
 	operations := []reviewOperation{reviewAdd}
 	if file.hasItems() {
@@ -122,8 +119,6 @@ func (file ReviewFile) operations() []reviewOperation {
 	return operations
 }
 
-// rowOperations narrows a file's operations to the cursor row: items are
-// removed or moved from their own row, and a file inherits from its header.
 func (snapshot Snapshot) rowOperations(row Item) []reviewOperation {
 	file, ok := snapshot.Reviews.file(row.Target)
 	if !ok {
@@ -170,8 +165,6 @@ type reviewKey struct {
 	label     string
 }
 
-// reviewKeys binds browser keys to Review operations. The key dispatcher,
-// the action bar, and the help overlay read this one table.
 var reviewKeys = []reviewKey{
 	{key: "a", operation: reviewAdd, label: "add"},
 	{key: "r", operation: reviewRemove, label: "remove"},
@@ -189,7 +182,6 @@ func reviewKeyOperation(key string) (reviewOperation, bool) {
 	return 0, false
 }
 
-// cursorReviewKeys lists the key bindings the cursor row allows.
 func (model Model) cursorReviewKeys() []reviewKey {
 	row, ok := model.cursorRow()
 	if !ok {
@@ -205,8 +197,6 @@ func (model Model) cursorReviewKeys() []reviewKey {
 	return keys
 }
 
-// reviewRows returns the browser rows for the Reviews area: every file header,
-// then that file's items that match the filter.
 func (model Model) reviewRows() []Item {
 	var rows []Item
 	for _, item := range model.snapshot.Items {
@@ -238,8 +228,6 @@ func (model Model) cursorRow() (Item, bool) {
 	return rows[min(model.cursor, len(rows)-1)], true
 }
 
-// renderReviewList renders the stacked per-file sections and reports the
-// line the cursor row starts on. A cursor of -1 marks no row.
 func renderReviewList(rows []Item, cursor, width int, options renderOptions) (string, int) {
 	var content strings.Builder
 	cursorLine, line := 1, 1
@@ -266,8 +254,6 @@ func writeReviewLine(content *strings.Builder, text string, width int) int {
 	return wrappedLineCount(text, width)
 }
 
-// reviewGroupLabel names the selection group a Repository Configuration row
-// starts. The Global file holds one group, so it gets no label.
 func reviewGroupLabel(previous, row Item) (string, bool) {
 	if row.Kind != itemReview || row.Target != configuration.ScopeRepository {
 		return "", false

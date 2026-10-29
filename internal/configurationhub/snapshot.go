@@ -108,8 +108,6 @@ func buildSnapshot(manager *configuration.Manager, repository configuration.Repo
 	return snapshot, nil
 }
 
-// hubTargets lists the files the Hub writes, Repository first. This is the
-// one place that reads an empty repository as "outside a repository".
 func hubTargets(repository configuration.Repository) []configuration.Scope {
 	if repository == "" {
 		return []configuration.Scope{configuration.ScopeGlobal}
@@ -196,12 +194,9 @@ func appendHubParties(snapshot *Snapshot, parties []configuration.Definition[con
 	}
 }
 
-// appendHubReviewFile adds one file's header row and its selected items.
-// Index is the item's position in its selection group, so an invalid entry
-// still occupies its position.
 func appendHubReviewFile(snapshot *Snapshot, file ReviewFile) {
 	snapshot.Items = append(snapshot.Items, Item{
-		Target: file.Target, Scope: ItemScope(file.Target), Kind: itemReviewHeader, Index: -1,
+		Target: file.Target, Scope: ItemScope(file.Target), Kind: itemReviewHeader,
 		Name: configurationTitle(file.Target), Detail: snapshot.Reviews.headerState(file),
 	})
 	if file.Selection == nil {

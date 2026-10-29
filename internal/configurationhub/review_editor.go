@@ -153,7 +153,6 @@ func (operation reviewOperation) label() string {
 	return operation.String()
 }
 
-// reviewOperationField offers only the operations the chosen file allows.
 func reviewOperationField(draft *reviewFormDraft, file ReviewFile) huh.Field {
 	var options []huh.Option[reviewOperation]
 	for _, operation := range file.operations() {
