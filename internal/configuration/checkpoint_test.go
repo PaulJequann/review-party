@@ -149,6 +149,27 @@ func TestGlobalCheckpointsAreInForceForEnrolledRepositories(t *testing.T) {
 	}
 }
 
+func TestRepositoryOptOutSurvivesUnrelatedMutations(t *testing.T) {
+	root := t.TempDir()
+	writeDocument(t, filepath.Join(root, "config.json"), `{"schema_version":1,"checkpoints":{"pre-push":{"requirement":"reviewed","unreviewed_lines":0,"review_budget":3}}}`)
+	manager := testManager(t, root)
+	repository := t.TempDir()
+	writeRepositoryCheckpoints(t, repository, `{}`)
+
+	publishPlan(t, manager, planCheckpoints(t, manager, repository, SetReviewerEnabled{Target: ScopeRepository, Reviewer: "opencode", Enabled: false}))
+	payload, err := os.ReadFile(filepath.Join(repository, ".reviewparty", "config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(payload), `"checkpoints": {}`) {
+		t.Fatalf("rewritten document dropped the opt-out: %s", payload)
+	}
+	effective, err := manager.EffectiveCheckpoints(Repository(repository))
+	if err != nil || effective.Source != SourceRepository || len(effective.Value) != 0 {
+		t.Fatalf("effective after an unrelated mutation = %#v, %v", effective, err)
+	}
+}
+
 func TestGlobalCheckpointPlansEditGlobalConfiguration(t *testing.T) {
 	root := t.TempDir()
 	manager := testManager(t, root)

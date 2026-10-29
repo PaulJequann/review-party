@@ -266,15 +266,17 @@ func containsModel(models []string, model string) bool {
 }
 
 // formattedDocument mirrors Document with explicit optional objects so the
-// rendered JSON has semantic field order and omits redundant defaults.
+// rendered JSON has semantic field order and omits redundant defaults. An
+// authored empty checkpoints object is an opt-out of Global Checkpoints, so
+// it renders as {} rather than disappearing with omitempty.
 type formattedDocument struct {
-	SchemaVersion  int                           `json:"schema_version"`
-	StateDirectory string                        `json:"state_directory,omitempty"`
-	Defaults       *Defaults                     `json:"defaults,omitempty"`
-	Reviewers      map[string]ReviewerPolicy     `json:"reviewers,omitempty"`
-	Eval           *formattedEval                `json:"eval,omitempty"`
-	Reviews        *ReviewSelection              `json:"reviews,omitempty"`
-	Checkpoints    map[CheckpointName]Checkpoint `json:"checkpoints,omitempty"`
+	SchemaVersion  int                            `json:"schema_version"`
+	StateDirectory string                         `json:"state_directory,omitempty"`
+	Defaults       *Defaults                      `json:"defaults,omitempty"`
+	Reviewers      map[string]ReviewerPolicy      `json:"reviewers,omitempty"`
+	Eval           *formattedEval                 `json:"eval,omitempty"`
+	Reviews        *ReviewSelection               `json:"reviews,omitempty"`
+	Checkpoints    *map[CheckpointName]Checkpoint `json:"checkpoints,omitempty"`
 }
 
 // formattedEval renders evaluation defaults without a redundant empty
@@ -302,7 +304,9 @@ func renderDocument(document Document) ([]byte, error) {
 		Reviewers:      document.Reviewers,
 		Eval:           eval,
 		Reviews:        document.Reviews,
-		Checkpoints:    document.Checkpoints,
+	}
+	if document.Checkpoints != nil {
+		formatted.Checkpoints = &document.Checkpoints
 	}
 	if !document.Defaults.empty() {
 		defaults := document.Defaults

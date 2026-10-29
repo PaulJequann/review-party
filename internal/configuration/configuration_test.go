@@ -205,6 +205,15 @@ func TestRenderedDocumentIsStableAndOmitsDefaults(t *testing.T) {
 	if string(payload) != want {
 		t.Fatalf("payload = %q, want %q", payload, want)
 	}
+	optedOut := Document{SchemaVersion: SchemaVersion, Checkpoints: map[CheckpointName]Checkpoint{}}
+	payload, err = renderDocument(optedOut)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want = "{\n  \"schema_version\": 1,\n  \"checkpoints\": {}\n}\n"
+	if string(payload) != want {
+		t.Fatalf("payload = %q, want %q", payload, want)
+	}
 	full := Document{
 		SchemaVersion:  SchemaVersion,
 		StateDirectory: "/state",
