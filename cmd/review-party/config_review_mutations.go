@@ -97,13 +97,9 @@ func reviewsMutationOptionsFromCommand(cmd *cobra.Command) (configurationMutatio
 	if err != nil {
 		return configurationMutationOptions{format: format}, err
 	}
-	mutation := configurationMutationOptions{
-		target: target, format: format, configuration: stringFlag(cmd, "config"), yes: boolFlag(cmd, "yes"),
-	}
-	if target == configuration.ScopeRepository {
-		mutation.repository = stringFlag(cmd, "repo")
-	}
-	return mutation, nil
+	return configurationMutationOptions{
+		target: target, repository: stringFlag(cmd, "repo"), format: format, configuration: stringFlag(cmd, "config"), yes: boolFlag(cmd, "yes"),
+	}, nil
 }
 
 func repositoryMutationOptions(cmd *cobra.Command) configurationMutationOptions {

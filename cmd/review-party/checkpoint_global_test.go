@@ -104,6 +104,10 @@ func TestConfigCheckpointNoneAndInheritChooseWhetherGlobalCheckpointsApply(t *te
 	}
 	assertRun(t, fixture.hook(refs, "pre-push", "origin", "url"), commandRun{})
 	assertRunContains(t, checkpoint("none"), commandRun{exit: 1, stderr: "Repository Configuration already declares no Checkpoints"})
+	for _, verb := range []string{"set", "remove"} {
+		assertRunContains(t, fixture.runWith("", false, "config", "checkpoint", verb, "pre-commit", "--target", "global", "--repo", fixture.repository, "--yes"),
+			commandRun{stdout: "warning: Repository Configuration replaces the Global Checkpoints here, so this change to them applies only to enrolled repositories without their own.\npublished\n"})
+	}
 
 	assertRunContains(t, checkpoint("inherit"), commandRun{stdout: "warning: Repository Configuration no longer declares Checkpoints of its own, so the Global pre-push Checkpoint now applies here.\npublished\n"})
 	if strings.Contains(config(), `"checkpoints"`) {

@@ -498,6 +498,11 @@ func TestConfigReviewsInheritHandsTheSelectionBackToGlobal(t *testing.T) {
 	if !strings.Contains(copied.stdout, "warning: The Review selection in force here moves from Global Configuration (1 item) to Repository Configuration (1 item), which replaces the Global one as a whole; later edits to the Global selection no longer reach this repository.\n") {
 		t.Fatalf("copying the selection printed %q", copied.stdout)
 	}
+	overridden := runConfigCommand(t, []string{"config", "reviews", "set-concurrency", "3", "--target", "global", "--repo", repository, "--yes"})
+	requireCommandSuccess(t, overridden)
+	if !strings.Contains(overridden.stdout, "warning: Repository Configuration replaces the Global Review selection here, so this change to it applies only to repositories without their own.\npublished\n") {
+		t.Fatalf("a Global edit this repository overrides printed %q", overridden.stdout)
+	}
 
 	inherited := runConfigCommand(t, []string{"config", "reviews", "inherit", "--repo", repository, "--yes"})
 	requireCommandSuccess(t, inherited)
