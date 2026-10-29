@@ -53,12 +53,16 @@ type profileChoicesRefreshedMsg struct {
 }
 
 type planRequest struct {
-	kind     planKind
-	profile  configuration.ProfileDraft
-	party    partyFormDraft
-	copy     string
-	review   reviewPlanRequest
-	receipts ReceiptProvider
+	kind       planKind
+	profile    configuration.ProfileDraft
+	party      partyFormDraft
+	copy       string
+	review     reviewPlanRequest
+	checkpoint checkpointFormDraft
+	receipts   ReceiptProvider
+	// notice reports, after a Checkpoints publish, what the published change
+	// leaves behind outside configuration.
+	notice func() (string, error)
 }
 
 type planKind string
@@ -69,6 +73,7 @@ const (
 	planParty       planKind = "party"
 	planCopy        planKind = "copy"
 	planReviews     planKind = "reviews"
+	planCheckpoints planKind = "checkpoints"
 )
 
 type reviewPlanRequest struct {
@@ -82,6 +87,7 @@ type publishRequest struct {
 	kind       planKind
 	plan       configuration.Plan
 	receipts   ReceiptProvider
+	notice     func() (string, error)
 }
 
 type planReadyMsg struct {
@@ -99,6 +105,7 @@ type planFailedMsg struct {
 type publishResultMsg struct {
 	kind       planKind
 	snapshot   Snapshot
+	notice     string
 	refreshErr error
 	err        error
 }
@@ -129,6 +136,9 @@ func newHubRuntime(options RunOptions, manager *configuration.Manager) *hubRunti
 		output:  options.Output,
 		commands: hubCommands{
 			plan: func(request planRequest) tea.Cmd {
+				if request.kind == planCheckpoints {
+					request.notice = options.UndeclaredIntegrations
+				}
 				return planRequestCommand(options.Context, manager, options.Repository, options.ModelChoiceCheck, request)
 			},
 			loadTemplate: func(id string) tea.Cmd {
@@ -224,7 +234,7 @@ func planRequestCommand(ctx context.Context, manager *configuration.Manager, rep
 			kind: request.kind, summary: summary.String(), warnings: plan.Warnings(),
 			publish: publishPlanCommand(publishRequest{
 				context: ctx, manager: manager, repository: repository, kind: request.kind, plan: plan,
-				receipts: request.receipts,
+				receipts: request.receipts, notice: request.notice,
 			}),
 		}
 	}
@@ -247,6 +257,9 @@ func buildPlan(manager *configuration.Manager, repository configuration.Reposito
 		return plan, nil, err
 	case planCopy:
 		plan, err := manager.PlanProfileCopy(repository, configuration.ScopeRepository, configuration.ScopeGlobal, request.copy)
+		return plan, nil, err
+	case planCheckpoints:
+		plan, err := planCheckpointEdit(manager, repository, request.checkpoint)
 		return plan, nil, err
 	case planReviews:
 		plan, selection, err := planReviewEdit(manager, repository, request.review.draft)
@@ -281,7 +294,7 @@ func publishPlanCommand(request publishRequest) tea.Cmd {
 		if refreshErr == nil {
 			attachReceipts(&snapshot, request.receipts)
 		}
-		return publishResultMsg{kind: request.kind, snapshot: snapshot, refreshErr: refreshErr}
+		return publishResultMsg{kind: request.kind, snapshot: snapshot, notice: integrationsNotice(request.notice), refreshErr: refreshErr}
 	}
 }
 

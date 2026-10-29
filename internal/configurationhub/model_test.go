@@ -450,7 +450,7 @@ func TestHubRendersActionAreasAsActions(t *testing.T) {
 		area int
 		want string
 	}{
-		{name: "changes", area: 4, want: "unfinished drafts"},
+		{name: "changes", area: 5, want: "unfinished drafts"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			model := New(Snapshot{})

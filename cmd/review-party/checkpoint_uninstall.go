@@ -97,20 +97,35 @@ func undeclaredUninstallCommand(root, config string) string {
 	return "review-party checkpoint uninstall --undeclared --repo " + shellWord(root) + configurationArgument(config)
 }
 
+// undeclaredIntegrations plans removing the installed Checkpoint
+// Integrations no declared Checkpoint serves, with the command that removes
+// them. The command is empty when nothing is installed beyond the declared
+// Checkpoints.
+func undeclaredIntegrations(root, config string, manager *configuration.Manager) (uninstallPlan, string, error) {
+	plan, err := planUndeclaredUninstall(root, manager)
+	if err != nil || len(plan.steps) == 0 {
+		return plan, "", err
+	}
+	return plan, undeclaredUninstallCommand(root, config), nil
+}
+
+func undeclaredIntegrationsNotice(command string) string {
+	return "Installed Checkpoint Integrations serve no declared Checkpoint; remove them with: " + command
+}
+
 func offerUndeclaredUninstall(streams commandIO, options uninstallOptions) error {
 	root, err := subject.ResolveRepositoryRoot(options.repository)
 	if err != nil {
 		return err
 	}
-	plan, err := planUndeclaredUninstall(root, streams.configurationManager(options.configuration))
-	if err != nil || len(plan.steps) == 0 {
+	plan, command, err := undeclaredIntegrations(root, options.configuration, streams.configurationManager(options.configuration))
+	if command == "" {
 		return err
 	}
-	command := undeclaredUninstallCommand(root, options.configuration)
 	switch {
 	case options.yes, !plan.changes(), !streams.interactive():
 		return writeCommandOutput(streams.output, func(output *commandOutput) {
-			output.write("Installed Checkpoint Integrations serve no declared Checkpoint; remove them with: %s\n", command)
+			output.write("%s\n", undeclaredIntegrationsNotice(command))
 		})
 	}
 	return promptUndeclaredUninstall(streams, plan, command)

@@ -58,7 +58,7 @@ func (e *editor) offerEnrollment() error {
 	if err := e.form(huh.NewConfirm().Title("Enroll this repository in your Global Checkpoints?").Value(&enroll)); err != nil || !enroll {
 		return err
 	}
-	plan, err := e.manager.PlanEnrollment(e.Repository)
+	plan, err := planCheckpointEdit(e.manager, e.Repository, checkpointFormDraft{target: configuration.ScopeRepository, operation: checkpointEnroll})
 	if err != nil {
 		return err
 	}
@@ -66,66 +66,24 @@ func (e *editor) offerEnrollment() error {
 	return err
 }
 
-// checkpointDraft holds the form answers; numbers stay text until parsed.
-type checkpointDraft struct {
-	name            configuration.CheckpointName
-	requirement     configuration.CheckpointRequirement
-	exemptions      string
-	unreviewedLines string
-	reviewBudget    string
-	waivers         configuration.WaiverPolicy
-	integrations    []configuration.IntegrationName
-}
-
-func (draft checkpointDraft) checkpoint() (configuration.Checkpoint, error) {
-	checkpoint := configuration.NewCheckpoint()
-	checkpoint.Requirement = draft.requirement
-	checkpoint.ExemptPaths = strings.Fields(draft.exemptions)
-	checkpoint.Waivers = draft.waivers
-	checkpoint.Integrations = draft.integrations
-	lines, err := strconv.Atoi(strings.TrimSpace(draft.unreviewedLines))
-	if err != nil {
-		return checkpoint, err
-	}
-	budget, err := strconv.Atoi(strings.TrimSpace(draft.reviewBudget))
-	checkpoint.UnreviewedLines, checkpoint.ReviewBudget = lines, budget
-	return checkpoint, err
-}
-
 // declareCheckpoint offers to declare one Checkpoint and publishes it
 // through its own Plan.
 func (e *editor) declareCheckpoint() error {
-	draft := checkpointDraft{
-		name: configuration.CheckpointPrePush, requirement: configuration.RequirementReviewed, waivers: configuration.WaiversHuman,
-		unreviewedLines: strconv.Itoa(configuration.DefaultUnreviewedLines), reviewBudget: strconv.Itoa(configuration.DefaultReviewBudget),
-		integrations: slices.Concat([]configuration.IntegrationName{configuration.IntegrationGit}, e.AgentsOnPath, []configuration.IntegrationName{configuration.IntegrationAgentsMD}),
-	}
+	name := configuration.CheckpointPrePush
 	choice := huh.NewSelect[configuration.CheckpointName]().
 		Title("Which Review Checkpoint should this repository declare?").
-		Options(
-			huh.NewOption("pre-push: the selected Reviews cover a change before it is pushed", configuration.CheckpointPrePush),
-			huh.NewOption("pre-commit: the selected Reviews cover staged content before it is committed", configuration.CheckpointPreCommit),
-			huh.NewOption("none", configuration.CheckpointName("")),
-		).Value(&draft.name)
-	if err := e.form(choice); err != nil || draft.name == "" {
+		Options(append(checkpointNameOptions(configuration.CheckpointNames()), huh.NewOption("none", configuration.CheckpointName("")))...).
+		Value(&name)
+	if err := e.form(choice); err != nil || name == "" {
 		return err
 	}
-	if err := e.form(
-		huh.NewSelect[configuration.CheckpointRequirement]().Title("What should the Checkpoint require?").Options(
-			huh.NewOption("reviewed: a completed Review of every selected Profile covers the change", configuration.RequirementReviewed),
-			huh.NewOption("judged: covered, and every Finding of those Reviews has a verdict", configuration.RequirementJudged),
-		).Value(&draft.requirement),
-		huh.NewInput().Title("Exempt paths (space-separated patterns such as *.md docs/**; blank for none)").Value(&draft.exemptions).Validate(validateExemptions),
-		huh.NewInput().Title("How many unreviewed lines may follow a Review without a new one? (0 for none)").Value(&draft.unreviewedLines).Validate(validateUnreviewedLines),
-		huh.NewInput().Title("How many Reviews may one change spend before a person must step in? (1 to 9)").Value(&draft.reviewBudget).Validate(validateReviewBudget),
-		huh.NewSelect[configuration.WaiverPolicy]().Title("Who may waive the Checkpoint?").Options(
-			huh.NewOption("human: a person confirms in a terminal", configuration.WaiversHuman),
-			huh.NewOption("anyone: any caller, including agents and scripts", configuration.WaiversAnyone),
-			huh.NewOption("none: only Reviews pass it", configuration.WaiversNone),
-		).Value(&draft.waivers),
-		huh.NewMultiSelect[configuration.IntegrationName]().Title("Which Integrations must every contributor install (the team floor)?").
-			Options(integrationOptions(configuration.IntegrationNames())...).Value(&draft.integrations),
-	); err != nil {
+	if err := e.refresh(); err != nil {
+		return err
+	}
+	fallback := configuration.NewCheckpoint()
+	fallback.Integrations = slices.Concat([]configuration.IntegrationName{configuration.IntegrationGit}, e.AgentsOnPath, []configuration.IntegrationName{configuration.IntegrationAgentsMD})
+	draft := e.snapshot.Checkpoints.setDraft(configuration.ScopeRepository, name, fallback)
+	if err := e.form(checkpointFields(&draft.checkpointDraft)...); err != nil {
 		return err
 	}
 	checkpoint, err := draft.checkpoint()
@@ -135,7 +93,7 @@ func (e *editor) declareCheckpoint() error {
 	if err := e.warnDocumentationExemption(checkpoint); err != nil {
 		return err
 	}
-	plan, err := e.manager.Plan(e.Repository, []configuration.Intent{configuration.SetCheckpoint{Target: configuration.ScopeRepository, Name: draft.name, Checkpoint: checkpoint}})
+	plan, err := planCheckpointEdit(e.manager, e.Repository, draft)
 	if err != nil {
 		return err
 	}

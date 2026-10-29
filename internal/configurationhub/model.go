@@ -29,6 +29,7 @@ const (
 	AreaProfiles    Area = "Profiles"
 	AreaParties     Area = "Parties"
 	AreaReviews     Area = "Reviews"
+	AreaCheckpoints Area = "Checkpoints"
 	AreaChanges     Area = "Review Changes"
 	areaCopyProfile Area = "Copy Profile"
 	areaSearch      Area = "Search"
@@ -38,18 +39,22 @@ const (
 type ItemKind string
 
 const (
-	itemProfile      ItemKind = "Profile"
-	itemParty        ItemKind = "Party"
-	itemReview       ItemKind = "Review"
-	itemReviewHeader ItemKind = "Review file"
+	itemProfile          ItemKind = "Profile"
+	itemParty            ItemKind = "Party"
+	itemReview           ItemKind = "Review"
+	itemReviewHeader     ItemKind = "Review file"
+	itemCheckpoint       ItemKind = "Checkpoint"
+	itemCheckpointHeader ItemKind = "Checkpoint file"
 )
 
 // ItemScope labels the source of one Hub inventory item.
 type ItemScope string
 
-// Item is one searchable, explicitly scoped configuration value. Review rows
-// also name the configuration file they belong to (Target) and their position
-// in that file's selection group (Index); a file header row has Index -1.
+// Item is one searchable, explicitly scoped configuration value. Review and
+// Checkpoint rows also name the configuration file they belong to (Target); a
+// Review row records its position in that file's selection group (Index), and
+// a file header row has Index -1. A Checkpoint row reports whether the file
+// declares that Checkpoint (Declared).
 type Item struct {
 	Scope     ItemScope
 	Kind      ItemKind
@@ -58,6 +63,11 @@ type Item struct {
 	Target    configuration.Scope
 	Index     int
 	Selection configuration.SelectionItem
+	Declared  bool
+}
+
+func (item Item) header() bool {
+	return item.Kind == itemReviewHeader || item.Kind == itemCheckpointHeader
 }
 
 // Snapshot is the read-only material shown by the shell. Targets lists the
@@ -66,6 +76,7 @@ type Snapshot struct {
 	Repository    string
 	Targets       []configuration.Scope
 	Reviews       ReviewsView
+	Checkpoints   CheckpointsView
 	Items         []Item
 	Templates     []configuration.Template
 	ReviewChoices []configuration.SelectedDefinition
@@ -83,9 +94,12 @@ type renderOptions struct {
 	styled bool
 }
 
+// header names the file header row kind of an area listed as one section per
+// configuration file; such an area keeps its headers through the filter.
 type areaSpec struct {
 	area        Area
 	kind        ItemKind
+	header      ItemKind
 	description string
 	menu        bool
 	action      func(*editor) error
@@ -97,7 +111,8 @@ func newAreaSpecs() []areaSpec {
 		{area: AreaOverview, description: "See configuration counts, resolved reviews, and warnings.", menu: true, render: renderOverviewArea},
 		{area: AreaProfiles, kind: itemProfile, description: "Browse Profiles and create or edit one.", menu: true, action: (*editor).manageProfiles, render: renderInventoryArea},
 		{area: AreaParties, kind: itemParty, description: "Browse flat Parties and create one.", menu: true, action: (*editor).createParty, render: renderInventoryArea},
-		{area: AreaReviews, kind: itemReview, description: "Assemble the ordered Review selection of each configuration file.", menu: true, action: (*editor).editReviews, render: renderInventoryArea},
+		{area: AreaReviews, kind: itemReview, header: itemReviewHeader, description: "Assemble the ordered Review selection of each configuration file.", menu: true, action: (*editor).editReviews, render: renderInventoryArea},
+		{area: AreaCheckpoints, kind: itemCheckpoint, header: itemCheckpointHeader, description: "Declare the Review Checkpoints of each configuration file.", menu: true, action: (*editor).editCheckpoints, render: renderInventoryArea},
 		{area: AreaChanges, description: "Review or discard unfinished drafts.", menu: true, action: (*editor).reviewDrafts, render: renderActionArea},
 		// Unlisted: reachable from the accessible-mode action select, not the menu.
 		{area: areaCopyProfile, description: "Copy a Repository Profile to Global Configuration.", action: (*editor).copyProfile, render: renderActionArea},
@@ -163,6 +178,7 @@ type Model struct {
 	formKind     formKind
 	session      *formSession
 	status       string
+	notice       string
 	outcome      string
 	outcomeGood  bool
 	planSummary  string
@@ -337,6 +353,7 @@ func (model Model) updateBrowser(key string) (tea.Model, tea.Cmd) {
 			model.moveReview = false
 			return model.startRowReview(reviewMove)
 		}
+		return model.browserAction(key)
 	default:
 		return model.browserAction(key)
 	}
@@ -344,6 +361,9 @@ func (model Model) updateBrowser(key string) (tea.Model, tea.Cmd) {
 }
 
 func (model Model) browserAction(key string) (tea.Model, tea.Cmd) {
+	if model.browserArea == AreaCheckpoints {
+		return model.browserCheckpointAction(key)
+	}
 	switch key {
 	case "n":
 		return model.browserNew()
@@ -381,6 +401,24 @@ func (model Model) browserReviewAction(key string) (tea.Model, tea.Cmd) {
 		return model.startReviewPlan(reviewFormDraft{target: row.Target, operation: reviewInherit})
 	}
 	return model, nil
+}
+
+func (model Model) browserCheckpointAction(key string) (tea.Model, tea.Cmd) {
+	row, hasRow := model.cursorRow()
+	operation, bound, refusal := checkpointKeyOperation(key, model.snapshot.Checkpoints.rowOperations(row))
+	switch {
+	case !bound:
+		return model, nil
+	case !hasRow:
+		model.status = "No configuration file is open."
+		return model, nil
+	case refusal != "":
+		model.status = refusal
+		return model, nil
+	case operation == checkpointSet:
+		return model.withForm(model.openCheckpointSet(row))
+	}
+	return model.startCheckpointPlan(checkpointFormDraft{target: row.Target, operation: operation, checkpointDraft: checkpointDraft{name: configuration.CheckpointName(row.Name)}})
 }
 
 func (model Model) beginRowMove(row Item) (tea.Model, tea.Cmd) {
@@ -603,6 +641,8 @@ func (model Model) menuAreaCount(spec areaSpec) int {
 		return model.countItems(itemParty)
 	case AreaReviews:
 		return model.snapshot.Reviews.inForceCount()
+	case AreaCheckpoints:
+		return model.snapshot.Checkpoints.inForceCount()
 	case AreaChanges:
 		return len(model.drafts.descriptions())
 	case areaSearch:
@@ -695,8 +735,8 @@ func (model Model) menuContextContent(spec areaSpec, options renderOptions) stri
 		if len(model.snapshot.Overview) > 0 || len(model.snapshot.Warnings) > 0 {
 			content += "\n\n" + model.overviewContext(options)
 		}
-	case spec.area == AreaReviews:
-		list, _ := renderReviewList(model.reviewRows(), -1, max(model.width, minBoxWidth), options)
+	case spec.header != "":
+		list, _ := renderFileSections(model.sectionRows(spec), -1, max(model.width, minBoxWidth), options)
 		content += "\n\n" + list
 	case spec.kind != "":
 		content += "\n\nInventory\n" + model.inventoryContext(spec.kind, options)
@@ -761,8 +801,8 @@ func (model Model) renderBrowserListPane(spec areaSpec, width int, options rende
 	var content strings.Builder
 	items := model.browserRows()
 	switch {
-	case model.browserArea == AreaReviews:
-		list, _ := renderReviewList(items, model.cursor, max(width-4, 1), options)
+	case spec.header != "":
+		list, _ := renderFileSections(items, model.cursor, max(width-4, 1), options)
 		content.WriteString(list)
 	case len(items) == 0:
 		content.WriteString("No matching items.\n")
@@ -812,8 +852,8 @@ func (model Model) browserCursorLine() int {
 	}
 	items := model.browserRows()
 	innerWidth := max(newResponsiveLayout(max(model.width, minBoxWidth)).leftWidth-4, 1)
-	if model.browserArea == AreaReviews {
-		_, line := renderReviewList(items, model.cursor, innerWidth, renderOptions{styled: true})
+	if spec.header != "" {
+		_, line := renderFileSections(items, model.cursor, innerWidth, renderOptions{styled: true})
 		return line
 	}
 	return model.itemCursorLine(items, innerWidth)
@@ -844,11 +884,6 @@ func (model Model) renderBrowserFrame(options renderOptions) string {
 		body = model.renderHelpOverlay(options)
 	}
 	return model.renderViewportFrame(body, options)
-}
-
-func (model Model) browserKind() ItemKind {
-	spec, _ := areaSpecFor(model.browserArea)
-	return spec.kind
 }
 
 func renderRows(model Model, items []Item, output *strings.Builder, options renderOptions) {
@@ -929,7 +964,7 @@ func renderSearchArea(model Model, _ areaSpec, output *strings.Builder, options 
 func (model Model) renderSearchResults(output *strings.Builder, options renderOptions) {
 	matched := 0
 	for _, item := range model.snapshot.Items {
-		if item.Kind == itemReviewHeader || !matches(item, model.query) {
+		if item.header() || item.Kind == itemCheckpoint && !item.Declared || !matches(item, model.query) {
 			continue
 		}
 		matched++
@@ -1004,6 +1039,11 @@ type RunOptions struct {
 	// AgentsOnPath lists the Caller Agent Integrations whose agent is on
 	// PATH, which the journey preselects.
 	AgentsOnPath []configuration.IntegrationName
+	// UndeclaredIntegrations reports, after a Checkpoints publish, the line
+	// naming installed Checkpoint Integrations that no declared Checkpoint
+	// serves, or "". The Hub never installs or removes them itself. Nil skips
+	// the check.
+	UndeclaredIntegrations func() (string, error)
 }
 
 // Run opens the terminal shell over a read-only Manager snapshot.

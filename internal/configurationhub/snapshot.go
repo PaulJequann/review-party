@@ -105,6 +105,11 @@ func buildSnapshot(manager *configuration.Manager, repository configuration.Repo
 	if loaded.ReviewSelection().Authored {
 		appendResolvedPreview(manager, repository, &snapshot)
 	}
+	snapshot.Checkpoints = newCheckpointsView(loaded, snapshot.Targets)
+	for _, file := range snapshot.Checkpoints.Files {
+		snapshot.Overview = append(snapshot.Overview, configurationTitle(file.Target)+" Checkpoints: "+snapshot.Checkpoints.headerState(file))
+		appendHubCheckpointFile(&snapshot, file)
+	}
 	return snapshot, nil
 }
 

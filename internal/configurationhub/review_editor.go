@@ -208,33 +208,16 @@ func reviewEntryOptions(items []Item, target configuration.Scope) []huh.Option[r
 	return options
 }
 
-// chooseReviewFile asks which configuration file to edit. A single file needs
-// no prompt.
-func (e *editor) chooseReviewFile() (ReviewFile, error) {
-	files := e.snapshot.Reviews.Files
-	switch len(files) {
-	case 0:
-		return ReviewFile{}, errors.New("No configuration file is available to edit.")
-	case 1:
-		return files[0], nil
-	}
-	var options []huh.Option[configuration.Scope]
-	for _, file := range files {
-		options = append(options, huh.NewOption(configurationTitle(file.Target)+" — "+e.snapshot.Reviews.headerState(file), file.Target))
-	}
-	target := files[0].Target
-	if err := e.form(huh.NewSelect[configuration.Scope]().Title("Configuration file").Options(options...).Value(&target)); err != nil {
-		return ReviewFile{}, err
-	}
-	file, _ := e.snapshot.Reviews.file(target)
-	return file, nil
-}
-
 func (e *editor) editReviews() error {
-	file, err := e.chooseReviewFile()
+	reviews := e.snapshot.Reviews
+	target, err := e.chooseFile(func(target configuration.Scope) string {
+		file, _ := reviews.file(target)
+		return reviews.headerState(file)
+	})
 	if err != nil {
 		return err
 	}
+	file, _ := reviews.file(target)
 	draft := &e.draftSet().reviews
 	draft.target = file.Target
 	if err := e.form(reviewOperationField(draft, file)); err != nil {

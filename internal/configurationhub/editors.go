@@ -23,15 +23,17 @@ type editor struct {
 }
 
 type draftSet struct {
-	profile  configuration.ProfileDraft
-	party    partyFormDraft
-	copyName string
-	reviews  reviewFormDraft
+	profile     configuration.ProfileDraft
+	party       partyFormDraft
+	copyName    string
+	reviews     reviewFormDraft
+	checkpoints checkpointFormDraft
 }
 
 func (drafts *draftSet) clear() { *drafts = draftSet{} }
 func (drafts draftSet) empty() bool {
-	return drafts.profile == (configuration.ProfileDraft{}) && partyDraftEmpty(drafts.party) && drafts.copyName == "" && drafts.reviews == (reviewFormDraft{})
+	return drafts.profile == (configuration.ProfileDraft{}) && partyDraftEmpty(drafts.party) && drafts.copyName == "" && drafts.reviews == (reviewFormDraft{}) &&
+		drafts.checkpoints.operation == 0
 }
 func (drafts draftSet) descriptions() []string {
 	var result []string
@@ -46,6 +48,9 @@ func (drafts draftSet) descriptions() []string {
 	}
 	if drafts.reviews != (reviewFormDraft{}) {
 		result = append(result, configurationTitle(drafts.reviews.target)+" Reviews "+drafts.reviews.operation.String())
+	}
+	if drafts.checkpoints.operation != 0 {
+		result = append(result, configurationTitle(drafts.checkpoints.target)+" Checkpoints "+drafts.checkpoints.operation.String())
 	}
 	return result
 }
@@ -217,6 +222,25 @@ func (e *editor) run(action hubAction) (bool, error) {
 		return true, nil
 	}
 	return true, spec.action(e)
+}
+
+// chooseFile asks which configuration file to edit, labelling each with its
+// state. A single file needs no prompt.
+func (e *editor) chooseFile(state func(configuration.Scope) string) (configuration.Scope, error) {
+	targets := e.snapshot.Targets
+	switch len(targets) {
+	case 0:
+		return "", errors.New("No configuration file is available to edit.")
+	case 1:
+		return targets[0], nil
+	}
+	var options []huh.Option[configuration.Scope]
+	for _, target := range targets {
+		options = append(options, huh.NewOption(configurationTitle(target)+" — "+state(target), target))
+	}
+	target := targets[0]
+	err := e.form(huh.NewSelect[configuration.Scope]().Title("Configuration file").Options(options...).Value(&target))
+	return target, err
 }
 
 func (e *editor) reviewAndPublish(plan configuration.Plan, publish func() error) (bool, error) {

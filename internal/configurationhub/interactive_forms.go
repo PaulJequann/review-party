@@ -30,8 +30,9 @@ const (
 	formProfileInstructions    formKind = "profile-instructions"
 	formEditor                 formKind = "editor"
 	formParty                  formKind = "party"
-	formReviewOperation        formKind = "review-operation"
 	formReviewFields           formKind = "review-fields"
+	formCheckpointName         formKind = "checkpoint-name"
+	formCheckpointFields       formKind = "checkpoint-fields"
 	formCopy                   formKind = "copy"
 	formChanges                formKind = "changes"
 	formPlanning               formKind = "planning"
@@ -45,6 +46,7 @@ type formSession struct {
 	copyName             string
 	editProfile          string
 	reviews              reviewFormDraft
+	checkpoints          checkpointFormDraft
 	source               string
 	templateID           string
 	templateInstructions string
@@ -77,6 +79,7 @@ func newFormSession(drafts draftSet) *formSession {
 		party:        drafts.party,
 		copyName:     drafts.copyName,
 		reviews:      drafts.reviews,
+		checkpoints:  drafts.checkpoints,
 		instructions: drafts.profile.Instructions,
 	}
 }
@@ -137,8 +140,9 @@ func (model *Model) openArea(area Area) tea.Cmd {
 		return model.openProfileFieldsForm()
 	case AreaParties:
 		return model.openPartyForm()
-	case AreaReviews:
-		return model.openReviewOperationForm()
+	case AreaReviews, AreaCheckpoints:
+		model.status = fmt.Sprintf("%s are edited from their rows.", area)
+		return model.openOverviewForm()
 	case AreaChanges:
 		return model.openChangesForm()
 	case areaCopyProfile:
@@ -179,6 +183,30 @@ func (model Model) startReviewPlan(draft reviewFormDraft) (tea.Model, tea.Cmd) {
 	model.session.reviews = draft
 	model.drafts.reviews = draft
 	return model.startPlan(planRequest{kind: planReviews, review: reviewPlanRequest{draft: draft}})
+}
+
+func (model Model) startCheckpointPlan(draft checkpointFormDraft) (tea.Model, tea.Cmd) {
+	model.session.checkpoints = draft
+	model.drafts.checkpoints = draft
+	return model.startPlan(planRequest{kind: planCheckpoints, checkpoint: draft})
+}
+
+// openCheckpointSet sets a Checkpoint in the file the cursor row belongs to:
+// a Checkpoint row opens its prefilled rules, and a file header first asks
+// which Checkpoint. The draft keeps that target until it is published.
+func (model *Model) openCheckpointSet(row Item) tea.Cmd {
+	model.status = ""
+	if row.Kind == itemCheckpoint {
+		model.session.checkpoints = model.snapshot.Checkpoints.setDraft(row.Target, configuration.CheckpointName(row.Name), configuration.NewCheckpoint())
+		return model.openCheckpointFieldsForm()
+	}
+	model.session.checkpoints = checkpointFormDraft{target: row.Target, operation: checkpointSet, checkpointDraft: checkpointDraft{name: configuration.CheckpointPrePush}}
+	file, _ := model.snapshot.Checkpoints.file(row.Target)
+	return model.openForm(formCheckpointName, []huh.Field{checkpointNameField(&model.session.checkpoints, file)})
+}
+
+func (model *Model) openCheckpointFieldsForm() tea.Cmd {
+	return model.openForm(formCheckpointFields, checkpointFields(&model.session.checkpoints.checkpointDraft))
 }
 
 func (model *Model) openForm(kind formKind, fields []huh.Field) tea.Cmd {
@@ -276,20 +304,6 @@ func (model *Model) openPartyForm() tea.Cmd {
 	})
 }
 
-func (model *Model) openReviewOperationForm() tea.Cmd {
-	draft := &model.session.reviews
-	if draft.target == "" && len(model.snapshot.Targets) > 0 {
-		draft.target = model.snapshot.Targets[0]
-	}
-	file, ok := model.snapshot.Reviews.file(draft.target)
-	if !ok {
-		model.toMenu()
-		model.status = "No configuration file is open."
-		return nil
-	}
-	return model.openForm(formReviewOperation, []huh.Field{reviewOperationField(draft, file)})
-}
-
 func (model *Model) openReviewFieldsForm() tea.Cmd {
 	draft := &model.session.reviews
 	fields, err := reviewFields(draft, model.snapshot)
@@ -382,8 +396,10 @@ func (model *Model) syncFormDraft() {
 		model.drafts.profile = state.draft
 	case formParty:
 		model.drafts.party = model.session.party
-	case formReviewOperation, formReviewFields:
+	case formReviewFields:
 		model.drafts.reviews = model.session.reviews
+	case formCheckpointName, formCheckpointFields:
+		model.drafts.checkpoints = model.session.checkpoints
 	case formCopy:
 		model.drafts.copyName = model.session.copyName
 	case formNone, formOverview, formChanges, formPlanning, formProfileEdit, formProfileEditLoading:
@@ -419,10 +435,12 @@ func (model *Model) completeForm() (tea.Model, tea.Cmd) {
 	case formProfileFields, formProfileModel, formProfileModelManual, formProfileEffort,
 		formProfileEffortManual, formProfileDeadline, formProfileSource, formProfileTemplate, formProfileInstructions:
 		return model.completeProfileForm()
-	case formParty, formReviewFields, formCopy:
+	case formParty, formReviewFields, formCheckpointFields, formCopy:
 		return model.completePlanForm()
-	case formReviewOperation:
-		return model.withForm(model.openReviewFieldsForm())
+	case formCheckpointName:
+		draft := model.session.checkpoints
+		model.session.checkpoints = model.snapshot.Checkpoints.setDraft(draft.target, draft.name, configuration.NewCheckpoint())
+		return model.withForm(model.openCheckpointFieldsForm())
 	case formNone, formProfileChoicesLoading, formProfileTemplateLoading, formEditor, formPlanning,
 		formProfileEditLoading:
 		// These states do not accept a completed form.
@@ -443,7 +461,7 @@ func (model *Model) completeProfileForm() (tea.Model, tea.Cmd) {
 	case formProfileInstructions:
 		return model.completeProfileInstructionsForm()
 	case formNone, formOverview, formProfileChoicesLoading, formProfileTemplateLoading, formEditor, formParty,
-		formReviewOperation, formReviewFields, formCopy, formChanges,
+		formReviewFields, formCheckpointName, formCheckpointFields, formCopy, formChanges,
 		formPlanning, formProfileEdit, formProfileEditLoading:
 		// Only profile forms reach this dispatcher.
 	}
@@ -464,7 +482,7 @@ func (model *Model) completeProfileChoiceForm() (tea.Model, tea.Cmd) {
 		return model.completeProfileExecutionForm()
 	case formNone, formOverview, formProfileFields, formProfileChoicesLoading, formProfileSource,
 		formProfileTemplate, formProfileTemplateLoading, formProfileInstructions, formEditor,
-		formParty, formReviewOperation, formReviewFields, formCopy, formChanges,
+		formParty, formReviewFields, formCheckpointName, formCheckpointFields, formCopy, formChanges,
 		formPlanning, formProfileEdit, formProfileEditLoading:
 		return *model, nil
 	}
@@ -477,12 +495,14 @@ func (model *Model) completePlanForm() (tea.Model, tea.Cmd) {
 		return model.startPlan(planRequest{kind: planParty, party: model.drafts.party})
 	case formReviewFields:
 		return model.startPlan(planRequest{kind: planReviews, review: reviewPlanRequest{draft: model.drafts.reviews}})
+	case formCheckpointFields:
+		return model.startPlan(planRequest{kind: planCheckpoints, checkpoint: model.drafts.checkpoints})
 	case formCopy:
 		return model.startPlan(planRequest{kind: planCopy, copy: model.drafts.copyName})
 	case formNone, formOverview, formProfileFields, formProfileSource, formProfileTemplate,
 		formProfileChoicesLoading, formProfileModel, formProfileModelManual, formProfileEffort,
-		formProfileEffortManual, formProfileDeadline, formProfileTemplateLoading, formProfileInstructions, formEditor, formReviewOperation,
-		formChanges, formPlanning, formProfileEdit, formProfileEditLoading:
+		formProfileEffortManual, formProfileDeadline, formProfileTemplateLoading, formProfileInstructions, formEditor,
+		formCheckpointName, formChanges, formPlanning, formProfileEdit, formProfileEditLoading:
 		// Only plan-producing forms reach this dispatcher.
 	}
 	return *model, nil
@@ -582,6 +602,16 @@ func (model *Model) reopenPlan(kind planKind) (Model, tea.Cmd) {
 		return model.withForm(model.openPartyForm())
 	case planReviews:
 		return model.withForm(model.openReviewFieldsForm())
+	case planCheckpoints:
+		if model.session.checkpoints.operation == checkpointSet {
+			return model.withForm(model.openCheckpointFieldsForm())
+		}
+		// Only a set has fields to correct; a refused remove, inherit, opt
+		// out, or enroll returns to the menu with the planner's fact in the
+		// status line and no draft left behind.
+		model.toMenu()
+		model.drafts.checkpoints = checkpointFormDraft{}
+		return *model, nil
 	case planCopy:
 		return model.withForm(model.openCopyForm())
 	default:
@@ -622,6 +652,7 @@ func (model *Model) receivePublishResult(message publishResultMsg) (tea.Model, t
 	model.pending = nil
 	model.outcome = "Published " + publishedTarget
 	model.outcomeGood = true
+	model.notice = message.notice
 	model.status = ""
 	if message.refreshErr != nil {
 		model.status = "Refresh failed: " + message.refreshErr.Error()
@@ -674,6 +705,8 @@ func (model *Model) clearDraft(kind planKind) {
 		model.drafts.copyName = ""
 	case planReviews:
 		model.drafts.reviews = reviewFormDraft{}
+	case planCheckpoints:
+		model.drafts.checkpoints = checkpointFormDraft{}
 	}
 }
 

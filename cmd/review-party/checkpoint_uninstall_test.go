@@ -14,6 +14,7 @@ import (
 	"testing/iotest"
 
 	"reviewparty/internal/configuration"
+	"reviewparty/internal/engine"
 )
 
 type uninstallFixture struct {
@@ -289,6 +290,27 @@ func TestUninstallUndeclaredRemovesOnlyWhatNoDeclaredCheckpointUses(t *testing.T
 	delete(after, config)
 	delete(before, config)
 	assertTree(t, after, before)
+}
+
+func TestConfigurationHubReportsUndeclaredIntegrationsLikeTheCLI(t *testing.T) {
+	fixture := newUninstallFixture(t)
+	fixture.install([]string{"git"})
+	var stdout, stderr bytes.Buffer
+	streams := productionCommandIO(strings.NewReader(""), &stdout, &stderr)
+	check := configurationHubOptions{repository: fixture.repository}.runOptions(context.Background(), configuration.NewManager(engine.ReviewPartyConfigurationOptions()), streams).UndeclaredIntegrations
+	if notice, err := check(); notice != "" || err != nil {
+		t.Fatalf("notice with every Integration declared = %q, %v", notice, err)
+	}
+
+	removal := fixture.runWith("", false, "config", "checkpoint", "remove", "pre-commit", "--repo", fixture.repository, "--yes")
+	want := "Installed Checkpoint Integrations serve no declared Checkpoint; remove them with: review-party checkpoint uninstall --undeclared --repo " + shellWord(fixture.repository)
+	assertRunContains(t, removal, commandRun{stdout: "\n" + want + "\n"})
+	if notice, err := check(); notice != want || err != nil {
+		t.Fatalf("Hub notice = %q, %v; want the CLI's %q", notice, err, want)
+	}
+	if !strings.Contains(fixture.read(".git/hooks/pre-commit"), checkpointHookBlock(configuration.CheckpointPreCommit)) {
+		t.Fatal("the Hub check removed an installed hook")
+	}
 }
 
 func TestConfigCheckpointRemoveOffersToUninstallInATerminal(t *testing.T) {

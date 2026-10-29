@@ -29,7 +29,7 @@ func TestAccessibleNextActionRefreshesSnapshotForEditors(t *testing.T) {
 		manager: manager,
 		RunOptions: RunOptions{
 			Repository: repository, Accessible: true,
-			Input: newLineInput("8\n"), Output: &bytes.Buffer{},
+			Input: newLineInput("9\n"), Output: &bytes.Buffer{},
 		},
 	}
 	// The editor started before the profile existed; the next menu render must
@@ -81,10 +81,10 @@ func TestAccessibleChooseActionRoutesCopyOption(t *testing.T) {
 		ValidateName: func(string) error { return nil },
 	})
 	var output bytes.Buffer
-	// Five area options precede the copy option; huh accessible selects take
+	// Six area options precede the copy option; huh accessible selects take
 	// a one-based option number.
 	editor := editor{manager: manager, RunOptions: RunOptions{
-		Input: newLineInput("6\n"), Output: &output, Accessible: true,
+		Input: newLineInput("7\n"), Output: &output, Accessible: true,
 	}}
 	action, err := editor.chooseAction()
 	if err != nil {

@@ -378,7 +378,7 @@ func TestReviewsAreaRendersStackedFileSections(t *testing.T) {
 	publishScopedSelection(t, manager, repository, configuration.ScopeGlobal, configuration.ReviewSelection{ConcurrencyLimit: 3, Global: []configuration.SelectionItem{sharedProfile}, Repository: []configuration.SelectionItem{}})
 	inherits := hubModelFor(t, manager, repository)
 	inherits = pressHubKeys(t, inherits, tea.KeyPressMsg{Code: tea.KeyEnter})
-	list, _ := renderReviewList(inherits.reviewRows(), 0, 200, renderOptions{})
+	list, _ := renderFileSections(inherits.browserRows(), 0, 200, renderOptions{})
 	view := inherits.Render()
 	for _, want := range []string{
 		"› Repository Configuration\n    no file; inherits Global Configuration\n",
@@ -397,7 +397,7 @@ func TestReviewsAreaRendersStackedFileSections(t *testing.T) {
 	publishScopedSelection(t, manager, repository, configuration.ScopeRepository, configuration.ReviewSelection{ConcurrencyLimit: 1, Global: []configuration.SelectionItem{sharedProfile}, Repository: []configuration.SelectionItem{dailyParty}})
 	declares := hubModelFor(t, manager, repository)
 	declares = pressHubKeys(t, declares, tea.KeyPressMsg{Code: tea.KeyEnter})
-	list, _ = renderReviewList(declares.reviewRows(), 0, 200, renderOptions{})
+	list, _ = renderFileSections(declares.browserRows(), 0, 200, renderOptions{})
 	view = declares.Render()
 	want := strings.Join([]string{
 		"› Repository Configuration",

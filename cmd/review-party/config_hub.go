@@ -37,7 +37,8 @@ func executeConfigurationHub(parent context.Context, options configurationHubOpt
 }
 
 // runOptions wires the Hub's forms for a resolved repository to the terminal,
-// Profile receipts, and model discovery. The Hub and the init first-use
+// Profile receipts, model discovery, and the undeclared-Integrations check a
+// Checkpoints publish reports. The Hub and the init first-use
 // journey share it so both drive the same forms.
 func (options configurationHubOptions) runOptions(ctx context.Context, manager *configuration.Manager, streams commandIO) configurationhub.RunOptions {
 	repository := options.repository
@@ -46,6 +47,13 @@ func (options configurationHubOptions) runOptions(ctx context.Context, manager *
 		Repository: configuration.Repository(repository),
 		Input:      configurationHubInput(streams.input), Output: streams.output, Accessible: options.accessible,
 		Receipts: profileReceiptProvider(ctx, options.configuration),
+	}
+	hubOptions.UndeclaredIntegrations = func() (string, error) {
+		_, command, err := undeclaredIntegrations(repository, options.configuration, manager)
+		if command == "" {
+			return "", err
+		}
+		return undeclaredIntegrationsNotice(command), nil
 	}
 	if options.discoveryService != nil {
 		hubOptions.Discovery = options.discoveryService()

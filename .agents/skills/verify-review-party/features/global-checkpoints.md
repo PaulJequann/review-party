@@ -27,8 +27,20 @@ Global Configuration declares Review Checkpoints that apply to every enrolled re
 - `label` in `cmd/review-party/checkpoint_commands.go` adds the declaring file
   to the refusal and the human report only for a Global declaration.
 
-Drift: none. Declaring a Global Checkpoint from the Configuration Hub is
-deferred; the Hub declares Repository Checkpoints and offers enrollment.
+- `CheckpointsView.headerState` in
+  `internal/configurationhub/checkpoints_view.go` is the one description of
+  each file's Checkpoints that the Hub Overview, the Checkpoints browser
+  headers, and the accessible file prompt share; `operations` gates which
+  edits a file offers.
+- `planCheckpointEdit` in `internal/configurationhub/checkpoint_editor.go` is
+  the one planner the Hub TUI, the accessible Hub, and the first-use journey
+  call for set, remove, inherit, opt out, and enroll.
+- `undeclaredIntegrations` in `cmd/review-party/checkpoint_uninstall.go` feeds
+  both the `config checkpoint` uninstall offer and the Hub's
+  `RunOptions.UndeclaredIntegrations` notice.
+
+Drift: none. The Hub declares and removes Checkpoints in both files, enrolls,
+inherits, and opts out; it never installs hooks.
 
 ## How to get to it (user POV)
 
@@ -36,6 +48,19 @@ deferred; the Hub declares Repository Checkpoints and offers enrollment.
 - Run `review-party init --repo PATH` in a repository and read the enrollment line, then `review-party init --enroll --yes --repo PATH`.
 - Run `review-party checkpoint install git --repo PATH` and push.
 - Run `review-party config checkpoint none --repo PATH` to turn the Global Checkpoints off for one repository, and `review-party config checkpoint inherit --repo PATH` to turn them back on.
+- Or run `review-party config --repo PATH` (add `--accessible` for prompts), choose Checkpoints, and use `e`/Enter to set, `r` to remove, and on the Repository header `i` to enroll or inherit and `o` to opt out.
+
+## Driving it with the Hub
+
+At 120x30, open `review-party config --repo PATH` in tmux, move down to Checkpoints and press Enter (accessible mode: choose `5`). Rows are the Repository header, its pre-push and pre-commit, the Global header, and its pre-push and pre-commit. A publish returns to the menu; press Enter to reopen the area.
+
+- **Global set with the repository unenrolled.** On the Global header press Enter, accept pre-push, and publish. Only the Global `config.json` changes; `.reviewparty` does not appear. The Global header reads `not in force here: this repository is not enrolled · pre-push`.
+- **Enroll.** On the Repository header press `i`. The Plan preview carries the warning `Creating Repository Configuration enrolls this repository, so the Global pre-push Checkpoint now applies here.` After publish the Repository file is exactly `{"schema_version": 1}` pretty-printed.
+- **Opt out, then inherit.** `o` on the Repository header writes `"checkpoints": {}`; `i` then removes the field.
+- **Repository set prefilled from Global.** `e` on the Repository pre-push row opens the form with the Global rules.
+- **Refusal.** A key the footer does not show, such as `o` on the Global header, prints `Opt out of Global Checkpoints does not apply to this row.` and opens nothing.
+
+In accessible mode, numeric prompts do not accept an empty line as the prefilled value; type the number.
 
 ## Driving it with the CLI
 

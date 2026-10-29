@@ -249,8 +249,8 @@ func (manager *Manager) Enrollment(repository Repository) (Enrollment, error) {
 }
 
 // PlanEnrollment plans the Repository Configuration file that enrolls the
-// repository, holding only the schema version. An enrolled repository plans
-// no change.
+// repository, holding only the schema version, and warns which Global
+// Checkpoints enrolling puts in force. An enrolled repository plans no change.
 func (manager *Manager) PlanEnrollment(repository Repository) (Plan, error) {
 	loaded, err := manager.Load(repository)
 	if err != nil {
@@ -269,7 +269,9 @@ func (manager *Manager) PlanEnrollment(repository Repository) (Plan, error) {
 	}
 	change := Change{Field: "schema_version", Scope: ScopeRepository, Path: path, After: fmt.Sprint(SchemaVersion), HadAfter: true}
 	write := pendingWrite{scope: ScopeRepository, anchor: anchor, path: path, payload: payload}
-	return newFilePlan(manager, ScopeRepository, change, []pendingWrite{write}), nil
+	enrolled := loaded
+	enrolled.Repository = LoadedDocument{Scope: ScopeRepository, Path: path, Present: true, Document: Document{SchemaVersion: SchemaVersion}}
+	return newFilePlan(manager, ScopeRepository, change, []pendingWrite{write}).WithWarnings(precedenceWarnings(loaded, enrolled)...), nil
 }
 
 func validateCheckpoints(checkpoints map[CheckpointName]Checkpoint) error {

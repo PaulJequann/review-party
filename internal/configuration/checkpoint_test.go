@@ -183,6 +183,10 @@ func TestEnrollmentPlanWritesOnlyTheSchemaVersion(t *testing.T) {
 	if !plan.Valid() || !reflect.DeepEqual(plan.Changes(), want) {
 		t.Fatalf("plan = %s %#v", plan.Reason(), plan.Changes())
 	}
+	wantWarnings := []string{"Creating Repository Configuration enrolls this repository, so the Global pre-push Checkpoint now applies here."}
+	if !reflect.DeepEqual(plan.Warnings(), wantWarnings) {
+		t.Fatalf("warnings = %#v", plan.Warnings())
+	}
 	publishPlan(t, manager, plan)
 	content, err := os.ReadFile(path)
 	if err != nil || string(content) != "{\n  \"schema_version\": 1\n}\n" {

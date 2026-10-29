@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+
+	"reviewparty/internal/configuration"
 )
 
 func (model Model) renderPlanPreviewFrame(options renderOptions) string {
@@ -53,6 +55,13 @@ func (model Model) renderHeader(options renderOptions) string {
 	if model.status != "" {
 		lines = append(lines, model.renderStatus(options))
 	}
+	if model.notice != "" {
+		notice := "▲ " + model.notice
+		if options.styled {
+			notice = warningStyle.Render(notice)
+		}
+		lines = append(lines, lipgloss.Wrap(notice, max(model.width, 1), " "))
+	}
 	if model.query != "" || model.searching {
 		lines = append(lines, "", model.renderSearchLine(options))
 	}
@@ -65,10 +74,29 @@ func (model Model) renderBreadcrumb(options renderOptions) string {
 		return ""
 	}
 	line := "Hub › " + string(area)
+	if target := model.editTarget(area); target != "" {
+		line += " › " + configurationTitle(target)
+	}
 	if options.styled {
 		return metaStyle.Render(line)
 	}
 	return line
+}
+
+// editTarget names the configuration file an open Reviews or Checkpoints
+// form or preview writes.
+func (model Model) editTarget(area Area) configuration.Scope {
+	if model.session == nil || model.view != viewForm && model.view != viewPlanPreview {
+		return ""
+	}
+	switch area {
+	case AreaReviews:
+		return model.session.reviews.target
+	case AreaCheckpoints:
+		return model.session.checkpoints.target
+	case AreaOverview, AreaProfiles, AreaParties, AreaChanges, areaCopyProfile, areaSearch:
+	}
+	return ""
 }
 
 func (model Model) focusedArea() Area {
@@ -92,6 +120,8 @@ func planArea(kind planKind) Area {
 		return AreaParties
 	case planReviews:
 		return AreaReviews
+	case planCheckpoints:
+		return AreaCheckpoints
 	default:
 		return ""
 	}
@@ -106,8 +136,10 @@ func formArea(kind formKind) Area {
 		return AreaProfiles
 	case formParty:
 		return AreaParties
-	case formReviewOperation, formReviewFields:
+	case formReviewFields:
 		return AreaReviews
+	case formCheckpointName, formCheckpointFields:
+		return AreaCheckpoints
 	case formCopy:
 		return AreaProfiles
 	case formOverview:
@@ -131,6 +163,8 @@ func (model Model) publishedTarget(kind planKind) string {
 		return fmt.Sprintf("profile %q", model.drafts.copyName)
 	case planReviews:
 		return configurationTitle(model.drafts.reviews.target) + " Reviews"
+	case planCheckpoints:
+		return configurationTitle(model.drafts.checkpoints.target) + " Checkpoints"
 	default:
 		return "configuration"
 	}
@@ -175,6 +209,10 @@ func (model Model) actionHints() []actionHint {
 	case AreaReviews:
 		for _, binding := range model.cursorReviewKeys() {
 			hints = append(hints, actionHint{key: binding.key, label: binding.label})
+		}
+	case AreaCheckpoints:
+		for _, binding := range model.cursorCheckpointKeys() {
+			hints = append(hints, actionHint{key: binding.help, label: binding.label})
 		}
 	case AreaOverview, AreaChanges, areaSearch, areaCopyProfile:
 	}
@@ -244,8 +282,8 @@ func (model Model) renderFormFrame(options renderOptions) string {
 			content = "Editing instructions..."
 		case formNone, formOverview, formProfileFields, formProfileSource, formProfileTemplate,
 			formProfileChoicesLoading, formProfileModel, formProfileModelManual, formProfileEffort,
-			formProfileEffortManual, formProfileDeadline, formProfileTemplateLoading, formProfileInstructions, formParty, formReviewOperation,
-			formReviewFields, formCopy, formChanges, formProfileEdit, formProfileEditLoading:
+			formProfileEffortManual, formProfileDeadline, formProfileTemplateLoading, formProfileInstructions, formParty,
+			formReviewFields, formCheckpointName, formCheckpointFields, formCopy, formChanges, formProfileEdit, formProfileEditLoading:
 			// The active form supplies the content.
 		}
 	}

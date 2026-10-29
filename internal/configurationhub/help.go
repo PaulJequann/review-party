@@ -101,6 +101,10 @@ func (model Model) browserHelpBindings() []bubbleskey.Binding {
 		for _, binding := range model.cursorReviewKeys() {
 			bindings = append(bindings, helpBinding(binding.key, binding.label, binding.key))
 		}
+	case AreaCheckpoints:
+		for _, binding := range model.cursorCheckpointKeys() {
+			bindings = append(bindings, helpBinding(binding.help, binding.label, binding.keys...))
+		}
 	case AreaOverview, AreaChanges, areaSearch, areaCopyProfile:
 	}
 	return bindings

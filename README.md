@@ -75,7 +75,7 @@ for non-redrawing terminal prompts.
 > through `review-party run` and explicit `review-party config ...` commands.
 > The recurring Hub, `review-party config`, opens its
 > scoped, searchable overview and focused Profile creation, Party creation,
-> Global and Repository Configuration Reviews, and Repository-to-Global
+> Global and Repository Configuration Reviews and Checkpoints, and Repository-to-Global
 > Profile-copy flows in a terminal, and refuses without writes outside a
 > terminal. The explicit commands below remain the automation interface.
 > The transitional `review` and `party run` commands are replaced with no
@@ -230,8 +230,21 @@ exiting the shell do not publish configuration. The Hub creates Profiles and
 Parties and edits an existing Profile's execution settings. In the normal
 Profiles browser, press `e` on a Profile to edit its Reviewer, model, effort,
 and deadline. Accessible mode offers `Edit an existing Profile` in Profiles.
-It assembles Repository
-Reviews and copies a Repository Profile only to Global Configuration. Each
+It assembles Global and
+Repository Reviews and copies a Repository Profile only to Global Configuration. The
+Checkpoints area lists Repository Configuration, then Global Configuration,
+each under a header that says whether its Checkpoints are in force here, with
+a row for each Checkpoint name; the menu counts the Checkpoints in force. Press
+`e` or Enter to set a Checkpoint in the row's file, prefilled from that file's
+declaration, then the Global one, then the defaults. Press `r` to stop
+declaring it. On the Repository header, `i` enrolls an unenrolled repository
+or makes an opted-out one inherit the Global Checkpoints again, and `o` opts
+out by writing an empty `checkpoints` field. The footer shows only the keys
+the row offers; any other key reports that it does not apply and changes
+nothing. Accessible mode asks for the file, then offers the same operations.
+The Hub never installs or removes hooks: after a Checkpoints publish that
+leaves installed Integrations serving no declared Checkpoint, it prints the
+`review-party checkpoint uninstall --undeclared` command that removes them. Each
 focused editor previews and confirms its Configuration Manager Plan before
 atomic publication. Instruction editing uses `$EDITOR`; export an argv-style
 editor command such as `export EDITOR=vim`. If it is unset or cannot launch, the

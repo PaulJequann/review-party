@@ -3,9 +3,6 @@ package configurationhub
 import (
 	"fmt"
 	"slices"
-	"strings"
-
-	"charm.land/lipgloss/v2"
 
 	"reviewparty/internal/configuration"
 )
@@ -38,19 +35,23 @@ func configurationTitle(scope configuration.Scope) string {
 }
 
 func newReviewsView(loaded configuration.Loaded, targets []configuration.Scope) ReviewsView {
-	view := ReviewsView{InForce: inForceTarget(loaded.ReviewSelection())}
+	view := ReviewsView{InForce: inForceTarget(loaded.ReviewSelection().Source)}
 	for _, target := range targets {
-		document := loaded.Global
-		if target == configuration.ScopeRepository {
-			document = loaded.Repository
-		}
+		document := loadedDocument(loaded, target)
 		view.Files = append(view.Files, ReviewFile{Target: target, Path: document.Path, Present: document.Present, Selection: document.Document.Reviews})
 	}
 	return view
 }
 
-func inForceTarget(value configuration.Value[configuration.ReviewSelection]) configuration.Scope {
-	switch value.Source {
+func loadedDocument(loaded configuration.Loaded, target configuration.Scope) configuration.LoadedDocument {
+	if target == configuration.ScopeRepository {
+		return loaded.Repository
+	}
+	return loaded.Global
+}
+
+func inForceTarget(source configuration.Source) configuration.Scope {
+	switch source {
 	case configuration.SourceGlobal:
 		return configuration.ScopeGlobal
 	case configuration.SourceRepository:
@@ -197,63 +198,8 @@ func (model Model) cursorReviewKeys() []reviewKey {
 	return keys
 }
 
-func (model Model) reviewRows() []Item {
-	var rows []Item
-	for _, item := range model.snapshot.Items {
-		switch item.Kind {
-		case itemReviewHeader:
-			rows = append(rows, item)
-		case itemReview:
-			if matches(item, model.query) {
-				rows = append(rows, item)
-			}
-		case itemProfile, itemParty:
-		}
-	}
-	return rows
-}
-
-func (model Model) browserRows() []Item {
-	if model.browserArea == AreaReviews {
-		return model.reviewRows()
-	}
-	return model.visibleItems(model.browserKind())
-}
-
-func (model Model) cursorRow() (Item, bool) {
-	rows := model.browserRows()
-	if len(rows) == 0 {
-		return Item{}, false
-	}
-	return rows[min(model.cursor, len(rows)-1)], true
-}
-
-func renderReviewList(rows []Item, cursor, width int, options renderOptions) (string, int) {
-	var content strings.Builder
-	cursorLine, line := 1, 1
-	var previous Item
-	for index, row := range rows {
-		if label, ok := reviewGroupLabel(previous, row); ok {
-			line += writeReviewLine(&content, renderReviewGroupLabel(label, options), width)
-		}
-		if index == cursor {
-			cursorLine = line
-		}
-		line += writeReviewLine(&content, renderReviewRow(row, index == cursor, width, options), width)
-		previous = row
-	}
-	if len(rows) == 0 {
-		content.WriteString("No configuration file is open.\n")
-	}
-	return content.String(), cursorLine
-}
-
-func writeReviewLine(content *strings.Builder, text string, width int) int {
-	content.WriteString(text)
-	content.WriteString("\n")
-	return wrappedLineCount(text, width)
-}
-
+// reviewGroupLabel names the selection group a Repository Configuration row
+// starts. The Global file holds one group, so it gets no label.
 func reviewGroupLabel(previous, row Item) (string, bool) {
 	if row.Kind != itemReview || row.Target != configuration.ScopeRepository {
 		return "", false
@@ -272,41 +218,4 @@ func renderReviewGroupLabel(label string, options renderOptions) string {
 		return "    " + metaStyle.Render(label)
 	}
 	return "    " + label
-}
-
-// renderReviewRow puts a file header's state on its own indented lines so a
-// narrow pane wraps it under the title rather than back to the margin.
-func renderReviewRow(row Item, focused bool, width int, options renderOptions) string {
-	cursor := "  "
-	if focused {
-		cursor = "› "
-	}
-	if row.Kind != itemReviewHeader {
-		return cursor + "  " + renderInventoryItem(row, options)
-	}
-	const indent = "    "
-	title := row.Name
-	state := indent + strings.ReplaceAll(lipgloss.Wrap(row.Detail, max(width-len(indent), 1), " "), "\n", "\n"+indent)
-	if options.styled {
-		title = sectionTitleStyle.Render(title)
-		state = metaStyle.Render(state)
-	}
-	return cursor + title + "\n" + state
-}
-
-func renderRowDetail(snapshot Snapshot, row Item, options renderOptions) string {
-	if row.Kind != itemReviewHeader {
-		return renderInventoryItem(row, options)
-	}
-	title, path := row.Name, ""
-	if file, ok := snapshot.Reviews.file(row.Target); ok && file.Path != "" {
-		path = file.Path
-	}
-	if options.styled {
-		title, path = sectionTitleStyle.Render(title), metaStyle.Render(path)
-	}
-	if path == "" {
-		return title + "\n" + row.Detail
-	}
-	return title + "\n" + path + "\n" + row.Detail
 }
