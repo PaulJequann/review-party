@@ -13,8 +13,8 @@ func validateReviewSelection(selection *ReviewSelection, scope Scope, manager *M
 	if selection == nil {
 		return nil
 	}
-	if scope != ScopeRepository {
-		return errors.New("reviews is a Repository Configuration field")
+	if scope == ScopeGlobal && len(selection.Repository) > 0 {
+		return errors.New("reviews.repository selects Repository definitions, which Global Configuration cannot name")
 	}
 	if selection.ConcurrencyLimit < 1 {
 		return errors.New("reviews.concurrency_limit must be positive")
@@ -33,7 +33,7 @@ func validateReviewSelectionReferences(selection ReviewSelection, repository Rep
 		selection,
 		Value[ReviewSelection]{Authored: true},
 	)
-	if errors.Is(err, ErrNoRepositorySelection) {
+	if errors.Is(err, ErrNoReviewSelection) {
 		return nil
 	}
 	if err != nil {

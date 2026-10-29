@@ -410,6 +410,63 @@ func TestConfigPartyAndReviewSelectionCommandsUseSemanticPlans(t *testing.T) {
 	}
 }
 
+func TestConfigReviewsTargetGlobalEditsTheGlobalSelectionForEveryRepository(t *testing.T) {
+	root := isolatedConfigRoot(t)
+	repository := t.TempDir()
+
+	requireConfigSuccess(t, []string{
+		"config", "profile", "create", "bugs", "--blank", "--instructions", "Find bugs.\n", "--reviewer", "grok",
+		"--model", "grok-4.5", "--effort", "high", "--deadline", "1m", "--yes", "--format", "json",
+	})
+	requireConfigSuccess(t, []string{
+		"config", "reviews", "add", "--target", "global", "--scope", "global", "--profile", "bugs", "--yes", "--format", "json",
+	})
+	requireConfigSuccess(t, []string{
+		"config", "reviews", "set-concurrency", "3", "--target", "global", "--yes", "--format", "json",
+	})
+
+	globalConfig := filepath.Join(root, "review-party", "config.json")
+	if payload, err := os.ReadFile(globalConfig); err != nil || !strings.Contains(string(payload), `"reviews"`) {
+		t.Fatalf("Global Configuration %s = %q, error %v", globalConfig, payload, err)
+	}
+	result := runConfigCommand(t, []string{"config", "show", "--repo", repository, "--format", "json"})
+	requireCommandSuccess(t, result)
+	var report struct {
+		Reviews struct {
+			Kind             string `json:"kind"`
+			Source           string `json:"source"`
+			ConcurrencyLimit int    `json:"concurrency_limit"`
+			LimitSource      string `json:"limit_source"`
+			Expanded         []struct {
+				Profile string `json:"profile"`
+			} `json:"expanded"`
+		} `json:"reviews"`
+	}
+	if err := json.Unmarshal([]byte(result.stdout), &report); err != nil {
+		t.Fatalf("config show output = %q: %v", result.stdout, err)
+	}
+	if report.Reviews.Kind != "global_default" || report.Reviews.Source != globalConfig {
+		t.Fatalf("selection = %#v, want global_default from %s", report.Reviews, globalConfig)
+	}
+	if report.Reviews.ConcurrencyLimit != 3 || report.Reviews.LimitSource != "global_selection" {
+		t.Fatalf("limit = %#v", report.Reviews)
+	}
+	if len(report.Reviews.Expanded) != 1 || report.Reviews.Expanded[0].Profile != "bugs" {
+		t.Fatalf("expanded reviews = %#v", report.Reviews.Expanded)
+	}
+	requireFileAbsent(t, filepath.Join(repository, ".reviewparty", "config.json"))
+}
+
+func TestConfigReviewsTargetGlobalRejectsRepositoryDefinitions(t *testing.T) {
+	isolatedConfigRoot(t)
+	result := runConfigCommand(t, []string{
+		"config", "reviews", "add", "--target", "global", "--scope", "repository", "--profile", "security", "--yes", "--format", "json",
+	})
+	if result.exitCode == 0 || !strings.Contains(result.stdout, "reviews.repository selects Repository definitions, which Global Configuration cannot name") {
+		t.Fatalf("exit = %d, stdout = %q, stderr = %q", result.exitCode, result.stdout, result.stderr)
+	}
+}
+
 func TestConfigMutationCommandsExposeDocumentedFlags(t *testing.T) {
 	root := newRootCommand(productionCommandIO(bytes.NewReader(nil), &bytes.Buffer{}, &bytes.Buffer{}))
 	tests := []struct {
@@ -419,10 +476,10 @@ func TestConfigMutationCommandsExposeDocumentedFlags(t *testing.T) {
 		{path: []string{"config", "profile", "create"}, flags: []string{"repo", "format", "config", "yes"}},
 		{path: []string{"config", "profile", "copy"}, flags: []string{"repo", "format", "config", "yes", "target-scope"}},
 		{path: []string{"config", "party", "create"}, flags: []string{"repo", "format", "config", "yes"}},
-		{path: []string{"config", "reviews", "add"}, flags: []string{"scope", "profile", "party", "repo", "format", "config", "yes"}},
-		{path: []string{"config", "reviews", "remove"}, flags: []string{"scope", "profile", "party", "index", "repo", "format", "config", "yes"}},
-		{path: []string{"config", "reviews", "move"}, flags: []string{"scope", "from", "to", "repo", "format", "config", "yes"}},
-		{path: []string{"config", "reviews", "set-concurrency"}, flags: []string{"repo", "format", "config", "yes"}},
+		{path: []string{"config", "reviews", "add"}, flags: []string{"scope", "target", "profile", "party", "repo", "format", "config", "yes"}},
+		{path: []string{"config", "reviews", "remove"}, flags: []string{"scope", "target", "profile", "party", "index", "repo", "format", "config", "yes"}},
+		{path: []string{"config", "reviews", "move"}, flags: []string{"scope", "target", "from", "to", "repo", "format", "config", "yes"}},
+		{path: []string{"config", "reviews", "set-concurrency"}, flags: []string{"target", "repo", "format", "config", "yes"}},
 	}
 	for _, test := range tests {
 		requireCommandFlags(t, findCommand(t, root, test.path), test.path, test.flags)

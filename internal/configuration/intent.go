@@ -50,8 +50,9 @@ type SetStateDirectory struct {
 	Directory string
 }
 
-// SetReviewSelection replaces the complete repository-owned default roll-up.
+// SetReviewSelection replaces one scope's complete default roll-up.
 type SetReviewSelection struct {
+	Target    Scope
 	Selection ReviewSelection
 }
 
@@ -143,7 +144,7 @@ func (intent SetStateDirectory) readIntent(document Document) (string, bool) {
 	return authoredString(configurationText(document.StateDirectory))
 }
 
-func (intent SetReviewSelection) intentScope() Scope  { return ScopeRepository }
+func (intent SetReviewSelection) intentScope() Scope  { return intent.Target }
 func (intent SetReviewSelection) intentField() string { return "reviews" }
 func (intent SetReviewSelection) applyIntent(document *Document) {
 	selection := intent.Selection

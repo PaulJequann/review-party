@@ -15,14 +15,15 @@ import (
 // Values only the Caller can choose stay as <placeholders>.
 type initReport struct {
 	manager    *configuration.Manager
+	target     configuration.Scope
 	repository configuration.Repository
 	// configuration is the --config path; config is the argument hints carry.
 	configuration string
 	config        string
 }
 
-func reportInitGaps(output io.Writer, manager *configuration.Manager, repository configuration.Repository, options initOptions) error {
-	report := initReport{manager: manager, repository: repository, configuration: options.configuration}
+func reportInitGaps(output io.Writer, manager *configuration.Manager, target configuration.Scope, repository configuration.Repository, options initOptions) error {
+	report := initReport{manager: manager, target: target, repository: repository, configuration: options.configuration}
 	if options.configuration != "" {
 		absolute, err := filepath.Abs(options.configuration)
 		if err != nil {
@@ -34,11 +35,13 @@ func reportInitGaps(output io.Writer, manager *configuration.Manager, repository
 	if err != nil {
 		return err
 	}
-	hooks, err := report.checkpointLines()
-	if err != nil {
-		return err
+	if report.target == configuration.ScopeRepository {
+		hooks, err := report.checkpointLines()
+		if err != nil {
+			return err
+		}
+		lines = append(lines, hooks...)
 	}
-	lines = append(lines, hooks...)
 	return writeCommandOutput(output, func(output *commandOutput) {
 		for _, line := range lines {
 			output.write("%s\n", line)
@@ -58,7 +61,7 @@ func (report initReport) lines() ([]string, error) {
 	if !binding.Declared {
 		return report.selectionLines(baseline)
 	}
-	selection, _, err := report.manager.EffectiveReviewSelection(report.repository)
+	selection, value, err := report.manager.EffectiveReviewSelection(report.repository)
 	if err != nil {
 		return nil, err
 	}
@@ -72,17 +75,34 @@ func (report initReport) lines() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	return report.readyLines(resolved, value), nil
+}
+
+func (report initReport) readyLines(resolved configuration.ResolvedReviews, value configuration.Value[configuration.ReviewSelection]) []string {
 	profiles := make([]string, 0, len(resolved.Expanded))
 	for _, profile := range resolved.Expanded {
 		profiles = append(profiles, string(profile.Scope)+":"+profile.Profile)
 	}
-	return []string{
-		"Saved review configuration is ready.",
-		"Effective Profiles: " + strings.Join(profiles, ", "),
-		fmt.Sprintf("Repository concurrency: %d", resolved.ConcurrencyLimit),
+	lines := []string{"Saved review configuration is ready."}
+	if report.target == configuration.ScopeRepository && value.Source == configuration.SourceGlobal {
+		lines = append(lines, "Review selection: Global Configuration "+value.Path)
+	}
+	lines = append(lines,
+		"Effective Profiles: "+strings.Join(profiles, ", "),
+		fmt.Sprintf("%s concurrency: %d", scopeTitle(report.target), resolved.ConcurrencyLimit),
 		"Reviewer access and execution are unverified.",
-		"Next: review-party run --repo " + shellWord(string(report.repository)) + report.config,
-	}, nil
+	)
+	if report.target == configuration.ScopeGlobal {
+		return append(lines, "Next: review-party run --repo <repo>"+report.config)
+	}
+	return append(lines, "Next: review-party run --repo "+shellWord(string(report.repository))+report.config)
+}
+
+func (report initReport) initCommand() string {
+	if report.target == configuration.ScopeGlobal {
+		return "review-party init --global" + report.config
+	}
+	return "review-party init --repo " + shellWord(string(report.repository)) + report.config
 }
 
 // unresolvedLines names each definition a declared selection lacks, with a
@@ -121,7 +141,7 @@ func (report initReport) baselineGapLine(baseline configuration.Baseline) string
 
 // baselineCommand asks for execution only when a member must be created.
 func (report initReport) baselineCommand(baseline configuration.Baseline) string {
-	command := "review-party init --repo " + shellWord(string(report.repository)) + report.config + " --baseline"
+	command := report.initCommand() + " --baseline"
 	if len(baseline.MembersIn(configuration.BaselineMissing)) > 0 {
 		command += profileExecutionPlaceholders
 	}
@@ -226,7 +246,7 @@ func (report initReport) selectionLines(baseline configuration.Baseline) ([]stri
 	if err != nil {
 		return nil, err
 	}
-	add := "Missing Review selection: review-party init --repo " + shellWord(string(report.repository)) + report.config + " --profile <name>"
+	add := "Missing Review selection: " + report.initCommand() + " --profile <name>"
 	profileNames, partyNames := definitionNames(profiles), definitionNames(baseline.OtherParties(parties))
 	if len(profileNames) == 0 {
 		create := "Missing Review Profile: review-party config profile create <name> --scope global" + report.config +

@@ -15,7 +15,7 @@ type configurationMutationOptions struct {
 	format        string
 	configuration string
 	yes           bool
-	scope         configuration.Scope
+	target        configuration.Scope
 }
 
 type configurationFileOptions struct {
@@ -71,6 +71,10 @@ func validateConfigurationFormat(format string) error {
 		return fmt.Errorf("unknown output format %q", format)
 	}
 	return nil
+}
+
+func addSelectionTargetFlag(cmd *cobra.Command) {
+	cmd.Flags().String("target", string(configuration.ScopeRepository), "Configuration file to edit: repository or global")
 }
 
 func addConfigMutationFlags(cmd *cobra.Command, withScope, withSelection bool, scopeDefault string) {

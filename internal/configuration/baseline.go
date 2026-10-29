@@ -225,7 +225,7 @@ func (baseline Baseline) SelectionBlocked(selection ReviewSelection) error {
 // Select adds the baseline Party to the Global group. A repository without a
 // Review selection gets one whose Concurrency Limit lets every member run at
 // once; an existing selection keeps its limit.
-func (baseline Baseline) Select(current ReviewSelection) SetReviewSelection {
+func (baseline Baseline) Select(current ReviewSelection) ReviewSelection {
 	if current.ConcurrencyLimit == 0 {
 		current = ReviewSelection{ConcurrencyLimit: len(baseline.Members)}
 	}

@@ -43,13 +43,13 @@ func TestReviewChoicesUseValidScopedInventory(t *testing.T) {
 		e := editor{snapshot: snapshot, drafts: &draftSet{reviews: draft}, RunOptions: RunOptions{
 			Accessible: true, Input: newLineInput(fmt.Sprintf("%d\n", index+1)), Output: &output,
 		}}
-		intent, err := e.addReview(configuration.DefaultReviewSelection())
+		interactive, err := e.addReview(configuration.DefaultReviewSelection())
 		if err != nil {
 			t.Fatal(err)
 		}
-		normal, err := addReviewIntent(e.draftSet().reviews, configuration.DefaultReviewSelection())
-		if err != nil || !reflect.DeepEqual(intent, normal) || !reflect.DeepEqual(e.draftSet().reviews.choice, choice) {
-			t.Fatalf("adapters disagree: %#v, %#v, %v", intent, normal, err)
+		normal, err := addReviewSelection(e.draftSet().reviews, configuration.DefaultReviewSelection())
+		if err != nil || !reflect.DeepEqual(interactive, normal) || !reflect.DeepEqual(e.draftSet().reviews.choice, choice) {
+			t.Fatalf("adapters disagree: %#v, %#v, %v", interactive, normal, err)
 		}
 		for _, label := range []string{"[global] profile shared", "[repository] profile shared", "retains existing entries"} {
 			if !strings.Contains(output.String(), label) {
@@ -79,12 +79,12 @@ func TestReviewAddRetainsEntriesAndShowsFinalWorkloadInBothAdapters(t *testing.T
 	}
 	selection := configuration.ReviewSelection{ConcurrencyLimit: 2, Global: []configuration.SelectionItem{{Profile: "shared"}}}
 	draft := reviewFormDraft{operation: "add", choice: configuration.SelectedDefinition{Kind: configuration.ItemParty, Scope: configuration.ScopeRepository, Name: "daily"}}
-	intent, err := addReviewIntent(draft, selection)
+	added, err := addReviewSelection(draft, selection)
 	if err != nil {
 		t.Fatal(err)
 	}
-	again, err := addReviewIntent(draft, intent.Selection)
-	if err != nil || !reflect.DeepEqual(intent, again) {
+	again, err := addReviewSelection(draft, added)
+	if err != nil || !reflect.DeepEqual(added, again) {
 		t.Fatalf("Add changed existing deduplication: %#v, %v", again, err)
 	}
 	message := planRequestCommand(context.Background(), manager, repository, nil, planRequest{
@@ -95,7 +95,7 @@ func TestReviewAddRetainsEntriesAndShowsFinalWorkloadInBothAdapters(t *testing.T
 		t.Fatalf("plan result = %#v", message)
 	}
 	var accessible bytes.Buffer
-	if err := renderReviewSelectionPreview(&accessible, manager, repository, intent.Selection); err != nil {
+	if err := renderReviewSelectionPreview(&accessible, manager, repository, added); err != nil {
 		t.Fatal(err)
 	}
 	for _, preview := range []string{ready.summary, accessible.String()} {
@@ -149,7 +149,7 @@ func TestRemoveFinalReviewPreviewsAndPublishesInBothAdapters(t *testing.T) {
 			repository := configuration.Repository(t.TempDir())
 			publishPreviewProfile(t, manager, configuration.ScopeGlobal, "")
 			selection := configuration.ReviewSelection{ConcurrencyLimit: 2, Global: []configuration.SelectionItem{{Profile: "shared"}}, Repository: []configuration.SelectionItem{}}
-			plan, err := manager.Plan(repository, []configuration.Intent{configuration.SetReviewSelection{Selection: selection}})
+			plan, err := manager.Plan(repository, []configuration.Intent{configuration.SetReviewSelection{Target: configuration.ScopeRepository, Selection: selection}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -176,11 +176,11 @@ func TestRemoveFinalReviewPreviewsAndPublishesInBothAdapters(t *testing.T) {
 			if accessible {
 				var output bytes.Buffer
 				e := editor{manager: manager, RunOptions: RunOptions{Repository: repository, Accessible: true, Input: newLineInput("y\n"), Output: &output}}
-				intent, err := removeReviewIntent(draft, selection)
+				removed, err := removeReviewSelection(draft, selection)
 				if err != nil {
 					t.Fatal(err)
 				}
-				if err := e.publishReviewSelection(intent); err != nil {
+				if err := e.publishReviewSelection(removed); err != nil {
 					t.Fatal(err)
 				}
 				if !strings.Contains(output.String(), "No reviews selected") {
@@ -193,7 +193,7 @@ func TestRemoveFinalReviewPreviewsAndPublishesInBothAdapters(t *testing.T) {
 			if err != nil || !source.Authored || len(after.Global)+len(after.Repository) != 0 || after.ConcurrencyLimit != 2 {
 				t.Fatalf("published selection = %#v, source = %#v, error = %v", after, source, err)
 			}
-			if _, err := manager.ResolveReviewSelection(repository, after); !errors.Is(err, configuration.ErrNoRepositorySelection) {
+			if _, err := manager.ResolveReviewSelection(repository, after); !errors.Is(err, configuration.ErrNoReviewSelection) {
 				t.Fatalf("empty selection became executable: %v", err)
 			}
 		})

@@ -59,5 +59,6 @@ Evidence stays under `$run_dir/evidence/`, which is ignored through the reposito
 - [Binary identity](binary-identity.md) verifies the installed CLI identity and revision-bound doctor check. This is the tracer feature.
 - [Managed initialization and history](managed-initialization.md) verifies idempotent initialization and read-only history against isolated state.
 - [Profile configuration](profile-configuration.md) verifies explicit non-interactive Profile publication and a read-only second view.
+- [Global configuration](global-configuration.md) verifies `init --global`, the Global Review selection as every repository's default, `--target global` edits, and the cannot-name rejection.
 - [Configuration Hub](configuration-hub.md) verifies the terminal shell, responsive navigation, plan-preview publication, and accessible prompt publication.
 - [Skill Templates](skill-templates.md) verifies that a skill in the caller's HOME becomes a Review Profile Template, reports drift and an unavailable source, and appears in the Hub Template picker.

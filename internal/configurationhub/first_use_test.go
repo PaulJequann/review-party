@@ -51,7 +51,7 @@ func publishGlobalParty(t *testing.T, manager *configuration.Manager, draft conf
 
 func publishSelection(t *testing.T, manager *configuration.Manager, repository configuration.Repository, selection configuration.ReviewSelection) {
 	t.Helper()
-	plan, err := manager.Plan(repository, []configuration.Intent{configuration.SetReviewSelection{Selection: selection}})
+	plan, err := manager.Plan(repository, []configuration.Intent{configuration.SetReviewSelection{Target: configuration.ScopeRepository, Selection: selection}})
 	if err != nil {
 		t.Fatalf("plan selection: %v", err)
 	}

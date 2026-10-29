@@ -26,7 +26,7 @@ func (checkpoint Checkpoint) MarkdownExemptions() []string {
 // repository with no selection has none.
 func (manager *Manager) SelectedDocumentationProfiles(repository Repository) ([]string, error) {
 	resolved, err := manager.ResolveRun(RunRequest{Repository: repository})
-	if errors.Is(err, ErrNoRepositorySelection) {
+	if errors.Is(err, ErrNoReviewSelection) {
 		return nil, nil
 	}
 	if err != nil {

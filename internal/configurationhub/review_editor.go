@@ -27,11 +27,11 @@ func (e *editor) editReviews() error {
 	if err != nil {
 		return err
 	}
-	intent, err := e.reviewIntent(draft.operation, selection)
+	selection, err = e.reviewSelection(draft.operation, selection)
 	if err != nil {
 		return err
 	}
-	return e.publishReviewSelection(intent)
+	return e.publishReviewSelection(selection)
 }
 
 func (e *editor) currentReviewSelection() (configuration.ReviewSelection, error) {
@@ -45,7 +45,8 @@ func (e *editor) currentReviewSelection() (configuration.ReviewSelection, error)
 	return selection, nil
 }
 
-func (e *editor) publishReviewSelection(intent configuration.SetReviewSelection) error {
+func (e *editor) publishReviewSelection(selection configuration.ReviewSelection) error {
+	intent := configuration.SetReviewSelection{Target: configuration.ScopeRepository, Selection: selection}
 	plan, err := e.manager.Plan(e.Repository, []configuration.Intent{intent})
 	if err != nil {
 		return err
@@ -75,7 +76,7 @@ func renderReviewSelectionPreview(output io.Writer, manager *configuration.Manag
 	return configuration.RenderResolvedReviewsHuman(output, resolved)
 }
 
-func (e *editor) reviewIntent(operation string, selection configuration.ReviewSelection) (configuration.SetReviewSelection, error) {
+func (e *editor) reviewSelection(operation string, selection configuration.ReviewSelection) (configuration.ReviewSelection, error) {
 	switch operation {
 	case "add":
 		return e.addReview(selection)
@@ -86,51 +87,51 @@ func (e *editor) reviewIntent(operation string, selection configuration.ReviewSe
 	case "concurrency":
 		return e.concurrencyReview(selection)
 	default:
-		return configuration.SetReviewSelection{}, fmt.Errorf("unknown Repository Reviews operation %q", operation)
+		return configuration.ReviewSelection{}, fmt.Errorf("unknown Repository Reviews operation %q", operation)
 	}
 }
 
-func (e *editor) addReview(selection configuration.ReviewSelection) (configuration.SetReviewSelection, error) {
+func (e *editor) addReview(selection configuration.ReviewSelection) (configuration.ReviewSelection, error) {
 	draft := &e.draftSet().reviews
 	options := reviewChoiceOptions(e.snapshot.ReviewChoices)
 	if len(options) == 0 {
-		return configuration.SetReviewSelection{}, fmt.Errorf("%s", emptyReviewChoices)
+		return configuration.ReviewSelection{}, fmt.Errorf("%s", emptyReviewChoices)
 	}
 	if _, err := fmt.Fprintln(e.Output, addReviewDescription); err != nil {
-		return configuration.SetReviewSelection{}, err
+		return configuration.ReviewSelection{}, err
 	}
 	if err := e.form(huh.NewSelect[configuration.SelectedDefinition]().
 		Title("Profile or Party to add").Description(addReviewDescription).
 		Options(options...).Value(&draft.choice)); err != nil {
-		return configuration.SetReviewSelection{}, err
+		return configuration.ReviewSelection{}, err
 	}
-	return addReviewIntent(*draft, selection)
+	return addReviewSelection(*draft, selection)
 }
 
-func (e *editor) removeReview(selection configuration.ReviewSelection) (configuration.SetReviewSelection, error) {
+func (e *editor) removeReview(selection configuration.ReviewSelection) (configuration.ReviewSelection, error) {
 	draft := &e.draftSet().reviews
 	if err := e.reviewScope(draft, huh.NewInput().Title("Zero-based index").Value(&draft.index)); err != nil {
-		return configuration.SetReviewSelection{}, err
+		return configuration.ReviewSelection{}, err
 	}
 	index, err := strconv.Atoi(draft.index)
 	if err != nil {
-		return configuration.SetReviewSelection{}, err
+		return configuration.ReviewSelection{}, err
 	}
 	return configuration.RemoveReviewSelection(selection, configuration.Scope(draft.scope), index)
 }
 
-func (e *editor) moveReview(selection configuration.ReviewSelection) (configuration.SetReviewSelection, error) {
+func (e *editor) moveReview(selection configuration.ReviewSelection) (configuration.ReviewSelection, error) {
 	draft := &e.draftSet().reviews
 	if err := e.reviewScope(draft, huh.NewInput().Title("From index").Value(&draft.from), huh.NewInput().Title("To index").Value(&draft.to)); err != nil {
-		return configuration.SetReviewSelection{}, err
+		return configuration.ReviewSelection{}, err
 	}
 	from, err := strconv.Atoi(draft.from)
 	if err != nil {
-		return configuration.SetReviewSelection{}, err
+		return configuration.ReviewSelection{}, err
 	}
 	to, err := strconv.Atoi(draft.to)
 	if err != nil {
-		return configuration.SetReviewSelection{}, err
+		return configuration.ReviewSelection{}, err
 	}
 	return configuration.MoveReviewSelection(selection, configuration.Scope(draft.scope), from, to)
 }
@@ -140,15 +141,15 @@ func (e *editor) reviewScope(draft *reviewFormDraft, fields ...huh.Field) error 
 	return e.form(fields...)
 }
 
-func (e *editor) concurrencyReview(selection configuration.ReviewSelection) (configuration.SetReviewSelection, error) {
+func (e *editor) concurrencyReview(selection configuration.ReviewSelection) (configuration.ReviewSelection, error) {
 	draft := &e.draftSet().reviews
 	if err := e.form(huh.NewInput().Title("Concurrency limit").Value(&draft.concurrency)); err != nil {
-		return configuration.SetReviewSelection{}, err
+		return configuration.ReviewSelection{}, err
 	}
 	limit, err := strconv.Atoi(draft.concurrency)
 	if err != nil {
-		return configuration.SetReviewSelection{}, err
+		return configuration.ReviewSelection{}, err
 	}
 	selection.ConcurrencyLimit = limit
-	return configuration.SetReviewSelection{Selection: selection}, nil
+	return selection, nil
 }

@@ -217,7 +217,7 @@ func TestRepositoryReviewSelectionPreservesScopeGroupOrder(t *testing.T) {
 		Global:           []SelectionItem{{Party: "baseline"}, {Profile: "documentation"}},
 		Repository:       []SelectionItem{{Profile: "security"}},
 	}
-	plan, err := manager.Plan(Repository(repository), []Intent{SetReviewSelection{Selection: selection}})
+	plan, err := manager.Plan(Repository(repository), []Intent{SetReviewSelection{Target: ScopeRepository, Selection: selection}})
 	if err != nil || !plan.Valid() {
 		t.Fatalf("plan error = %v, reason = %q", err, plan.Reason())
 	}
@@ -256,7 +256,7 @@ func TestPlanRejectsReviewSelectionWithMissingReferences(t *testing.T) {
 			root := t.TempDir()
 			repository := t.TempDir()
 			manager := testManager(t, root)
-			plan, err := manager.Plan(Repository(repository), []Intent{SetReviewSelection{Selection: ReviewSelection{
+			plan, err := manager.Plan(Repository(repository), []Intent{SetReviewSelection{Target: ScopeRepository, Selection: ReviewSelection{
 				ConcurrencyLimit: 1,
 				Global:           []SelectionItem{test.item},
 			}}})
@@ -286,7 +286,7 @@ func TestPlanRejectsReviewSelectionWithInvalidPartyReferences(t *testing.T) {
   "profiles": [{"scope":"global","profile":"missing"}]
 }`)
 	manager := testManager(t, root)
-	plan, err := manager.Plan(Repository(repository), []Intent{SetReviewSelection{Selection: ReviewSelection{
+	plan, err := manager.Plan(Repository(repository), []Intent{SetReviewSelection{Target: ScopeRepository, Selection: ReviewSelection{
 		ConcurrencyLimit: 1,
 		Global:           []SelectionItem{{Party: "broken"}},
 	}}})

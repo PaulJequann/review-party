@@ -21,6 +21,7 @@ type initOptions struct {
 	fresh            bool
 	yes              bool
 	accessible       bool
+	global           bool
 	setup            []setupTarget
 	baseline         *configuration.ProfileExecution
 	discoveryService func() *discovery.Service
@@ -50,6 +51,9 @@ func (flag setupTargetFlag) Set(value string) error {
 func (flag setupTargetFlag) Type() string { return "name" }
 
 func executeInit(ctx context.Context, options initOptions, streams commandIO) int {
+	if options.global {
+		return executeGlobalInit(options, streams)
+	}
 	if !initRecoveryConfirmed(options) {
 		return printFailure(streams.errors, errors.New("state recovery requires --yes for this confirmation step"))
 	}
@@ -70,7 +74,7 @@ func executeInit(ctx context.Context, options initOptions, streams commandIO) in
 	repository := configuration.Repository(result.Repository)
 	switch {
 	case options.hasSetup():
-		return initSetup{manager: manager, repository: repository, options: options, streams: streams}.apply()
+		return initSetup{manager: manager, repository: repository, target: configuration.ScopeRepository, options: options, streams: streams}.apply()
 	case streams.interactive():
 		hub := configurationHubOptions{
 			repository: result.Repository, configuration: options.configuration,
@@ -80,7 +84,15 @@ func executeInit(ctx context.Context, options initOptions, streams commandIO) in
 			return printFailure(streams.errors, err)
 		}
 	}
-	return failureCode(streams.errors, reportInitGaps(streams.output, manager, repository, options))
+	return failureCode(streams.errors, reportInitGaps(streams.output, manager, configuration.ScopeRepository, repository, options))
+}
+
+func executeGlobalInit(options initOptions, streams commandIO) int {
+	manager := streams.configurationManager(options.configuration)
+	if options.hasSetup() {
+		return initSetup{manager: manager, target: configuration.ScopeGlobal, options: options, streams: streams}.apply()
+	}
+	return failureCode(streams.errors, reportInitGaps(streams.output, manager, configuration.ScopeGlobal, "", options))
 }
 
 func failureCode(output io.Writer, err error) int {
@@ -134,6 +146,7 @@ func (options initOptions) hasSetup() bool {
 type initSetup struct {
 	manager    *configuration.Manager
 	repository configuration.Repository
+	target     configuration.Scope
 	options    initOptions
 	streams    commandIO
 }
@@ -151,9 +164,10 @@ func (setup initSetup) apply() int {
 		if err != nil {
 			return printFailure(setup.streams.errors, err)
 		}
-		selection = configuration.AddReviewSelection(selection, group, item).Selection
+		selection = configuration.AddReviewSelection(selection, group, item)
 	}
-	plan, err := setup.manager.Plan(setup.repository, []configuration.Intent{configuration.SetReviewSelection{Selection: selection}})
+	intent := configuration.SetReviewSelection{Target: setup.target, Selection: selection}
+	plan, err := setup.manager.Plan(setup.repository, []configuration.Intent{intent})
 	if err != nil {
 		return printFailure(setup.streams.errors, err)
 	}
@@ -181,7 +195,7 @@ func (setup initSetup) startingSelection() (configuration.ReviewSelection, strin
 	if code != 0 {
 		return configuration.ReviewSelection{}, "", code
 	}
-	return baseline.Select(selection).Selection, "The Review selection already includes the Review Party baseline; it was not changed.\n", 0
+	return baseline.Select(selection), "The Review selection already includes the Review Party baseline; it was not changed.\n", 0
 }
 
 func (setup initSetup) publish(plan configuration.Plan) int {

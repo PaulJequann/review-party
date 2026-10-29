@@ -135,9 +135,11 @@ sequential. Fallback is recovery, not an extra peer opinion.
 ## Configuration and observability
 
 Global Configuration makes reusable Profiles and Parties available to every
-repository without enabling them. Repository Configuration selects the ordered
-Global and Repository Profiles or Parties that `review-party run` uses by
-default. An explicit Profile or Party replaces that default for one run.
+repository, and its Review selection is the Caller's default: the ordered
+Global Profiles or Parties that `review-party run` uses in any repository
+without a selection of its own. A Repository Configuration selection replaces
+that default as a whole, never item by item, and may add Repository Profiles or
+Parties. An explicit Profile or Party replaces either default for one run.
 
 Packaged Review Profile Templates provide starting instructions but cannot run.
 A Caller creates a complete executable Profile by choosing a Template or blank

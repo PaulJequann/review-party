@@ -79,7 +79,7 @@ type coverageCheck struct {
 // Profile has reviewed of the content and what remains.
 func (conductor *Conductor) checkCoverage(repository string, content []model.ContentChange, declaration configuration.Checkpoint, judge *findingJudge) (CoverageReport, error) {
 	resolved, err := conductor.configuration.ResolveRun(configuration.RunRequest{Repository: configuration.Repository(repository)})
-	if errors.Is(err, configuration.ErrNoRepositorySelection) {
+	if errors.Is(err, configuration.ErrNoReviewSelection) {
 		return CoverageReport{}, fmt.Errorf("%w; run review-party init to choose the Reviews this repository runs", err)
 	}
 	if err != nil {

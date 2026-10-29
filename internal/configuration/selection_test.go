@@ -11,12 +11,25 @@ import (
 
 type selectionFixture struct {
 	manager    *Manager
+	globalRoot string
 	repository Repository
 }
 
 func newSelectionFixture(t *testing.T) selectionFixture {
 	t.Helper()
-	return selectionFixture{manager: testManager(t, t.TempDir()), repository: Repository(t.TempDir())}
+	root := t.TempDir()
+	return selectionFixture{manager: testManager(t, root), globalRoot: root, repository: Repository(t.TempDir())}
+}
+
+func (fixture selectionFixture) globalConfigPath() string {
+	return filepath.Join(fixture.globalRoot, "config.json")
+}
+
+func (fixture selectionFixture) globalReviews(t *testing.T, selection ReviewSelection) {
+	t.Helper()
+	intent := SetReviewSelection{Target: ScopeGlobal, Selection: selection}
+	plan, planningErr := fixture.manager.Plan("", []Intent{intent})
+	fixture.publish(t, plan, planningErr)
 }
 
 func (fixture selectionFixture) profile(t *testing.T, scope Scope, name string) {
@@ -302,8 +315,8 @@ func TestResolveRunRejectsConflictingExplicitChoices(t *testing.T) {
 func TestMissingSavedSelectionFailsClosed(t *testing.T) {
 	fixture := newSelectionFixture(t)
 	_, err := fixture.manager.ResolveRun(RunRequest{Repository: fixture.repository})
-	if !errors.Is(err, ErrNoRepositorySelection) {
-		t.Fatalf("error = %v, want ErrNoRepositorySelection", err)
+	if !errors.Is(err, ErrNoReviewSelection) {
+		t.Fatalf("error = %v, want ErrNoReviewSelection", err)
 	}
 	fixture.reviews(t, ReviewSelection{
 		ConcurrencyLimit: 1,
@@ -311,7 +324,7 @@ func TestMissingSavedSelectionFailsClosed(t *testing.T) {
 		Repository:       []SelectionItem{},
 	})
 	_, err = fixture.manager.ResolveRun(RunRequest{Repository: fixture.repository})
-	if !errors.Is(err, ErrNoRepositorySelection) || !strings.Contains(err.Error(), "selects nothing") {
+	if !errors.Is(err, ErrNoReviewSelection) || !strings.Contains(err.Error(), "selects nothing") {
 		t.Fatalf("empty roll-up error = %v", err)
 	}
 }
@@ -365,4 +378,67 @@ func requireUnresolvedDetails(t *testing.T, failure UnresolvedReferenceError, na
 		}
 	}
 	t.Fatalf("available names omit bugs: %#v", failure.Available)
+}
+
+func TestGlobalSelectionIsTheCallerDefault(t *testing.T) {
+	fixture := newSelectionFixture(t)
+	fixture.profile(t, ScopeGlobal, "bugs")
+	fixture.profile(t, ScopeGlobal, "documentation")
+	fixture.globalReviews(t, ReviewSelection{
+		ConcurrencyLimit: 3,
+		Global:           []SelectionItem{{Profile: "documentation"}, {Profile: "bugs"}},
+	})
+
+	resolved := fixture.resolve(t, RunRequest{Repository: fixture.repository})
+	expectSlots(t, scopedSlots(resolved),
+		"global:documentation@reviews.global[0]",
+		"global:bugs@reviews.global[1]",
+	)
+	requireResolvedFacts(t, resolved, facts{kind: SelectionGlobalDefault, limit: 3, source: LimitGlobalSelection})
+	if resolved.Source != fixture.globalConfigPath() {
+		t.Fatalf("selection source = %q, want %q", resolved.Source, fixture.globalConfigPath())
+	}
+	if _, err := os.Stat(filepath.Join(string(fixture.repository), ".reviewparty")); !os.IsNotExist(err) {
+		t.Fatalf("Global selection touched the repository: %v", err)
+	}
+}
+
+func TestRepositorySelectionReplacesGlobalSelectionAsAWhole(t *testing.T) {
+	fixture := newSelectionFixture(t)
+	fixture.profile(t, ScopeGlobal, "bugs")
+	fixture.profile(t, ScopeGlobal, "documentation")
+	fixture.profile(t, ScopeRepository, "security")
+	fixture.globalReviews(t, ReviewSelection{
+		ConcurrencyLimit: 3,
+		Global:           []SelectionItem{{Profile: "documentation"}, {Profile: "bugs"}},
+	})
+	fixture.reviews(t, ReviewSelection{
+		ConcurrencyLimit: 1,
+		Global:           []SelectionItem{},
+		Repository:       []SelectionItem{{Profile: "security"}},
+	})
+
+	resolved := fixture.resolve(t, RunRequest{Repository: fixture.repository})
+	expectSlots(t, scopedSlots(resolved), "repository:security@reviews.repository[0]")
+	requireResolvedFacts(t, resolved, facts{kind: SelectionRepositoryDefault, limit: 1, source: LimitRepositorySelection})
+}
+
+func TestGlobalSelectionCannotNameRepositoryDefinitions(t *testing.T) {
+	fixture := newSelectionFixture(t)
+	fixture.profile(t, ScopeGlobal, "bugs")
+	intent := SetReviewSelection{Target: ScopeGlobal, Selection: ReviewSelection{
+		ConcurrencyLimit: 1,
+		Global:           []SelectionItem{{Profile: "bugs"}},
+		Repository:       []SelectionItem{{Profile: "security"}},
+	}}
+	plan, err := fixture.manager.Plan("", []Intent{intent})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Valid() || !strings.Contains(plan.Reason(), "reviews.repository selects Repository definitions, which Global Configuration cannot name") {
+		t.Fatalf("plan valid = %v, reason = %q", plan.Valid(), plan.Reason())
+	}
+	if _, err := os.Stat(fixture.globalConfigPath()); !os.IsNotExist(err) {
+		t.Fatalf("invalid plan wrote the Global Configuration: %v", err)
+	}
 }

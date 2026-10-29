@@ -189,12 +189,12 @@ func TestBaselineSelectAddsThePartyOnce(t *testing.T) {
 	baseline := requireBaseline(t, baselineManager(t, t.TempDir()))
 	item := SelectionItem{Party: BaselinePartyName}
 
-	created := baseline.Select(ReviewSelection{}).Selection
+	created := baseline.Select(ReviewSelection{})
 	if want := (ReviewSelection{ConcurrencyLimit: 3, Global: []SelectionItem{item}, Repository: []SelectionItem{}}); !reflect.DeepEqual(created, want) {
 		t.Fatalf("new selection = %#v", created)
 	}
 	existing := ReviewSelection{ConcurrencyLimit: 1, Repository: []SelectionItem{{Profile: "local"}}}
-	again := baseline.Select(baseline.Select(existing).Selection).Selection
+	again := baseline.Select(baseline.Select(existing))
 	if want := (ReviewSelection{ConcurrencyLimit: 1, Global: []SelectionItem{item}, Repository: existing.Repository}); !reflect.DeepEqual(again, want) {
 		t.Fatalf("existing selection = %#v", again)
 	}

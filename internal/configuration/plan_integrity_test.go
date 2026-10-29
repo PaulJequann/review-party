@@ -113,7 +113,7 @@ func TestPublishDoesNotWriteAnyTargetWhenOneIsStale(t *testing.T) {
 	manager := integrityManager(t, globalRoot)
 	plan := integrityPlan(t, manager, repository,
 		configuration.SetStateDirectory{Directory: "/planned"},
-		configuration.SetReviewSelection{Selection: configuration.ReviewSelection{ConcurrencyLimit: 2}},
+		configuration.SetReviewSelection{Target: configuration.ScopeRepository, Selection: configuration.ReviewSelection{ConcurrencyLimit: 2}},
 	)
 	repositoryChanged := `{"schema_version":1,"reviews":{"concurrency_limit":3,"global":[],"repository":[]}}`
 	writeIntegrityDocument(t, repositoryPath, repositoryChanged)

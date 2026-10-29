@@ -226,11 +226,11 @@ func planRequestCommand(ctx context.Context, manager *configuration.Manager, rep
 			return planFailedMsg{kind: request.kind, err: err}
 		}
 		if request.kind == planReviews {
-			intent, err := reviewIntentFromForm(request.review.draft, request.review.selection)
+			selection, err := reviewSelectionFromForm(request.review.draft, request.review.selection)
 			if err != nil {
 				return planFailedMsg{kind: request.kind, err: err}
 			}
-			if err := renderReviewSelectionPreview(&summary, manager, repository, intent.Selection); err != nil {
+			if err := renderReviewSelectionPreview(&summary, manager, repository, selection); err != nil {
 				return planFailedMsg{kind: request.kind, err: err}
 			}
 		}
@@ -260,10 +260,11 @@ func buildPlan(manager *configuration.Manager, repository configuration.Reposito
 	case planCopy:
 		return manager.PlanProfileCopy(repository, configuration.ScopeRepository, configuration.ScopeGlobal, request.copy)
 	case planReviews:
-		intent, err := reviewIntentFromForm(request.review.draft, request.review.selection)
+		selection, err := reviewSelectionFromForm(request.review.draft, request.review.selection)
 		if err != nil {
 			return configuration.Plan{}, err
 		}
+		intent := configuration.SetReviewSelection{Target: configuration.ScopeRepository, Selection: selection}
 		return manager.Plan(repository, []configuration.Intent{intent})
 	default:
 		return configuration.Plan{}, fmt.Errorf("unknown plan kind %q", request.kind)
@@ -383,25 +384,25 @@ func partyDraftFromForm(draft partyFormDraft) (configuration.PartyDraft, error) 
 	}, nil
 }
 
-func reviewIntentFromForm(draft reviewFormDraft, selection configuration.ReviewSelection) (configuration.SetReviewSelection, error) {
+func reviewSelectionFromForm(draft reviewFormDraft, selection configuration.ReviewSelection) (configuration.ReviewSelection, error) {
 	switch draft.operation {
 	case "add":
-		return addReviewIntent(draft, selection)
+		return addReviewSelection(draft, selection)
 	case "remove":
-		return removeReviewIntent(draft, selection)
+		return removeReviewSelection(draft, selection)
 	case "move":
-		return moveReviewIntent(draft, selection)
+		return moveReviewSelection(draft, selection)
 	case "concurrency":
-		return concurrencyReviewIntent(draft, selection)
+		return concurrencyReviewSelection(draft, selection)
 	default:
-		return configuration.SetReviewSelection{}, fmt.Errorf("unknown Repository Reviews operation %q", draft.operation)
+		return configuration.ReviewSelection{}, fmt.Errorf("unknown Repository Reviews operation %q", draft.operation)
 	}
 }
 
-func addReviewIntent(draft reviewFormDraft, selection configuration.ReviewSelection) (configuration.SetReviewSelection, error) {
+func addReviewSelection(draft reviewFormDraft, selection configuration.ReviewSelection) (configuration.ReviewSelection, error) {
 	choice := draft.choice
 	if choice.Scope != configuration.ScopeGlobal && choice.Scope != configuration.ScopeRepository {
-		return configuration.SetReviewSelection{}, fmt.Errorf("choose an existing scoped Profile or Party")
+		return configuration.ReviewSelection{}, fmt.Errorf("choose an existing scoped Profile or Party")
 	}
 	var item configuration.SelectionItem
 	switch choice.Kind {
@@ -410,36 +411,36 @@ func addReviewIntent(draft reviewFormDraft, selection configuration.ReviewSelect
 	case configuration.ItemParty:
 		item.Party = choice.Name
 	default:
-		return configuration.SetReviewSelection{}, fmt.Errorf("choose a Profile or Party")
+		return configuration.ReviewSelection{}, fmt.Errorf("choose a Profile or Party")
 	}
 	return configuration.AddReviewSelection(selection, choice.Scope, item), nil
 }
 
-func removeReviewIntent(draft reviewFormDraft, selection configuration.ReviewSelection) (configuration.SetReviewSelection, error) {
+func removeReviewSelection(draft reviewFormDraft, selection configuration.ReviewSelection) (configuration.ReviewSelection, error) {
 	index, err := strconv.Atoi(draft.index)
 	if err != nil {
-		return configuration.SetReviewSelection{}, err
+		return configuration.ReviewSelection{}, err
 	}
 	return configuration.RemoveReviewSelection(selection, configuration.Scope(draft.scope), index)
 }
 
-func moveReviewIntent(draft reviewFormDraft, selection configuration.ReviewSelection) (configuration.SetReviewSelection, error) {
+func moveReviewSelection(draft reviewFormDraft, selection configuration.ReviewSelection) (configuration.ReviewSelection, error) {
 	from, err := strconv.Atoi(draft.from)
 	if err != nil {
-		return configuration.SetReviewSelection{}, err
+		return configuration.ReviewSelection{}, err
 	}
 	to, err := strconv.Atoi(draft.to)
 	if err != nil {
-		return configuration.SetReviewSelection{}, err
+		return configuration.ReviewSelection{}, err
 	}
 	return configuration.MoveReviewSelection(selection, configuration.Scope(draft.scope), from, to)
 }
 
-func concurrencyReviewIntent(draft reviewFormDraft, selection configuration.ReviewSelection) (configuration.SetReviewSelection, error) {
+func concurrencyReviewSelection(draft reviewFormDraft, selection configuration.ReviewSelection) (configuration.ReviewSelection, error) {
 	limit, err := strconv.Atoi(draft.concurrency)
 	if err != nil {
-		return configuration.SetReviewSelection{}, err
+		return configuration.ReviewSelection{}, err
 	}
 	selection.ConcurrencyLimit = limit
-	return configuration.SetReviewSelection{Selection: selection}, nil
+	return selection, nil
 }

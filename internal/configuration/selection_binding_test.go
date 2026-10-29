@@ -8,16 +8,16 @@ import (
 
 func TestAddReviewSelectionIgnoresAnItemItsGroupAlreadySelects(t *testing.T) {
 	current := ReviewSelection{ConcurrencyLimit: 2, Global: []SelectionItem{{Profile: "bugs"}}}
-	repeated := AddReviewSelection(current, ScopeGlobal, SelectionItem{Profile: "bugs"}).Selection
+	repeated := AddReviewSelection(current, ScopeGlobal, SelectionItem{Profile: "bugs"})
 	if !slices.Equal(repeated.Global, current.Global) || len(repeated.Repository) != 0 {
 		t.Fatalf("repeated add changed the selection: %#v", repeated)
 	}
-	crossScope := AddReviewSelection(repeated, ScopeRepository, SelectionItem{Profile: "bugs"}).Selection
+	crossScope := AddReviewSelection(repeated, ScopeRepository, SelectionItem{Profile: "bugs"})
 	want := []SelectionItem{{Profile: "bugs"}}
 	if !slices.Equal(crossScope.Repository, want) || !slices.Equal(crossScope.Global, want) {
 		t.Fatalf("a different group must still receive the item: %#v", crossScope)
 	}
-	party := AddReviewSelection(crossScope, ScopeGlobal, SelectionItem{Party: "bugs"}).Selection
+	party := AddReviewSelection(crossScope, ScopeGlobal, SelectionItem{Party: "bugs"})
 	if !slices.Equal(party.Global, []SelectionItem{{Profile: "bugs"}, {Party: "bugs"}}) {
 		t.Fatalf("a Party must not be mistaken for a same-named Profile: %#v", party.Global)
 	}

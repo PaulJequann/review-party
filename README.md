@@ -119,6 +119,19 @@ command to create the Profiles and Party on their machine; the committed
 selection is not changed. A Global Party `baseline` with other members blocks
 the command until you edit or remove that file.
 
+To run the baseline in every repository without a selection of its own, save it
+as the Global Configuration's Review selection instead. `init --global` edits
+only Global Configuration, reads no repository, and installs no Checkpoints:
+
+```sh
+review-party init --global --baseline \
+  --reviewer codex --model gpt-5.6-luna --effort high --deadline 8m --yes
+```
+
+A repository selection, when present, replaces the Global selection as a whole.
+`review-party config show --repo .` names the file the effective selection comes
+from.
+
 In a terminal, `init` runs the first-use journey with the Configuration Hub's
 forms. When the repository's Review selection names Global Profiles or Parties
 that your Global Configuration lacks, it offers to create each one. A missing
@@ -259,6 +272,15 @@ review-party config profile create code-quality \
 review-party config reviews add --scope global --profile code-quality \
   --repo . --yes
 review-party config reviews set-concurrency 2 --repo . --yes
+```
+
+`--scope` names the selection group inside the file. `--target global` edits
+the Global Configuration's selection instead of the repository's; it reads no
+repository and accepts only `--scope global` entries:
+
+```sh
+review-party config reviews add --target global --scope global \
+  --profile code-quality --yes
 ```
 
 ### Create a custom daily Party
@@ -511,11 +533,14 @@ Review Party loads Global Configuration from
 `${XDG_CONFIG_HOME:-$HOME/.config}/review-party/` and Repository Configuration
 from `<repo>/.reviewparty/`. Both use schema version 1. Global Configuration may
 hold reusable Profiles, Parties, Reviewer policy, Eval defaults, and the managed
-state location. Global availability enables no Reviews by itself. The `reviews`
-field is Repository-only; Global Configuration rejects it.
+state location. Global availability enables no Reviews by itself. A Global
+`reviews` field is the default selection for every repository that saves none;
+its `repository` group must be empty because Global Configuration cannot name
+Repository definitions. A Repository `reviews` field replaces the Global one as
+a whole, never item by item.
 
 `defaults.profile` and `defaults.party` are not accepted configuration fields.
-Repository Configuration owns the complete default roll-up in `reviews`:
+Each Configuration holds a complete default roll-up in `reviews`:
 
 ```json
 {

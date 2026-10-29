@@ -439,22 +439,32 @@ func authoredPartySource(scope Scope, name string) string {
 	return "global:parties/" + name + ".json"
 }
 
-// EffectiveReviewSelection returns the repository-authored selection. Global
-// availability is deliberately inert.
+// EffectiveReviewSelection returns the Review selection a run in repository
+// uses: the Repository Configuration's when it authors one, otherwise the
+// Global Configuration's.
 func (manager *Manager) EffectiveReviewSelection(repository Repository) (ReviewSelection, Value[ReviewSelection], error) {
 	loaded, err := manager.Load(repository)
 	if err != nil {
 		return ReviewSelection{}, Value[ReviewSelection]{}, err
 	}
-	selection, value := manager.effectiveReviewSelection(loaded)
+	selection, value := effectiveReviewSelection(loaded)
 	return selection, value, nil
 }
 
-func (manager *Manager) effectiveReviewSelection(loaded Loaded) (ReviewSelection, Value[ReviewSelection]) {
-	if !loaded.Repository.Present || loaded.Repository.Document.Reviews == nil {
-		return ReviewSelection{}, Value[ReviewSelection]{Source: SourcePackaged}
+func effectiveReviewSelection(loaded Loaded) (ReviewSelection, Value[ReviewSelection]) {
+	for _, document := range []LoadedDocument{loaded.Repository, loaded.Global} {
+		if selection, value, authored := document.reviewSelection(); authored {
+			return selection, value
+		}
 	}
-	selection := *loaded.Repository.Document.Reviews
-	value := Value[ReviewSelection]{Value: selection, Authored: true, Source: SourceRepository, Path: loaded.Repository.Path}
-	return selection, value
+	return ReviewSelection{}, Value[ReviewSelection]{Source: SourcePackaged}
+}
+
+func (document LoadedDocument) reviewSelection() (ReviewSelection, Value[ReviewSelection], bool) {
+	if !document.Present || document.Document.Reviews == nil {
+		return ReviewSelection{}, Value[ReviewSelection]{}, false
+	}
+	selection := *document.Document.Reviews
+	value := Value[ReviewSelection]{Value: selection, Authored: true, Source: sourceFor(document.Scope), Path: document.Path}
+	return selection, value, true
 }

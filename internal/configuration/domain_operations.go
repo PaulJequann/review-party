@@ -113,37 +113,37 @@ func DefaultReviewSelection() ReviewSelection {
 	return ReviewSelection{ConcurrencyLimit: 1}
 }
 
-// AddReviewSelection returns a typed replacement intent with one item appended
-// to its group. Adding an item the group already selects changes nothing.
-func AddReviewSelection(current ReviewSelection, group Scope, item SelectionItem) SetReviewSelection {
+// AddReviewSelection returns the selection with one item appended to its
+// group. Adding an item the group already selects changes nothing.
+func AddReviewSelection(current ReviewSelection, group Scope, item SelectionItem) ReviewSelection {
 	updated := cloneReviewSelection(current)
 	items := selectionGroup(&updated, group)
 	if !slices.Contains(*items, item) {
 		*items = append(*items, item)
 	}
-	return SetReviewSelection{Selection: updated}
+	return updated
 }
 
-// RemoveReviewSelection returns a typed replacement intent without one item.
-func RemoveReviewSelection(current ReviewSelection, group Scope, index int) (SetReviewSelection, error) {
+// RemoveReviewSelection returns the selection without one item.
+func RemoveReviewSelection(current ReviewSelection, group Scope, index int) (ReviewSelection, error) {
 	updated := cloneReviewSelection(current)
 	items := selectionGroup(&updated, group)
 	if index < 0 || index >= len(*items) {
-		return SetReviewSelection{}, fmt.Errorf("review selection index %d is out of range", index)
+		return ReviewSelection{}, fmt.Errorf("review selection index %d is out of range", index)
 	}
 	*items = append((*items)[:index], (*items)[index+1:]...)
-	return SetReviewSelection{Selection: updated}, nil
+	return updated, nil
 }
 
-// MoveReviewSelection returns a typed replacement intent with one item moved.
-func MoveReviewSelection(current ReviewSelection, group Scope, from, to int) (SetReviewSelection, error) {
+// MoveReviewSelection returns the selection with one item moved.
+func MoveReviewSelection(current ReviewSelection, group Scope, from, to int) (ReviewSelection, error) {
 	updated := cloneReviewSelection(current)
 	items := selectionGroup(&updated, group)
 	if err := validateSelectionMove(len(*items), from, to); err != nil {
-		return SetReviewSelection{}, err
+		return ReviewSelection{}, err
 	}
 	moveSelectionItem(*items, from, to)
-	return SetReviewSelection{Selection: updated}, nil
+	return updated, nil
 }
 
 func moveSelectionItem(items []SelectionItem, from, to int) {

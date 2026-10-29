@@ -185,7 +185,7 @@ func markReviewSelectionChange(staged map[Scope]*stagedDocument, intent Intent) 
 	if _, ok := intent.(SetReviewSelection); !ok {
 		return
 	}
-	staged[ScopeRepository].reviewSelectionChanged = true
+	staged[intent.intentScope()].reviewSelectionChanged = true
 }
 
 func (manager *Manager) validateStaged(plan *Plan, staged map[Scope]*stagedDocument, loaded Loaded, repository Repository) error {

@@ -50,7 +50,7 @@ not been initialized.
 | `runs.by_repository` | array of `{name, count}` | Reviews by repository root. |
 | `runs.by_profile` | array of `{name, count}` | Reviews by Profile name. |
 | `runs.by_reviewer` | array of `{name, count}` | Reviews by Reviewer id, such as `codex` or `opencode`. |
-| `runs.by_selection` | array of `{name, count}` | Reviews by how their Review Bundle chose Profiles: `repository_default`, `explicit_profile`, `explicit_party`, `unknown` for a Bundle without a recorded selection, or `unbundled` for a Review that no Bundle lists. |
+| `runs.by_selection` | array of `{name, count}` | Reviews by how their Review Bundle chose Profiles: `global_default`, `repository_default`, `explicit_profile`, `explicit_party`, `unknown` for a Bundle without a recorded selection, or `unbundled` for a Review that no Bundle lists. |
 | `status.clean` | integer | Completed Reviews with a clean result. |
 | `status.findings` | integer | Completed Reviews with at least one finding. |
 | `status.failed` | integer | Incomplete Reviews not ended by cancellation. |

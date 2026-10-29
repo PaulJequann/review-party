@@ -70,7 +70,7 @@ type runtimeDefinitions struct {
 
 // ResolveRuntime captures the effective configuration, resolved selection, and
 // executable Profile material for one run. A no-selection result returns the
-// effective view alongside ErrNoRepositorySelection so inspection can still
+// effective view alongside ErrNoReviewSelection so inspection can still
 // explain the configured state.
 func (manager *Manager) ResolveRuntime(request RunRequest) (RuntimeSnapshot, error) {
 	loaded, err := manager.Load(request.Repository)
@@ -94,7 +94,7 @@ func (manager *Manager) ResolveRuntime(request RunRequest) (RuntimeSnapshot, err
 	if err != nil {
 		return nil, err
 	}
-	selectionFacts, selectionValue := manager.effectiveReviewSelection(loaded)
+	selectionFacts, selectionValue := effectiveReviewSelection(loaded)
 	selection, err := definitions.resolve(request, selectionFacts, selectionValue)
 	if err != nil {
 		return nil, err
@@ -123,12 +123,12 @@ func (manager *Manager) noSelectionError(request RunRequest, loaded Loaded) (boo
 	if request.Profile != "" || request.Party != "" {
 		return false, nil
 	}
-	selection, value := manager.effectiveReviewSelection(loaded)
+	selection, value := effectiveReviewSelection(loaded)
 	if !value.Authored {
-		return true, ErrNoRepositorySelection
+		return true, ErrNoReviewSelection
 	}
 	if len(selection.Global) == 0 && len(selection.Repository) == 0 {
-		return true, fmt.Errorf("%w: reviews selects nothing", ErrNoRepositorySelection)
+		return true, fmt.Errorf("%w: reviews selects nothing", ErrNoReviewSelection)
 	}
 	return false, nil
 }
@@ -168,14 +168,14 @@ func runtimeRequestNeedsParties(request RunRequest, loaded Loaded) bool {
 	if request.Profile != "" {
 		return false
 	}
-	return savedSelectionIncludesParty(loaded.Repository)
+	return savedSelectionIncludesParty(loaded)
 }
 
-func savedSelectionIncludesParty(document LoadedDocument) bool {
-	if !document.Present || document.Document.Reviews == nil {
+func savedSelectionIncludesParty(loaded Loaded) bool {
+	selection, value := effectiveReviewSelection(loaded)
+	if !value.Authored {
 		return false
 	}
-	selection := *document.Document.Reviews
 	return selectionIncludesParty(selection.Global) || selectionIncludesParty(selection.Repository)
 }
 

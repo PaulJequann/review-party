@@ -185,8 +185,8 @@ func TestResolveRuntimeKeepsEffectiveViewForNoSelection(t *testing.T) {
 	writeDocument(t, filepath.Join(root, "config.json"), `{"schema_version":1,"defaults":{"reviewer":"opencode"}}`)
 
 	snapshot, err := manager.ResolveRuntime(RunRequest{Repository: repository})
-	if !errors.Is(err, ErrNoRepositorySelection) {
-		t.Fatalf("error = %v, want ErrNoRepositorySelection", err)
+	if !errors.Is(err, ErrNoReviewSelection) {
+		t.Fatalf("error = %v, want ErrNoReviewSelection", err)
 	}
 	if snapshot == nil {
 		t.Fatal("no-selection resolution did not retain effective configuration")
@@ -198,6 +198,29 @@ func TestResolveRuntimeKeepsEffectiveViewForNoSelection(t *testing.T) {
 		t.Fatalf("no-selection facts = %#v", selection)
 	}
 	if _, err := os.Stat(filepath.Join(string(repository), ".reviewparty", "config.json")); !os.IsNotExist(err) {
+		t.Fatalf("resolution created repository configuration: %v", err)
+	}
+}
+
+func TestResolveRuntimeRunsGlobalSelectionWithoutRepositoryConfiguration(t *testing.T) {
+	fixture := newSelectionFixture(t)
+	fixture.profile(t, ScopeGlobal, "bugs")
+	fixture.profile(t, ScopeGlobal, "documentation")
+	fixture.party(t, partySpec{
+		scope: ScopeGlobal, name: "baseline", limit: 2,
+		members: []ProfileReference{{Scope: ScopeGlobal, Profile: "documentation"}, {Scope: ScopeGlobal, Profile: "bugs"}},
+	})
+	fixture.globalReviews(t, ReviewSelection{ConcurrencyLimit: 1, Global: []SelectionItem{{Party: "baseline"}}})
+
+	snapshot, err := fixture.manager.ResolveRuntime(RunRequest{Repository: fixture.repository})
+	if err != nil {
+		t.Fatal(err)
+	}
+	selection := snapshot.Selection()
+	requireRuntimeSelectionFacts(t, selection, facts{kind: SelectionGlobalDefault, limit: 1, source: LimitGlobalSelection})
+	requireRuntimeProfile(t, snapshot, requireRuntimeSlot(t, selection, "documentation"))
+	requireRuntimeProfile(t, snapshot, requireRuntimeSlot(t, selection, "bugs"))
+	if _, err := os.Stat(filepath.Join(string(fixture.repository), ".reviewparty", "config.json")); !os.IsNotExist(err) {
 		t.Fatalf("resolution created repository configuration: %v", err)
 	}
 }

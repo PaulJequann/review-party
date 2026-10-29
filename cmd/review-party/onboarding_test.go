@@ -36,7 +36,7 @@ func TestEmptyProfilesHumanActionPreservesJSON(t *testing.T) {
 func TestInitEmptySavedSelectionReportsNextAction(t *testing.T) {
 	fixture := newInitFixture(t)
 	plan, err := fixture.manager.Plan(configuration.Repository(fixture.repository), []configuration.Intent{
-		configuration.SetReviewSelection{Selection: configuration.DefaultReviewSelection()},
+		configuration.SetReviewSelection{Target: configuration.ScopeRepository, Selection: configuration.DefaultReviewSelection()},
 	})
 	if err != nil {
 		t.Fatal(err)

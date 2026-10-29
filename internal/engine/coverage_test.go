@@ -248,7 +248,7 @@ func TestCheckCoverageWithoutContentSkipsTheLedger(t *testing.T) {
 func TestCheckCoverageWithoutSelectionNamesInit(t *testing.T) {
 	conductor, repository := newCoverageConductor(t, &coverageStore{}, nil)
 	_, err := conductor.CheckCheckpoint(context.Background(), CheckpointRequest{Repository: repository, Name: configuration.CheckpointPrePush, Content: coverageWhole})
-	if !errors.Is(err, configuration.ErrNoRepositorySelection) || !strings.Contains(err.Error(), "review-party init") {
+	if !errors.Is(err, configuration.ErrNoReviewSelection) || !strings.Contains(err.Error(), "review-party init") {
 		t.Fatalf("error = %v", err)
 	}
 }

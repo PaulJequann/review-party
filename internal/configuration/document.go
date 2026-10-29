@@ -199,9 +199,6 @@ func validateScopeFields(document Document, scope Scope) error {
 	if scope == ScopeRepository {
 		return validateRepositoryFields(document)
 	}
-	if document.Reviews != nil {
-		return errors.New("reviews is a Repository Configuration field")
-	}
 	if document.Checkpoints != nil {
 		return errors.New("checkpoints is a Repository Configuration field; personal Checkpoints are not supported")
 	}

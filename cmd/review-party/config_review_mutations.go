@@ -16,7 +16,7 @@ func executeConfigReviewsAdd(cmd *cobra.Command, streams commandIO) int {
 		if err != nil {
 			return configuration.ReviewSelection{}, err
 		}
-		return configuration.AddReviewSelection(selection, scope, item).Selection, nil
+		return configuration.AddReviewSelection(selection, scope, item), nil
 	})
 }
 
@@ -35,21 +35,13 @@ func executeConfigReviewsSelection(cmd *cobra.Command, streams commandIO, operat
 			if err != nil {
 				return configuration.ReviewSelection{}, err
 			}
-			intent, err := configuration.RemoveReviewSelection(selection, scope, index)
-			if err != nil {
-				return configuration.ReviewSelection{}, err
-			}
-			return intent.Selection, nil
+			return configuration.RemoveReviewSelection(selection, scope, index)
 		case reviewSelectionMove:
 			from, to := intFlag(cmd, "from"), intFlag(cmd, "to")
 			if from < 0 || to < 0 {
 				return configuration.ReviewSelection{}, errors.New("--from and --to must be non-negative")
 			}
-			intent, err := configuration.MoveReviewSelection(selection, scope, from, to)
-			if err != nil {
-				return configuration.ReviewSelection{}, err
-			}
-			return intent.Selection, nil
+			return configuration.MoveReviewSelection(selection, scope, from, to)
 		default:
 			return configuration.ReviewSelection{}, fmt.Errorf("unknown review selection operation %d", operation)
 		}
@@ -61,16 +53,19 @@ func executeConfigReviewsMutation(cmd *cobra.Command, streams commandIO, transfo
 	if err != nil {
 		return printConfigFailure(stringFlag(cmd, "format"), streams.output, streams.errors, err)
 	}
+	scope, err := parseConfigurationScope(stringFlag(cmd, "scope"))
+	if err != nil {
+		return printConfigFailure(options.format, streams.output, streams.errors, err)
+	}
 	return mutateReviewSelection(options, streams, func(selection configuration.ReviewSelection) (configuration.ReviewSelection, error) {
-		return transform(selection, options.scope)
+		return transform(selection, scope)
 	})
 }
 
 func executeConfigReviewsConcurrency(value string, cmd *cobra.Command, streams commandIO) int {
-	format := stringFlag(cmd, "format")
-	options := configurationMutationOptions{
-		repository: stringFlag(cmd, "repo"), format: format,
-		configuration: stringFlag(cmd, "config"), yes: boolFlag(cmd, "yes"),
+	options, err := reviewsMutationOptionsFromCommand(cmd)
+	if err != nil {
+		return printConfigFailure(stringFlag(cmd, "format"), streams.output, streams.errors, err)
 	}
 	return mutateReviewSelection(options, streams, func(selection configuration.ReviewSelection) (configuration.ReviewSelection, error) {
 		limit, err := strconv.Atoi(value)
@@ -97,7 +92,8 @@ func mutateReviewSelection(options configurationMutationOptions, streams command
 }
 
 func publishReviewSelection(manager *configuration.Manager, selection configuration.ReviewSelection, options configurationMutationOptions, streams commandIO) int {
-	plan, err := manager.Plan(configuration.Repository(options.repository), []configuration.Intent{configuration.SetReviewSelection{Selection: selection}})
+	intent := configuration.SetReviewSelection{Target: options.target, Selection: selection}
+	plan, err := manager.Plan(configuration.Repository(options.repository), []configuration.Intent{intent})
 	if err != nil {
 		return printConfigFailure(options.format, streams.output, streams.errors, err)
 	}
@@ -106,15 +102,16 @@ func publishReviewSelection(manager *configuration.Manager, selection configurat
 
 func reviewsMutationOptionsFromCommand(cmd *cobra.Command) (configurationMutationOptions, error) {
 	format := stringFlag(cmd, "format")
-	configurationPath := stringFlag(cmd, "config")
-	mutation := configurationMutationOptions{
-		repository: stringFlag(cmd, "repo"), format: format, configuration: configurationPath, yes: boolFlag(cmd, "yes"),
-	}
-	scope, err := parseConfigurationScope(stringFlag(cmd, "scope"))
+	target, err := parseConfigurationScope(stringFlag(cmd, "target"))
 	if err != nil {
 		return configurationMutationOptions{format: format}, err
 	}
-	mutation.scope = scope
+	mutation := configurationMutationOptions{
+		target: target, format: format, configuration: stringFlag(cmd, "config"), yes: boolFlag(cmd, "yes"),
+	}
+	if target == configuration.ScopeRepository {
+		mutation.repository = stringFlag(cmd, "repo")
+	}
 	return mutation, nil
 }
 

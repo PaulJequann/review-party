@@ -97,7 +97,7 @@ func validateEffectiveConfiguration(manager *configuration.Manager, repository c
 	}
 	var err error
 	_, err = manager.ResolveRunAuthored(configuration.RunRequest{Repository: repository}, inspection)
-	if errors.Is(err, configuration.ErrNoRepositorySelection) {
+	if errors.Is(err, configuration.ErrNoReviewSelection) {
 		return nil
 	}
 	return err

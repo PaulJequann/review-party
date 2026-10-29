@@ -7,13 +7,16 @@ import (
 	"strings"
 )
 
-// SelectionKind records how one run chose its Profiles: the repository's
-// saved roll-up, one explicit Profile, or one explicit Party.
+// SelectionKind records how one run chose its Profiles: the saved roll-up of
+// the Repository or Global Configuration, one explicit Profile, or one
+// explicit Party.
 type SelectionKind string
 
 const (
 	// SelectionRepositoryDefault is the repository-authored default roll-up.
 	SelectionRepositoryDefault SelectionKind = "repository_default"
+	// SelectionGlobalDefault is the Global Configuration's default roll-up.
+	SelectionGlobalDefault SelectionKind = "global_default"
 	// SelectionExplicitProfile is a single explicitly named Profile.
 	SelectionExplicitProfile SelectionKind = "explicit_profile"
 	// SelectionExplicitParty is a single explicitly named Party.
@@ -27,6 +30,8 @@ type LimitSource string
 const (
 	// LimitRepositorySelection is the repository selection's own limit.
 	LimitRepositorySelection LimitSource = "repository_selection"
+	// LimitGlobalSelection is the Global selection's own limit.
+	LimitGlobalSelection LimitSource = "global_selection"
 	// LimitParty is a named Party's Concurrency Limit.
 	LimitParty LimitSource = "party"
 	// LimitExplicitProfile is the sequential default of a one-Profile selection.
@@ -41,9 +46,9 @@ const (
 	ItemParty   AuthoredItemKind = "party"
 )
 
-// ErrNoRepositorySelection reports that a repository has no executable saved
-// Review selection. Callers choose the follow-up guidance.
-var ErrNoRepositorySelection = errors.New("repository has no executable review selection")
+// ErrNoReviewSelection reports that no Configuration gives the run an
+// executable saved Review selection. Callers choose the follow-up guidance.
+var ErrNoReviewSelection = errors.New("no executable review selection")
 
 const (
 	sourceExplicit = "explicit"
@@ -129,7 +134,7 @@ func (manager *Manager) ResolveRun(request RunRequest) (ResolvedReviews, error) 
 // snapshot. Definition files remain resolved through the manager so missing or
 // malformed executable material still fails closed.
 func (manager *Manager) ResolveRunLoaded(request RunRequest, loaded Loaded) (ResolvedReviews, error) {
-	selection, value := manager.effectiveReviewSelection(loaded)
+	selection, value := effectiveReviewSelection(loaded)
 	return selectionResolver{lookup: manager.selectionLookup(request.Repository)}.
 		resolve(request.Repository, request, selection, value)
 }
@@ -350,13 +355,17 @@ func (resolver selectionResolver) resolveExplicitParty(repository Repository, va
 	return resolved, nil
 }
 
-// resolveDefaultSelection expands the repository's authored reviews roll-up:
+// resolveDefaultSelection expands the effective authored reviews roll-up:
 // global entries first, then repository entries, preserving authored order.
 func (resolver selectionResolver) resolveDefaultSelection(repository Repository, selection ReviewSelection, value Value[ReviewSelection]) (ResolvedReviews, error) {
 	if !value.Authored {
-		return ResolvedReviews{}, ErrNoRepositorySelection
+		return ResolvedReviews{}, ErrNoReviewSelection
 	}
-	resolved := ResolvedReviews{Kind: SelectionRepositoryDefault, Source: value.Path}
+	kind, limitSource := SelectionRepositoryDefault, LimitRepositorySelection
+	if value.Source == SourceGlobal {
+		kind, limitSource = SelectionGlobalDefault, LimitGlobalSelection
+	}
+	resolved := ResolvedReviews{Kind: kind, Source: value.Path}
 	entries, err := resolver.defaultEntries(repository, selection)
 	if err != nil {
 		return ResolvedReviews{}, err
@@ -365,10 +374,10 @@ func (resolver selectionResolver) resolveDefaultSelection(repository Repository,
 	expander.expand(&resolved, repository, entries)
 	expander.finish(&resolved)
 	if len(resolved.Authored) == 0 && len(resolved.Expanded) == 0 {
-		return ResolvedReviews{}, fmt.Errorf("%w: reviews selects nothing", ErrNoRepositorySelection)
+		return ResolvedReviews{}, fmt.Errorf("%w: reviews selects nothing", ErrNoReviewSelection)
 	}
 	resolved.ConcurrencyLimit = selection.ConcurrencyLimit
-	resolved.LimitSource = LimitRepositorySelection
+	resolved.LimitSource = limitSource
 	return resolved, nil
 }
 

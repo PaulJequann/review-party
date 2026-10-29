@@ -51,7 +51,7 @@ func executeConfigurationShow(options configurationFileOptions, streams commandI
 func buildConfigurationShowReport(manager *configuration.Manager, repository string) (configurationShowReport, error) {
 	repositoryID := configuration.Repository(repository)
 	snapshot, err := manager.ResolveRuntime(configuration.RunRequest{Repository: repositoryID})
-	if errors.Is(err, configuration.ErrNoRepositorySelection) {
+	if errors.Is(err, configuration.ErrNoReviewSelection) {
 		if snapshot == nil {
 			return configurationShowReport{}, err
 		}

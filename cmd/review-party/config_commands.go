@@ -162,7 +162,7 @@ func newConfigPartyCreateCommand(streams commandIO) *cobra.Command {
 }
 
 func newConfigReviewsCommand(streams commandIO) *cobra.Command {
-	cmd := &cobra.Command{Use: "reviews", Short: "Edit the repository's ordered Review selection", Args: cobra.NoArgs, RunE: showCommandHelp}
+	cmd := &cobra.Command{Use: "reviews", Short: "Edit the ordered Review selection of the repository or the Global Configuration", Args: cobra.NoArgs, RunE: showCommandHelp}
 	cmd.AddCommand(
 		newConfigReviewsAddCommand(streams),
 		newConfigReviewsRemoveCommand(streams),
@@ -177,6 +177,7 @@ func newConfigReviewsAddCommand(streams commandIO) *cobra.Command {
 		return commandResult(executeConfigReviewsAdd(cmd, streams))
 	})
 	addConfigMutationFlags(cmd, true, true, "")
+	addSelectionTargetFlag(cmd)
 	return cmd
 }
 
@@ -186,6 +187,7 @@ func newConfigReviewsRemoveCommand(streams commandIO) *cobra.Command {
 	})
 	cmd.Flags().Int("index", -1, "Zero-based item index in the selected scope")
 	addConfigMutationFlags(cmd, true, true, "")
+	addSelectionTargetFlag(cmd)
 	return cmd
 }
 
@@ -196,13 +198,15 @@ func newConfigReviewsMoveCommand(streams commandIO) *cobra.Command {
 	cmd.Flags().Int("from", -1, "Current zero-based item index")
 	cmd.Flags().Int("to", -1, "Destination zero-based item index")
 	addConfigMutationFlags(cmd, true, false, "")
+	addSelectionTargetFlag(cmd)
 	return cmd
 }
 
 func newConfigReviewsConcurrencyCommand(streams commandIO) *cobra.Command {
-	cmd := newConfigLeafCommand("set-concurrency N", "Set the repository Review selection's Concurrency Limit", cobra.ExactArgs(1), func(cmd *cobra.Command, args []string) error {
+	cmd := newConfigLeafCommand("set-concurrency N", "Set the Review selection's Concurrency Limit", cobra.ExactArgs(1), func(cmd *cobra.Command, args []string) error {
 		return commandResult(executeConfigReviewsConcurrency(args[0], cmd, streams))
 	})
 	addConfigMutationFlags(cmd, false, false, "")
+	addSelectionTargetFlag(cmd)
 	return cmd
 }
