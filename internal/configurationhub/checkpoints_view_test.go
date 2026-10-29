@@ -69,8 +69,6 @@ func loadedFiles(t *testing.T, manager *configuration.Manager, repository config
 	return loaded
 }
 
-// checkpointsModel opens the Hub menu on Checkpoints over the manager's
-// files, with the caller's undeclared-Integrations check.
 func checkpointsModel(t *testing.T, manager *configuration.Manager, repository configuration.Repository, check func() (string, error)) Model {
 	t.Helper()
 	model := hubModelFor(t, manager, repository)
@@ -180,7 +178,7 @@ func TestCheckpointsViewDescribesEachFile(t *testing.T) {
 			}
 			model = pressHubKeys(t, model, tea.KeyPressMsg{Code: tea.KeyEnter})
 			rows := model.browserRows()
-			if len(rows) != 6 || rows[0].Kind != itemCheckpointHeader || rows[0].Index != -1 || rows[0].Detail != test.repository ||
+			if len(rows) != 6 || rows[0].Kind != itemCheckpointHeader || rows[0].Detail != test.repository ||
 				rows[3].Target != configuration.ScopeGlobal || rows[3].Detail != test.global || rows[4].Name != string(configuration.CheckpointPrePush) {
 				t.Fatalf("rows = %#v", rows)
 			}

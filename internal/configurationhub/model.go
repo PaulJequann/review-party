@@ -94,8 +94,6 @@ type renderOptions struct {
 	styled bool
 }
 
-// header names the file header row kind of an area listed as one section per
-// configuration file; such an area keeps its headers through the filter.
 type areaSpec struct {
 	area        Area
 	kind        ItemKind

@@ -198,8 +198,6 @@ func (model Model) cursorReviewKeys() []reviewKey {
 	return keys
 }
 
-// reviewGroupLabel names the selection group a Repository Configuration row
-// starts. The Global file holds one group, so it gets no label.
 func reviewGroupLabel(previous, row Item) (string, bool) {
 	if row.Kind != itemReview || row.Target != configuration.ScopeRepository {
 		return "", false

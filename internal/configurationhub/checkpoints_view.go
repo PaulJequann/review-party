@@ -77,9 +77,6 @@ func (view CheckpointsView) enrollment() configuration.Enrollment {
 	return configuration.Enrollment{Enrolled: view.Enrolled, GlobalCheckpoints: global.Declared}
 }
 
-// headerState is the one description of a file's Checkpoints. The TUI
-// section header, the detail pane, the Overview, and the accessible file
-// prompt all show it.
 func (view CheckpointsView) headerState(file CheckpointFile) string {
 	repository := file.Target == configuration.ScopeRepository
 	_, hasRepository := view.file(configuration.ScopeRepository)
@@ -114,7 +111,6 @@ func (file CheckpointFile) names() string {
 	return strings.Join(names, ", ")
 }
 
-// operations lists what an edit of this file can do, in prompt order.
 func (view CheckpointsView) operations(file CheckpointFile) []checkpointOperation {
 	operations := []checkpointOperation{checkpointSet}
 	if file.Field == CheckpointsDeclared {
@@ -123,21 +119,21 @@ func (view CheckpointsView) operations(file CheckpointFile) []checkpointOperatio
 	if file.Target != configuration.ScopeRepository {
 		return operations
 	}
-	if view.enrollment().Offered() {
-		operations = append(operations, checkpointEnroll)
+	if !file.Present {
+		if view.enrollment().Offered() {
+			operations = append(operations, checkpointEnroll)
+		}
+		return operations
 	}
-	if file.Present && file.Field != CheckpointsAbsent {
+	if file.Field != CheckpointsAbsent {
 		operations = append(operations, checkpointInherit)
 	}
-	if file.Present && file.Field != CheckpointsNone {
+	if file.Field != CheckpointsNone {
 		operations = append(operations, checkpointOptOut)
 	}
 	return operations
 }
 
-// rowOperations narrows a file's operations to the cursor row: a declared
-// Checkpoint is removed from its own row, and the file-wide operations live on
-// the header.
 func (view CheckpointsView) rowOperations(row Item) []checkpointOperation {
 	file, ok := view.file(row.Target)
 	if !ok {
@@ -161,8 +157,6 @@ func (view CheckpointsView) rowOperations(row Item) []checkpointOperation {
 	return operations
 }
 
-// prefill is the Checkpoint a set starts from: the file's own declaration of
-// the name, else the Global one, else fallback.
 func (view CheckpointsView) prefill(target configuration.Scope, name configuration.CheckpointName, fallback configuration.Checkpoint) configuration.Checkpoint {
 	for _, scope := range []configuration.Scope{target, configuration.ScopeGlobal} {
 		if file, ok := view.file(scope); ok {
@@ -178,11 +172,9 @@ func (view CheckpointsView) setDraft(target configuration.Scope, name configurat
 	return checkpointFormDraft{target: target, operation: checkpointSet, checkpointDraft: newCheckpointDraft(name, view.prefill(target, name, fallback))}
 }
 
-// appendHubCheckpointFile adds one file's header row and a row for every
-// Checkpoint name, declared or not.
 func appendHubCheckpointFile(snapshot *Snapshot, file CheckpointFile) {
 	snapshot.Items = append(snapshot.Items, Item{
-		Target: file.Target, Scope: ItemScope(file.Target), Kind: itemCheckpointHeader, Index: -1,
+		Target: file.Target, Scope: ItemScope(file.Target), Kind: itemCheckpointHeader,
 		Name: configurationTitle(file.Target), Detail: snapshot.Checkpoints.headerState(file),
 	})
 	for _, name := range configuration.CheckpointNames() {
@@ -202,9 +194,6 @@ type checkpointKey struct {
 	label     string
 }
 
-// checkpointKeys binds browser keys to Checkpoint operations. A key may bind
-// several operations; the row offers at most one of them. The key dispatcher,
-// the action bar, and the help overlay read this one table.
 var checkpointKeys = []checkpointKey{
 	{keys: []string{"e", "enter"}, help: "e/⏎", operation: checkpointSet, label: "set"},
 	{keys: []string{"r"}, help: "r", operation: checkpointRemove, label: "remove"},
@@ -213,9 +202,6 @@ var checkpointKeys = []checkpointKey{
 	{keys: []string{"o"}, help: "o", operation: checkpointOptOut, label: "opt out"},
 }
 
-// checkpointKeyOperation resolves a key against the operations a row offers.
-// bound is false for a key the table does not hold; refusal names what the
-// key does when the row offers none of its operations.
 func checkpointKeyOperation(key string, offered []checkpointOperation) (operation checkpointOperation, bound bool, refusal string) {
 	var labels []string
 	for _, binding := range checkpointKeys {
@@ -233,7 +219,6 @@ func checkpointKeyOperation(key string, offered []checkpointOperation) (operatio
 	return 0, true, fmt.Sprintf("%s does not apply to this row.", strings.Join(labels, " or "))
 }
 
-// cursorCheckpointKeys lists the key bindings the cursor row allows.
 func (model Model) cursorCheckpointKeys() []checkpointKey {
 	row, ok := model.cursorRow()
 	if !ok {

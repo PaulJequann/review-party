@@ -83,8 +83,6 @@ func (model Model) renderBreadcrumb(options renderOptions) string {
 	return line
 }
 
-// editTarget names the configuration file an open Reviews or Checkpoints
-// form or preview writes.
 func (model Model) editTarget(area Area) configuration.Scope {
 	if model.session == nil || model.view != viewForm && model.view != viewPlanPreview {
 		return ""

@@ -97,10 +97,6 @@ func undeclaredUninstallCommand(root, config string) string {
 	return "review-party checkpoint uninstall --undeclared --repo " + shellWord(root) + configurationArgument(config)
 }
 
-// undeclaredIntegrations plans removing the installed Checkpoint
-// Integrations no declared Checkpoint serves, with the command that removes
-// them. The command is empty when nothing is installed beyond the declared
-// Checkpoints.
 func undeclaredIntegrations(root, config string, manager *configuration.Manager) (uninstallPlan, string, error) {
 	plan, err := planUndeclaredUninstall(root, manager)
 	if err != nil || len(plan.steps) == 0 {

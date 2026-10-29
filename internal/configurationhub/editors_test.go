@@ -81,8 +81,7 @@ func TestAccessibleChooseActionRoutesCopyOption(t *testing.T) {
 		ValidateName: func(string) error { return nil },
 	})
 	var output bytes.Buffer
-	// Six area options precede the copy option; huh accessible selects take
-	// a one-based option number.
+	// huh accessible selects take a one-based option number.
 	editor := editor{manager: manager, RunOptions: RunOptions{
 		Input: newLineInput("7\n"), Output: &output, Accessible: true,
 	}}

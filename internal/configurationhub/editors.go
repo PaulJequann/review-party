@@ -224,8 +224,6 @@ func (e *editor) run(action hubAction) (bool, error) {
 	return true, spec.action(e)
 }
 
-// chooseFile asks which configuration file to edit, labelling each with its
-// state. A single file needs no prompt.
 func (e *editor) chooseFile(state func(configuration.Scope) string) (configuration.Scope, error) {
 	targets := e.snapshot.Targets
 	switch len(targets) {

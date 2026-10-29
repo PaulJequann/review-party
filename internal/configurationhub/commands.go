@@ -60,9 +60,7 @@ type planRequest struct {
 	review     reviewPlanRequest
 	checkpoint checkpointFormDraft
 	receipts   ReceiptProvider
-	// notice reports, after a Checkpoints publish, what the published change
-	// leaves behind outside configuration.
-	notice func() (string, error)
+	notice     func() (string, error)
 }
 
 type planKind string

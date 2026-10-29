@@ -54,17 +54,12 @@ func (operation checkpointOperation) label() string {
 	return operation.String()
 }
 
-// checkpointFormDraft is one Checkpoints edit of one configuration file. The
-// embedded draft names the Checkpoint a set or remove changes.
 type checkpointFormDraft struct {
 	target    configuration.Scope
 	operation checkpointOperation
 	checkpointDraft
 }
 
-// planCheckpointEdit is the one Checkpoints planner both Hub hosts and the
-// first-use journey call. It refuses an edit that changes nothing with the
-// fact that makes it a no-op.
 func planCheckpointEdit(manager *configuration.Manager, repository configuration.Repository, draft checkpointFormDraft) (configuration.Plan, error) {
 	plan, err := draft.plan(manager, repository)
 	if err != nil {
@@ -99,8 +94,6 @@ func (draft checkpointFormDraft) plan(manager *configuration.Manager, repository
 	return manager.Plan(repository, []configuration.Intent{intent})
 }
 
-// unchangedFact explains a no-op. Inherit and opt out never reach it: their
-// intents refuse a no-op themselves.
 func (draft checkpointFormDraft) unchangedFact() string {
 	title := configurationTitle(draft.target)
 	switch draft.operation {
@@ -115,7 +108,6 @@ func (draft checkpointFormDraft) unchangedFact() string {
 	return fmt.Sprintf("%s already holds these Checkpoints.", title)
 }
 
-// checkpointDraft holds the form answers; numbers stay text until parsed.
 type checkpointDraft struct {
 	name            configuration.CheckpointName
 	requirement     configuration.CheckpointRequirement
@@ -149,7 +141,6 @@ func (draft checkpointDraft) checkpoint() (configuration.Checkpoint, error) {
 	return checkpoint, err
 }
 
-// checkpointFields asks for every rule of one Checkpoint.
 func checkpointFields(draft *checkpointDraft) []huh.Field {
 	return []huh.Field{
 		huh.NewSelect[configuration.CheckpointRequirement]().Title("What should the Checkpoint require?").Options(
@@ -181,8 +172,6 @@ func checkpointNameOptions(names []configuration.CheckpointName) []huh.Option[co
 	return options
 }
 
-// checkpointNameField asks which Checkpoint a set declares or a remove stops
-// declaring. A remove offers only the names the file declares.
 func checkpointNameField(draft *checkpointFormDraft, file CheckpointFile) huh.Field {
 	title, names := "Which Checkpoint should %s declare?", configuration.CheckpointNames()
 	if draft.operation == checkpointRemove {
@@ -192,9 +181,6 @@ func checkpointNameField(draft *checkpointFormDraft, file CheckpointFile) huh.Fi
 		Options(checkpointNameOptions(names)...).Value(&draft.name)
 }
 
-// integrationsNotice runs the caller's undeclared-Integrations check after a
-// Checkpoints publish. A failed check is reported, never fatal: the publish
-// already happened.
 func integrationsNotice(check func() (string, error)) string {
 	if check == nil {
 		return ""
@@ -243,8 +229,6 @@ func (e *editor) editCheckpoints() error {
 	return err
 }
 
-// fillCheckpointDraft asks what a set or remove changes. A set starts from
-// the prefilled Checkpoint of the chosen name.
 func (e *editor) fillCheckpointDraft(draft *checkpointFormDraft, file CheckpointFile) error {
 	switch draft.operation {
 	case checkpointSet:

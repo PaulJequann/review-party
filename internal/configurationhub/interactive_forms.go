@@ -191,9 +191,6 @@ func (model Model) startCheckpointPlan(draft checkpointFormDraft) (tea.Model, te
 	return model.startPlan(planRequest{kind: planCheckpoints, checkpoint: draft})
 }
 
-// openCheckpointSet sets a Checkpoint in the file the cursor row belongs to:
-// a Checkpoint row opens its prefilled rules, and a file header first asks
-// which Checkpoint. The draft keeps that target until it is published.
 func (model *Model) openCheckpointSet(row Item) tea.Cmd {
 	model.status = ""
 	if row.Kind == itemCheckpoint {
@@ -606,9 +603,6 @@ func (model *Model) reopenPlan(kind planKind) (Model, tea.Cmd) {
 		if model.session.checkpoints.operation == checkpointSet {
 			return model.withForm(model.openCheckpointFieldsForm())
 		}
-		// Only a set has fields to correct; a refused remove, inherit, opt
-		// out, or enroll returns to the menu with the planner's fact in the
-		// status line and no draft left behind.
 		model.toMenu()
 		model.drafts.checkpoints = checkpointFormDraft{}
 		return *model, nil

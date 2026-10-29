@@ -6,9 +6,6 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-// sectionRows returns the browser rows of an area listed as one section per
-// configuration file: every file header, then that file's rows that match the
-// filter.
 func (model Model) sectionRows(spec areaSpec) []Item {
 	var rows []Item
 	for _, item := range model.snapshot.Items {
@@ -35,8 +32,6 @@ func (model Model) cursorRow() (Item, bool) {
 	return rows[min(model.cursor, len(rows)-1)], true
 }
 
-// renderFileSections renders the stacked per-file sections and reports the
-// line the cursor row starts on. A cursor of -1 marks no row.
 func renderFileSections(rows []Item, cursor, width int, options renderOptions) (string, int) {
 	var content strings.Builder
 	cursorLine, line := 1, 1
@@ -63,9 +58,6 @@ func writeSectionLine(content *strings.Builder, text string, width int) int {
 	return wrappedLineCount(text, width)
 }
 
-// renderSectionRow indents a file header's state and every row's wrapped
-// lines so a narrow pane wraps them under the title rather than back to the
-// margin.
 func renderSectionRow(row Item, focused bool, width int, options renderOptions) string {
 	cursor := "  "
 	if focused {
@@ -103,7 +95,6 @@ func renderRowDetail(snapshot Snapshot, row Item, options renderOptions) string 
 	return title + "\n" + path + "\n" + row.Detail
 }
 
-// headerPath is the file a header row describes. An absent file has no path.
 func headerPath(snapshot Snapshot, row Item) string {
 	switch row.Kind {
 	case itemReviewHeader:
