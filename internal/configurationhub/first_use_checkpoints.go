@@ -102,8 +102,12 @@ func (e *editor) declareCheckpoint() error {
 }
 
 func validateExemptions(value string) error {
+	patterns, err := parseExemptions(value)
+	if err != nil {
+		return err
+	}
 	var errs []error
-	for _, pattern := range strings.Fields(value) {
+	for _, pattern := range patterns {
 		errs = append(errs, configuration.ValidatePathPattern(pattern))
 	}
 	return errors.Join(errs...)

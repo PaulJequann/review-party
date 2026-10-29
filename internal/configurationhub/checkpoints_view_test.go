@@ -485,6 +485,22 @@ func TestRepositoryCheckpointEditsMatchThroughBothHosts(t *testing.T) {
 	}
 }
 
+func TestCheckpointEditKeepsExemptPatternsThatHoldASpace(t *testing.T) {
+	manager, repository := checkpointsHubFixture(t)
+	checkpoint := judgedCheckpoint()
+	checkpoint.ExemptPaths = []string{"design docs/**", "*.md"}
+	publishIntents(t, manager, "", configuration.SetCheckpoint{Target: configuration.ScopeGlobal, Name: configuration.CheckpointPrePush, Checkpoint: checkpoint})
+	enroll(t, manager, repository)
+
+	model := pressHubKeys(t, checkpointsModel(t, manager, repository, nil), tea.KeyPressMsg{Code: tea.KeyEnter}, key('j'), key('e'))
+	model.session.checkpoints.reviewBudget = "5"
+	publishHubForm(t, model)
+	checkpoint.ReviewBudget = 5
+	if got := loadedFiles(t, manager, repository).Repository.Document.Checkpoints; !reflect.DeepEqual(got, map[configuration.CheckpointName]configuration.Checkpoint{configuration.CheckpointPrePush: checkpoint}) {
+		t.Fatalf("Repository Checkpoints = %#v", got)
+	}
+}
+
 func repositoryFile(t *testing.T, repository configuration.Repository) string {
 	t.Helper()
 	content, err := os.ReadFile(filepath.Join(string(repository), ".reviewparty", "config.json"))

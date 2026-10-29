@@ -1,8 +1,10 @@
 package configurationhub
 
 import (
+	"encoding/csv"
 	"errors"
 	"fmt"
+	"io"
 	"slices"
 	"strconv"
 	"strings"
@@ -120,7 +122,7 @@ type checkpointDraft struct {
 
 func newCheckpointDraft(name configuration.CheckpointName, checkpoint configuration.Checkpoint) checkpointDraft {
 	return checkpointDraft{
-		name: name, requirement: checkpoint.Requirement, exemptions: strings.Join(checkpoint.ExemptPaths, " "),
+		name: name, requirement: checkpoint.Requirement, exemptions: formatExemptions(checkpoint.ExemptPaths),
 		unreviewedLines: strconv.Itoa(checkpoint.UnreviewedLines), reviewBudget: strconv.Itoa(checkpoint.ReviewBudget),
 		waivers: checkpoint.Waivers, integrations: slices.Clone(checkpoint.Integrations),
 	}
@@ -129,7 +131,11 @@ func newCheckpointDraft(name configuration.CheckpointName, checkpoint configurat
 func (draft checkpointDraft) checkpoint() (configuration.Checkpoint, error) {
 	checkpoint := configuration.NewCheckpoint()
 	checkpoint.Requirement = draft.requirement
-	checkpoint.ExemptPaths = strings.Fields(draft.exemptions)
+	exemptions, err := parseExemptions(draft.exemptions)
+	if err != nil {
+		return checkpoint, err
+	}
+	checkpoint.ExemptPaths = exemptions
 	checkpoint.Waivers = draft.waivers
 	checkpoint.Integrations = draft.integrations
 	lines, err := strconv.Atoi(strings.TrimSpace(draft.unreviewedLines))
@@ -141,13 +147,40 @@ func (draft checkpointDraft) checkpoint() (configuration.Checkpoint, error) {
 	return checkpoint, err
 }
 
+// Exempt paths are typed as one space-separated line in CSV quoting, so a
+// pattern holding a space survives an edit as a quoted field.
+func parseExemptions(value string) ([]string, error) {
+	reader := csv.NewReader(strings.NewReader(value))
+	reader.Comma = ' '
+	reader.TrimLeadingSpace = true
+	patterns, err := reader.Read()
+	if errors.Is(err, io.EOF) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return slices.DeleteFunc(patterns, func(pattern string) bool { return pattern == "" }), nil
+}
+
+func formatExemptions(patterns []string) string {
+	var line strings.Builder
+	writer := csv.NewWriter(&line)
+	writer.Comma = ' '
+	if err := writer.Write(patterns); err != nil {
+		panic(fmt.Sprintf("format exempt paths: %v", err))
+	}
+	writer.Flush()
+	return strings.TrimSuffix(line.String(), "\n")
+}
+
 func checkpointFields(draft *checkpointDraft) []huh.Field {
 	return []huh.Field{
 		huh.NewSelect[configuration.CheckpointRequirement]().Title("What should the Checkpoint require?").Options(
 			huh.NewOption("reviewed: a completed Review of every selected Profile covers the change", configuration.RequirementReviewed),
 			huh.NewOption("judged: covered, and every Finding of those Reviews has a verdict", configuration.RequirementJudged),
 		).Value(&draft.requirement),
-		huh.NewInput().Title("Exempt paths (space-separated patterns such as *.md docs/**; blank for none)").Value(&draft.exemptions).Validate(validateExemptions),
+		huh.NewInput().Title(`Exempt paths (space-separated patterns such as *.md docs/**; quote one holding a space, as in "design docs/**"; blank for none)`).Value(&draft.exemptions).Validate(validateExemptions),
 		huh.NewInput().Title("How many unreviewed lines may follow a Review without a new one? (0 for none)").Value(&draft.unreviewedLines).Validate(validateUnreviewedLines),
 		huh.NewInput().Title("How many Reviews may one change spend before a person must step in? (1 to 9)").Value(&draft.reviewBudget).Validate(validateReviewBudget),
 		huh.NewSelect[configuration.WaiverPolicy]().Title("Who may waive the Checkpoint?").Options(
