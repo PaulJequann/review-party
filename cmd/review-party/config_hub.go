@@ -38,11 +38,6 @@ func executeConfigurationHub(parent context.Context, options configurationHubOpt
 	return 0
 }
 
-// runOptions wires the Hub's forms for a resolved repository, or for none, to
-// the terminal, Profile receipts, model discovery, and the
-// undeclared-Integrations check a Checkpoints publish reports. Integrations
-// are installed per repository, so without one there is nothing to check. The
-// Hub and the init first-use journey share it so both drive the same forms.
 func (options configurationHubOptions) runOptions(ctx context.Context, manager *configuration.Manager, streams commandIO) configurationhub.RunOptions {
 	repository := options.repository
 	hubOptions := configurationhub.RunOptions{
@@ -72,9 +67,6 @@ func (options configurationHubOptions) runOptions(ctx context.Context, manager *
 	return hubOptions
 }
 
-// resolveConfigurationHubRepository returns "" when a launch without --repo is
-// outside every git repository: the Hub then opens on Global Configuration
-// only. An explicit --repo must name a repository.
 func resolveConfigurationHubRepository(repository string, explicit bool) (string, error) {
 	root, err := subject.ResolveRepositoryRoot(repository)
 	if !explicit && errors.Is(err, subject.ErrNotRepository) {

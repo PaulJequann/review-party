@@ -89,8 +89,6 @@ func (snapshot Snapshot) writes(target configuration.Scope) bool {
 	return slices.Contains(snapshot.Targets, target)
 }
 
-// copiesProfiles reports whether Copy Profile has a Repository Profile to
-// read and a Global file to write.
 func (snapshot Snapshot) copiesProfiles() bool {
 	return snapshot.writes(configuration.ScopeRepository) && snapshot.writes(configuration.ScopeGlobal)
 }

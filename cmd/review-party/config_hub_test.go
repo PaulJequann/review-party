@@ -27,8 +27,6 @@ func TestConfigurationHubResolvesGitRepositoryRoot(t *testing.T) {
 	}
 }
 
-// runOutsideRepository runs the CLI from a directory that git cannot place in
-// any work tree, answering prompts from input.
 func runOutsideRepository(t *testing.T, input string, arguments ...string) (int, string, string) {
 	t.Helper()
 	isolateProfileCommandEnvironment(t)

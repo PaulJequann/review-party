@@ -263,8 +263,6 @@ func (e *editor) publishReviewPlan(plan configuration.Plan, selection configurat
 	return err
 }
 
-// runPreviewAbsence replaces the resolved run preview outside a repository:
-// what a run resolves to depends on the repository it runs in.
 const runPreviewAbsence = "Run preview needs a repository"
 
 func renderReviewSelectionPreview(output io.Writer, manager *configuration.Manager, repository configuration.Repository, selection configuration.ReviewSelection, globalOnly bool) error {

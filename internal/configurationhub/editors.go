@@ -273,8 +273,6 @@ func (e *editor) reviewAndPublishWithPreview(plan configuration.Plan, publish fu
 	return true, nil
 }
 
-// scopeFields asks which configuration a new definition belongs to. With one
-// target there is nothing to ask: the scope is that target.
 func scopeFields(snapshot Snapshot, scope *string) []huh.Field {
 	if len(snapshot.Targets) == 1 {
 		*scope = string(snapshot.Targets[0])
