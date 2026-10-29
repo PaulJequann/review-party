@@ -190,10 +190,12 @@ func (manager *Manager) stageIntent(plan *Plan, staged map[Scope]*stagedDocument
 }
 
 func markReviewSelectionChange(staged map[Scope]*stagedDocument, intent Intent) {
-	if _, ok := intent.(SetReviewSelection); !ok {
-		return
+	switch intent.(type) {
+	case SetReviewSelection:
+		staged[intent.intentScope()].reviewSelectionChanged = true
+	case InheritGlobalReviewSelection:
+		staged[intent.intentScope()].reviewSelectionChanged = false
 	}
-	staged[intent.intentScope()].reviewSelectionChanged = true
 }
 
 func (manager *Manager) validateStaged(plan *Plan, staged map[Scope]*stagedDocument, loaded Loaded, repository Repository) error {

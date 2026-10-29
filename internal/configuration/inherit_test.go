@@ -140,6 +140,18 @@ func TestInheritGlobalReviewSelectionRemovesOnlyTheRepositorySelection(t *testin
 	}
 }
 
+func TestInheritGlobalReviewSelectionAfterSettingOneInTheSamePlan(t *testing.T) {
+	manager := testManager(t, t.TempDir())
+	repository := t.TempDir()
+	writeDocument(t, repositoryConfig(repository), `{"schema_version":1,"reviews":{"concurrency_limit":3,"global":[],"repository":[]}}`)
+	selection := ReviewSelection{ConcurrencyLimit: 4, Global: []SelectionItem{}, Repository: []SelectionItem{}}
+
+	publishPlan(t, manager, planCheckpoints(t, manager, repository, SetReviewSelection{Target: ScopeRepository, Selection: selection}, InheritGlobalReviewSelection{}))
+	if content := readConfig(t, repositoryConfig(repository)); strings.Contains(content, `"reviews"`) {
+		t.Fatalf("Repository Configuration after setting then inheriting = %s", content)
+	}
+}
+
 func TestInheritGlobalCheckpointsRemovesTheRepositoryField(t *testing.T) {
 	root := t.TempDir()
 	writeDocument(t, filepath.Join(root, "config.json"), `{"schema_version":1,"checkpoints":`+globalPrePush+`}`)
