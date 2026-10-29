@@ -440,31 +440,50 @@ func authoredPartySource(scope Scope, name string) string {
 }
 
 // EffectiveReviewSelection returns the Review selection a run in repository
-// uses: the Repository Configuration's when it authors one, otherwise the
-// Global Configuration's.
+// uses.
 func (manager *Manager) EffectiveReviewSelection(repository Repository) (ReviewSelection, Value[ReviewSelection], error) {
 	loaded, err := manager.Load(repository)
 	if err != nil {
 		return ReviewSelection{}, Value[ReviewSelection]{}, err
 	}
-	selection, value := effectiveReviewSelection(loaded)
-	return selection, value, nil
+	value := loaded.ReviewSelection()
+	return value.Value, value, nil
 }
 
-func effectiveReviewSelection(loaded Loaded) (ReviewSelection, Value[ReviewSelection]) {
+// ReviewSelection returns the Review selection in force: the Repository
+// Configuration's when it authors one, otherwise the Global Configuration's.
+func (loaded Loaded) ReviewSelection() Value[ReviewSelection] {
 	for _, document := range []LoadedDocument{loaded.Repository, loaded.Global} {
-		if selection, value, authored := document.reviewSelection(); authored {
-			return selection, value
+		if document.Present && document.Document.Reviews != nil {
+			return Value[ReviewSelection]{Value: *document.Document.Reviews, Authored: true, Source: sourceFor(document.Scope), Path: document.Path}
 		}
 	}
-	return ReviewSelection{}, Value[ReviewSelection]{Source: SourcePackaged}
+	return Value[ReviewSelection]{Source: SourcePackaged}
 }
 
-func (document LoadedDocument) reviewSelection() (ReviewSelection, Value[ReviewSelection], bool) {
-	if !document.Present || document.Document.Reviews == nil {
-		return ReviewSelection{}, Value[ReviewSelection]{}, false
+// ReviewSelectionToEdit returns the selection an edit to the target file
+// starts from. A Global edit starts from the Global Configuration's own
+// selection; a Repository edit starts from the selection in force there,
+// since saving it gives the repository its own copy. Without one, both start
+// from DefaultReviewSelection. The result shares no memory with later calls.
+func (manager *Manager) ReviewSelectionToEdit(target Scope, repository Repository) (ReviewSelection, error) {
+	switch target {
+	case ScopeGlobal:
+		repository = ""
+	case ScopeRepository:
+		if repository == "" {
+			return ReviewSelection{}, errors.New("editing the Repository Review selection needs a repository")
+		}
+	default:
+		return ReviewSelection{}, fmt.Errorf("unknown configuration scope %q", target)
 	}
-	selection := *document.Document.Reviews
-	value := Value[ReviewSelection]{Value: selection, Authored: true, Source: sourceFor(document.Scope), Path: document.Path}
-	return selection, value, true
+	loaded, err := manager.Load(repository)
+	if err != nil {
+		return ReviewSelection{}, err
+	}
+	value := loaded.ReviewSelection()
+	if !value.Authored {
+		return DefaultReviewSelection(), nil
+	}
+	return value.Value, nil
 }

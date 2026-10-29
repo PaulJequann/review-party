@@ -15,9 +15,14 @@ Review Party runs the Global Configuration's Review selection in every repositor
   repository state.
 - `reportInitGaps` in `cmd/review-party/init_report.go` names the Global
   Configuration as the source of a repository's effective selection.
-- `effectiveReviewSelection` in `internal/configuration/domain_storage.go`
+- `Loaded.ReviewSelection` in `internal/configuration/domain_storage.go`
   takes the Repository `reviews` field when present and the Global field
-  otherwise, as a whole.
+  otherwise, as a whole. `ReviewSelectionToEdit` starts a Global edit from the
+  Global field and a Repository edit from the selection in force.
+- `InheritGlobalReviewSelection` in `internal/configuration/intent.go` removes
+  the Repository field for `config reviews inherit`, and `precedenceWarnings`
+  in `internal/configuration/precedence.go` warns when a Plan moves the
+  selection in force between files.
 - `resolveDefaultSelection` in `internal/configuration/selection.go` records a
   Global source as selection kind `global_default` with limit source
   `global_selection`.
@@ -32,6 +37,7 @@ deferred; the Hub edits the repository selection only.
 - Run `review-party init --global --baseline ...` once per machine.
 - Run `review-party init --repo PATH` in any repository and read which file the selection comes from.
 - Run `review-party config reviews ... --target global` to edit the Global selection.
+- Run `review-party config reviews inherit --repo PATH` to drop a repository's own selection.
 
 ## Driving it with the CLI
 

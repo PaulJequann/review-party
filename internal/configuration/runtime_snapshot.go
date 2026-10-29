@@ -94,8 +94,8 @@ func (manager *Manager) ResolveRuntime(request RunRequest) (RuntimeSnapshot, err
 	if err != nil {
 		return nil, err
 	}
-	selectionFacts, selectionValue := effectiveReviewSelection(loaded)
-	selection, err := definitions.resolve(request, selectionFacts, selectionValue)
+	selectionValue := loaded.ReviewSelection()
+	selection, err := definitions.resolve(request, selectionValue.Value, selectionValue)
 	if err != nil {
 		return nil, err
 	}
@@ -123,11 +123,11 @@ func (manager *Manager) noSelectionError(request RunRequest, loaded Loaded) (boo
 	if request.Profile != "" || request.Party != "" {
 		return false, nil
 	}
-	selection, value := effectiveReviewSelection(loaded)
+	value := loaded.ReviewSelection()
 	if !value.Authored {
 		return true, ErrNoReviewSelection
 	}
-	if len(selection.Global) == 0 && len(selection.Repository) == 0 {
+	if len(value.Value.Global) == 0 && len(value.Value.Repository) == 0 {
 		return true, fmt.Errorf("%w: reviews selects nothing", ErrNoReviewSelection)
 	}
 	return false, nil
@@ -172,11 +172,11 @@ func runtimeRequestNeedsParties(request RunRequest, loaded Loaded) bool {
 }
 
 func savedSelectionIncludesParty(loaded Loaded) bool {
-	selection, value := effectiveReviewSelection(loaded)
+	value := loaded.ReviewSelection()
 	if !value.Authored {
 		return false
 	}
-	return selectionIncludesParty(selection.Global) || selectionIncludesParty(selection.Repository)
+	return selectionIncludesParty(value.Value.Global) || selectionIncludesParty(value.Value.Repository)
 }
 
 func selectionIncludesParty(items []SelectionItem) bool {

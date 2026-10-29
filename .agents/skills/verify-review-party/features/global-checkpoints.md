@@ -10,9 +10,12 @@ Global Configuration declares Review Checkpoints that apply to every enrolled re
 
 ## Source evidence
 
-- `EffectiveCheckpoints` in `internal/configuration/checkpoint.go` returns no
+- `Loaded.Checkpoints` in `internal/configuration/checkpoint.go` returns no
   Checkpoints for an unenrolled repository, the Repository field when present,
   and the Global field otherwise, with the declaring file.
+- `DeclareNoCheckpoints` and `InheritGlobalCheckpoints` in
+  `internal/configuration/checkpoint.go` write or remove the Repository field
+  for `config checkpoint none` and `config checkpoint inherit`.
 - `PlanEnrollment` in `internal/configuration/checkpoint.go` stages a
   Repository Configuration file holding only the schema version.
 - `enrollRepository` in `cmd/review-party/profile_commands.go` routes
@@ -32,6 +35,7 @@ deferred; the Hub declares Repository Checkpoints and offers enrollment.
 - Run `review-party config checkpoint set pre-push --target global --integration git` once per machine.
 - Run `review-party init --repo PATH` in a repository and read the enrollment line, then `review-party init --enroll --yes --repo PATH`.
 - Run `review-party checkpoint install git --repo PATH` and push.
+- Run `review-party config checkpoint none --repo PATH` to turn the Global Checkpoints off for one repository, and `review-party config checkpoint inherit --repo PATH` to turn them back on.
 
 ## Driving it with the CLI
 

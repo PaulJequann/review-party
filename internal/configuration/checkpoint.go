@@ -201,25 +201,29 @@ func (manager *Manager) Checkpoints(repository Repository) (map[CheckpointName]C
 }
 
 // EffectiveCheckpoints returns the Checkpoints in force for the repository
-// and the file that declares them. Repository Configuration that declares
-// checkpoints, even an empty object, replaces the Global ones as a whole. A
-// repository without that field takes the Global Checkpoints once it is
-// enrolled by having a Repository Configuration file; one without the file
-// has none.
+// and the file that declares them.
 func (manager *Manager) EffectiveCheckpoints(repository Repository) (Value[map[CheckpointName]Checkpoint], error) {
 	loaded, err := manager.Load(repository)
 	if err != nil {
 		return Value[map[CheckpointName]Checkpoint]{}, err
 	}
-	if !loaded.Repository.Present {
-		return Value[map[CheckpointName]Checkpoint]{Source: SourcePackaged}, nil
-	}
-	for _, document := range []LoadedDocument{loaded.Repository, loaded.Global} {
-		if document.Document.Checkpoints != nil {
-			return Value[map[CheckpointName]Checkpoint]{Value: document.Document.Checkpoints, Authored: true, Source: sourceFor(document.Scope), Path: document.Path}, nil
+	return loaded.Checkpoints(), nil
+}
+
+// Checkpoints returns the Checkpoints in force and the file that declares
+// them. Repository Configuration that declares checkpoints, even an empty
+// object, replaces the Global ones as a whole. A repository without that
+// field takes the Global Checkpoints once it is enrolled by having a
+// Repository Configuration file; one without the file has none.
+func (loaded Loaded) Checkpoints() Value[map[CheckpointName]Checkpoint] {
+	if loaded.Repository.Present {
+		for _, document := range []LoadedDocument{loaded.Repository, loaded.Global} {
+			if document.Document.Checkpoints != nil {
+				return Value[map[CheckpointName]Checkpoint]{Value: document.Document.Checkpoints, Authored: true, Source: sourceFor(document.Scope), Path: document.Path}
+			}
 		}
 	}
-	return Value[map[CheckpointName]Checkpoint]{Source: SourcePackaged}, nil
+	return Value[map[CheckpointName]Checkpoint]{Source: SourcePackaged}
 }
 
 // Enrollment is whether the repository has a Repository Configuration file,
@@ -409,7 +413,27 @@ type RemoveCheckpoint struct {
 	Name   CheckpointName
 }
 
+// InheritGlobalCheckpoints removes the Repository Configuration's checkpoints,
+// including an empty object, so the Global Checkpoints are in force for the
+// enrolled repository.
+type InheritGlobalCheckpoints struct{}
+
+// DeclareNoCheckpoints declares an empty set of Checkpoints in Repository
+// Configuration, which replaces the Global Checkpoints with none.
+type DeclareNoCheckpoints struct{}
+
 func checkpointField(name CheckpointName) string { return "checkpoints." + string(name) }
+
+func readCheckpoints(document Document) (string, bool) {
+	if document.Checkpoints == nil {
+		return "", false
+	}
+	payload, err := json.Marshal(document.Checkpoints)
+	if err != nil {
+		panic(fmt.Sprintf("encode checkpoints preview: %v", err))
+	}
+	return string(payload), true
+}
 
 func readCheckpoint(document Document, name CheckpointName) (string, bool) {
 	checkpoint, declared := document.Checkpoints[name]
@@ -456,4 +480,26 @@ func (intent RemoveCheckpoint) applyIntent(document *Document) {
 }
 func (intent RemoveCheckpoint) readIntent(document Document) (string, bool) {
 	return readCheckpoint(document, intent.Name)
+}
+
+func (InheritGlobalCheckpoints) intentScope() Scope             { return ScopeRepository }
+func (InheritGlobalCheckpoints) intentField() string            { return "checkpoints" }
+func (InheritGlobalCheckpoints) applyIntent(document *Document) { document.Checkpoints = nil }
+func (InheritGlobalCheckpoints) readIntent(document Document) (string, bool) {
+	return readCheckpoints(document)
+}
+func (InheritGlobalCheckpoints) unchangedFact() string {
+	return "Repository Configuration does not replace the Global Checkpoints; there is nothing to inherit"
+}
+
+func (DeclareNoCheckpoints) intentScope() Scope  { return ScopeRepository }
+func (DeclareNoCheckpoints) intentField() string { return "checkpoints" }
+func (DeclareNoCheckpoints) applyIntent(document *Document) {
+	document.Checkpoints = map[CheckpointName]Checkpoint{}
+}
+func (DeclareNoCheckpoints) readIntent(document Document) (string, bool) {
+	return readCheckpoints(document)
+}
+func (DeclareNoCheckpoints) unchangedFact() string {
+	return "Repository Configuration already declares no Checkpoints"
 }

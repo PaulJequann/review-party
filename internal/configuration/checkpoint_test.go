@@ -116,39 +116,6 @@ func TestRepositoryCheckpointsRejectInvalidDeclarations(t *testing.T) {
 	}
 }
 
-func TestGlobalCheckpointsAreInForceForEnrolledRepositories(t *testing.T) {
-	root := t.TempDir()
-	global := filepath.Join(root, "config.json")
-	writeDocument(t, global, `{"schema_version":1,"checkpoints":{"pre-push":{"requirement":"reviewed","unreviewed_lines":0,"review_budget":3}}}`)
-	manager := testManager(t, root)
-	declared := map[CheckpointName]Checkpoint{CheckpointPrePush: {Requirement: RequirementReviewed, ReviewBudget: 3, Waivers: WaiversHuman}}
-
-	unenrolled := t.TempDir()
-	enrolled := t.TempDir()
-	writeDocument(t, filepath.Join(enrolled, ".reviewparty", "config.json"), `{"schema_version":1}`)
-	replacing := t.TempDir()
-	writeRepositoryCheckpoints(t, replacing, `{}`)
-	for _, test := range []struct {
-		name       string
-		repository string
-		want       Value[map[CheckpointName]Checkpoint]
-	}{
-		{"unenrolled repository has none", unenrolled, Value[map[CheckpointName]Checkpoint]{Source: SourcePackaged}},
-		{"enrolled repository takes the Global ones", enrolled, Value[map[CheckpointName]Checkpoint]{Value: declared, Authored: true, Source: SourceGlobal, Path: global}},
-		{"repository checkpoints replace them as a whole", replacing, Value[map[CheckpointName]Checkpoint]{Value: map[CheckpointName]Checkpoint{}, Authored: true, Source: SourceRepository, Path: filepath.Join(replacing, ".reviewparty", "config.json")}},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			effective, err := manager.EffectiveCheckpoints(Repository(test.repository))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !reflect.DeepEqual(effective, test.want) {
-				t.Fatalf("effective = %#v, want %#v", effective, test.want)
-			}
-		})
-	}
-}
-
 func TestRepositoryOptOutSurvivesUnrelatedMutations(t *testing.T) {
 	root := t.TempDir()
 	writeDocument(t, filepath.Join(root, "config.json"), `{"schema_version":1,"checkpoints":{"pre-push":{"requirement":"reviewed","unreviewed_lines":0,"review_budget":3}}}`)

@@ -134,9 +134,9 @@ func (manager *Manager) ResolveRun(request RunRequest) (ResolvedReviews, error) 
 // snapshot. Definition files remain resolved through the manager so missing or
 // malformed executable material still fails closed.
 func (manager *Manager) ResolveRunLoaded(request RunRequest, loaded Loaded) (ResolvedReviews, error) {
-	selection, value := effectiveReviewSelection(loaded)
+	value := loaded.ReviewSelection()
 	return selectionResolver{lookup: manager.selectionLookup(request.Repository)}.
-		resolve(request.Repository, request, selection, value)
+		resolve(request.Repository, request, value.Value, value)
 }
 
 // ResolveReviewSelection expands a proposed repository-owned selection

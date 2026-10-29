@@ -62,17 +62,28 @@ Checkpoint asks a person to step in; declare it on one Checkpoint.`
 		code := publishCheckpointIntent(cmd, streams, func(target configuration.Scope) configuration.Intent {
 			return configuration.RemoveCheckpoint{Target: target, Name: configuration.CheckpointName(args[0])}
 		})
-		if code == 0 && stringFlag(cmd, "format") != "json" {
-			if err := offerUndeclaredUninstall(streams, uninstallOptions{repository: stringFlag(cmd, "repo"), configuration: stringFlag(cmd, "config"), yes: boolFlag(cmd, "yes")}); err != nil {
-				printCommandError(streams.errors, 0, fmt.Errorf("warning: %w", err))
-			}
-		}
-		return commandResult(code)
+		return commandResult(offerUninstallAfter(cmd, streams, code))
 	})
 	remove.ValidArgs = checkpointNameArguments()
 	addConfigMutationFlags(remove, false, false, "")
 	addSelectionTargetFlag(remove)
-	cmd.AddCommand(set, remove)
+
+	inherit := newConfigLeafCommand("inherit", "Stop replacing the Global Review Checkpoints in this repository", cobra.NoArgs, func(cmd *cobra.Command, _ []string) error {
+		code := publishIntent(repositoryMutationOptions(cmd), streams, configuration.InheritGlobalCheckpoints{})
+		return commandResult(offerUninstallAfter(cmd, streams, code))
+	})
+	inherit.Long = `Remove the Checkpoints this repository's Configuration declares, including
+an empty declaration, so the Global Checkpoints are in force here again.`
+	addConfigMutationFlags(inherit, false, false, "")
+
+	none := newConfigLeafCommand("none", "Declare that this repository expects no Review Checkpoints", cobra.NoArgs, func(cmd *cobra.Command, _ []string) error {
+		code := publishIntent(repositoryMutationOptions(cmd), streams, configuration.DeclareNoCheckpoints{})
+		return commandResult(offerUninstallAfter(cmd, streams, code))
+	})
+	none.Long = `Declare an empty set of Checkpoints in this repository's Configuration,
+which replaces the Global Checkpoints with none.`
+	addConfigMutationFlags(none, false, false, "")
+	cmd.AddCommand(set, remove, inherit, none)
 	return cmd
 }
 
@@ -89,11 +100,16 @@ func publishCheckpointIntent(cmd *cobra.Command, streams commandIO, intent func(
 	if err != nil {
 		return printConfigFailure(options.format, streams.output, streams.errors, err)
 	}
-	return runConfigurationCommand(options.format, options.configuration, streams, func(manager *configuration.Manager) (int, error) {
-		plan, err := manager.Plan(configuration.Repository(options.repository), []configuration.Intent{intent(options.target)})
-		if err != nil {
-			return 0, err
+	return publishIntent(options, streams, intent(options.target))
+}
+
+// offerUninstallAfter offers to remove installed Checkpoint Integrations that
+// a published change left serving no Checkpoint in force.
+func offerUninstallAfter(cmd *cobra.Command, streams commandIO, code int) int {
+	if code == 0 && stringFlag(cmd, "format") != "json" {
+		if err := offerUndeclaredUninstall(streams, uninstallOptions{repository: stringFlag(cmd, "repo"), configuration: stringFlag(cmd, "config"), yes: boolFlag(cmd, "yes")}); err != nil {
+			printCommandError(streams.errors, 0, fmt.Errorf("warning: %w", err))
 		}
-		return publishConfigurationPlan(manager, plan, options, streams), nil
-	})
+	}
+	return code
 }

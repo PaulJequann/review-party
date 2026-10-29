@@ -206,7 +206,7 @@ func (setup initSetup) apply() int {
 // Party, after the Profile and Party steps.
 func (setup initSetup) startingSelection() (configuration.ReviewSelection, string, int) {
 	if setup.options.baseline == nil {
-		selection, err := currentReviewSelection(setup.manager, setup.repository)
+		selection, err := setup.manager.ReviewSelectionToEdit(setup.target, setup.repository)
 		return selection, "The Review selection already includes every name given; nothing was written.\n", failureCode(setup.streams.errors, err)
 	}
 	selection, _, err := setup.manager.EffectiveReviewSelection(setup.repository)

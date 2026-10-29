@@ -283,6 +283,16 @@ review-party config reviews add --target global --scope global \
   --profile code-quality --yes
 ```
 
+A Repository edit starts from the selection in force there. In a repository
+that uses the Global selection, the first edit saves a Repository copy, which
+replaces the Global selection as a whole, and the Plan warns that later Global
+edits no longer reach the repository. `config reviews inherit` removes the
+Repository selection so the Global one is in force again:
+
+```sh
+review-party config reviews inherit --repo . --yes
+```
+
 ### Create a custom daily Party
 
 Starting from the baseline above, create two Repository Profiles. These commands
@@ -763,18 +773,25 @@ repository. A repository is enrolled when it has a Repository Configuration
 file; `review-party init --enroll` writes one holding only the schema version,
 and `init` in an unenrolled repository prints that command when your Global
 Configuration declares Checkpoints. A Repository `checkpoints` field, even an
-empty one, replaces the Global ones as a whole. A hook in an unenrolled
-repository finds no Checkpoint and allows the push or commit silently.
+empty one, replaces the Global ones as a whole. `config checkpoint none`
+writes that empty field, so the repository expects no Checkpoint whatever
+Global Configuration declares, and `config checkpoint inherit` removes the
+field, so the Global Checkpoints apply again. Both edit only Repository
+Configuration. A hook in an unenrolled repository finds no Checkpoint and
+allows the push or commit silently.
 
 ```sh
 review-party config checkpoint set pre-push --exempt '*.md' --exempt 'docs/**' --waivers human
 review-party config checkpoint set pre-push --target global --integration git
 review-party config checkpoint remove pre-push
+review-party config checkpoint none --yes
+review-party config checkpoint inherit --yes
 review-party init --enroll --yes
 ```
 
-Both commands show the configuration Plan and confirm it in a terminal or with
-`--yes`. `--unreviewed-lines N` (default 0) is the allowance: after a Review,
+Each command shows the configuration Plan and confirms it in a terminal or
+with `--yes`. The Plan warns when the change enrolls the repository or moves
+which file supplies the Checkpoints in force. `--unreviewed-lines N` (default 0) is the allowance: after a Review,
 a change with at most N unreviewed lines passes without another Review, so a
 small fix does not start another round. A binary file never fits the
 allowance. `--review-budget K` (default 3, at most 9) caps the Reviews one
@@ -939,8 +956,8 @@ without one. Rerunning it is safe, and a run with nothing left prints
 
 `--undeclared` removes only what no declared Checkpoint uses: the hook blocks
 of undeclared Checkpoints, and the agent entries and `agents-md` block once no
-Checkpoint is declared. `config checkpoint remove` offers that in a terminal
-and prints the command otherwise. `$CODEX_HOME/hooks.json` serves every
+Checkpoint is declared. `config checkpoint remove`, `none`, and `inherit`
+offer that in a terminal and print the command otherwise. `$CODEX_HOME/hooks.json` serves every
 repository on the machine, even when it lies inside this clone. Any file that
 resolves outside the clone, such as a settings file or `AGENTS.md` symlinked to
 a dotfiles copy, may serve several. So may hooks in a directory a

@@ -13,6 +13,20 @@ import (
 	"reviewparty/internal/configuration"
 )
 
+func publishIntent(options configurationMutationOptions, streams commandIO, intent configuration.Intent) int {
+	return runConfigurationCommand(options.format, options.configuration, streams, func(manager *configuration.Manager) (int, error) {
+		return planAndPublishIntent(manager, intent, options, streams), nil
+	})
+}
+
+func planAndPublishIntent(manager *configuration.Manager, intent configuration.Intent, options configurationMutationOptions, streams commandIO) int {
+	plan, err := manager.Plan(configuration.Repository(options.repository), []configuration.Intent{intent})
+	if err != nil {
+		return printConfigFailure(options.format, streams.output, streams.errors, err)
+	}
+	return publishConfigurationPlan(manager, plan, options, streams)
+}
+
 func publishConfigurationPlan(manager *configuration.Manager, plan configuration.Plan, options configurationMutationOptions, streams commandIO) int {
 	if !plan.Valid() {
 		return printInvalidConfigurationPlan(plan, options, streams)

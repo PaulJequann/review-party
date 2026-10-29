@@ -168,7 +168,18 @@ func newConfigReviewsCommand(streams commandIO) *cobra.Command {
 		newConfigReviewsRemoveCommand(streams),
 		newConfigReviewsMoveCommand(streams),
 		newConfigReviewsConcurrencyCommand(streams),
+		newConfigReviewsInheritCommand(streams),
 	)
+	return cmd
+}
+
+func newConfigReviewsInheritCommand(streams commandIO) *cobra.Command {
+	cmd := newConfigLeafCommand("inherit", "Stop replacing the Global Review selection in this repository", cobra.NoArgs, func(cmd *cobra.Command, _ []string) error {
+		return commandResult(publishIntent(repositoryMutationOptions(cmd), streams, configuration.InheritGlobalReviewSelection{}))
+	})
+	cmd.Long = `Remove the Review selection this repository's Configuration declares, so
+the Global Configuration's selection is in force here again.`
+	addConfigMutationFlags(cmd, false, false, "")
 	return cmd
 }
 

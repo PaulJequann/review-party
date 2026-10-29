@@ -1,6 +1,7 @@
 package configuration
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -133,13 +134,20 @@ func (manager *Manager) Plan(repository Repository, intents []Intent) (Plan, err
 			plan.state.reason = err.Error()
 			return plan, nil
 		}
-		if change != nil {
-			plan.state.changes = append(plan.state.changes, *change)
-			markReviewSelectionChange(staged, intent)
+		if change == nil {
+			if refusal, ok := intent.(refusesUnchanged); ok {
+				return Plan{}, errors.New(refusal.unchangedFact())
+			}
+			continue
 		}
+		plan.state.changes = append(plan.state.changes, *change)
+		markReviewSelectionChange(staged, intent)
 	}
 	if err := manager.validateStaged(&plan, staged, loaded, repository); err != nil {
 		return plan, nil
+	}
+	if repository != "" {
+		plan.state.warnings = append(plan.state.warnings, precedenceWarnings(loaded, withStagedDocuments(loaded, staged))...)
 	}
 	plan.state.valid = true
 	return plan, nil

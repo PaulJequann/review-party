@@ -82,3 +82,44 @@ func TestRunHintsAtTheMissingGitHookOnceAndOnlyWhenItIsMissing(t *testing.T) {
 		t.Fatalf("run with a hook = %+v", result)
 	}
 }
+
+func TestConfigCheckpointNoneAndInheritChooseWhetherGlobalCheckpointsApply(t *testing.T) {
+	fixture := newCheckpointFixture(t)
+	fixture.declareGlobal("set", "pre-push")
+	refs := pushLine(fixture.commit("one.go", "package app\n\nconst one = 1\n"), fixture.base)
+	config := func() string {
+		payload, err := os.ReadFile(filepath.Join(fixture.repository, ".reviewparty", "config.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(payload)
+	}
+	checkpoint := func(verb string) commandRun {
+		return fixture.runWith("", false, "config", "checkpoint", verb, "--repo", fixture.repository, "--yes")
+	}
+
+	assertRunContains(t, checkpoint("none"), commandRun{stdout: "warning: Repository Configuration declares no Checkpoints, so the Global pre-push Checkpoint no longer applies here.\npublished\n"})
+	if !strings.Contains(config(), `"checkpoints": {}`) {
+		t.Fatalf("Repository Configuration after none = %s", config())
+	}
+	assertRun(t, fixture.hook(refs, "pre-push", "origin", "url"), commandRun{})
+	assertRunContains(t, checkpoint("none"), commandRun{exit: 1, stderr: "Repository Configuration already declares no Checkpoints"})
+
+	assertRunContains(t, checkpoint("inherit"), commandRun{stdout: "warning: Repository Configuration no longer declares Checkpoints of its own, so the Global pre-push Checkpoint now applies here.\npublished\n"})
+	if strings.Contains(config(), `"checkpoints"`) {
+		t.Fatalf("Repository Configuration after inherit = %s", config())
+	}
+	if result := fixture.hook(refs, "pre-push", "origin", "url"); result.exit != 1 {
+		t.Fatalf("hook with the Global Checkpoint in force = %+v", result)
+	}
+	assertRunContains(t, checkpoint("inherit"), commandRun{exit: 1, stderr: "Repository Configuration does not replace the Global Checkpoints; there is nothing to inherit"})
+}
+
+func TestConfigCheckpointNoneAndInheritOnlyEditRepositoryConfiguration(t *testing.T) {
+	fixture := newCheckpointFixture(t)
+	for _, verb := range []string{"none", "inherit"} {
+		if result := fixture.runWith("", false, "config", "checkpoint", verb, "--target", "global", "--yes"); result.exit == 0 || !strings.Contains(result.stderr, "unknown flag: --target") {
+			t.Fatalf("%s --target global = %+v", verb, result)
+		}
+	}
+}

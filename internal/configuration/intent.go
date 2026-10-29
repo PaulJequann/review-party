@@ -56,6 +56,16 @@ type SetReviewSelection struct {
 	Selection ReviewSelection
 }
 
+// InheritGlobalReviewSelection removes the Repository Configuration's Review
+// selection, so the Global one is in force for the repository.
+type InheritGlobalReviewSelection struct{}
+
+// refusesUnchanged is implemented by intents that exist only to change a
+// field, so planning one that changes nothing is an error, not an empty Plan.
+type refusesUnchanged interface {
+	unchangedFact() string
+}
+
 func reviewerField(reviewer, field string) string {
 	return "reviewers." + reviewer + "." + field
 }
@@ -152,6 +162,20 @@ func (intent SetReviewSelection) applyIntent(document *Document) {
 	document.Reviews = &selection
 }
 func (intent SetReviewSelection) readIntent(document Document) (string, bool) {
+	return readReviewSelection(document)
+}
+
+func (InheritGlobalReviewSelection) intentScope() Scope             { return ScopeRepository }
+func (InheritGlobalReviewSelection) intentField() string            { return "reviews" }
+func (InheritGlobalReviewSelection) applyIntent(document *Document) { document.Reviews = nil }
+func (InheritGlobalReviewSelection) readIntent(document Document) (string, bool) {
+	return readReviewSelection(document)
+}
+func (InheritGlobalReviewSelection) unchangedFact() string {
+	return "Repository Configuration does not replace the Global Review selection; there is nothing to inherit"
+}
+
+func readReviewSelection(document Document) (string, bool) {
 	if document.Reviews == nil {
 		return "", false
 	}

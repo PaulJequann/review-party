@@ -79,7 +79,7 @@ func executeConfigReviewsConcurrency(value string, cmd *cobra.Command, streams c
 
 func mutateReviewSelection(options configurationMutationOptions, streams commandIO, transform func(configuration.ReviewSelection) (configuration.ReviewSelection, error)) int {
 	return runConfigurationCommand(options.format, options.configuration, streams, func(manager *configuration.Manager) (int, error) {
-		selection, err := currentReviewSelection(manager, configuration.Repository(options.repository))
+		selection, err := manager.ReviewSelectionToEdit(options.target, configuration.Repository(options.repository))
 		if err != nil {
 			return 0, err
 		}
@@ -87,17 +87,8 @@ func mutateReviewSelection(options configurationMutationOptions, streams command
 		if err != nil {
 			return 0, err
 		}
-		return publishReviewSelection(manager, selection, options, streams), nil
+		return planAndPublishIntent(manager, configuration.SetReviewSelection{Target: options.target, Selection: selection}, options, streams), nil
 	})
-}
-
-func publishReviewSelection(manager *configuration.Manager, selection configuration.ReviewSelection, options configurationMutationOptions, streams commandIO) int {
-	intent := configuration.SetReviewSelection{Target: options.target, Selection: selection}
-	plan, err := manager.Plan(configuration.Repository(options.repository), []configuration.Intent{intent})
-	if err != nil {
-		return printConfigFailure(options.format, streams.output, streams.errors, err)
-	}
-	return publishConfigurationPlan(manager, plan, options, streams)
 }
 
 func reviewsMutationOptionsFromCommand(cmd *cobra.Command) (configurationMutationOptions, error) {
@@ -115,15 +106,13 @@ func reviewsMutationOptionsFromCommand(cmd *cobra.Command) (configurationMutatio
 	return mutation, nil
 }
 
-func currentReviewSelection(manager *configuration.Manager, repository configuration.Repository) (configuration.ReviewSelection, error) {
-	selection, value, err := manager.EffectiveReviewSelection(repository)
-	if err != nil {
-		return configuration.ReviewSelection{}, err
+// repositoryMutationOptions reads the flags of a command that only ever edits
+// Repository Configuration and so offers no --target.
+func repositoryMutationOptions(cmd *cobra.Command) configurationMutationOptions {
+	return configurationMutationOptions{
+		target: configuration.ScopeRepository, repository: stringFlag(cmd, "repo"), format: stringFlag(cmd, "format"),
+		configuration: stringFlag(cmd, "config"), yes: boolFlag(cmd, "yes"),
 	}
-	if !value.Authored {
-		selection = configuration.DefaultReviewSelection()
-	}
-	return selection, nil
 }
 
 func selectionItemFromCommand(cmd *cobra.Command, scope configuration.Scope) (configuration.SelectionItem, error) {

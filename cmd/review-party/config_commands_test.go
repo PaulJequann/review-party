@@ -483,6 +483,45 @@ func TestConfigReviewsTargetGlobalRejectsRepositoryDefinitions(t *testing.T) {
 	}
 }
 
+func TestConfigReviewsInheritHandsTheSelectionBackToGlobal(t *testing.T) {
+	root := isolatedConfigRoot(t)
+	repository := t.TempDir()
+	repositoryConfig := filepath.Join(repository, ".reviewparty", "config.json")
+	requireConfigSuccess(t, []string{
+		"config", "profile", "create", "bugs", "--blank", "--instructions", "Find bugs.\n", "--reviewer", "grok",
+		"--model", "grok-4.5", "--effort", "high", "--deadline", "1m", "--yes", "--format", "json",
+	})
+	requireConfigSuccess(t, []string{"config", "reviews", "add", "--target", "global", "--scope", "global", "--profile", "bugs", "--yes", "--format", "json"})
+
+	copied := runConfigCommand(t, []string{"config", "reviews", "set-concurrency", "2", "--repo", repository, "--yes"})
+	requireCommandSuccess(t, copied)
+	if !strings.Contains(copied.stdout, "warning: The Review selection in force here moves from Global Configuration (1 item) to Repository Configuration (1 item), which replaces the Global one as a whole; later edits to the Global selection no longer reach this repository.\n") {
+		t.Fatalf("copying the selection printed %q", copied.stdout)
+	}
+
+	inherited := runConfigCommand(t, []string{"config", "reviews", "inherit", "--repo", repository, "--yes"})
+	requireCommandSuccess(t, inherited)
+	if !strings.Contains(inherited.stdout, "warning: The Review selection in force here moves from Repository Configuration (1 item) to Global Configuration (1 item); edits to the Global selection now reach this repository.\npublished\n") {
+		t.Fatalf("inheriting printed %q", inherited.stdout)
+	}
+	if payload, err := os.ReadFile(repositoryConfig); err != nil || strings.Contains(string(payload), `"reviews"`) {
+		t.Fatalf("Repository Configuration after inherit = %q, %v", payload, err)
+	}
+	show := runConfigCommand(t, []string{"config", "show", "--repo", repository, "--format", "json"})
+	requireCommandSuccess(t, show)
+	if !strings.Contains(show.stdout, `"source": "`+filepath.Join(root, "review-party", "config.json")+`"`) {
+		t.Fatalf("config show after inherit = %s", show.stdout)
+	}
+
+	again := runConfigCommand(t, []string{"config", "reviews", "inherit", "--repo", repository, "--yes"})
+	if again.exitCode != 1 || !strings.Contains(again.stderr, "Repository Configuration does not replace the Global Review selection; there is nothing to inherit") {
+		t.Fatalf("inheriting twice = %+v", again)
+	}
+	if offered := runConfigCommand(t, []string{"config", "reviews", "inherit", "--target", "global", "--yes"}); offered.exitCode == 0 || !strings.Contains(offered.stderr, "unknown flag: --target") {
+		t.Fatalf("inherit --target global = %+v", offered)
+	}
+}
+
 func TestConfigMutationCommandsExposeDocumentedFlags(t *testing.T) {
 	root := newRootCommand(productionCommandIO(bytes.NewReader(nil), &bytes.Buffer{}, &bytes.Buffer{}))
 	tests := []struct {
@@ -498,6 +537,9 @@ func TestConfigMutationCommandsExposeDocumentedFlags(t *testing.T) {
 		{path: []string{"config", "reviews", "set-concurrency"}, flags: []string{"target", "repo", "format", "config", "yes"}},
 		{path: []string{"config", "checkpoint", "set"}, flags: []string{"requirement", "exempt", "unreviewed-lines", "review-budget", "waivers", "integration", "target", "repo", "format", "config", "yes"}},
 		{path: []string{"config", "checkpoint", "remove"}, flags: []string{"target", "repo", "format", "config", "yes"}},
+		{path: []string{"config", "reviews", "inherit"}, flags: []string{"repo", "format", "config", "yes"}},
+		{path: []string{"config", "checkpoint", "inherit"}, flags: []string{"repo", "format", "config", "yes"}},
+		{path: []string{"config", "checkpoint", "none"}, flags: []string{"repo", "format", "config", "yes"}},
 	}
 	for _, test := range tests {
 		requireCommandFlags(t, findCommand(t, root, test.path), test.path, test.flags)
