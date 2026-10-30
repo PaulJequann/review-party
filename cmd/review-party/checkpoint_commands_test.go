@@ -324,3 +324,22 @@ func TestCheckpointPrePushDefaultsToMergeBaseWithDivergedUpstream(t *testing.T) 
 		t.Fatalf("first line = %q", first)
 	}
 }
+
+func TestCheckpointPrePushDefaultsPastTheTrunkARebaseBroughtIn(t *testing.T) {
+	fixture := newCheckpointFixture(t)
+	fixture.git("checkout", "-q", "-b", "feature")
+	fixture.commit("one.go", "package app\n\nconst one = 1\n")
+	fixture.git("branch", "published")
+	fixture.git("branch", "--set-upstream-to=published")
+	fixture.git("checkout", "-q", "-b", "trunk", fixture.base)
+	trunk := fixture.commit("merged.go", "package app\n\nconst merged = 1\n")
+	fixture.git("update-ref", "refs/remotes/origin/HEAD", trunk)
+	fixture.git("checkout", "-q", "feature")
+	fixture.git("rebase", "--quiet", "trunk")
+	head := fixture.git("rev-parse", "HEAD")
+
+	_, stdout, _ := fixture.check("pre-push")
+	if first := strings.SplitN(stdout, "\n", 2)[0]; first != "pre-push checkpoint: "+trunk+".."+head+" (base is the merge base with the upstream branch and origin/HEAD)" {
+		t.Fatalf("first line = %q", first)
+	}
+}

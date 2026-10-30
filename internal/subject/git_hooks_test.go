@@ -64,6 +64,61 @@ func TestPushedRefBase(t *testing.T) {
 	assertPushedRefBase(t, repository, pushed("upstream", zero), head)
 }
 
+func TestPushedRefBaseLeavesOutTheTrunkARebaseBroughtIn(t *testing.T) {
+	repository := testRepository(t)
+	base := gitText(t, repository, "rev-parse", "HEAD")
+	runTestCommand(t, repository, "git", "checkout", "--quiet", "-b", "feature")
+	published := commitFile(t, repository, "feature.go")
+	runTestCommand(t, repository, "git", "commit", "--quiet", "--amend", "-m", "reword feature.go")
+	amended := gitText(t, repository, "rev-parse", "HEAD")
+	runTestCommand(t, repository, "git", "checkout", "--quiet", "-b", "trunk", base)
+	trunk := commitFile(t, repository, "merged.go")
+	runTestCommand(t, repository, "git", "commit", "--quiet", "--amend", "-m", "reword merged.go")
+	rewrittenTrunk := gitText(t, repository, "rev-parse", "HEAD")
+	runTestCommand(t, repository, "git", "checkout", "--quiet", "-B", "feature", published)
+	runTestCommand(t, repository, "git", "rebase", "--quiet", trunk)
+	rebased := gitText(t, repository, "rev-parse", "HEAD")
+	next := commitFile(t, repository, "next.go")
+
+	pushed := func(local, remote string) PushedRef {
+		return PushedRef{Remote: "origin", LocalRef: "refs/heads/feature", LocalObject: local, RemoteRef: "refs/heads/feature", RemoteObject: remote}
+	}
+	// Without a trunk to compare with, a forced push leaves out only what it replaces.
+	assertPushedRefBase(t, repository, pushed(rebased, published), base)
+
+	runTestCommand(t, repository, "git", "update-ref", "refs/remotes/origin/HEAD", trunk)
+	assertPushedRefBase(t, repository, pushed(rebased, published), trunk)
+	assertPushedRefBase(t, repository, pushed(amended, published), base)
+	assertPushedRefBase(t, repository, pushed(rewrittenTrunk, trunk), base)
+	assertPushedRefBase(t, repository, pushed(next, rebased), rebased)
+
+	runTestCommand(t, repository, "git", "update-ref", "refs/remotes/upstream/HEAD", base)
+	toUpstream := pushed(rebased, zero)
+	toUpstream.Remote = "upstream"
+	assertPushedRefBase(t, repository, toUpstream, base)
+}
+
+func TestPushedRefBaseCountsFromTheOldTipWhenTheTrunkIsNotTheOnlyBestBase(t *testing.T) {
+	repository := testRepository(t)
+	base := gitText(t, repository, "rev-parse", "HEAD")
+	runTestCommand(t, repository, "git", "checkout", "--quiet", "-b", "feature")
+	kept := commitFile(t, repository, "feature.go")
+	published := commitFile(t, repository, "more.go")
+	runTestCommand(t, repository, "git", "checkout", "--quiet", "-b", "trunk", base)
+	t.Setenv("GIT_COMMITTER_DATE", "@4102444800 +0000")
+	trunk := commitFile(t, repository, "merged.go")
+	runTestCommand(t, repository, "git", "update-ref", "refs/remotes/origin/HEAD", trunk)
+	runTestCommand(t, repository, "git", "checkout", "--quiet", "-B", "feature", kept)
+	runTestCommand(t, repository, "git", "merge", "--quiet", "--no-edit", trunk)
+	runTestCommand(t, repository, "git", "rm", "--quiet", "feature.go")
+	runTestCommand(t, repository, "git", "commit", "--quiet", "-m", "delete feature.go")
+	head := gitText(t, repository, "rev-parse", "HEAD")
+
+	// The trunk and the kept commit are both best bases; the trunk alone would hide the deletion.
+	ref := PushedRef{Remote: "origin", LocalRef: "refs/heads/feature", LocalObject: head, RemoteRef: "refs/heads/feature", RemoteObject: published}
+	assertPushedRefBase(t, repository, ref, kept)
+}
+
 func assertPushedRefBase(t *testing.T, repository string, ref PushedRef, want string) {
 	t.Helper()
 	if got, err := PushedRefBase(repository, ref); err != nil || got != want {

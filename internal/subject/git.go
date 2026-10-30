@@ -336,23 +336,29 @@ func ResolveRepositoryRoot(repository string) (string, error) {
 // Push range sources name where DefaultPushBase found the base of the range
 // a push would publish.
 const (
-	PushBaseUpstream   = "upstream"
-	PushBaseRemoteHead = "remote-head"
+	PushBaseUpstream              = "upstream"
+	PushBaseRemoteHead            = "remote-head"
+	PushBaseUpstreamAndRemoteHead = "upstream-and-remote-head"
 )
 
 var ErrNoDefaultPushBase = errors.New("no upstream branch and no origin/HEAD to compare with")
 
-// DefaultPushBase is the merge base of HEAD and the current branch's
-// upstream, else of HEAD and origin/HEAD. A merge base keeps a diverged
-// upstream's own commits out of the range.
+// DefaultPushBase is the base of the range that pushing HEAD over the current
+// branch's upstream publishes, compared with the upstream and origin/HEAD as
+// publishedBase compares them. Source names which of them the base depends on.
 func DefaultPushBase(repository string) (base, source string, err error) {
-	if output, err := gitOutput(repository, "merge-base", "HEAD", "@{upstream}"); err == nil {
-		return strings.TrimSpace(string(output)), PushBaseUpstream, nil
+	upstream := knownCommit(repository, "@{upstream}")
+	remoteHead := knownCommit(repository, "refs/remotes/origin/HEAD")
+	base, err = publishedBase(repository, "HEAD", upstream, remoteHead)
+	switch {
+	case err != nil:
+		return "", "", ErrNoDefaultPushBase
+	case upstream == "":
+		return base, PushBaseRemoteHead, nil
+	case remoteHead == "" || base == upstream:
+		return base, PushBaseUpstream, nil
 	}
-	if output, err := gitOutput(repository, "merge-base", "HEAD", "refs/remotes/origin/HEAD"); err == nil {
-		return strings.TrimSpace(string(output)), PushBaseRemoteHead, nil
-	}
-	return "", "", ErrNoDefaultPushBase
+	return base, PushBaseUpstreamAndRemoteHead, nil
 }
 
 // readGitConfig returns the clone's configuration keyed as git config --list

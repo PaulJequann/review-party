@@ -43,8 +43,10 @@ func newCheckpointCheckCommand(streams commandIO) *cobra.Command {
 checkpoint accepts no completed Review of that Profile has examined.
 
 pre-push checks the range from --base to --head. Without --base, the base is
-the merge base of HEAD and the branch's upstream, else of HEAD and origin/HEAD. pre-commit
-checks the staged content against HEAD.
+the branch's upstream when HEAD descends from it. Otherwise it is the newest
+commit HEAD shares with the upstream or origin/HEAD, so a branch rebased onto
+a newer trunk counts only its own commits. pre-commit checks the staged
+content against HEAD.
 
 A Profile has reviewed a path up to the newest blob its completed Reviews
 reach from the base blob, so rebased, amended, squashed, and recommitted
@@ -108,7 +110,7 @@ func addCheckpointRangeFlags(cmd *cobra.Command, repository string) {
 	addRepositoryFlag(cmd, repository)
 	addConfigurationFlag(cmd)
 	addFormatFlag(cmd)
-	cmd.Flags().String("base", "", "pre-push: base revision of the range (default: merge base with the upstream, else with origin/HEAD)")
+	cmd.Flags().String("base", "", "pre-push: base revision of the range (default: the upstream, or the newest commit HEAD shares with the upstream or origin/HEAD)")
 	cmd.Flags().String("head", "", "pre-push: head revision of the range (default: HEAD)")
 }
 
@@ -219,9 +221,10 @@ type checkpointUnreviewed struct {
 }
 
 var rangeSourceDescriptions = map[string]string{
-	subject.PushBaseUpstream:   "base is the merge base with the upstream branch",
-	subject.PushBaseRemoteHead: "base is the merge base with origin/HEAD",
-	rangeSourceFlags:           "range from --base",
+	subject.PushBaseUpstream:              "base is the merge base with the upstream branch",
+	subject.PushBaseRemoteHead:            "base is the merge base with origin/HEAD",
+	subject.PushBaseUpstreamAndRemoteHead: "base is the merge base with the upstream branch and origin/HEAD",
+	rangeSourceFlags:                      "range from --base",
 }
 
 // checkpointContent is what one Checkpoint accepts, and the commands that
