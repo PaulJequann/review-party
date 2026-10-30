@@ -215,7 +215,9 @@ fast-forwards the remote object uses it as the base. Otherwise the base is the
 best common ancestor of the pushed object and a merge of the remote object
 with `refs/remotes/<remote>/HEAD`, else `refs/remotes/origin/HEAD`, of those
 this clone has. A forced push then counts neither the commits it drops nor the
-trunk commits a rebase brought in, while commits it rewrites still count. A
+trunk commits a rebase brought in, while commits it rewrites still count. When
+that merge leaves several best common ancestors, the base is the merge base
+with the remote object alone, so no choice among them hides a change. A
 new branch, whose remote object is zero or not present locally, compares with
 that HEAD alone. Every
 installed form stops git only on exit 1. Any other status, such as a usage

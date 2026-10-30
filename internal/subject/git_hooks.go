@@ -64,24 +64,35 @@ func PushedRefBase(repository string, ref PushedRef) (string, error) {
 // common ancestor of head and a merge of tip and the first trunk this clone
 // has, so a forced push counts neither the commits it drops nor those a rebase
 // brought in from a newer trunk, while the commits it rewrites still count.
+// When tip and the trunk leave several best common ancestors, any one of them
+// could hide a change to what tip holds, so the base is head's merge base
+// with tip alone.
 func publishedBase(repository, head, tip string, trunks ...string) (string, error) {
-	arguments := []string{"merge-base", head}
+	var published []string
 	if tip != "" {
 		if _, err := gitOutput(repository, "merge-base", "--is-ancestor", tip, head); err == nil {
 			return tip, nil
 		}
-		arguments = append(arguments, tip)
+		published = append(published, tip)
 	}
 	for _, trunk := range trunks {
 		if object := knownCommit(repository, trunk); object != "" {
-			arguments = append(arguments, object)
+			published = append(published, object)
 			break
 		}
 	}
-	if len(arguments) == 2 {
+	if len(published) == 0 {
 		return "", errors.New("nothing published to compare with")
 	}
-	return gitLine(repository, arguments...)
+	output, err := gitLine(repository, append([]string{"merge-base", "--all", head}, published...)...)
+	if err != nil {
+		return "", err
+	}
+	bases := strings.Fields(output)
+	if len(bases) > 1 && len(published) > 1 {
+		return gitLine(repository, "merge-base", head, tip)
+	}
+	return bases[0], nil
 }
 
 // knownCommit is the commit a revision names in the clone, empty when it
