@@ -46,22 +46,55 @@ func ParsePushedRefs(remote string, input []byte) ([]PushedRef, error) {
 
 var ErrNoPushedRefBase = errors.New("no remote object, remote HEAD, or origin/HEAD to compare with")
 
-// PushedRefBase is the base of the range one pushed ref publishes. When this
-// clone has the remote's object, the base is its merge base with the pushed
-// object, so a forced push does not count the commits it drops. A new ref, or
-// a remote object this clone lacks, uses the merge base with the remote's
-// HEAD, else with origin/HEAD.
+// PushedRefBase is the base of the range one pushed ref publishes: the pushed
+// object compared with the remote's object and the remote's HEAD, else
+// origin/HEAD, as publishedBase compares them.
 func PushedRefBase(repository string, ref PushedRef) (string, error) {
-	candidates := []string{"refs/remotes/" + ref.Remote + "/HEAD", "refs/remotes/origin/HEAD"}
-	if _, err := gitOutput(repository, "cat-file", "-e", ref.RemoteObject+"^{commit}"); err == nil {
-		candidates = []string{ref.RemoteObject}
+	base, err := publishedBase(repository, ref.LocalObject, knownCommit(repository, ref.RemoteObject), "refs/remotes/"+ref.Remote+"/HEAD", "refs/remotes/origin/HEAD")
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", ref.LocalRef, ErrNoPushedRefBase)
 	}
-	for _, candidate := range candidates {
-		if output, err := gitOutput(repository, "merge-base", ref.LocalObject, candidate); err == nil {
-			return strings.TrimSpace(string(output)), nil
+	return base, nil
+}
+
+// publishedBase is the base of the range that pushing head over tip publishes.
+// Tip is the remote ref's commit, empty for a new ref or one this clone lacks;
+// trunks name the remote's default branch, most specific first. A push that
+// fast-forwards tip publishes what follows it. Otherwise the base is the best
+// common ancestor of head and a merge of tip and the first trunk this clone
+// has, so a forced push counts neither the commits it drops nor those a rebase
+// brought in from a newer trunk, while the commits it rewrites still count.
+func publishedBase(repository, head, tip string, trunks ...string) (string, error) {
+	arguments := []string{"merge-base", head}
+	if tip != "" {
+		if _, err := gitOutput(repository, "merge-base", "--is-ancestor", tip, head); err == nil {
+			return tip, nil
+		}
+		arguments = append(arguments, tip)
+	}
+	for _, trunk := range trunks {
+		if object := knownCommit(repository, trunk); object != "" {
+			arguments = append(arguments, object)
+			break
 		}
 	}
-	return "", fmt.Errorf("%s: %w", ref.LocalRef, ErrNoPushedRefBase)
+	if len(arguments) == 2 {
+		return "", errors.New("nothing published to compare with")
+	}
+	return gitLine(repository, arguments...)
+}
+
+// knownCommit is the commit a revision names in the clone, empty when it
+// names none.
+func knownCommit(repository, revision string) string {
+	if revision == "" {
+		return ""
+	}
+	object, err := committedRangeResolver{repository: repositoryRoot(repository)}.resolveCommit(revisionName(revision))
+	if err != nil {
+		return ""
+	}
+	return string(object)
 }
 
 // HookLocations says where git runs hooks for a clone. Directory is absolute

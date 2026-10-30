@@ -210,11 +210,14 @@ waiver because recording one needs the same review state. When
 not parse, or no base can be found, the hook prints one warning line and exits
 0: it cannot tell whether a Checkpoint applies, or what content it would
 check. An undeclared
-Checkpoint exits 0 silently. A ref deletion is skipped. When this clone has
-the remote object, the base is its merge base with the pushed object, so a
-forced push does not count the commits it drops. A new branch, whose remote
-object is zero or not present locally, uses the merge base with
-`refs/remotes/<remote>/HEAD`, then `refs/remotes/origin/HEAD`. Every
+Checkpoint exits 0 silently. A ref deletion is skipped. A push that
+fast-forwards the remote object uses it as the base. Otherwise the base is the
+best common ancestor of the pushed object and a merge of the remote object
+with `refs/remotes/<remote>/HEAD`, else `refs/remotes/origin/HEAD`, of those
+this clone has. A forced push then counts neither the commits it drops nor the
+trunk commits a rebase brought in, while commits it rewrites still count. A
+new branch, whose remote object is zero or not present locally, compares with
+that HEAD alone. Every
 installed form stops git only on exit 1. Any other status, such as a usage
 error from a `review-party` that predates `checkpoint hook`, warns with the
 status and allows.

@@ -91,6 +91,11 @@ func TestPushedRefBaseLeavesOutTheTrunkARebaseBroughtIn(t *testing.T) {
 	assertPushedRefBase(t, repository, pushed(amended, published), base)
 	assertPushedRefBase(t, repository, pushed(rewrittenTrunk, trunk), base)
 	assertPushedRefBase(t, repository, pushed(next, rebased), rebased)
+
+	runTestCommand(t, repository, "git", "update-ref", "refs/remotes/upstream/HEAD", base)
+	toUpstream := pushed(rebased, zero)
+	toUpstream.Remote = "upstream"
+	assertPushedRefBase(t, repository, toUpstream, base)
 }
 
 func assertPushedRefBase(t *testing.T, repository string, ref PushedRef, want string) {
