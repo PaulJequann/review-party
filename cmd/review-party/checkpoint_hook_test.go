@@ -59,6 +59,33 @@ func TestCheckpointHookRefusesAPushUntilReviewed(t *testing.T) {
 	assertRun(t, fixture.hook(refs, "pre-push", "origin", "url"), commandRun{})
 }
 
+func TestCheckpointHookCountsOnlyTheBranchsOwnCommitsAfterARebase(t *testing.T) {
+	fixture := newCheckpointFixture(t)
+	fixture.declare("pre-push")
+	fixture.git("checkout", "-q", "-b", "feature")
+	published := fixture.commit("one.go", "package app\n\nconst one = 1\n")
+	reviewed := fixture.rangeChanges(published).Changes
+	fixture.saveReview("rp_1725192000000_00000000000000d1", "bugs", model.LifecycleCompleted, reviewed)
+	fixture.saveReview("rp_1725192000000_00000000000000d2", "docs", model.LifecycleCompleted, reviewed)
+	fixture.git("checkout", "-q", "-b", "trunk", fixture.base)
+	trunk := fixture.commit("merged.go", "package app\n\nconst merged = 1\n")
+	fixture.git("update-ref", "refs/remotes/origin/HEAD", trunk)
+	fixture.git("checkout", "-q", "feature")
+	fixture.git("rebase", "--quiet", "trunk")
+	forced := func(local string) string {
+		return "refs/heads/feature " + local + " refs/heads/feature " + published + "\n"
+	}
+
+	assertRun(t, fixture.hook(forced(fixture.git("rev-parse", "HEAD")), "pre-push", "origin", "url"), commandRun{})
+
+	fixture.writeFile("one.go", "package app\n\nconst one = 1\n\nconst two = 2\n")
+	fixture.git("commit", "--quiet", "--all", "--amend", "--no-edit")
+	rewritten := fixture.git("rev-parse", "HEAD")
+	refusal := "review-party: pre-push Checkpoint: 2 unreviewed lines in " + trunk[:12] + ".." + rewritten[:12] +
+		"; next: review-party run --unreviewed --base " + trunk + " --head " + rewritten + "\n"
+	assertRun(t, fixture.hook(forced(rewritten), "pre-push", "origin", "url"), commandRun{exit: 1, stderr: refusal})
+}
+
 func TestCheckpointHookStopsASpentBudgetWithoutACommand(t *testing.T) {
 	fixture := newCheckpointFixture(t)
 	fixture.declare("pre-push", "--unreviewed-lines", "1", "--review-budget", "1", "--waivers", "anyone")

@@ -64,6 +64,35 @@ func TestPushedRefBase(t *testing.T) {
 	assertPushedRefBase(t, repository, pushed("upstream", zero), head)
 }
 
+func TestPushedRefBaseLeavesOutTheTrunkARebaseBroughtIn(t *testing.T) {
+	repository := testRepository(t)
+	base := gitText(t, repository, "rev-parse", "HEAD")
+	runTestCommand(t, repository, "git", "checkout", "--quiet", "-b", "feature")
+	published := commitFile(t, repository, "feature.go")
+	runTestCommand(t, repository, "git", "commit", "--quiet", "--amend", "-m", "reword feature.go")
+	amended := gitText(t, repository, "rev-parse", "HEAD")
+	runTestCommand(t, repository, "git", "checkout", "--quiet", "-b", "trunk", base)
+	trunk := commitFile(t, repository, "merged.go")
+	runTestCommand(t, repository, "git", "commit", "--quiet", "--amend", "-m", "reword merged.go")
+	rewrittenTrunk := gitText(t, repository, "rev-parse", "HEAD")
+	runTestCommand(t, repository, "git", "checkout", "--quiet", "-B", "feature", published)
+	runTestCommand(t, repository, "git", "rebase", "--quiet", trunk)
+	rebased := gitText(t, repository, "rev-parse", "HEAD")
+	next := commitFile(t, repository, "next.go")
+
+	pushed := func(local, remote string) PushedRef {
+		return PushedRef{Remote: "origin", LocalRef: "refs/heads/feature", LocalObject: local, RemoteRef: "refs/heads/feature", RemoteObject: remote}
+	}
+	// Without a trunk to compare with, a forced push leaves out only what it replaces.
+	assertPushedRefBase(t, repository, pushed(rebased, published), base)
+
+	runTestCommand(t, repository, "git", "update-ref", "refs/remotes/origin/HEAD", trunk)
+	assertPushedRefBase(t, repository, pushed(rebased, published), trunk)
+	assertPushedRefBase(t, repository, pushed(amended, published), base)
+	assertPushedRefBase(t, repository, pushed(rewrittenTrunk, trunk), base)
+	assertPushedRefBase(t, repository, pushed(next, rebased), rebased)
+}
+
 func assertPushedRefBase(t *testing.T, repository string, ref PushedRef, want string) {
 	t.Helper()
 	if got, err := PushedRefBase(repository, ref); err != nil || got != want {
