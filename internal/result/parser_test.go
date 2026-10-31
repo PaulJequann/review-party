@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -86,6 +87,47 @@ func TestNonObjectResultsAreRejected(t *testing.T) {
 func TestMultipleResultObjectsAreRejected(t *testing.T) {
 	if _, err := parseReviewResult(cleanResultExample + "\n" + cleanResultExample); err == nil || !strings.Contains(err.Error(), "exactly one JSON object") {
 		t.Fatalf("error = %v, want a multiple-object rejection", err)
+	}
+	separated := cleanResultExample + "\nActually, also consider:\n```\n" + findingsResultExample + "\n```"
+	if _, err := parseReviewResult(separated); err == nil || !strings.Contains(err.Error(), "exactly one JSON object") {
+		t.Fatalf("error = %v, want a second object after narration rejected", err)
+	}
+	if _, err := parseReviewResult(cleanResultExample + "\nDone {thanks}"); err != nil {
+		t.Fatalf("brace in trailing prose was misread as a second object: %v", err)
+	}
+}
+
+func TestMissingOrNullFindingsAreRejected(t *testing.T) {
+	for _, invalid := range []string{
+		`{"status":"clean"}`,
+		`{"status":"clean","findings":null}`,
+		`{"findings":[]}`,
+	} {
+		if _, err := parseReviewResult(invalid); err == nil {
+			t.Fatalf("invalid result was accepted: %q", invalid)
+		}
+	}
+}
+
+func TestSchemaRequiresEveryDeclaredProperty(t *testing.T) {
+	var schema struct {
+		Required   []string `json:"required"`
+		Properties map[string]struct {
+			Required []string `json:"required"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal([]byte(CanonicalReviewResultContract.Schema()), &schema); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range schema.Required {
+		if _, ok := schema.Properties[name]; !ok {
+			t.Fatalf("required property %q is not declared", name)
+		}
+	}
+	for _, want := range []string{"status", "caveats", "findings"} {
+		if !slices.Contains(schema.Required, want) {
+			t.Fatalf("schema required = %v, want %q included for strict structured outputs", schema.Required, want)
+		}
 	}
 }
 

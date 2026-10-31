@@ -15,7 +15,7 @@ const resultJSONSchema = `{
   "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "additionalProperties": false,
-  "required": ["status", "findings"],
+  "required": ["status", "caveats", "findings"],
   "properties": {
     "status": {"type": "string", "enum": ["clean", "findings"]},
     "caveats": {"type": "array", "maxItems": 4, "items": {"type": "string"}},

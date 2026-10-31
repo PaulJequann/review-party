@@ -234,6 +234,21 @@ func TestClaudeDecoderJoinsTextBlocksAndResolvesModel(t *testing.T) {
 	}
 }
 
+func TestClaudeDecoderPrefersStructuredOutputOverText(t *testing.T) {
+	output := []byte(`{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"text","text":"Narration only; the result is in structured_output."}]}}` + "\n" +
+		`{"type":"result","subtype":"success","is_error":false,"result":"ignored","structured_output":` + cleanReview + `}` + "\n")
+	decoded, err := decodeClaudeOutput(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded.assistantText != cleanReview {
+		t.Fatalf("assistant text = %q, want the structured output", decoded.assistantText)
+	}
+	if decoded.incomplete || decoded.diagnostic != "" {
+		t.Fatalf("decoded = %#v", decoded)
+	}
+}
+
 func TestClaudeInBandErrorIsIncompleteDespiteCleanExit(t *testing.T) {
 	output := []byte(`{"type":"assistant","message":{"model":"<synthetic>","content":[{"type":"text","text":"Not logged in · Please run /login"}]}}` + "\n" +
 		`{"type":"result","subtype":"success","is_error":true,"result":"Not logged in · Please run /login"}` + "\n")
