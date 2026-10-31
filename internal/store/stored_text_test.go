@@ -47,7 +47,16 @@ func seedSchemaFourteenText(t *testing.T, db *sql.DB, completed model.ReviewID) 
 	t.Helper()
 	failed := ledgerFixture(model.LifecycleIncomplete)
 	failed.ID = "rp_1723200000001_0123456789abcdef"
+	// The current save code writes the caveats column migration 16 adds;
+	// lend it to the schema-fourteen table and remove it before the raw
+	// result_raw seeding below.
+	if _, err := db.Exec("ALTER TABLE reviews ADD COLUMN result_caveats BLOB"); err != nil {
+		t.Fatal(err)
+	}
 	if err := (reviewRecordProjection{db: db}).save(failed); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("ALTER TABLE reviews DROP COLUMN result_caveats"); err != nil {
 		t.Fatal(err)
 	}
 	text := strings.Repeat(storedTextSentinel, 1<<16)

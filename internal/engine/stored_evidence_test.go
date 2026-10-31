@@ -289,8 +289,9 @@ func forgetStoredTextUpgrade(t *testing.T, state string) {
 	execLedger(t, state,
 		"ALTER TABLE reviews ADD COLUMN result_raw BLOB",
 		"ALTER TABLE attempts ADD COLUMN raw_output BLOB",
+		"ALTER TABLE reviews DROP COLUMN result_caveats",
 		"DROP TABLE pending_maintenance",
-		"DELETE FROM schema_migrations WHERE version = 15",
+		"DELETE FROM schema_migrations WHERE version >= 15",
 	)
 }
 

@@ -17,7 +17,7 @@ import (
 
 const ledgerFilename = "ledger.sqlite"
 
-const currentLedgerSchemaVersion = 15
+const currentLedgerSchemaVersion = 16
 
 var ledgerMigrations = []struct {
 	version int
@@ -29,6 +29,7 @@ var ledgerMigrations = []struct {
 	{13, "migrations/content_changes.sql"},
 	{14, "migrations/checkpoint_waivers.sql"},
 	{15, "migrations/stored_text.sql"},
+	{16, "migrations/result_caveats.sql"},
 }
 
 var ErrReviewRecordStateNotInitialized = errors.New("Review Party is not initialized")

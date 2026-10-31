@@ -29,7 +29,7 @@ func TestLedgerRoundTripsCompleteAndIncompleteReviews(t *testing.T) {
 	}
 	defer closeTestResource(t, store.Close)
 	clean := ledgerFixture(model.LifecycleCompleted)
-	clean.Result = &model.ReviewResult{Status: model.ResultClean, Summary: "clean", Findings: []model.Finding{}}
+	clean.Result = &model.ReviewResult{Status: model.ResultClean, Summary: "clean", Caveats: []string{"Could not run tests: no shell."}, Findings: []model.Finding{}}
 	withoutAttempts := ledgerFixture(model.LifecycleIncomplete)
 	withoutAttempts.ID = "rp_1723200000003_0123456789abcdef"
 	withoutAttempts.Passes[0].Attempts = []model.AttemptRecord{}

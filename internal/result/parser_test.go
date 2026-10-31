@@ -109,6 +109,20 @@ func TestMissingOrNullFindingsAreRejected(t *testing.T) {
 	}
 }
 
+func TestDuplicateFieldsAreRejected(t *testing.T) {
+	duplicated := `{"status":"findings","findings":[` +
+		`{"severity":"HIGH","category":"c","location":"l","failure":"f","evidence":"e","fix":"x","test":"t"}` +
+		`],"status":"clean","findings":[]}`
+	_, err := parseReviewResult(duplicated)
+	if err == nil || !strings.Contains(err.Error(), `field "status" is declared more than once`) {
+		t.Fatalf("error = %v, want a duplicate-field rejection", err)
+	}
+	nested := strings.Replace(findingsResultExample, `"failure":"`, `"failure":"dup","failure":"`, 1)
+	if _, err := parseReviewResult(nested); err == nil {
+		t.Fatal("duplicate nested field was accepted")
+	}
+}
+
 func TestSchemaRequiresEveryDeclaredProperty(t *testing.T) {
 	var schema struct {
 		Required   []string `json:"required"`

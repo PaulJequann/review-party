@@ -85,11 +85,66 @@ func decodeWireResult(assistantText string) (wireResult, error) {
 	if err := decoder.Decode(&wire); err != nil {
 		return wireResult{}, fmt.Errorf("review result is not valid contract JSON: %w", err)
 	}
+	if err := rejectDuplicateJSONKeys(assistantText[start : start+int(decoder.InputOffset())]); err != nil {
+		return wireResult{}, fmt.Errorf("review result contains ambiguous content: %w", err)
+	}
 	remainder := assistantText[start+int(decoder.InputOffset()):]
 	if containsAnotherJSONObject(remainder) {
 		return wireResult{}, errors.New("review result must be exactly one JSON object")
 	}
 	return wire, nil
+}
+
+// rejectDuplicateJSONKeys rejects an object that declares the same field
+// twice. encoding/json silently applies the last value, so without this check
+// a result without harness-level schema enforcement could carry a findings
+// verdict followed by a clean verdict in one object and be read as clean.
+func rejectDuplicateJSONKeys(payload string) error {
+	return scanJSONValue(json.NewDecoder(strings.NewReader(payload)))
+}
+
+func scanJSONValue(decoder *json.Decoder) error {
+	token, err := decoder.Token()
+	if err != nil {
+		return err
+	}
+	delimiter, isDelimiter := token.(json.Delim)
+	if !isDelimiter {
+		return nil
+	}
+	switch delimiter {
+	case '{':
+		seen := map[string]bool{}
+		for decoder.More() {
+			keyToken, err := decoder.Token()
+			if err != nil {
+				return err
+			}
+			key, isString := keyToken.(string)
+			if !isString {
+				return errors.New("object field name is not a string")
+			}
+			if seen[key] {
+				return fmt.Errorf("field %q is declared more than once", key)
+			}
+			seen[key] = true
+			if err := scanJSONValue(decoder); err != nil {
+				return err
+			}
+		}
+		_, err = decoder.Token()
+		return err
+	case '[':
+		for decoder.More() {
+			if err := scanJSONValue(decoder); err != nil {
+				return err
+			}
+		}
+		_, err = decoder.Token()
+		return err
+	default:
+		return nil
+	}
 }
 
 // containsAnotherJSONObject reports whether rest holds a second decodable
