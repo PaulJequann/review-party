@@ -104,8 +104,8 @@ func stripFrontmatter(content string) string {
 func skillInstructions(name, body string) string {
 	return "This Profile was imported from the `" + name + "` skill. Review Party runs it as a read-only Reviewer.\n\n" +
 		"- You can read and search this repository only. Skip skill steps that need shell commands, edits, other skills, subagents, or files bundled with the skill.\n" +
-		"- When the skill requires observed evidence you could not gather, such as a test failing after a mutation, state that the claim is unverified.\n" +
-		"- Report only through the required result block, not the skill's own output format, and do not apply changes.\n\n" +
+		"- When the skill requires observed evidence you could not gather, such as a test failing after a mutation, state the claim as unverified: in that finding's evidence field, or in a result caveat when there are no findings.\n" +
+		"- Report only through the required JSON result object, not the skill's own output format, and do not apply changes.\n\n" +
 		"---\n\n" + body + "\n"
 }
 

@@ -675,6 +675,7 @@ const (
 type ReviewResult struct {
 	Status   ResultStatus `json:"status"`
 	Summary  string       `json:"summary"`
+	Caveats  []string     `json:"caveats,omitempty"`
 	Findings []Finding    `json:"findings"`
 }
 

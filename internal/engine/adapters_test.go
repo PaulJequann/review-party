@@ -29,7 +29,7 @@ func TestCopilotAutoModelOmitsEffortAndCapturesResolution(t *testing.T) {
 		t.Fatalf("auto model command contains incompatible effort flag: %#v", command)
 	}
 	output := []byte("{\"type\":\"session.auto_mode_resolved\",\"data\":{\"chosenModel\":\"gpt-5-mini\",\"reasoningBucket\":\"low\"}}\n" +
-		"{\"type\":\"assistant.message\",\"data\":{\"model\":\"gpt-5-mini\",\"content\":\"" + strings.ReplaceAll(cleanReview, "\n", "\\n") + "\"}}\n")
+		"{\"type\":\"assistant.message\",\"data\":{\"model\":\"gpt-5-mini\",\"content\":\"" + escapedReview(cleanReview) + "\"}}\n")
 	decoded, err := decodeCopilotOutput(output)
 	if err != nil {
 		t.Fatal(err)
@@ -54,7 +54,7 @@ func TestCopilotAutoModelRejectsExplicitEffort(t *testing.T) {
 
 func TestCopilotDecoderPreservesAssistantMessageBoundaries(t *testing.T) {
 	output := []byte("{\"type\":\"assistant.message\",\"data\":{\"content\":\"Inspecting files.\"}}\n" +
-		"{\"type\":\"assistant.message\",\"data\":{\"content\":\"" + strings.ReplaceAll(cleanReview, "\n", "\\n") + "\"}}\n")
+		"{\"type\":\"assistant.message\",\"data\":{\"content\":\"" + escapedReview(cleanReview) + "\"}}\n")
 	decoded, err := decodeCopilotOutput(output)
 	assertReviewWithPreamble(t, decoded.assistantText, err)
 }
@@ -108,8 +108,8 @@ func TestGrokCommandRestrictsCapabilities(t *testing.T) {
 func TestGrokDecoderPreservesAssistantMessageBoundaries(t *testing.T) {
 	output := []byte("{\"type\":\"text\",\"data\":\"Checking first.\"}\n" +
 		"{\"type\":\"tool_call\",\"data\":\"ignored\"}\n" +
-		"{\"type\":\"text\",\"data\":\"BEGIN_\"}\n" +
-		"{\"type\":\"text\",\"data\":\"REVIEW\\nstatus: clean\\nsummary: No actionable findings.\\nEND_REVIEW\"}\n")
+		"{\"type\":\"text\",\"data\":\"{\\\"stat\"}\n" +
+		"{\"type\":\"text\",\"data\":\"us\\\":\\\"clean\\\",\\\"caveats\\\":[],\\\"findings\\\":[]}\"}\n")
 	decoded, err := decodeGrokOutput(output)
 	if err != nil {
 		t.Fatal(err)
@@ -151,7 +151,7 @@ func TestOpenCodeCommandRequestsExplicitEffortVariant(t *testing.T) {
 
 func TestOpenCodeDecoderUsesOnlyTextEvents(t *testing.T) {
 	output := []byte("{\"type\":\"step_start\",\"part\":{\"text\":\"ignored\"}}\n" +
-		"{\"type\":\"text\",\"part\":{\"text\":\"" + strings.ReplaceAll(cleanReview, "\n", "\\n") + "\"}}\n")
+		"{\"type\":\"text\",\"part\":{\"text\":\"" + escapedReview(cleanReview) + "\"}}\n")
 	decoded, err := decodeOpenCodeOutput(output)
 	if err != nil {
 		t.Fatal(err)
@@ -163,7 +163,7 @@ func TestOpenCodeDecoderUsesOnlyTextEvents(t *testing.T) {
 
 func TestOpenCodeDecoderPreservesCompletedTextPartBoundaries(t *testing.T) {
 	output := []byte("{\"type\":\"text\",\"part\":{\"text\":\"Inspecting files.\"}}\n" +
-		"{\"type\":\"text\",\"part\":{\"text\":\"" + strings.ReplaceAll(cleanReview, "\n", "\\n") + "\"}}\n")
+		"{\"type\":\"text\",\"part\":{\"text\":\"" + escapedReview(cleanReview) + "\"}}\n")
 	decoded, err := decodeOpenCodeOutput(output)
 	assertReviewWithPreamble(t, decoded.assistantText, err)
 }
@@ -199,7 +199,7 @@ func TestDecodeFailurePreservesHarnessFailureClassification(t *testing.T) {
 
 func TestClaudeCommandRestrictsCapabilities(t *testing.T) {
 	got := claudeCommand(reviewerCandidate{Model: "claude-opus-5-5", Effort: "high"}, "")
-	want := []string{"claude", "-p", "--output-format", "stream-json", "--verbose", "--model", "claude-opus-5-5", "--tools", "Read,Grep,Glob", "--permission-mode", "dontAsk", "--permission-prompts", "none", "--restricted", "--safe-mode", "--strict-mcp-config", "--no-session-persistence", "--effort", "high"}
+	want := []string{"claude", "-p", "--output-format", "stream-json", "--verbose", "--model", "claude-opus-5-5", "--tools", "Read,Grep,Glob", "--permission-mode", "dontAsk", "--permission-prompts", "none", "--restricted", "--safe-mode", "--strict-mcp-config", "--no-session-persistence", "--json-schema", result.CanonicalReviewResultContract.Schema(), "--effort", "high"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("command = %#v, want %#v", got, want)
 	}
@@ -225,7 +225,7 @@ func TestClaudeDecoderJoinsTextBlocksAndResolvesModel(t *testing.T) {
 		`{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"text","text":"Inspecting files."},{"type":"tool_use","input":{"pattern":"**/*.go"}}]}}` + "\n" +
 		`{"type":"user","message":{"role":"user","content":"tool output"}}` + "\n" +
 		`{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"thinking","thinking":"ignored"}]}}` + "\n" +
-		`{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"text","text":"` + strings.ReplaceAll(cleanReview, "\n", "\\n") + `"}]}}` + "\n" +
+		`{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"text","text":"` + escapedReview(cleanReview) + `"}]}}` + "\n" +
 		`{"type":"result","subtype":"success","is_error":false,"result":"ignored final copy"}` + "\n")
 	decoded, err := decodeClaudeOutput(output)
 	assertReviewWithPreamble(t, decoded.assistantText, err)
@@ -250,7 +250,7 @@ func TestClaudeInBandErrorIsIncompleteDespiteCleanExit(t *testing.T) {
 }
 
 func TestClaudeMissingResultEventIsIncomplete(t *testing.T) {
-	output := []byte(`{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"text","text":"` + strings.ReplaceAll(cleanReview, "\n", "\\n") + `"}]}}` + "\n")
+	output := []byte(`{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"text","text":"` + escapedReview(cleanReview) + `"}]}}` + "\n")
 	decoded, err := (claudeAdapter{}).Decode(output, "")
 	if err != nil {
 		t.Fatal(err)

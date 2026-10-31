@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"os/exec"
+	"reviewparty/internal/result"
 	"slices"
 	"strings"
 )
@@ -78,6 +79,7 @@ func claudeCommand(candidate reviewerCandidate, instructions string) []string {
 		"--safe-mode",
 		"--strict-mcp-config",
 		"--no-session-persistence",
+		"--json-schema", result.CanonicalReviewResultContract.Schema(),
 	}
 	if usesClaudeEffort(candidate) {
 		command = append(command, "--effort", candidate.Effort)

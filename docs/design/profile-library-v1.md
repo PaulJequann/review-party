@@ -59,7 +59,7 @@ An Agent Skills directory on the Caller's machine is also a Template source. Rev
 
 Each directory with a regular `SKILL.md` becomes Template `skill:<directory name>`. Directories whose name starts with `.` are skipped. So is a `SKILL.md` that is unreadable, larger than the document limit, or empty after its frontmatter. Discovery never blocks opening configuration.
 
-Instructions are a fixed preamble followed by the `SKILL.md` body with its leading YAML frontmatter removed. The preamble tells the Reviewer it is read-only, confined to the repository, and must report through the result block. It also says to mark evidence the skill requires but the Reviewer could not gather as unverified. Instructions never contain the skill's filesystem path, because repository-scoped Profiles may be committed.
+Instructions are a fixed preamble followed by the `SKILL.md` body with its leading YAML frontmatter removed. The preamble tells the Reviewer it is read-only, confined to the repository, and must report through the JSON result object. It also says to mark evidence the skill requires but the Reviewer could not gather as unverified. Instructions never contain the skill's filesystem path, because repository-scoped Profiles may be committed.
 
 The revision is `sha256-` plus the first 12 hex characters of the instructions digest. Editing a skill therefore surfaces as Template drift, and `config profile update-template` refreshes the Profile. Deleting a skill surfaces as an unavailable Template source; the Profile keeps running its saved instructions.
 

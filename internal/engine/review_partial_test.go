@@ -10,23 +10,13 @@ import (
 	"reviewparty/internal/model"
 )
 
-// partialFindingsReview is a findings review whose second section is missing
-// its Evidence field, so the first finding survives and the second is dropped
+// partialFindingsReview is a findings review whose second finding is missing
+// its evidence, so the first finding survives and the second is dropped
 // by the salvage tier.
-const partialFindingsReview = `BEGIN_REVIEW
-status: findings
-
-1. HIGH | correctness | review.go:3
-Failure: The changed state is not handled.
-Evidence: The Subject changes the state without updating its caller.
-Fix: Update the caller with the state change.
-Test: Exercise the caller with the changed state.
-
-2. MEDIUM | maintainability | parse.go:8
-Failure: Second failure without evidence.
-Fix: Second correction.
-Test: Second regression.
-END_REVIEW`
+const partialFindingsReview = `{"status":"findings","caveats":[],"findings":[
+  {"severity":"HIGH","category":"correctness","location":"review.go:3","failure":"The changed state is not handled.","evidence":"The Subject changes the state without updating its caller.","fix":"Update the caller with the state change.","test":"Exercise the caller with the changed state."},
+  {"severity":"MEDIUM","category":"maintainability","location":"parse.go:8","failure":"Second failure without evidence.","evidence":"","fix":"Second correction.","test":"Second regression."}
+]}`
 
 func TestPartialResultPreservesEvidenceButNeverCompletes(t *testing.T) {
 	repository := changedTestRepository(t)

@@ -38,6 +38,9 @@ func writeHumanEntry(output *commandOutput, label string, entry reviewEntry) {
 	if entry.Summary != "" {
 		output.write("%s\n", entry.Summary)
 	}
+	for _, caveat := range entry.Caveats {
+		output.write("Caveat: %s\n", caveat)
+	}
 	for _, finding := range entry.Findings {
 		writeHumanFinding(output, finding)
 	}

@@ -39,6 +39,7 @@ type reviewEntry struct {
 	Status          model.ResultStatus        `json:"status,omitempty"`
 	Termination     *model.ReviewTermination  `json:"termination,omitempty"`
 	Summary         string                    `json:"summary,omitempty"`
+	Caveats         []string                  `json:"caveats,omitempty"`
 	Findings        []reportFinding           `json:"findings"`
 	Misses          []model.Miss              `json:"misses"`
 	Profile         profileSummary            `json:"profile"`
@@ -301,6 +302,7 @@ func recordEntry(record model.ReviewRecord, full bool) reviewEntry {
 	if record.Result != nil {
 		entry.Status = record.Result.Status
 		entry.Summary = record.Result.Summary
+		entry.Caveats = record.Result.Caveats
 		for _, finding := range record.Result.Findings {
 			entry.Findings = append(entry.Findings, reportFinding{Finding: finding})
 		}
