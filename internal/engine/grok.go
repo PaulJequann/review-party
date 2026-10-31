@@ -94,16 +94,20 @@ func decodeGrokOutput(output []byte) (string, error) {
 }
 
 func writePromptFile(prompt string) (string, error) {
-	file, err := os.CreateTemp("", "review-party-prompt-*.txt")
+	return writeTempFile("review-party-prompt-*.txt", "grok prompt file", prompt)
+}
+
+func writeTempFile(pattern, description, content string) (string, error) {
+	file, err := os.CreateTemp("", pattern)
 	if err != nil {
-		return "", fmt.Errorf("create grok prompt file: %w", err)
+		return "", fmt.Errorf("create %s: %w", description, err)
 	}
 	path := file.Name()
-	if _, err := file.WriteString(prompt); err != nil {
-		return "", errors.Join(fmt.Errorf("write grok prompt file: %w", err), file.Close(), os.Remove(path))
+	if _, err := file.WriteString(content); err != nil {
+		return "", errors.Join(fmt.Errorf("write %s: %w", description, err), file.Close(), os.Remove(path))
 	}
 	if err := file.Close(); err != nil {
-		return "", errors.Join(fmt.Errorf("close grok prompt file: %w", err), os.Remove(path))
+		return "", errors.Join(fmt.Errorf("close %s: %w", description, err), os.Remove(path))
 	}
 	return path, nil
 }

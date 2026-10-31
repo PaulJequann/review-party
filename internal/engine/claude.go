@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"os/exec"
+	"reviewparty/internal/result"
 	"slices"
 	"strings"
 )
@@ -78,6 +79,7 @@ func claudeCommand(candidate reviewerCandidate, instructions string) []string {
 		"--safe-mode",
 		"--strict-mcp-config",
 		"--no-session-persistence",
+		"--json-schema", result.CanonicalReviewResultContract.Schema(),
 	}
 	if usesClaudeEffort(candidate) {
 		command = append(command, "--effort", candidate.Effort)
@@ -157,10 +159,11 @@ func usesClaudeEffort(candidate reviewerCandidate) bool {
 }
 
 type decodedClaudeOutput struct {
-	assistantText string
-	diagnostic    string
-	model         string
-	incomplete    bool
+	assistantText    string
+	diagnostic       string
+	model            string
+	incomplete       bool
+	structuredOutput string
 }
 
 type claudeEvent struct {
@@ -171,6 +174,10 @@ type claudeEvent struct {
 	IsError bool            `json:"is_error"`
 	Result  string          `json:"result"`
 	Errors  []string        `json:"errors"`
+	// StructuredOutput carries the schema-conforming object when
+	// --json-schema is enabled; it is the authoritative result, not the
+	// assistant text blocks.
+	StructuredOutput json.RawMessage `json:"structured_output"`
 }
 
 type claudeAssistantMessage struct {
@@ -198,6 +205,9 @@ func decodeClaudeOutput(output []byte) (decodedClaudeOutput, error) {
 		return decodedClaudeOutput{}, err
 	}
 	decoded.assistantText = text.String()
+	if decoded.structuredOutput != "" {
+		decoded.assistantText = decoded.structuredOutput
+	}
 	if decoded.incomplete && decoded.diagnostic == "" {
 		decoded.diagnostic = "claude output ended without a result event"
 	}
@@ -228,6 +238,9 @@ func applyClaudeEvent(decoded *decodedClaudeOutput, text *strings.Builder, event
 			text.WriteString(block.Text)
 		}
 	case "result":
+		if output := strings.TrimSpace(string(event.StructuredOutput)); output != "" && output != "null" {
+			decoded.structuredOutput = output
+		}
 		decoded.incomplete = event.IsError
 		if event.IsError {
 			decoded.diagnostic = strings.TrimSpace(strings.Join(append([]string{event.Result}, event.Errors...), " "))

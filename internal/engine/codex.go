@@ -6,8 +6,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"regexp"
+	"reviewparty/internal/result"
 	"strconv"
 	"strings"
 )
@@ -27,12 +29,16 @@ func (codexAdapter) Check(_ context.Context, candidate reviewerCandidate) availa
 }
 
 func (codexAdapter) Prepare(spec attemptSpec) (preparedAttempt, error) {
-	arguments := codexCommand(spec.Candidate, spec.Repository)
+	schemaPath, err := writeTempFile("review-party-schema-*.json", "codex result schema", result.CanonicalReviewResultContract.Schema())
+	if err != nil {
+		return preparedAttempt{}, err
+	}
+	arguments := codexCommand(spec.Candidate, spec.Repository, schemaPath)
 	command := exec.Command(arguments[0], arguments[1:]...)
 	command.Dir = spec.Repository
 	command.Stdin = strings.NewReader(spec.Prompt)
 	command.Env = reviewerEnvironment(spec.Candidate.ID)
-	return preparedAttempt{command: command}, nil
+	return preparedAttempt{command: command, cleanup: func() error { return os.Remove(schemaPath) }}, nil
 }
 
 func (codexAdapter) Decode(output []byte, stderr string) (decodedHarnessOutput, error) {
@@ -46,8 +52,8 @@ func (codexAdapter) Decode(output []byte, stderr string) (decodedHarnessOutput, 
 	}, err
 }
 
-func codexCommand(candidate reviewerCandidate, repository string) []string {
-	command := []string{"codex", "exec", "--json", "--skip-git-repo-check", "--ephemeral", "-C", repository, "-s", "read-only", "-m", candidate.Model}
+func codexCommand(candidate reviewerCandidate, repository, schemaPath string) []string {
+	command := []string{"codex", "exec", "--json", "--skip-git-repo-check", "--ephemeral", "-C", repository, "-s", "read-only", "-m", candidate.Model, "--output-schema", schemaPath}
 	if usesCodexEffort(candidate) {
 		command = append(command, "-c", fmt.Sprintf("model_reasoning_effort=%q", candidate.Effort))
 	}

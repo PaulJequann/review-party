@@ -23,7 +23,7 @@ func codexRetryEvent(message string) string {
 }
 
 func codexMessageEvent(text string) string {
-	return `{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"` + strings.ReplaceAll(text, "\n", `\n`) + `"}}`
+	return `{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"` + escapedReview(text) + `"}}`
 }
 
 func executeWithStub(t *testing.T, adapter harnessAdapter, run commandRun) attemptExecution {
@@ -91,7 +91,7 @@ func TestCodexAuthenticationCauseOnStderrLeadsTheDiagnostic(t *testing.T) {
 }
 
 func TestClaudeCompletedAttemptKeepsStderrOutOfDiagnostic(t *testing.T) {
-	stdout := []byte(`{"type":"assistant","message":{"model":"m","content":[{"type":"text","text":"` + strings.ReplaceAll(cleanReview, "\n", `\n`) + `"}]}}` + "\n" +
+	stdout := []byte(`{"type":"assistant","message":{"model":"m","content":[{"type":"text","text":"` + escapedReview(cleanReview) + `"}]}}` + "\n" +
 		`{"type":"result","subtype":"success","is_error":false}` + "\n")
 
 	execution := executeWithStub(t, claudeAdapter{}, commandRun{Stdout: stdout, Stderr: "warning: transport retry\n"})

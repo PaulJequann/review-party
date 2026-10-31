@@ -19,20 +19,15 @@ import (
 	"time"
 )
 
-const cleanReview = `BEGIN_REVIEW
-status: clean
-summary: No actionable findings.
-END_REVIEW`
+// escapedReview renders a review fixture for embedding inside a JSON string
+// event: backslashes and quotes escaped, newlines preserved as literals.
+func escapedReview(review string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(review, `\`, `\\`), `"`, `\"`)
+}
 
-const findingsReview = `BEGIN_REVIEW
-status: findings
+const cleanReview = `{"status":"clean","caveats":[],"findings":[]}`
 
-1. HIGH | correctness | review.go:3
-Failure: The changed state is not handled.
-Evidence: The Subject changes the state without updating its caller.
-Fix: Update the caller with the state change.
-Test: Exercise the caller with the changed state.
-END_REVIEW`
+const findingsReview = `{"status":"findings","caveats":[],"findings":[{"severity":"HIGH","category":"correctness","location":"review.go:3","failure":"The changed state is not handled.","evidence":"The Subject changes the state without updating its caller.","fix":"Update the caller with the state change.","test":"Exercise the caller with the changed state."}]}`
 
 type scriptedExecutor struct {
 	availability availability

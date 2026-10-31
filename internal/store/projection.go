@@ -58,8 +58,8 @@ func writeReview(tx *sql.Tx, record model.ReviewRecord) error {
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(`INSERT INTO reviews(id,replays_review_id,lifecycle,subject,profile_revision,profile_snapshot,result_status,result_summary,result_finding_count,termination,runtime,timings,created_at,updated_at)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET replays_review_id=excluded.replays_review_id, lifecycle=excluded.lifecycle, subject=excluded.subject, profile_revision=excluded.profile_revision, profile_snapshot=excluded.profile_snapshot, result_status=excluded.result_status, result_summary=excluded.result_summary, result_finding_count=excluded.result_finding_count, termination=excluded.termination, runtime=excluded.runtime, timings=excluded.timings, updated_at=excluded.updated_at`, values...)
+	_, err = tx.Exec(`INSERT INTO reviews(id,replays_review_id,lifecycle,subject,profile_revision,profile_snapshot,result_status,result_summary,result_caveats,result_finding_count,termination,runtime,timings,created_at,updated_at)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET replays_review_id=excluded.replays_review_id, lifecycle=excluded.lifecycle, subject=excluded.subject, profile_revision=excluded.profile_revision, profile_snapshot=excluded.profile_snapshot, result_status=excluded.result_status, result_summary=excluded.result_summary, result_caveats=excluded.result_caveats, result_finding_count=excluded.result_finding_count, termination=excluded.termination, runtime=excluded.runtime, timings=excluded.timings, updated_at=excluded.updated_at`, values...)
 	return err
 }
 
@@ -88,8 +88,8 @@ func projectionValues(record model.ReviewRecord) ([]any, error) {
 	if err != nil {
 		return nil, fmt.Errorf("encode review timings: %w", err)
 	}
-	status, summary, count := projectedResult(record.Result)
-	return []any{string(record.ID), record.ReplaysReviewID, record.Lifecycle, subject, profile, snapshot, status, summary, count, termination, runtime, timings, record.CreatedAt, record.UpdatedAt}, nil
+	status, summary, caveats, count := projectedResult(record.Result)
+	return []any{string(record.ID), record.ReplaysReviewID, record.Lifecycle, subject, profile, snapshot, status, summary, caveats, count, termination, runtime, timings, record.CreatedAt, record.UpdatedAt}, nil
 }
 
 func encodeNullable(value any) ([]byte, error) {
@@ -99,11 +99,25 @@ func encodeNullable(value any) ([]byte, error) {
 	return json.Marshal(value)
 }
 
-func projectedResult(result *model.ReviewResult) (status, summary any, count int) {
+// projectedResult reduces one review result to its ledger columns. The
+// result_caveats column carries the caveats payload; every other field has
+// its own column.
+func projectedResult(result *model.ReviewResult) (status, summary, caveats any, count int) {
 	if result == nil {
-		return nil, nil, 0
+		return nil, nil, nil, 0
 	}
-	return result.Status, result.Summary, result.FindingCount()
+	return result.Status, result.Summary, encodeNullableSlice(result.Caveats), result.FindingCount()
+}
+
+func encodeNullableSlice(values []string) any {
+	if len(values) == 0 {
+		return nil
+	}
+	payload, err := json.Marshal(values)
+	if err != nil {
+		return nil
+	}
+	return payload
 }
 
 func replaceReviewChildren(tx *sql.Tx, record model.ReviewRecord) error {
@@ -221,15 +235,16 @@ type reviewValues struct {
 	lifecycle                                                 model.Lifecycle
 	subject, profile, snapshot, termination, runtime, timings []byte
 	status, summary                                           sql.NullString
+	caveats                                                   []byte
 	findingCount                                              int
 	createdAt, updatedAt                                      time.Time
 	replaysReviewID                                           sql.NullString
 }
 
 func loadReviewValues(tx *sql.Tx, id model.ReviewID) (reviewValues, error) {
-	row := tx.QueryRow("SELECT lifecycle,subject,profile_revision,profile_snapshot,result_status,result_summary,result_finding_count,termination,runtime,timings,created_at,updated_at,replays_review_id FROM reviews WHERE id = ?", id)
+	row := tx.QueryRow("SELECT lifecycle,subject,profile_revision,profile_snapshot,result_status,result_summary,result_caveats,result_finding_count,termination,runtime,timings,created_at,updated_at,replays_review_id FROM reviews WHERE id = ?", id)
 	var values reviewValues
-	if err := row.Scan(&values.lifecycle, &values.subject, &values.profile, &values.snapshot, &values.status, &values.summary, &values.findingCount, &values.termination, &values.runtime, &values.timings, &values.createdAt, &values.updatedAt, &values.replaysReviewID); err != nil {
+	if err := row.Scan(&values.lifecycle, &values.subject, &values.profile, &values.snapshot, &values.status, &values.summary, &values.caveats, &values.findingCount, &values.termination, &values.runtime, &values.timings, &values.createdAt, &values.updatedAt, &values.replaysReviewID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return values, notFoundAs(string(id), err)
 		}
@@ -260,7 +275,13 @@ func (values reviewValues) record(id model.ReviewID) (model.ReviewRecord, error)
 		}
 	}
 	if values.status.Valid {
-		record.Result = &model.ReviewResult{Status: model.ResultStatus(values.status.String), Summary: values.summary.String, Findings: []model.Finding{}}
+		result := &model.ReviewResult{Status: model.ResultStatus(values.status.String), Summary: values.summary.String, Findings: []model.Finding{}}
+		if len(values.caveats) > 0 {
+			if err := json.Unmarshal(values.caveats, &result.Caveats); err != nil {
+				return record, fmt.Errorf("decode result caveats: %w", err)
+			}
+		}
+		record.Result = result
 	}
 	return record, nil
 }

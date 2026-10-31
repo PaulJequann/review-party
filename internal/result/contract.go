@@ -2,26 +2,43 @@
 package result
 
 import (
-	"fmt"
 	"reviewparty/internal/model"
 )
 
-const (
-	resultContractRevision = "canonical-v3"
-	cleanReviewExample     = `BEGIN_REVIEW
-status: clean
-summary: No actionable findings.
-END_REVIEW`
-	findingsReviewExample = `BEGIN_REVIEW
-status: findings
+const resultContractRevision = "canonical-v4"
 
-1. HIGH | correctness | path/to/file.go:123
-Failure: Concrete supported scenario that fails.
-Evidence: Why the Subject permits the failure.
-Fix: Smallest safe correction.
-Test: Regression that fails before the correction.
-END_REVIEW`
-)
+// resultJSONSchema is the JSON Schema handed to harnesses that enforce
+// structured output (Claude --json-schema, Codex --output-schema) and
+// mirrored by the Go parser's semantic validation. Findings carry no ordinal:
+// Review Party numbers them, so an agent cannot drift the sequence.
+const resultJSONSchema = `{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["status", "caveats", "findings"],
+  "properties": {
+    "status": {"type": "string", "enum": ["clean", "findings"]},
+    "caveats": {"type": "array", "maxItems": 4, "items": {"type": "string"}},
+    "findings": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["severity", "category", "location", "failure", "evidence", "fix", "test"],
+        "properties": {
+          "severity": {"type": "string", "enum": ["MEDIUM", "HIGH", "CRITICAL"]},
+          "category": {"type": "string"},
+          "location": {"type": "string"},
+          "failure": {"type": "string"},
+          "evidence": {"type": "string"},
+          "fix": {"type": "string"},
+          "test": {"type": "string"}
+        }
+      }
+    }
+  }
+}`
 
 type ResultContract struct{}
 
@@ -29,14 +46,19 @@ var CanonicalReviewResultContract ResultContract
 
 func (ResultContract) Revision() string { return resultContractRevision }
 
+// Schema returns the JSON Schema describing the reviewer's final message.
+func (ResultContract) Schema() string { return resultJSONSchema }
+
 func (ResultContract) Instructions() string {
-	return fmt.Sprintf(`Return exactly one block and no text before or after it.
+	return `Return the review as one JSON object and nothing else: no prose before or after it and no markdown code fence.
 
-For no actionable findings:
-%s
+A clean review:
+{"status":"clean","caveats":[],"findings":[]}
 
-For findings, return at most eight MEDIUM, HIGH, or CRITICAL items:
-%s`, cleanReviewExample, findingsReviewExample)
+A review with findings returns at most eight MEDIUM, HIGH, or CRITICAL findings:
+{"status":"findings","caveats":[],"findings":[{"severity":"HIGH","category":"correctness","location":"path/to/file.go:123","failure":"Concrete supported scenario that fails.","evidence":"Why the Subject permits the failure.","fix":"Smallest safe correction.","test":"Regression that fails before the correction."}]}
+
+"status" is "clean" with an empty findings array, or "findings" with one to eight findings. Every finding requires "severity", "category", "location", "failure", "evidence", "fix", and "test". "caveats" holds up to four short verification limits only, such as a claim you could not verify; anything actionable is a finding.`
 }
 
 func (ResultContract) Parse(assistantText string) (model.ReviewResult, error) {

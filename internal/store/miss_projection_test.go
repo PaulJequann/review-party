@@ -277,6 +277,11 @@ func writeLedgerAtSchema(t *testing.T, directory string, version int) model.Revi
 	execLedgerMigrations(t, db, "CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY);", func(migration int) bool { return migration <= version })
 	tables := ledgerTables(t, db)
 	execLedgerMigrations(t, db, "", func(migration int) bool { return migration > version && migration < storedTextSchema })
+	// The current save code writes the caveats column migration 16 adds;
+	// lend it to the simulated old schema and remove it again below.
+	if _, err := db.Exec("ALTER TABLE reviews ADD COLUMN result_caveats BLOB"); err != nil {
+		t.Fatal(err)
+	}
 	review := ledgerFixture(model.LifecycleCompleted)
 	review.Passes[0].Attempts[0].Artifacts = nil
 	if err := (reviewRecordProjection{db: db}).save(review); err != nil {
@@ -288,6 +293,12 @@ func writeLedgerAtSchema(t *testing.T, directory string, version int) model.Revi
 				t.Fatal(err)
 			}
 		}
+	}
+	// The lent column is removed so the reviews table is shaped exactly as
+	// the simulated schema version; the real migration adds it back on
+	// prepare.
+	if _, err := db.Exec("ALTER TABLE reviews DROP COLUMN result_caveats"); err != nil {
+		t.Fatal(err)
 	}
 	if _, err := db.Exec("DELETE FROM schema_migrations WHERE version > ?", version); err != nil {
 		t.Fatal(err)
