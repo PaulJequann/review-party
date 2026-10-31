@@ -7,6 +7,8 @@
 !/.agents/skills/dogfood-review-party/**
 !/.agents/skills/verify-review-party/
 !/.agents/skills/verify-review-party/**
+!/.agents/skills/verify/
+!/.agents/skills/verify/**
 /.backpassrc.json
 /.claude/
 /scratch/
